@@ -96,10 +96,12 @@
     opacity: 0; transform: translateY(10px); transition: opacity .55s .32s, transform .55s .32s;
   }
   .hero-sub.show { opacity: 1; transform: translateY(0); }
-  .hero-dots { display: flex; gap: 6px; margin-bottom: 24px; opacity: 0; transition: opacity .4s .45s; }
+  .hero-dots { display: flex; gap: 6px; margin-bottom: 24px; opacity: 0; transition: opacity .4s .45s; overflow: hidden; width: calc(5 * 22px + 4 * 6px); }
   .hero-dots.show { opacity: 1; }
-  .hero-dot { height: 3px; border-radius: 2px; background: rgba(255,255,255,.22); transition: background .3s, width .3s; width: 22px; }
+  .hero-dots-inner { display: flex; gap: 6px; transition: transform .45s cubic-bezier(.4,0,.2,1); }
+  .hero-dot { height: 3px; border-radius: 2px; background: rgba(255,255,255,.22); transition: background .4s, width .4s, opacity .4s; width: 22px; flex-shrink: 0; cursor: pointer; }
   .hero-dot.active { background: var(--accent); width: 38px; }
+  .hero-dot.dim { opacity: 0.35; }
   .hero-ep-card{
     display:flex;align-items:center;gap:0;
     width:400px;cursor:pointer;position:relative;
@@ -424,7 +426,7 @@
     <div class="hero-efed" id="hero-efed"></div>
     <h1 class="hero-title" id="hero-title"></h1>
     <p class="hero-sub" id="hero-sub"></p>
-    <div class="hero-dots" id="hero-dots"></div>
+    <div class="hero-dots" id="hero-dots"><div class="hero-dots-inner" id="hero-dots-inner"></div></div>
     <div class="hero-ep-card" id="hero-btn" onclick="heroWatchNow()">
       <div class="hero-ep-thumb-wrap">
         <img class="hero-ep-thumb" id="hero-ep-thumb" src="" alt="">
@@ -752,9 +754,9 @@ function heroSrc(id) {
 }
 
 function buildHeroDots() {
-  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
-  const wrap = document.getElementById('hero-dots');
-  wrap.innerHTML = '';
+  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => new Date(b.date) - new Date(a.date));
+  const inner = document.getElementById('hero-dots-inner');
+  inner.innerHTML = '';
   list.forEach((_, i) => {
     const d = document.createElement('div');
     d.className = 'hero-dot' + (i === 0 ? ' active' : '');
@@ -763,14 +765,53 @@ function buildHeroDots() {
       heroIdx = i;
       loadSlide();
     };
-    wrap.appendChild(d);
+    inner.appendChild(d);
   });
-  wrap.classList.add('show');
+  document.getElementById('hero-dots').classList.add('show');
+  setHeroDot(0);
 }
 
 function setHeroDot(idx) {
-  document.querySelectorAll('.hero-dot').forEach((d, i) =>
-    d.classList.toggle('active', i === idx));
+  const inner = document.getElementById('hero-dots-inner');
+  const dots = inner.querySelectorAll('.hero-dot');
+  const total = dots.length;
+  const VISIBLE = 5;   // how many dots fit in the window
+  const CENTER = 2;    // 0-based: keep active dot at position 2 (3rd slot)
+
+  dots.forEach((d, i) => {
+    d.classList.toggle('active', i === idx);
+  });
+
+  // Calculate how far to shift the inner strip
+  // Active dot should sit at CENTER slot, but clamp near the end
+  let offset;
+  const dotW = 22;   // default dot width px
+  const activeW = 38; // active dot width px
+  const gap = 6;
+
+  if (idx <= CENTER) {
+    // Early slides: no shift, active moves from pos 0 → CENTER
+    offset = 0;
+  } else if (idx >= total - (VISIBLE - CENTER)) {
+    // Near end: lock so last dot is at position VISIBLE-1
+    // Calculate the natural offset if we kept centering
+    const maxOffset = total - VISIBLE;
+    offset = maxOffset;
+  } else {
+    // Middle: shift so active is always at CENTER slot
+    offset = idx - CENTER;
+  }
+
+  // Each dot unit width (using avg; active dot is wider but we slide by index units)
+  const unitW = dotW + gap; // 28px per dot step
+  inner.style.transform = `translateX(-${offset * unitW}px)`;
+
+  // Dim dots outside the visible window for a fade-in effect
+  dots.forEach((d, i) => {
+    const visStart = offset;
+    const visEnd = offset + VISIBLE - 1;
+    d.classList.toggle('dim', i < visStart || i > visEnd);
+  });
 }
 
 function showHeroText(v) {
@@ -796,7 +837,7 @@ let _heroFirstLoad = true;
 const isMobile = () => window.innerWidth <= 768;
 
 function loadSlide() {
-  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => new Date(b.date) - new Date(a.date));
   const v      = list[heroIdx];
   const id     = heroExtractId(v.url);
   const fade   = document.getElementById('hero-fade');
@@ -846,7 +887,7 @@ function loadSlide() {
 }
 
 function heroWatchNow() {
-  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => new Date(b.date) - new Date(a.date));
   openM(list[heroIdx]);
 }
 
