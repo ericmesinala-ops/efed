@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EFED Streaming Hub</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #07070a; --surface: #111114; --surface2: #1a1a1f;
+    --accent: #c0000e; --gold: #c8a84b; --text: #e8e8e8;
+    --muted: #5a5a6a; --card-w: 278px; --card-h: 156px;
+  }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { scrollbar-width: none; -ms-overflow-style: none; }
+  html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; overflow-x: hidden; min-height: 100vh; }
+
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 22px 56px;
+    background: linear-gradient(to bottom, rgba(0,0,0,.95) 0%, transparent 100%);
+    transition: background .3s;
+  }
+  nav.scrolled { background: rgba(7,7,10,.97); backdrop-filter: blur(16px); border-bottom: 1px solid rgba(255,255,255,.04); }
+  .logo { display: flex; flex-direction: column; line-height: 1; text-decoration: none; }
+  .logo-eyebrow { font-size: .58rem; letter-spacing: 3px; color: var(--muted); font-weight: 300; font-style: italic; text-transform: uppercase; margin-bottom: 2px; }
+  .logo-main { font-family: 'Bebas Neue', sans-serif; font-size: 1.5rem; letter-spacing: 4px; color: #fff; }
+  .logo-main em { color: var(--gold); font-style: normal; }
+
+  /* ── NETFLIX HERO ── */
+  .hero {
+    position: relative; height: 88vh; min-height: 520px;
+    display: flex; align-items: flex-end; padding: 0 56px 72px; overflow: hidden;
+  }
+  .hero-vid-wrap {
+    position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none;
+  }
+  .hero-vid-wrap iframe {
+    position: absolute; top: 50%; left: 50%;
+    width: 177.78vh; height: 100vh;
+    min-width: 100%; min-height: 56.25vw;
+    transform: translate(-50%, -50%);
+    opacity: .6; pointer-events: none; border: none;
+  }
+  .hero-thumb {
+    position: absolute; inset: 0; z-index: 2;
+    background-size: cover; background-position: center;
+    transition: opacity 1.5s ease;
+  }
+  .hero-thumb.hidden { opacity: 0; pointer-events: none; }
+  .hero-fade {
+    position: absolute; inset: 0; z-index: 2;
+    background: #000; opacity: 0; pointer-events: none;
+    transition: opacity .7s ease;
+  }
+  .hero-fade.active { opacity: 1; }
+  .hero-grain {
+    position: absolute; inset: 0; z-index: 3; opacity: .035; pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    background-size: 200px; animation: grain 1s steps(2) infinite;
+  }
+  @keyframes grain { 0%{background-position:0 0} 25%{background-position:20px -15px} 50%{background-position:-10px 20px} 75%{background-position:15px 10px} 100%{background-position:-20px -5px} }
+  .hero-vignette {
+    position: absolute; inset: 0; z-index: 4;
+    background:
+      linear-gradient(to right, rgba(7,7,10,.88) 0%, rgba(7,7,10,.3) 50%, transparent 100%),
+      linear-gradient(to top, rgba(7,7,10,1) 0%, rgba(7,7,10,.15) 38%, transparent 65%);
+  }
+  .hero-content { position: relative; z-index: 5; max-width: 560px; }
+  .hero-kicker {
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid rgba(200,168,75,.3); background: rgba(200,168,75,.07);
+    color: var(--gold); font-size: .65rem; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    padding: 5px 14px; border-radius: 2px; margin-bottom: 16px;
+  }
+  .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.75)} }
+  .hero-efed {
+    font-size: .62rem; color: var(--gold); letter-spacing: 3px; text-transform: uppercase;
+    font-weight: 700; margin-bottom: 8px;
+    opacity: 0; transform: translateY(8px); transition: opacity .5s .1s, transform .5s .1s;
+  }
+  .hero-efed.show { opacity: 1; transform: translateY(0); }
+  .hero-title {
+    font-family: 'Bebas Neue', sans-serif; font-size: clamp(2.4rem,6vw,5rem);
+    line-height: .9; letter-spacing: 2px; color: #fff; margin-bottom: 12px;
+    opacity: 0; transform: translateY(14px); transition: opacity .55s .2s, transform .55s .2s;
+  }
+  .hero-title.show { opacity: 1; transform: translateY(0); }
+  .hero-sub {
+    font-size: .82rem; color: rgba(232,232,232,.55); font-weight: 300;
+    letter-spacing: .5px; line-height: 1.6; margin-bottom: 22px;
+    opacity: 0; transform: translateY(10px); transition: opacity .55s .32s, transform .55s .32s;
+  }
+  .hero-sub.show { opacity: 1; transform: translateY(0); }
+  .hero-dots { display: flex; gap: 6px; margin-bottom: 24px; opacity: 0; transition: opacity .4s .45s; }
+  .hero-dots.show { opacity: 1; }
+  .hero-dot { height: 3px; border-radius: 2px; background: rgba(255,255,255,.22); transition: background .3s, width .3s; width: 22px; }
+  .hero-dot.active { background: var(--accent); width: 38px; }
+  .hero-btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    /* Liquid glass core */
+    background: linear-gradient(
+      135deg,
+      rgba(255,255,255,.22) 0%,
+      rgba(255,255,255,.06) 50%,
+      rgba(255,255,255,.14) 100%
+    );
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    /* Glass border — bright top-left, subtle bottom-right */
+    border: 1px solid rgba(255,255,255,.35);
+    border-bottom-color: rgba(255,255,255,.12);
+    border-right-color:  rgba(255,255,255,.12);
+    /* Inset highlight shimmer */
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.45),
+      inset 0 -1px 0 rgba(255,255,255,.08),
+      0 8px 32px rgba(0,0,0,.35),
+      0 2px 8px  rgba(0,0,0,.2);
+    color: #fff;
+    font-family: 'DM Sans', sans-serif;
+    font-size: .85rem; font-weight: 700;
+    padding: 13px 30px; border-radius: 12px;
+    cursor: pointer; letter-spacing: .6px; text-decoration: none;
+    text-shadow: 0 1px 3px rgba(0,0,0,.4);
+    opacity: 0; transform: translateY(10px);
+    transition: opacity .55s .42s, transform .55s .42s,
+                box-shadow .25s, background .25s, border-color .25s;
+    position: relative; overflow: hidden;
+  }
+  /* Animated light sweep on hover */
+  .hero-btn::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 30%,
+      rgba(255,255,255,.18) 50%,
+      transparent 70%
+    );
+    transform: translateX(-100%);
+    transition: transform .5s ease;
+    pointer-events: none;
+  }
+  .hero-btn:hover::before { transform: translateX(100%); }
+  .hero-btn.show { opacity: 1; transform: translateY(0); }
+  .hero-btn:hover {
+    background: linear-gradient(
+      135deg,
+      rgba(255,255,255,.32) 0%,
+      rgba(255,255,255,.12) 50%,
+      rgba(255,255,255,.22) 100%
+    );
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.6),
+      inset 0 -1px 0 rgba(255,255,255,.1),
+      0 12px 40px rgba(0,0,0,.4),
+      0 4px 12px  rgba(0,0,0,.25);
+    border-color: rgba(255,255,255,.5);
+    transform: translateY(-1px);
+  }
+
+  .divider { display: flex; align-items: center; gap: 16px; padding: 0 56px; margin-bottom: 32px; }
+  .divider-line { flex: 1; height: 1px; background: rgba(255,255,255,.06); }
+  .divider-text { font-size: .6rem; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+
+  main { padding-top: 32px; padding-bottom: 80px; }
+  .section { margin-bottom: 56px; }
+  .sec-head { display: flex; align-items: center; justify-content: space-between; padding: 0 56px; margin-bottom: 20px; }
+  .sec-title-wrap { display: flex; align-items: center; gap: 12px; }
+  .s-bar { width: 3px; height: 22px; background: var(--accent); border-radius: 2px; }
+  .sec-title { font-family: 'Bebas Neue', sans-serif; font-size: 1.5rem; letter-spacing: 3px; color: #fff; }
+  .sec-count { font-size: .7rem; color: var(--muted); font-weight: 400; margin-left: 4px; }
+
+  .filter-wrap { padding: 0 56px 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill {
+    font-size: .72rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+    padding: 6px 16px; border-radius: 20px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.1); background: transparent; color: var(--muted);
+    transition: all .2s; font-family: 'DM Sans', sans-serif;
+  }
+  .pill:hover { border-color: rgba(255,255,255,.25); color: var(--text); }
+  .pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* Netflix horizontal scroll row */
+  .row-wrap { position: relative; }
+  .card-grid {
+    display: flex; gap: 12px;
+    overflow-x: auto; overflow-y: visible;
+    padding: 8px 56px 24px;
+    scroll-behavior: smooth;
+    scrollbar-width: none; -ms-overflow-style: none;
+  }
+  .card-grid::-webkit-scrollbar { display: none; }
+
+  /* Arrow buttons */
+  .row-arr {
+    position: absolute; top: 50%; transform: translateY(-60%);
+    z-index: 10; width: 44px; height: 44px;
+    background: rgba(7,7,10,.92); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 50%; color: #fff; font-size: 1.1rem;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; opacity: 0; transition: opacity .2s, background .2s;
+  }
+  .row-wrap:hover .row-arr { opacity: 1; }
+  .row-arr:hover { background: var(--accent); border-color: var(--accent); }
+  .row-arr.left  { left: 10px; }
+  .row-arr.right { right: 10px; }
+
+  .card { cursor: pointer; transition: transform .28s cubic-bezier(.4,0,.2,1); position: relative; flex-shrink: 0; width: var(--card-w); }
+  .card:hover { transform: scale(1.08) translateY(-6px); z-index: 5; }
+  .card-thumb { width: 100%; height: var(--card-h); border-radius: 8px; overflow: hidden; position: relative; background: var(--surface2); }
+  .card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card-over {
+    position: absolute; inset: 0;
+    background: linear-gradient(to top, rgba(0,0,0,.85) 0%, transparent 55%);
+    border-radius: 8px; opacity: 0; transition: opacity .25s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .card:hover .card-over { opacity: 1; }
+  .play-c { width: 52px; height: 52px; border-radius: 50%; background: rgba(192,0,14,.95); display: flex; align-items: center; justify-content: center; transition: transform .2s; box-shadow: 0 0 24px rgba(192,0,14,.5); }
+  .card:hover .play-c { transform: scale(1.1); }
+  .card-info { padding: 10px 2px 0; }
+  .card-efed { font-size: .6rem; color: var(--gold); letter-spacing: 2px; text-transform: uppercase; font-weight: 700; margin-bottom: 2px; }
+  .card-show { font-size: .82rem; font-weight: 600; color: var(--text); line-height: 1.3; margin-bottom: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card-date { font-size: .68rem; color: var(--muted); }
+
+  .empty-state { padding: 60px 56px; text-align: center; color: var(--muted); font-size: .85rem; display: none; }
+  .empty-state.visible { display: block; }
+  /* Hide load more — not needed with scroll */
+  .load-more-wrap { display: none; }
+
+  /* ── MODAL ── */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.92); z-index: 200; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity .3s; }
+  .modal-bg.open { opacity: 1; pointer-events: all; }
+  .modal-box { background: var(--surface); border-radius: 12px; width: 90%; max-width: 720px; overflow: hidden; transform: scale(.94); transition: transform .3s; border: 1px solid rgba(255,255,255,.07); position: relative; }
+  .modal-bg.open .modal-box { transform: scale(1); }
+
+  /* Thumbnail preview shown before play */
+  .modal-preview {
+    width: 100%; aspect-ratio: 16/9; position: relative; cursor: pointer;
+    background: #000; overflow: hidden;
+  }
+  .modal-preview img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: .75; transition: opacity .2s; }
+  .modal-preview:hover img { opacity: .9; }
+  .modal-preview-play {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  }
+  .modal-big-play {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: rgba(192,0,14,.95); display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 40px rgba(192,0,14,.6); transition: transform .2s;
+  }
+  .modal-preview:hover .modal-big-play { transform: scale(1.1); }
+  .modal-play-label {
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    font-size: .72rem; font-weight: 600; letter-spacing: 2px; text-transform: uppercase;
+    color: rgba(255,255,255,.7); background: rgba(0,0,0,.5); padding: 5px 14px; border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  /* Actual iframe — hidden until clicked */
+  .modal-vid { width: 100%; aspect-ratio: 16/9; background: #000; display: none; position: relative; }
+  .modal-vid iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; display: block; }
+
+  .modal-info { padding: 14px 22px 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .modal-info-left { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; }
+  .modal-info-text { flex: 1; min-width: 0; }
+  .modal-efed { font-size: .62rem; color: var(--gold); letter-spacing: 2px; text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+  .modal-show { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .modal-meta { font-size: .76rem; color: var(--muted); }
+
+  /* Animated equalizer bars */
+  .eq-bars { display: none; align-items: flex-end; gap: 3px; height: 22px; flex-shrink: 0; }
+  .eq-bars.playing { display: flex; }
+  .eq-bars.paused .eq-bar { animation-play-state: paused; }
+  .eq-bar {
+    width: 3px; border-radius: 2px; background: var(--accent);
+    animation: eq-bounce 0s ease-in-out infinite alternate;
+  }
+  .eq-bar:nth-child(1) { animation-duration: .5s;  animation-delay: 0s;    height: 60%; }
+  .eq-bar:nth-child(2) { animation-duration: .7s;  animation-delay: .1s;   height: 90%; }
+  .eq-bar:nth-child(3) { animation-duration: .4s;  animation-delay: .25s;  height: 45%; }
+  .eq-bar:nth-child(4) { animation-duration: .65s; animation-delay: .05s;  height: 75%; }
+  .eq-bar:nth-child(5) { animation-duration: .55s; animation-delay: .15s;  height: 55%; }
+  @keyframes eq-bounce {
+    from { transform: scaleY(.2); opacity: .5; }
+    to   { transform: scaleY(1);  opacity: 1;  }
+  }
+  .modal-close { position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,.7); border: none; color: #fff; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 1rem; z-index: 10; display: flex; align-items: center; justify-content: center; transition: background .2s; }
+  .modal-close:hover { background: var(--accent); }
+
+  /* Pause button — right side of info bar */
+  .pause-fab {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--accent); border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 14px rgba(192,0,14,.45);
+    transition: transform .2s, box-shadow .2s;
+    flex-shrink: 0;
+  }
+  .pause-fab:hover { transform: scale(1.08); box-shadow: 0 0 24px rgba(192,0,14,.75); }
+  .pause-fab svg { pointer-events: none; display: block; }
+
+  /* Mobile landscape — fullscreen video */
+  @media (max-height: 500px) and (orientation: landscape) {
+    .modal-bg { align-items: stretch; padding: 0; background: #000; }
+    .modal-box {
+      width: 100vw; max-width: 100vw;
+      height: 100dvh; max-height: 100dvh;
+      border-radius: 0; border: none;
+      display: flex; flex-direction: column;
+      transform: none !important;
+    }
+    .modal-preview { flex: 1; width: 100%; aspect-ratio: unset; }
+    .modal-vid { flex: 1; width: 100%; height: 100dvh; max-height: 100dvh; aspect-ratio: unset; display: block; position: relative; overflow: hidden; }
+    .modal-vid iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; display: block; }
+    .modal-info { display: none !important; }
+    .modal-close { top: 10px; right: 10px; z-index: 300; }
+  }
+
+  footer { border-top: 1px solid rgba(255,255,255,.05); padding: 32px 56px; display: flex; align-items: center; justify-content: space-between; font-size: .74rem; color: var(--muted); }
+  .foot-logo { font-family: 'Bebas Neue', sans-serif; font-size: 1.1rem; letter-spacing: 3px; color: rgba(255,255,255,.2); }
+
+  @media (max-width: 768px) {
+    nav { padding: 14px 20px; }
+    .hero { padding: 0 20px 50px; height: 70vh; min-height: 400px; }
+    .hero-title { font-size: 2.2rem; }
+    .divider, .sec-head, .filter-wrap { padding: 0 20px; }
+    .filter-wrap { padding-bottom: 12px; display: none; }
+    .card-grid { padding: 8px 20px 20px; }
+    .row-arr { display: none; }
+    footer { padding: 24px 20px; flex-direction: column; gap: 10px; text-align: center; }
+    :root { --card-w: 200px; --card-h: 112px; }
+    .modal-big-play { width: 56px; height: 56px; }
+    .hero-vid-wrap iframe { width: 200%; height: 200%; }
+  }
+  @media (max-width: 480px) {
+    .hero-title { font-size: 1.8rem; }
+    :root { --card-w: 155px; --card-h: 88px; }
+    .hero { padding: 0 16px 44px; height: 65vh; }
+    .card-grid { gap: 14px 10px; }
+    .hero-vid-wrap iframe { width: 250%; height: 250%; }
+  }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <a href="#" class="logo">
+    <span class="logo-eyebrow">The Official</span>
+    <span class="logo-main"><em>EFED</em> Streaming Hub</span>
+  </a>
+</nav>
+
+<section class="hero" id="hero">
+  <!-- Video layer — src hardcoded so browser fires autoplay immediately -->
+  <div class="hero-vid-wrap">
+    <iframe id="hero-iframe" src="https://www.youtube.com/embed/lq8DgP7nQB0?autoplay=1&mute=1&start=20&loop=1&playlist=lq8DgP7nQB0&controls=0&disablekb=1&modestbranding=1&showinfo=0&rel=0&iv_load_policy=3&enablejsapi=1&playsinline=1" frameborder="0"
+      allow="autoplay; encrypted-media" allowfullscreen></iframe>
+  </div>
+  <!-- Thumbnail fallback -->
+  <div class="hero-thumb" id="hero-thumb"></div>
+  <!-- Black fade for transitions -->
+  <div class="hero-fade" id="hero-fade"></div>
+  <!-- Grain -->
+  <div class="hero-grain"></div>
+  <!-- Gradients -->
+  <div class="hero-vignette"></div>
+
+  <!-- Content -->
+  <div class="hero-content">
+    <div class="hero-kicker"><span class="pulse"></span> Now Streaming</div>
+    <div class="hero-efed" id="hero-efed"></div>
+    <h1 class="hero-title" id="hero-title"></h1>
+    <p class="hero-sub" id="hero-sub"></p>
+    <div class="hero-dots" id="hero-dots"></div>
+    <button class="hero-btn" id="hero-btn" onclick="heroWatchNow()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      Watch Now
+    </button>
+  </div>
+</section>
+
+<main>
+  <div class="divider">
+    <div class="divider-line"></div>
+    <div class="divider-text">Latest Videos</div>
+    <div class="divider-line"></div>
+  </div>
+  <section class="section">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar"></div>
+        <div class="sec-title">Latest Videos</div>
+        <span class="sec-count" id="vid-count"></span>
+      </div>
+    </div>
+    <div class="filter-wrap" id="filter-wrap">
+      <button class="pill active" data-filter="all" onclick="setFilter('all',this)">All</button>
+    </div>
+    <div class="row-wrap">
+      <button class="row-arr left" onclick="scrollRow(-1)">&#8249;</button>
+      <div class="card-grid" id="card-grid"></div>
+      <button class="row-arr right" onclick="scrollRow(1)">&#8250;</button>
+    </div>
+    <div class="empty-state" id="empty-state">No videos match that filter yet.</div>
+    <div class="load-more-wrap">
+      <button class="load-more-btn" id="load-more-btn" onclick="loadMore()">Load More</button>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="foot-logo">EFED Streaming Hub</div>
+  <span>© 2026 EFED Streaming Hub</span>
+</footer>
+
+<!-- MODAL -->
+<div class="modal-bg" id="modal" onclick="if(event.target===this)closeM()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeM()">✕</button>
+
+    <!-- Step 1: thumbnail + big play button -->
+    <div class="modal-preview" id="modal-preview" onclick="startVideo()">
+      <img id="modal-thumb" src="" alt="">
+      <div class="modal-preview-play">
+        <div class="modal-big-play">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="white" style="margin-left:3px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+      </div>
+      <div class="modal-play-label">Click to Play</div>
+    </div>
+
+    <!-- Step 2: real iframe shown after click -->
+    <div class="modal-vid" id="modal-vid">
+      <iframe id="m-frame" src="" frameborder="0"
+        allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+        allowfullscreen></iframe>
+    </div>
+
+    <div class="modal-info" id="modal-info">
+      <div class="modal-info-left">
+        <div class="eq-bars" id="eq-bars">
+          <div class="eq-bar"></div>
+          <div class="eq-bar"></div>
+          <div class="eq-bar"></div>
+          <div class="eq-bar"></div>
+          <div class="eq-bar"></div>
+        </div>
+        <div class="modal-info-text">
+          <div class="modal-efed" id="m-efed"></div>
+          <div class="modal-show" id="m-show"></div>
+          <div class="modal-meta" id="m-meta"></div>
+        </div>
+      </div>
+      <button class="pause-fab" id="pause-fab" onclick="togglePause()" title="Pause / Resume" style="display:none">
+        <svg id="pause-icon" width="18" height="18" viewBox="0 0 24 24" fill="white">
+          <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── VIDEO DATA ────────────────────────────────────────────────────────────────
+const videos = [
+  { url: "https://www.youtube.com/watch?v=SGQqbCUJvME&t=3245s", show: 'FSW 52: Maximum \u2014 \u201cChoices\u201d (Full Show)', efed: "First Strike Wrestling",           date: "Feb 12, 2026" },
+  { url: "https://www.youtube.com/watch?v=P-q7UGmFeJc&t=71s",   show: "REVENGE - Supershow Toronto: Season 3 | Episode 5",    efed: "Revenge Wrestling",               date: "Dec 31, 2025" },
+  { url: "https://www.youtube.com/watch?v=lq8DgP7nQB0",         show: "WWE 2K: COH RISE | Episode 437",                       efed: "COH Wrestling",                   date: "Mar 4, 2026"  },
+  { url: "https://www.youtube.com/watch?v=hDOSqrSs5qc",         show: "MPWF Royal Rumble 2026",                               efed: "Major Pain Wrestling Federation", date: "Feb 15, 2026" },
+  { url: "https://www.youtube.com/watch?v=tYCvQRDdap0",         show: "SWW Adrenaline S2 Ep. 6",                              efed: "Virtual Wrestling Network",       date: "Mar 5, 2026"  },
+  { url: "https://www.youtube.com/watch?v=QnS_KW8Sqyo",         show: "IGNITE #1 — Episode 4",                                efed: "Premier Wrestling Network",       date: "Jan 25, 2026" },
+  { url: "https://www.youtube.com/watch?v=kKivkyQE85Y",         show: "DCA Wildcats Episode 235",                             efed: "DCA Wildcats",                    date: "Feb 19, 2026" },
+  { url: "https://www.youtube.com/watch?v=4rOkRxtj-18",         show: "SCW Twisted Tuesday — Episode 9",                      efed: "SCW",                             date: "Mar 3, 2026"  },
+];
+// ─────────────────────────────────────────────────────────────────────────────
+
+function getPlatform(url) {
+  if (url && url.includes('twitch.tv')) return 'twitch';
+  return 'youtube';
+}
+function extractId(url) {
+  if (!url) return '';
+  if (getPlatform(url) === 'twitch') {
+    const m = url.match(/twitch\.tv\/videos\/(\d+)/);
+    return m ? m[1] : '';
+  }
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : url;
+}
+function extractT(url) {
+  const m = url.match(/[?&]t=(\d+)/);
+  return m ? parseInt(m[1]) : 0;
+}
+function thumb(id) { return `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`; }
+
+// ── Filter ────────────────────────────────────────────────────────────────────
+let activeFilter = 'all';
+const PAGE_SIZE = 12;
+let visibleCount = PAGE_SIZE;
+
+function filteredVideos() {
+  const list = activeFilter === 'all' ? [...videos] : videos.filter(v => v.efed === activeFilter);
+  return list.sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+function buildPills() {
+  if (window.innerWidth <= 768) return;
+  const efeds = [...new Set(videos.map(v => v.efed))];
+  const wrap = document.getElementById('filter-wrap');
+  efeds.forEach(e => {
+    const btn = document.createElement('button');
+    btn.className = 'pill'; btn.dataset.filter = e; btn.textContent = e;
+    btn.onclick = () => setFilter(e, btn);
+    wrap.appendChild(btn);
+  });
+}
+function setFilter(f, btn) {
+  activeFilter = f; visibleCount = PAGE_SIZE;
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  renderGrid();
+}
+function renderGrid() {
+  const grid = document.getElementById('card-grid');
+  const empty = document.getElementById('empty-state');
+  const loadBtn = document.getElementById('load-more-btn');
+  const countEl = document.getElementById('vid-count');
+  grid.innerHTML = '';
+  const list = filteredVideos();
+  countEl.textContent = ' \u00b7 ' + list.length + ' video' + (list.length !== 1 ? 's' : '');
+  if (!list.length) { empty.classList.add('visible'); loadBtn.classList.remove('visible'); return; }
+  empty.classList.remove('visible');
+  list.slice(0, visibleCount).forEach(v => grid.appendChild(makeCard(v)));
+  loadBtn.classList.toggle('visible', list.length > visibleCount);
+}
+function loadMore() { visibleCount += PAGE_SIZE; renderGrid(); }
+
+function makeCard(v) {
+  const platform = getPlatform(v.url);
+  const id = extractId(v.url);
+  // Twitch thumbnails: use the vod preview endpoint
+  const thumbUrl = v.thumb ? v.thumb
+    : platform === 'twitch'
+    ? `https://vod-secure.twitch.tv/v1/vod/${id}/preview-320x180.jpg`
+    : `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+  const errFallback = platform === 'twitch'
+    ? `this.style.background='#1a1a1f'`
+    : `this.src='https://i.ytimg.com/vi/${id}/default.jpg'`;
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.onclick = () => openM(v);
+  el.innerHTML = `
+    <div class="card-thumb">
+      <img src="${thumbUrl}" alt="${v.show}" loading="lazy" onerror="${errFallback}">
+      <div class="card-over">
+        <div class="play-c">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+      </div>
+    </div>
+    <div class="card-info">
+      <div class="card-efed">${v.efed}</div>
+      <div class="card-show">${v.show}</div>
+      <div class="card-date">${v.date || ''}</div>
+    </div>`;
+  return el;
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+let _currentId = '';
+let _currentT  = 0;
+
+let _paused = false;
+
+function openM(v) {
+  const platform = getPlatform(v.url);
+  const id = extractId(v.url);
+  _currentId = id;
+  _currentT  = extractT(v.url);
+  _paused = false;
+
+  document.getElementById('modal-preview').style.display = 'none';
+
+  let src;
+  if (platform === 'twitch') {
+    src = `https://player.twitch.tv/?video=${id}&parent=efedhub.vercel.app&parent=localhost&autoplay=true&muted=false`;
+  } else {
+    src = `https://www.youtube.com/embed/${id}?autoplay=1&start=${_currentT}&rel=0&modestbranding=1&enablejsapi=1`;
+  }
+
+  document.getElementById('m-frame').src = src;
+  document.getElementById('modal-vid').style.display = 'block';
+  document.getElementById('pause-fab').style.display = 'flex';
+
+  const eq = document.getElementById('eq-bars');
+  eq.classList.add('playing');
+  eq.classList.remove('paused');
+  setPauseIcon(false);
+
+  document.getElementById('m-efed').textContent = v.efed;
+  document.getElementById('m-show').textContent = v.show;
+  document.getElementById('m-meta').textContent = v.date || '';
+  document.getElementById('modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function setPauseIcon(paused) {
+  const icon = document.getElementById('pause-icon');
+  if (paused) {
+    // Play triangle
+    icon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+  } else {
+    // Pause bars
+    icon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+  }
+}
+
+function togglePause() {
+  const frame = document.getElementById('m-frame');
+  const src = frame.src || '';
+  if (src.includes('twitch.tv')) {
+    // Twitch player postMessage API
+    const msg = _paused ? { method: 'play' } : { method: 'pause' };
+    frame.contentWindow.postMessage(JSON.stringify(msg), '*');
+  } else {
+    const msg = _paused
+      ? '{"event":"command","func":"playVideo","args":""}'
+      : '{"event":"command","func":"pauseVideo","args":""}';
+    frame.contentWindow.postMessage(msg, '*');
+  }
+  _paused = !_paused;
+  setPauseIcon(_paused);
+  const eq = document.getElementById('eq-bars');
+  eq.classList.toggle('paused', _paused);
+}
+
+function closeM() {
+  document.getElementById('modal').classList.remove('open');
+  document.body.style.overflow = '';
+  document.getElementById('m-frame').src = '';
+  document.getElementById('modal-vid').style.display = 'none';
+  document.getElementById('modal-preview').style.display = '';
+  document.getElementById('pause-fab').style.display = 'none';
+  document.getElementById('eq-bars').classList.remove('playing', 'paused');
+  _paused = false;
+}
+
+window.addEventListener('scroll', () => {
+  document.getElementById('nav').classList.toggle('scrolled', scrollY > 50);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeM(); });
+
+function scrollRow(dir) {
+  const grid = document.getElementById('card-grid');
+  grid.scrollBy({ left: dir * 600, behavior: 'smooth' });
+}
+
+buildPills();
+renderGrid();
+
+// ── NETFLIX HERO SLIDESHOW ────────────────────────────────────────────────────
+const HERO_SKIP = 20;
+const HERO_DUR  = 20;
+let heroIdx   = 0;
+let heroTimer = null;
+
+function heroExtractId(url) {
+  if (url && url.includes('twitch.tv')) {
+    const m = url.match(/twitch\.tv\/videos\/(\d+)/);
+    return m ? m[1] : '';
+  }
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : '';
+}
+
+function heroSrc(id) {
+  return `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&start=${HERO_SKIP}&loop=1&playlist=${id}&controls=0&disablekb=1&modestbranding=1&showinfo=0&rel=0&iv_load_policy=3&enablejsapi=1&playsinline=1`;
+}
+
+function buildHeroDots() {
+  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+  const wrap = document.getElementById('hero-dots');
+  wrap.innerHTML = '';
+  list.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'hero-dot' + (i === 0 ? ' active' : '');
+    d.onclick = () => {
+      clearTimeout(heroTimer);
+      heroIdx = i;
+      loadSlide();
+    };
+    wrap.appendChild(d);
+  });
+  wrap.classList.add('show');
+}
+
+function setHeroDot(idx) {
+  document.querySelectorAll('.hero-dot').forEach((d, i) =>
+    d.classList.toggle('active', i === idx));
+}
+
+function showHeroText(v) {
+  ['hero-efed','hero-title','hero-sub','hero-btn'].forEach(elId => {
+    const el = document.getElementById(elId);
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+  });
+  document.getElementById('hero-efed').textContent = v.efed;
+  document.getElementById('hero-title').textContent = v.show;
+  document.getElementById('hero-sub').textContent = v.date || '';
+}
+
+let _heroFirstLoad = true;
+
+function loadSlide() {
+  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+  const v      = list[heroIdx];
+  const id     = heroExtractId(v.url);
+  const fade   = document.getElementById('hero-fade');
+  const iframe = document.getElementById('hero-iframe');
+  const thumb  = document.getElementById('hero-thumb');
+
+  setHeroDot(heroIdx);
+
+  if (_heroFirstLoad) {
+    _heroFirstLoad = false;
+    thumb.classList.add('hidden');
+    iframe.src = heroSrc(id);
+    showHeroText(v);
+    setTimeout(() => fade.classList.remove('active'), 800);
+    heroTimer = setTimeout(() => {
+      heroIdx = (heroIdx + 1) % list.length;
+      loadSlide();
+    }, HERO_DUR * 1000);
+    return;
+  }
+
+  fade.classList.add('active');
+  thumb.classList.add('hidden');
+  setTimeout(() => {
+    iframe.src = heroSrc(id);
+    showHeroText(v);
+    setTimeout(() => fade.classList.remove('active'), 300);
+    clearTimeout(heroTimer);
+    heroTimer = setTimeout(() => {
+      heroIdx = (heroIdx + 1) % list.length;
+      loadSlide();
+    }, HERO_DUR * 1000);
+  }, 600);
+}
+
+function heroWatchNow() {
+  openM(videos[heroIdx]);
+}
+
+// Init
+buildHeroDots();
+loadSlide();
+</script>
+</body>
+</html>
