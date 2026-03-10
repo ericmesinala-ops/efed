@@ -337,6 +337,7 @@
     transition: color .2s; font-weight: 400;
   }
   .nav-contact-link:hover { color: rgba(255,255,255,.7); }
+  @media (max-width: 768px) { .nav-contact-link { font-size: .5rem; letter-spacing: 1px; } }
 
   /* ── Contact modal ── */
   .contact-bg {
@@ -420,7 +421,7 @@
     <span class="logo-eyebrow">The Official</span>
     <span class="logo-main"><em>EFED</em> Streaming Hub</span>
   </a>
-  <a class="nav-contact-link" onclick="openContact()">Submit an EFED</a>
+  <a class="nav-contact-link" onclick="openContact()">Submit Your Content</a>
 </nav>
 
 <section class="hero" id="hero">
@@ -976,10 +977,22 @@ loadSlide();
     <!-- ADD mode -->
     <div id="cf-add-view">
       <div class="contact-eyebrow">Get Featured</div>
-      <div class="contact-title">Submit Your EFED</div>
-      <p class="contact-sub">Want your show on the hub? Fill out the form below and we'll get you added.</p>
-      <form class="contact-form" id="cf-add-form" action="https://formspree.io/f/xlgprgnk" method="POST">
-        <input type="hidden" name="request_type" value="ADD EFED">
+      <div class="contact-title">Submit Your Content</div>
+      <p class="contact-sub">Choose what you'd like to submit below.</p>
+
+      <!-- Step 1: type selector -->
+      <div id="cf-type-chooser">
+        <label class="cf-label">What are you submitting?</label>
+        <select class="cf-select" id="cf-type-select" onchange="cfTypeChange(this.value)" required>
+          <option value="" disabled selected>— Choose one —</option>
+          <option value="show">Submit a Show</option>
+          <option value="ple">Submit an Upcoming PLE Trailer</option>
+        </select>
+      </div>
+
+      <!-- Show form -->
+      <form class="contact-form" id="cf-add-form" action="https://formspree.io/f/xlgprgnk" method="POST" style="display:none;margin-top:16px;">
+        <input type="hidden" name="request_type" id="cf-request-type" value="ADD EFED">
         <div>
           <label class="cf-label">Your Name</label>
           <input class="cf-input" type="text" name="name" placeholder="Your full name" required>
@@ -1003,22 +1016,24 @@ loadSlide();
             <option>Other</option>
           </select>
         </div>
-        <div>
-          <label class="cf-label">Latest Episode Link</label>
-          <input class="cf-input" type="url" name="video_url" placeholder="https://youtube.com/watch?v=..." required>
+        <div id="cf-video-url-wrap">
+          <label class="cf-label" id="cf-video-url-label">Latest Episode Link</label>
+          <input class="cf-input" type="url" name="video_url" id="cf-video-url" placeholder="https://youtube.com/watch?v=..." required>
         </div>
-        <div>
-          <label class="cf-label">Date of Show</label>
-          <input class="cf-input" type="text" name="show_date" placeholder="e.g. Mar 9, 2026" required>
+        <div id="cf-2month-notice" style="display:none;background:rgba(192,0,14,.1);border:1px solid rgba(192,0,14,.3);border-radius:8px;padding:10px 14px;font-size:.72rem;color:rgba(255,255,255,.55);line-height:1.6;">⚠ <strong style="color:rgba(255,255,255,.7);">Note:</strong> Shows must have aired within the last 2 months to be listed on the hub.</div>
+        <div id="cf-date-wrap">
+          <label class="cf-label" id="cf-date-label">Date of Show</label>
+          <input class="cf-input" type="date" name="show_date" id="cf-show-date" required>
+          <div class="cf-date-error" id="cf-date-error" style="display:none;color:#e05555;font-size:.72rem;margin-top:5px;">⚠ Shows must be within the last 2 months to be listed.</div>
         </div>
         <div class="cf-remove-box">
           Want to remove your show instead? <a href="#" onclick="switchToRemove();return false;">Click here to remove a show.</a>
         </div>
-        <button class="cf-submit" type="submit">Submit EFED →</button>
+        <button class="cf-submit" type="submit" id="cf-add-submit">Submit →</button>
       </form>
       <div class="cf-success" id="cf-add-success">
         <strong>Submission received!</strong><br>
-        We'll review your EFED and get it added soon. Thanks for reaching out!
+        We'll review your submission and get it added soon. Thanks for reaching out!
       </div>
     </div>
 
@@ -1094,12 +1109,56 @@ function switchToAdd() {
   document.getElementById('cf-remove-view').style.display = 'none';
   document.getElementById('cf-add-view').style.display = 'block';
 }
+function cfTypeChange(val) {
+  const form = document.getElementById('cf-add-form');
+  const reqType = document.getElementById('cf-request-type');
+  const urlLabel = document.getElementById('cf-video-url-label');
+  const urlInput = document.getElementById('cf-video-url');
+  const dateLabel = document.getElementById('cf-date-label');
+  const dateWrap = document.getElementById('cf-date-wrap');
+  form.style.display = 'flex';
+  if (val === 'show') {
+    reqType.value = 'ADD EFED';
+    document.getElementById('cf-2month-notice').style.display = '';
+    urlLabel.textContent = 'Latest Episode Link';
+    urlInput.placeholder = 'https://youtube.com/watch?v=...';
+    dateLabel.textContent = 'Date of Show';
+    dateWrap.style.display = '';
+    document.getElementById('cf-add-submit').textContent = 'Submit Show →';
+  } else if (val === 'ple') {
+    reqType.value = 'ADD PLE TRAILER';
+    document.getElementById('cf-2month-notice').style.display = 'none';
+    urlLabel.textContent = 'PLE Trailer Link';
+    urlInput.placeholder = 'https://youtube.com/watch?v=...';
+    dateLabel.textContent = 'PLE Event Date';
+    dateWrap.style.display = '';
+    document.getElementById('cf-add-submit').textContent = 'Submit PLE Trailer →';
+  }
+}
 function handleFormSubmit(formId, successId) {
   const form = document.getElementById(formId);
   if (!form) return;
   form.addEventListener('submit', async function(e) {
     e.preventDefault();
     e.stopPropagation();
+
+    // 2-month date validation for show submissions
+    if (formId === 'cf-add-form' && document.getElementById('cf-request-type').value === 'ADD EFED') {
+      const dateInput = document.getElementById('cf-show-date');
+      const errEl = document.getElementById('cf-date-error');
+      if (dateInput && dateInput.value) {
+        const showDate = new Date(dateInput.value);
+        const twoMonthsAgo = new Date();
+        twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+        if (showDate < twoMonthsAgo) {
+          errEl.style.display = 'block';
+          return;
+        } else {
+          errEl.style.display = 'none';
+        }
+      }
+    }
+
     const btn = form.querySelector('.cf-submit');
     if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
     const data = new FormData(form);
