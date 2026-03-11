@@ -253,6 +253,34 @@
   .card-date { font-size: .68rem; color: var(--muted); }
   .card-posted-by { font-size: .58rem; color: rgba(255,255,255,.18); margin-top: 3px; font-style: italic; letter-spacing: .3px; }
 
+  /* 3-dot card menu */
+  .card-menu-btn {
+    position: absolute; top: 7px; right: 7px; z-index: 9;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(0,0,0,.65); border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .18s;
+    backdrop-filter: blur(4px);
+  }
+  .card:hover .card-menu-btn, .card-menu-btn.open { opacity: 1; }
+  .card-menu-btn svg { pointer-events: none; }
+  .card-menu-dropdown {
+    position: absolute; top: 38px; right: 7px; z-index: 20;
+    background: #1a1a20; border: 1px solid rgba(255,255,255,.1);
+    border-radius: 8px; overflow: hidden; min-width: 130px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.6);
+    display: none;
+  }
+  .card-menu-dropdown.open { display: block; }
+  .card-menu-item {
+    width: 100%; padding: 10px 14px; background: none; border: none;
+    color: #ff6b6b; font-family: 'DM Sans', sans-serif;
+    font-size: .72rem; font-weight: 600; letter-spacing: .5px;
+    text-align: left; cursor: pointer; display: flex; align-items: center; gap: 8px;
+    transition: background .15s;
+  }
+  .card-menu-item:hover { background: rgba(192,0,14,.15); }
+
   .empty-state { padding: 60px 56px; text-align: center; color: var(--muted); font-size: .85rem; display: none; }
   .empty-state.visible { display: block; }
   /* Hide load more — not needed with scroll */
@@ -1018,19 +1046,6 @@
         <button class="settings-save-btn" onclick="savePassword()">Update Password</button>
       </div>
 
-      <hr class="settings-divider">
-
-      <div class="settings-section">
-        <label class="settings-label">Request Removal</label>
-        <p style="font-size:.68rem;color:var(--muted);line-height:1.6;margin-bottom:12px;">Select one of your submitted videos to request its removal.</p>
-        <select class="settings-input" id="settings-removal-select" style="appearance:none;cursor:pointer;margin-bottom:8px;">
-          <option value="" disabled selected style="background:#111">Choose a video…</option>
-        </select>
-        <input class="settings-input" id="settings-removal-reason" type="text" placeholder="Reason for removal (optional)" autocomplete="off">
-        <div class="settings-msg" id="settings-removal-msg"></div>
-        <button class="settings-save-btn" onclick="submitRemovalRequest()" style="background:rgba(192,0,14,.15);color:#ff6b6b;border:1px solid rgba(192,0,14,.3);">Request Removal</button>
-      </div>
-
     </div>
   </div>
 </div>
@@ -1266,6 +1281,55 @@ function thumb(id) { return `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`; }
 // ── Filter ────────────────────────────────────────────────────────────────────
 let activeFilter = 'all';
 
+// ── CARD 3-DOT MENU ──
+function toggleCardMenu(e, id) {
+  e.stopPropagation();
+  const btn = document.getElementById('cmb-' + id);
+  const menu = document.getElementById('cmd-' + id);
+  if (!menu) return;
+  const isOpen = menu.classList.contains('open');
+  // Close all other open menus
+  document.querySelectorAll('.card-menu-dropdown.open').forEach(m => m.classList.remove('open'));
+  document.querySelectorAll('.card-menu-btn.open').forEach(b => b.classList.remove('open'));
+  if (!isOpen) {
+    menu.classList.add('open');
+    btn.classList.add('open');
+  }
+}
+
+// Close card menus when clicking elsewhere
+document.addEventListener('click', () => {
+  document.querySelectorAll('.card-menu-dropdown.open').forEach(m => m.classList.remove('open'));
+  document.querySelectorAll('.card-menu-btn.open').forEach(b => b.classList.remove('open'));
+});
+
+async function deleteSubmittedVideo(e, url) {
+  e.stopPropagation();
+  const session = getSession();
+  if (!session) return;
+  if (!confirm('Delete this video? This cannot be undone.')) return;
+  try {
+    _dbCache = null;
+    const db = await getDB();
+    if (!db.submissions) db.submissions = [];
+    const idx = db.submissions.findIndex(v => v.url === url && v.submittedBy === session.username);
+    if (idx === -1) { alert('Video not found or you do not own it.'); return; }
+    db.submissions.splice(idx, 1);
+    await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
+      body: JSON.stringify(db)
+    });
+    _dbCache = db;
+    // Remove from local array and re-render
+    const vi = videos.findIndex(v => v.url === url);
+    if (vi !== -1) videos.splice(vi, 1);
+    buildPills();
+    renderGrid();
+  } catch(e) {
+    alert('Could not delete. Try again.');
+  }
+}
 
 function sortByDate(arr) {
   return [...arr].sort((a, b) => {
@@ -1315,14 +1379,17 @@ function renderGrid() {
 function makeCard(v) {
   const platform = getPlatform(v.url);
   const id = extractId(v.url);
-  // Twitch thumbnails: use the vod preview endpoint
   const thumbUrl = v.thumb ? v.thumb
     : platform === 'twitch'
     ? `https://vod-secure.twitch.tv/v1/vod/${id}/preview-320x180.jpg`
     : `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`;
   const errFallback = platform === 'twitch'
     ? `this.style.background='#1a1a1f'`
-    : `this.src='https://i.ytimg.com/vi/${id}/hqdefault.jpg';this.onerror=function(){this.src='https://i.ytimg.com/vi/${id}/mqdefault.jpg';this.onerror=function(){this.style.background='#1a1a1f'}}`; 
+    : `this.src='https://i.ytimg.com/vi/${id}/hqdefault.jpg';this.onerror=function(){this.src='https://i.ytimg.com/vi/${id}/mqdefault.jpg';this.onerror=function(){this.style.background='#1a1a1f'}}`;
+
+  const session = getSession();
+  const isOwner = v.community && session && v.submittedBy === session.username;
+
   const el = document.createElement('div');
   el.className = 'card';
   el.onclick = () => openM(v);
@@ -1339,6 +1406,16 @@ function makeCard(v) {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         </div>
       </div>
+      ${isOwner ? `
+      <button class="card-menu-btn" id="cmb-${id}" onclick="toggleCardMenu(event,'${id}')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+      </button>
+      <div class="card-menu-dropdown" id="cmd-${id}">
+        <button class="card-menu-item" onclick="deleteSubmittedVideo(event,'${v.url}')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          Delete
+        </button>
+      </div>` : ''}
     </div>
     <div class="card-info">
       <div class="card-efed">${v.efed}</div>
@@ -2397,80 +2474,9 @@ function openSettings() {
   document.getElementById('settings-name').value = displayName;
   document.getElementById('settings-cur-pass').value = '';
   document.getElementById('settings-new-pass').value = '';
-  document.getElementById('settings-removal-reason').value = '';
   clearSettingsMsgs();
-
-  // Populate removal dropdown with this user's submitted videos
-  const select = document.getElementById('settings-removal-select');
-  select.innerHTML = '<option value="" disabled selected style="background:#111">Choose a video…</option>';
-  const myVideos = videos.filter(v => v.community && v.submittedBy === session.username);
-  if (myVideos.length === 0) {
-    const opt = document.createElement('option');
-    opt.value = ''; opt.disabled = true;
-    opt.textContent = 'No submitted videos found';
-    opt.style.background = '#111';
-    select.appendChild(opt);
-  } else {
-    myVideos.forEach(v => {
-      const opt = document.createElement('option');
-      opt.value = v.url;
-      opt.textContent = v.show + (v.efed ? ' — ' + v.efed : '');
-      opt.style.background = '#111';
-      select.appendChild(opt);
-    });
-  }
-
   document.getElementById('settings-bg').classList.add('open');
   document.body.style.overflow = 'hidden';
-}
-
-async function submitRemovalRequest() {
-  const session = getSession();
-  if (!session) return;
-  const url = document.getElementById('settings-removal-select').value;
-  const reason = document.getElementById('settings-removal-reason').value.trim();
-  const msgEl = document.getElementById('settings-removal-msg');
-  msgEl.className = 'settings-msg'; msgEl.textContent = '';
-
-  if (!url) {
-    msgEl.textContent = 'Please select a video first.';
-    msgEl.className = 'settings-msg error'; return;
-  }
-
-  const btn = event.target;
-  btn.disabled = true; btn.textContent = 'Submitting…';
-
-  try {
-    const db = await getDB();
-    if (!db.removalRequests) db.removalRequests = [];
-    const alreadyRequested = db.removalRequests.find(r => r.url === url && r.status === 'pending');
-    if (alreadyRequested) {
-      msgEl.textContent = 'A removal request for this video is already pending.';
-      msgEl.className = 'settings-msg error'; return;
-    }
-    db.removalRequests.push({
-      url,
-      requestedBy: session.username,
-      reason: reason || 'No reason provided',
-      requestedAt: Date.now(),
-      status: 'pending'
-    });
-    await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-      body: JSON.stringify(db)
-    });
-    _dbCache = db;
-    msgEl.textContent = '✓ Removal request submitted. We\'ll review it shortly.';
-    msgEl.className = 'settings-msg success';
-    document.getElementById('settings-removal-select').value = '';
-    document.getElementById('settings-removal-reason').value = '';
-  } catch(e) {
-    msgEl.textContent = 'Could not submit request. Try again.';
-    msgEl.className = 'settings-msg error';
-  } finally {
-    btn.disabled = false; btn.textContent = 'Request Removal';
-  }
 }
 
 // ── SUBMIT VIDEO ──
@@ -2485,12 +2491,36 @@ const WRESTLING_KEYWORDS = [
   'royal rumble','summerslam','wrestlemania','superstar','submission','pinfall',
   'suplex','powerbomb','chokeslam','finisher','entrance','vignette','stable','faction',
   'tag team','ladder match','cage match','iron man','federation','promotion',
-  'show ep','episode','event','card','results','bout','reign','belt'
+  'show ep','episode','event','card','results','bout','reign','belt',
+  // eFed show naming patterns
+  'fsw','frontier','fighting spirit','maximum','bloodsport','battleground',
+  'showdown','collision','rampage','warfare','havoc','carnage','mayhem',
+  'vs.','vs ','versus',' ep ',' ep.','episode ','show #','show ep',
+  ' v ','title defense','grudge match','main event','semi-main',
+  'heel turn','face turn','turn heel','went heel','character','gimmick',
+  'manager','valet','rivalry','feud','angle','storyline','build',
+  'squash','jobber','push','buried','midcard','main card','opener',
+  'contract','signing','confrontation','beatdown','ambush','promo segment'
+];
+
+// Non-wrestling signals that suggest the video is clearly off-topic
+const NON_WRESTLING_KEYWORDS = [
+  'minecraft','fortnite','gaming','gameplay','tutorial','cooking','recipe',
+  'vlog','travel','reaction','music video','official video','official audio',
+  'lyric video','album','song','dance','comedy','skit','prank',
+  'makeup','beauty','fashion','fitness','workout','yoga','review',
+  'unboxing','tech','phone','laptop','car','driving','sports highlights',
+  'basketball','football','soccer','baseball','nfl','nba','mlb','fifa'
 ];
 
 function checkWrestling(text) {
   const lower = (text || '').toLowerCase();
   return WRESTLING_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+function checkNonWrestling(text) {
+  const lower = (text || '').toLowerCase();
+  return NON_WRESTLING_KEYWORDS.some(kw => lower.includes(kw));
 }
 
 function openSubmit() {
@@ -2534,6 +2564,8 @@ function onSubmitUrlInput() {
       const oData = await oEmbedRes.json();
       _fetchedTitle = oData.title || '';
       _isWrestling = checkWrestling(_fetchedTitle);
+      let _gotPageData = false;
+      let _isDefinitelyNotWrestling = false;
 
       // Date + description/tags via allorigins proxy
       try {
@@ -2541,17 +2573,29 @@ function onSubmitUrlInput() {
         const proxyData = await proxyRes.json();
         const html = proxyData.contents || '';
 
+        if (html.length > 500) _gotPageData = true;
+
         const dateMatch = html.match(/"datePublished":"([^"]+)"/);
         if (dateMatch) {
           _fetchedDate = new Date(dateMatch[1]).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         }
 
-        // Check description, tags, category for wrestling signals
         const desc = (html.match(/"shortDescription":"([^"]{0,600})"/) || [])[1] || '';
         const tags = (html.match(/"keywords":"([^"]+)"/) || [])[1] || '';
         const category = (html.match(/"category":"([^"]+)"/) || [])[1] || '';
-        if (!_isWrestling) _isWrestling = checkWrestling(desc) || checkWrestling(tags) || checkWrestling(category);
-      } catch(_) {}
+        const allText = [_fetchedTitle, desc, tags, category].join(' ');
+
+        if (!_isWrestling) _isWrestling = checkWrestling(allText);
+
+        // Only flag as definitely non-wrestling if we got real page data AND it has non-wrestling signals but zero wrestling signals
+        if (_gotPageData && !_isWrestling && checkNonWrestling(allText)) {
+          _isDefinitelyNotWrestling = true;
+        }
+        // Store for doSubmitVideo to check
+        window._isDefinitelyNotWrestling = _isDefinitelyNotWrestling;
+      } catch(_) {
+        window._isDefinitelyNotWrestling = false;
+      }
 
       // Date fallback via noembed
       if (!_fetchedDate) {
@@ -2570,8 +2614,11 @@ function onSubmitUrlInput() {
       if (_isWrestling) {
         checkEl.textContent = '✓ Wrestling content detected';
         checkEl.style.color = '#4caf8a';
+      } else if (window._isDefinitelyNotWrestling) {
+        checkEl.textContent = '⛔ This does not look like wrestling content';
+        checkEl.style.color = '#ff6b6b';
       } else {
-        checkEl.textContent = '⚠ Could not confirm wrestling content — verify this is an eFed video';
+        checkEl.textContent = '⚠ Could not auto-confirm — make sure this is an eFed video';
         checkEl.style.color = 'rgba(255,180,50,.85)';
       }
 
@@ -2579,6 +2626,7 @@ function onSubmitUrlInput() {
       preview.textContent = 'Could not fetch info — video may be private.';
       preview.style.color = '#ff6b6b';
       checkEl.textContent = '';
+      window._isDefinitelyNotWrestling = false;
     }
   }, 600);
 }
@@ -2602,7 +2650,7 @@ async function doSubmitVideo() {
     msg.textContent = 'Wait for the title to load, or check the link.';
     msg.className = 'settings-msg error'; return;
   }
-  if (!_isWrestling) {
+  if (window._isDefinitelyNotWrestling) {
     msg.textContent = '⛔ This video does not appear to be wrestling-related. Only eFed wrestling content is allowed.';
     msg.className = 'settings-msg error';
     // Log the violation attempt
