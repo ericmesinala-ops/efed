@@ -1367,28 +1367,21 @@ document.addEventListener('click', () => {
 
 async function deleteSubmittedVideo(e, url) {
   e.stopPropagation();
-  const session = getSession();
+  const session = (typeof getSession === 'function') ? getSession() : null;
   if (!session) return;
   if (!confirm('Delete this video? This cannot be undone.')) return;
   try {
-    _dbCache = null;
-    const db = await getDB();
+    const db = await getDB(); // always fresh
     if (!db.submissions) db.submissions = [];
     const idx = db.submissions.findIndex(v => v.url === url && v.submittedBy === session.username);
     if (idx === -1) { alert('Video not found or you do not own it.'); return; }
     db.submissions.splice(idx, 1);
-    await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-      body: JSON.stringify(db)
-    });
-    _dbCache = db;
-    // Remove from local array and re-render
+    await setDB(db);
     const vi = videos.findIndex(v => v.url === url);
     if (vi !== -1) videos.splice(vi, 1);
     buildPills();
     renderGrid();
-  } catch(e) {
+  } catch(err) {
     alert('Could not delete. Try again.');
   }
 }
@@ -1631,16 +1624,15 @@ async function loadCommunityVideos() {
     _dbCache = null; // always fresh fetch on page load
     const db = await getDB();
     const submissions = db.submissions || [];
-    // Sort newest first
+    // Sort newest first by submittedAt
     const sorted = [...submissions].sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
-    // Add in reverse so that after all unshifts, newest ends up at index 0
-    const toAdd = sorted.filter(v => !videos.find(x => x.url === v.url));
-    for (let i = toAdd.length - 1; i >= 0; i--) {
-      const v = toAdd[i];
-      // Ensure dateMs exists for reliable sorting
-      if (!v.dateMs && v.date) v.dateMs = new Date(v.date).getTime();
-      videos.unshift({ ...v, community: true });
-    }
+    // Add community videos — skip any URL already in the hardcoded list
+    sorted.forEach(v => {
+      if (!videos.find(x => x.url === v.url)) {
+        if (!v.dateMs && v.date) v.dateMs = new Date(v.date).getTime();
+        videos.push({ ...v, community: true });
+      }
+    });
   } catch(e) { console.warn('Could not load community videos', e); }
 }
 
@@ -2393,16 +2385,33 @@ function getSession() {
 }
 
 let _dbCache = null;
+
 async function getDB() {
-  if (_dbCache) return _dbCache;
-  const r = await fetch(BIN_URL + '/latest', { headers: { 'X-Master-Key': JSONBIN_API_KEY } });
+  _dbCache = null;
+  const r = await fetch(BIN_URL + '/latest', {
+    headers: { 'X-Master-Key': JSONBIN_API_KEY },
+    cache: 'no-store'
+  });
+  if (!r.ok) throw new Error('DB read failed ' + r.status);
   const j = await r.json();
   _dbCache = j.record;
   return _dbCache;
 }
 
-// Update nav with username from session
-(function() {
+async function setDB(data) {
+  const r = await fetch(BIN_URL, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
+    body: JSON.stringify(data),
+    cache: 'no-store'
+  });
+  if (!r.ok) throw new Error('DB write failed ' + r.status);
+  _dbCache = data;
+  return data;
+}
+
+// Update nav with username from session — also sync displayName from DB
+(async function() {
   const session = getSession();
   if (!session) return;
   const signInBtn = document.getElementById('nav-sign-in-btn');
@@ -2417,11 +2426,27 @@ async function getDB() {
   if (inviteBtn) inviteBtn.classList.add('visible');
   const submitNavBtn = document.getElementById('nav-submit-btn');
   if (submitNavBtn) submitNavBtn.style.display = 'flex';
-  const u = session.displayName || session.username || 'Member';
-  if (nameEl) nameEl.textContent = u;
-  if (initialsEl) initialsEl.textContent = u[0].toUpperCase();
-  if (ddName) ddName.textContent = u;
+
+  // Set immediately from local session so nav isn't blank while loading
+  let displayName = session.displayName || session.username || 'Member';
+  if (nameEl) nameEl.textContent = displayName;
+  if (initialsEl) initialsEl.textContent = displayName[0].toUpperCase();
+  if (ddName) ddName.textContent = displayName;
   if (ddEmail) ddEmail.textContent = 'EFED Member';
+
+  // Then sync from DB — catches changes made on other devices
+  try {
+    const db = await getDB();
+    const user = db.users?.[session.username];
+    if (user?.displayName && user.displayName !== session.displayName) {
+      session.displayName = user.displayName;
+      localStorage.setItem('efed_session', JSON.stringify(session));
+      displayName = user.displayName;
+      if (nameEl) nameEl.textContent = displayName;
+      if (initialsEl) initialsEl.textContent = displayName[0].toUpperCase();
+      if (ddName) ddName.textContent = displayName;
+    }
+  } catch(_) {} // non-critical — nav still works from local session
 })();
 
 function handleSignOut() {
@@ -2717,19 +2742,12 @@ async function doSubmitVideo() {
   if (window._isDefinitelyNotWrestling) {
     msg.textContent = '⛔ This video does not appear to be wrestling-related. Only eFed wrestling content is allowed.';
     msg.className = 'settings-msg error';
-    // Log the violation attempt
     const session = getSession();
     try {
-      _dbCache = null;
       const db = await getDB();
       if (!db.violations) db.violations = [];
       db.violations.push({ username: session?.username || 'unknown', url, title: _fetchedTitle, attemptedAt: Date.now() });
-      await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-        body: JSON.stringify(db)
-      });
-      _dbCache = db;
+      await setDB(db);
     } catch(_) {}
     return;
   }
@@ -2739,8 +2757,7 @@ async function doSubmitVideo() {
   btn.disabled = true; btn.textContent = 'Posting…';
 
   try {
-    _dbCache = null; // bust cache — always write to latest DB state
-    const db = await getDB();
+    const db = await getDB(); // always fresh — see latest state
     if (!db.submissions) db.submissions = [];
     if (db.submissions.find(v => v.url === url)) {
       msg.textContent = 'This video has already been submitted.';
@@ -2762,26 +2779,18 @@ async function doSubmitVideo() {
       submittedAt: Date.now()
     };
     db.submissions.push(newVideo);
-
-    // Sort submissions by submittedAt descending so newest is first
     db.submissions.sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
 
-    await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-      body: JSON.stringify(db)
-    });
-    _dbCache = db;
+    await setDB(db); // confirmed write
 
-    // Add to top of local videos array and re-render
-    videos.unshift({ ...newVideo });
+    videos.push({ ...newVideo }); // add to local list — sortByDate handles order
     buildPills();
     renderGrid();
 
     msg.textContent = '✓ Posted! Now live for everyone.';
     msg.className = 'settings-msg success';
     setTimeout(() => closeSubmit(), 1600);
-  } catch(e) {
+  } catch(err) {
     msg.textContent = 'Could not post. Try again.';
     msg.className = 'settings-msg error';
   } finally {
@@ -2819,17 +2828,12 @@ async function saveDisplayName() {
   if (!name) return showSettingsMsg('settings-name-msg', 'Please enter a name.', 'error');
   if (name.length > 24) return showSettingsMsg('settings-name-msg', 'Max 24 characters.', 'error');
 
-  const btn = document.querySelector('#settings-body .settings-save-btn');
   try {
-    const db = await getDB();
+    const db = await getDB(); // always fresh
+    if (!db.users[session.username]) throw new Error('User not found');
     db.users[session.username].displayName = name;
-    await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-      body: JSON.stringify(db)
-    });
-    _dbCache = db;
-    // Update session + nav
+    await setDB(db);
+    // Persist to local session so it survives logout/login
     session.displayName = name;
     localStorage.setItem('efed_session', JSON.stringify(session));
     const nameEl = document.getElementById('nav-user-name');
@@ -2837,7 +2841,7 @@ async function saveDisplayName() {
     if (nameEl) nameEl.textContent = name;
     if (ddName) ddName.textContent = name;
     showSettingsMsg('settings-name-msg', 'Name updated!', 'success');
-  } catch(e) {
+  } catch(err) {
     showSettingsMsg('settings-name-msg', 'Could not save. Try again.', 'error');
   }
 }
@@ -2857,20 +2861,16 @@ async function savePassword() {
   }
 
   try {
-    const db = await getDB();
+    const db = await getDB(); // always fresh — get real current password hash
     const user = db.users[session.username];
+    if (!user) throw new Error('User not found');
     if (user.passwordHash !== hash(curPass)) return showSettingsMsg('settings-pass-msg', 'Current password is incorrect.', 'error');
     db.users[session.username].passwordHash = hash(newPass);
-    await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-      body: JSON.stringify(db)
-    });
-    _dbCache = db;
+    await setDB(db);
     document.getElementById('settings-cur-pass').value = '';
     document.getElementById('settings-new-pass').value = '';
     showSettingsMsg('settings-pass-msg', 'Password updated!', 'success');
-  } catch(e) {
+  } catch(err) {
     showSettingsMsg('settings-pass-msg', 'Could not save. Try again.', 'error');
   }
 }

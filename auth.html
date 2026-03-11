@@ -297,18 +297,22 @@ function hash(str) {
 
 async function getDB() {
   const r = await fetch(BIN_URL + '/latest', {
-    headers: { 'X-Master-Key': JSONBIN_API_KEY }
+    headers: { 'X-Master-Key': JSONBIN_API_KEY },
+    cache: 'no-store'
   });
+  if (!r.ok) throw new Error('DB read failed ' + r.status);
   const j = await r.json();
   return j.record;
 }
 
 async function setDB(data) {
-  await fetch(BIN_URL, {
+  const r = await fetch(BIN_URL, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-    body: JSON.stringify(data)
+    body: JSON.stringify(data),
+    cache: 'no-store'
   });
+  if (!r.ok) throw new Error('DB write failed ' + r.status);
 }
 
 // ── SESSION ──
@@ -376,7 +380,11 @@ async function doLogin() {
     if (!username) return showErr('login-err', 'No account found. Check your username or email.');
     const account = db.users[username];
     if (account.passwordHash !== hash(pass)) return showErr('login-err', 'Incorrect password.');
-    setSession({ username });
+    // Store full session including displayName so it's consistent across devices
+    setSession({
+      username,
+      displayName: account.displayName || username
+    });
     window.location.replace('index.html');
   } catch(e) {
     showErr('login-err', 'Could not connect. Check your setup.');
@@ -427,7 +435,7 @@ async function doRegister() {
     Object.assign(db.invites, myCodes);
     await setDB(db);
 
-    setSession({ username: user });
+    setSession({ username: user, displayName: user });
     showOk('reg-ok', 'Account created! Welcome to the Hub.');
     setTimeout(() => window.location.replace('index.html'), 800);
   } catch(e) {
@@ -566,7 +574,13 @@ async function init() {
   if (session?.username) {
     try {
       const db = await getDB();
-      if (db.users?.[session.username]) {
+      const user = db.users?.[session.username];
+      if (user) {
+        // Always sync displayName from DB — may have changed on another device
+        if (user.displayName && user.displayName !== session.displayName) {
+          session.displayName = user.displayName;
+          setSession(session);
+        }
         showLoggedIn(session.username, db);
         return;
       }
