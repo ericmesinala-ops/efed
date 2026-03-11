@@ -1377,12 +1377,14 @@ async function deleteSubmittedVideo(e, url) {
     if (idx === -1) { alert('Video not found or you do not own it.'); return; }
     db.submissions.splice(idx, 1);
     await setDB(db);
+    // Small delay before re-render so JSONBin propagates the write
+    await new Promise(r => setTimeout(r, 600));
     const vi = videos.findIndex(v => v.url === url);
     if (vi !== -1) videos.splice(vi, 1);
     buildPills();
     renderGrid();
   } catch(err) {
-    alert('Could not delete. Try again.');
+    alert('Delete failed — the video is still in the hub. Please try again in a moment.');
   }
 }
 
@@ -2622,6 +2624,9 @@ function openSubmit() {
   _fetchedTitle = '';
   _fetchedDate = '';
   _isWrestling = false;
+  // Gray out button until a URL is fetched
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true; btn.textContent = 'Post Video';
   document.getElementById('submit-modal-bg').classList.add('open');
   document.body.style.overflow = 'hidden';
 }
@@ -2638,13 +2643,19 @@ function onSubmitUrlInput() {
   _isWrestling = false;
   const preview = document.getElementById('submit-title-preview');
   const checkEl = document.getElementById('submit-wrestling-check');
+  const btn = document.getElementById('submit-btn');
   const url = document.getElementById('submit-url').value.trim();
   const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
-  if (!ytMatch) { preview.textContent = ''; checkEl.textContent = ''; return; }
+  if (!ytMatch) {
+    preview.textContent = ''; checkEl.textContent = '';
+    btn.disabled = true; btn.textContent = 'Post Video';
+    return;
+  }
   const videoId = ytMatch[1];
   preview.textContent = 'Fetching info…';
   preview.style.color = 'var(--muted)';
   checkEl.textContent = '';
+  btn.disabled = true; btn.textContent = 'Please wait…';
   _fetchTimer = setTimeout(async () => {
     try {
       // Title via oEmbed
@@ -2700,6 +2711,20 @@ function onSubmitUrlInput() {
       preview.textContent = '✓ ' + _fetchedTitle + (_fetchedDate ? '  ·  ' + _fetchedDate : '');
       preview.style.color = 'var(--gold)';
 
+      // Check live DB for duplicate — catches videos that were "deleted" but still in DB
+      try {
+        const db = await getDB();
+        if (db.submissions?.find(v => v.url === url)) {
+          checkEl.textContent = '⚠ This video is already in the hub';
+          checkEl.style.color = '#ff6b6b';
+          btn.disabled = true; btn.textContent = 'Already Submitted';
+          return;
+        }
+      } catch(_) {}
+
+      // Re-enable button — fetch is done, info confirmed
+      btn.disabled = false; btn.textContent = 'Post Video';
+
       if (_isWrestling) {
         checkEl.textContent = '✓ Wrestling content detected';
         checkEl.style.color = '#4caf8a';
@@ -2715,6 +2740,7 @@ function onSubmitUrlInput() {
       preview.textContent = 'Could not fetch info — video may be private.';
       preview.style.color = '#ff6b6b';
       checkEl.textContent = '';
+      btn.disabled = true; btn.textContent = 'Post Video';
       window._isDefinitelyNotWrestling = false;
     }
   }, 600);
@@ -2760,7 +2786,7 @@ async function doSubmitVideo() {
     const db = await getDB(); // always fresh — see latest state
     if (!db.submissions) db.submissions = [];
     if (db.submissions.find(v => v.url === url)) {
-      msg.textContent = 'This video has already been submitted.';
+      msg.textContent = 'This video is already in the hub. If you just deleted it, refresh the page and try again.';
       msg.className = 'settings-msg error';
       btn.disabled = false; btn.textContent = 'Post Video';
       return;
