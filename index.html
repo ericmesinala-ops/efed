@@ -1043,10 +1043,14 @@
       <button class="settings-close" onclick="closeSubmit()">✕</button>
     </div>
     <div class="settings-body">
+      <div style="background:rgba(192,0,14,.08);border:1px solid rgba(192,0,14,.25);border-radius:8px;padding:10px 13px;margin-bottom:16px;">
+        <p style="font-size:.68rem;color:rgba(255,100,100,.85);line-height:1.6;"><strong style="letter-spacing:.5px;">⚠ eFed Wrestling only.</strong> Non-wrestling videos will be removed and repeat offenders will be banned.</p>
+      </div>
       <div class="settings-section">
         <label class="settings-label">YouTube Link</label>
         <input class="settings-input" id="submit-url" type="url" placeholder="https://youtube.com/watch?v=..." autocomplete="off" oninput="onSubmitUrlInput()">
         <div id="submit-title-preview" style="margin-top:8px;font-size:.72rem;color:var(--gold);min-height:18px;"></div>
+        <div id="submit-wrestling-check" style="margin-top:5px;font-size:.65rem;min-height:16px;"></div>
       </div>
       <div class="settings-section">
         <label class="settings-label">eFed / Promotion Name</label>
@@ -1263,9 +1267,17 @@ function thumb(id) { return `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`; }
 let activeFilter = 'all';
 
 
+function sortByDate(arr) {
+  return [...arr].sort((a, b) => {
+    const ta = a.dateMs || new Date(a.date || 0).getTime();
+    const tb = b.dateMs || new Date(b.date || 0).getTime();
+    return tb - ta;
+  });
+}
+
 function filteredVideos() {
   const list = activeFilter === 'all' ? [...videos] : videos.filter(v => v.efed === activeFilter);
-  return list.sort((a, b) => { const d = new Date(b.date) - new Date(a.date); return d !== 0 ? d : videos.indexOf(b) - videos.indexOf(a); });
+  return sortByDate(list);
 }
 function buildPills() {
   const efeds = [...new Set(videos.map(v => v.efed))].sort((a, b) => a.localeCompare(b));
@@ -1483,7 +1495,10 @@ async function loadCommunityVideos() {
     // Add in reverse so that after all unshifts, newest ends up at index 0
     const toAdd = sorted.filter(v => !videos.find(x => x.url === v.url));
     for (let i = toAdd.length - 1; i >= 0; i--) {
-      videos.unshift({ ...toAdd[i], community: true });
+      const v = toAdd[i];
+      // Ensure dateMs exists for reliable sorting
+      if (!v.dateMs && v.date) v.dateMs = new Date(v.date).getTime();
+      videos.unshift({ ...v, community: true });
     }
   } catch(e) { console.warn('Could not load community videos', e); }
 }
@@ -1518,7 +1533,7 @@ function heroSrc(id) {
 }
 
 function buildHeroDots() {
-  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => { const d = new Date(b.date) - new Date(a.date); return d !== 0 ? d : videos.indexOf(b) - videos.indexOf(a); });
+  const list = sortByDate([...videos].filter(v => !v.platform || v.platform !== 'twitch'));
   const inner = document.getElementById('hero-dots-inner');
   inner.innerHTML = '';
   list.forEach((_, i) => {
@@ -1598,7 +1613,7 @@ function showHeroText(v) {
 
 let _heroFirstLoad = true;
 function loadSlide() {
-  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => { const d = new Date(b.date) - new Date(a.date); return d !== 0 ? d : videos.indexOf(b) - videos.indexOf(a); });
+  const list = sortByDate([...videos].filter(v => !v.platform || v.platform !== 'twitch'));
   const v      = list[heroIdx];
   const id     = heroExtractId(v.url);
   const fade   = document.getElementById('hero-fade');
@@ -1610,7 +1625,11 @@ function loadSlide() {
   if (_heroFirstLoad) {
     _heroFirstLoad = false;
     thumb.classList.add('hidden');
-    // src already hardcoded in HTML — don't reset or mobile loses autoplay
+    // Update iframe to match the actual first video in sorted order
+    const firstSrc = heroSrc(id);
+    if (!iframe.src.includes(id)) {
+      iframe.src = firstSrc;
+    }
     showHeroText(v);
     setTimeout(() => fade.classList.remove('active'), 800);
     heroTimer = setTimeout(() => {
@@ -1636,7 +1655,7 @@ function loadSlide() {
 }
 
 function heroWatchNow() {
-  const list = [...videos].filter(v => !v.platform || v.platform !== 'twitch').sort((a, b) => { const d = new Date(b.date) - new Date(a.date); return d !== 0 ? d : videos.indexOf(b) - videos.indexOf(a); });
+  const list = sortByDate([...videos].filter(v => !v.platform || v.platform !== 'twitch'));
   openM(list[heroIdx]);
 }
 
@@ -2457,16 +2476,33 @@ async function submitRemovalRequest() {
 // ── SUBMIT VIDEO ──
 let _fetchedTitle = '';
 let _fetchedDate = '';
+let _isWrestling = false;
 let _fetchTimer = null;
+
+const WRESTLING_KEYWORDS = [
+  'wrestling','wrestler','efed','e-fed','wwe','aew','nxt','roh','tna','impact',
+  'promo','heel','face','kayfabe','ppv','pay-per-view','ple','championship','title match',
+  'royal rumble','summerslam','wrestlemania','superstar','submission','pinfall',
+  'suplex','powerbomb','chokeslam','finisher','entrance','vignette','stable','faction',
+  'tag team','ladder match','cage match','iron man','federation','promotion',
+  'show ep','episode','event','card','results','bout','reign','belt'
+];
+
+function checkWrestling(text) {
+  const lower = (text || '').toLowerCase();
+  return WRESTLING_KEYWORDS.some(kw => lower.includes(kw));
+}
 
 function openSubmit() {
   document.getElementById('submit-url').value = '';
   document.getElementById('submit-efed').value = '';
   document.getElementById('submit-title-preview').textContent = '';
+  document.getElementById('submit-wrestling-check').textContent = '';
   const msg = document.getElementById('submit-msg');
   msg.className = 'settings-msg'; msg.textContent = '';
   _fetchedTitle = '';
   _fetchedDate = '';
+  _isWrestling = false;
   document.getElementById('submit-modal-bg').classList.add('open');
   document.body.style.overflow = 'hidden';
 }
@@ -2480,51 +2516,69 @@ function onSubmitUrlInput() {
   clearTimeout(_fetchTimer);
   _fetchedTitle = '';
   _fetchedDate = '';
+  _isWrestling = false;
   const preview = document.getElementById('submit-title-preview');
+  const checkEl = document.getElementById('submit-wrestling-check');
   const url = document.getElementById('submit-url').value.trim();
   const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
-  if (!ytMatch) { preview.textContent = ''; return; }
+  if (!ytMatch) { preview.textContent = ''; checkEl.textContent = ''; return; }
   const videoId = ytMatch[1];
   preview.textContent = 'Fetching info…';
   preview.style.color = 'var(--muted)';
+  checkEl.textContent = '';
   _fetchTimer = setTimeout(async () => {
     try {
-      // Get title via oEmbed
+      // Title via oEmbed
       const oEmbedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
       if (!oEmbedRes.ok) throw new Error();
       const oData = await oEmbedRes.json();
       _fetchedTitle = oData.title || '';
+      _isWrestling = checkWrestling(_fetchedTitle);
 
-      // Get publish date via noembed (includes published_at)
+      // Date + description/tags via allorigins proxy
       try {
-        const noEmbedRes = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`);
-        const noData = await noEmbedRes.json();
-        if (noData.upload_date) {
-          // upload_date format: YYYYMMDD
-          const d = noData.upload_date;
-          const parsed = new Date(`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`);
-          _fetchedDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`);
+        const proxyData = await proxyRes.json();
+        const html = proxyData.contents || '';
+
+        const dateMatch = html.match(/"datePublished":"([^"]+)"/);
+        if (dateMatch) {
+          _fetchedDate = new Date(dateMatch[1]).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         }
+
+        // Check description, tags, category for wrestling signals
+        const desc = (html.match(/"shortDescription":"([^"]{0,600})"/) || [])[1] || '';
+        const tags = (html.match(/"keywords":"([^"]+)"/) || [])[1] || '';
+        const category = (html.match(/"category":"([^"]+)"/) || [])[1] || '';
+        if (!_isWrestling) _isWrestling = checkWrestling(desc) || checkWrestling(tags) || checkWrestling(category);
       } catch(_) {}
 
-      // Fallback: try to get date from YouTube page meta via allorigins proxy
+      // Date fallback via noembed
       if (!_fetchedDate) {
         try {
-          const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`);
-          const proxyData = await proxyRes.json();
-          const dateMatch = proxyData.contents?.match(/"datePublished":"([^"]+)"/);
-          if (dateMatch) {
-            const parsed = new Date(dateMatch[1]);
-            _fetchedDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          const noData = await (await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`)).json();
+          if (noData.upload_date) {
+            const d = noData.upload_date;
+            _fetchedDate = new Date(`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
           }
         } catch(_) {}
       }
 
       preview.textContent = '✓ ' + _fetchedTitle + (_fetchedDate ? '  ·  ' + _fetchedDate : '');
       preview.style.color = 'var(--gold)';
+
+      if (_isWrestling) {
+        checkEl.textContent = '✓ Wrestling content detected';
+        checkEl.style.color = '#4caf8a';
+      } else {
+        checkEl.textContent = '⚠ Could not confirm wrestling content — verify this is an eFed video';
+        checkEl.style.color = 'rgba(255,180,50,.85)';
+      }
+
     } catch(e) {
       preview.textContent = 'Could not fetch info — video may be private.';
       preview.style.color = '#ff6b6b';
+      checkEl.textContent = '';
     }
   }, 600);
 }
@@ -2548,6 +2602,25 @@ async function doSubmitVideo() {
     msg.textContent = 'Wait for the title to load, or check the link.';
     msg.className = 'settings-msg error'; return;
   }
+  if (!_isWrestling) {
+    msg.textContent = '⛔ This video does not appear to be wrestling-related. Only eFed wrestling content is allowed.';
+    msg.className = 'settings-msg error';
+    // Log the violation attempt
+    const session = getSession();
+    try {
+      _dbCache = null;
+      const db = await getDB();
+      if (!db.violations) db.violations = [];
+      db.violations.push({ username: session?.username || 'unknown', url, title: _fetchedTitle, attemptedAt: Date.now() });
+      await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
+        body: JSON.stringify(db)
+      });
+      _dbCache = db;
+    } catch(_) {}
+    return;
+  }
 
   const session = getSession();
   const btn = document.getElementById('submit-btn');
@@ -2565,11 +2638,13 @@ async function doSubmitVideo() {
     }
 
     const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const dateMs = _fetchedDate ? new Date(_fetchedDate).getTime() : Date.now();
     const newVideo = {
       url,
       show: _fetchedTitle,
       efed,
       date: _fetchedDate || today,
+      dateMs,
       submittedBy: session?.username || 'member',
       community: true,
       submittedAt: Date.now()
