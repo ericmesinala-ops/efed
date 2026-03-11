@@ -899,6 +899,14 @@
   .settings-msg.error { display: block; background: rgba(192,0,14,.1); color: #ff6b6b; border: 1px solid rgba(192,0,14,.3); }
   .settings-msg.success { display: block; background: rgba(200,168,75,.08); color: var(--gold); border: 1px solid rgba(200,168,75,.25); }
   .settings-divider { border: none; border-top: 1px solid rgba(255,255,255,.06); margin: 20px 0; }
+
+  /* Submit modal — reuses settings style */
+  .community-badge {
+    position: absolute; bottom: 7px; left: 8px;
+    background: rgba(200,168,75,.85); color: #000;
+    font-size: .5rem; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 3px; pointer-events: none;
+  }
   @media (max-width: 768px) {
     .nav-user-name { display: none; }
     .auth-box { max-width: 360px; }
@@ -928,6 +936,10 @@
     <button class="nav-invite-btn" id="nav-invite-btn" onclick="openInvite()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
       Invite
+    </button>
+    <button class="nav-invite-btn" id="nav-submit-btn" onclick="openSubmit()" style="display:none;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      Submit
     </button>
     <div class="nav-user-wrap" id="nav-user-wrap">
       <button class="nav-auth-btn" id="nav-sign-in-btn" onclick="openAuth('sign-in')">
@@ -1006,6 +1018,29 @@
         <button class="settings-save-btn" onclick="savePassword()">Update Password</button>
       </div>
 
+    </div>
+  </div>
+</div>
+
+<!-- ── SUBMIT VIDEO MODAL ── -->
+<div class="settings-bg" id="submit-modal-bg" onclick="if(event.target===this)closeSubmit()">
+  <div class="settings-modal">
+    <div class="settings-header">
+      <span class="settings-title">Submit a Video</span>
+      <button class="settings-close" onclick="closeSubmit()">✕</button>
+    </div>
+    <div class="settings-body">
+      <div class="settings-section">
+        <label class="settings-label">YouTube Link</label>
+        <input class="settings-input" id="submit-url" type="url" placeholder="https://youtube.com/watch?v=..." autocomplete="off" oninput="onSubmitUrlInput()">
+        <div id="submit-title-preview" style="margin-top:8px;font-size:.72rem;color:var(--gold);min-height:18px;"></div>
+      </div>
+      <div class="settings-section">
+        <label class="settings-label">eFed / Promotion Name</label>
+        <input class="settings-input" id="submit-efed" type="text" placeholder="e.g. First Strike Wrestling" autocomplete="off">
+      </div>
+      <div class="settings-msg" id="submit-msg"></div>
+      <button class="settings-save-btn" id="submit-btn" onclick="doSubmitVideo()">Post Video</button>
     </div>
   </div>
 </div>
@@ -1270,6 +1305,7 @@ function makeCard(v) {
       <img src="${thumbUrl}" alt="${v.show}" loading="lazy" onerror="${errFallback}">
       <div class="now-playing-badge"><div class="now-playing-eq"><span></span><span></span><span></span></div> Now Playing</div>
       ${v.new ? '<div class="new-badge">Just Added</div>' : ''}
+      ${v.community ? '<div class="community-badge">Community</div>' : ''}
       ${v.game ? `<div class="game-badge">${v.game}</div>` : ''}
       <div class="card-over">
         <div class="play-c">
@@ -1420,8 +1456,27 @@ function updateRowArrows() {
   right.classList.toggle('hidden', grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 4);
 }
 
-buildPills();
-renderGrid();
+// ── COMMUNITY VIDEOS ──
+async function loadCommunityVideos() {
+  try {
+    const db = await getDB();
+    const submissions = db.submissions || [];
+    submissions.forEach(v => {
+      // Avoid duplicates
+      if (!videos.find(x => x.url === v.url)) {
+        videos.unshift({ ...v, community: true });
+      }
+    });
+  } catch(e) { console.warn('Could not load community videos', e); }
+}
+
+async function initHub() {
+  await loadCommunityVideos();
+  buildPills();
+  renderGrid();
+}
+
+initHub();
 const _grid = document.getElementById('card-grid');
 if (_grid) _grid.addEventListener('scroll', updateRowArrows);
 
@@ -2182,6 +2237,8 @@ async function getDB() {
   if (signInBtn) signInBtn.classList.add('hidden');
   if (userBtn) userBtn.classList.add('visible');
   if (inviteBtn) inviteBtn.classList.add('visible');
+  const submitBtn = document.getElementById('nav-submit-btn');
+  if (submitBtn) submitBtn.style.display = 'flex';
   const u = session.displayName || session.username || 'Member';
   if (nameEl) nameEl.textContent = u;
   if (initialsEl) initialsEl.textContent = u[0].toUpperCase();
@@ -2292,6 +2349,108 @@ function copyCode(btn, code) {
     btn.classList.add('done');
     setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('done'); }, 2000);
   });
+}
+
+// ── SUBMIT VIDEO ──
+let _fetchedTitle = '';
+let _fetchTimer = null;
+
+function openSubmit() {
+  document.getElementById('submit-url').value = '';
+  document.getElementById('submit-efed').value = '';
+  document.getElementById('submit-title-preview').textContent = '';
+  const msg = document.getElementById('submit-msg');
+  msg.className = 'settings-msg'; msg.textContent = '';
+  _fetchedTitle = '';
+  document.getElementById('submit-modal-bg').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeSubmit() {
+  document.getElementById('submit-modal-bg').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function onSubmitUrlInput() {
+  clearTimeout(_fetchTimer);
+  _fetchedTitle = '';
+  const preview = document.getElementById('submit-title-preview');
+  const url = document.getElementById('submit-url').value.trim();
+  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
+  if (!ytMatch) { preview.textContent = ''; return; }
+  preview.textContent = 'Fetching title…';
+  preview.style.color = 'var(--muted)';
+  _fetchTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      _fetchedTitle = data.title || '';
+      preview.textContent = '✓ ' + _fetchedTitle;
+      preview.style.color = 'var(--gold)';
+    } catch(e) {
+      preview.textContent = 'Could not fetch title — video may be private.';
+      preview.style.color = '#ff6b6b';
+    }
+  }, 600);
+}
+
+async function doSubmitVideo() {
+  const url  = document.getElementById('submit-url').value.trim();
+  const efed = document.getElementById('submit-efed').value.trim();
+  const msg  = document.getElementById('submit-msg');
+  msg.className = 'settings-msg'; msg.textContent = '';
+
+  if (!url || !efed) {
+    msg.textContent = 'Please fill in all fields.';
+    msg.className = 'settings-msg error'; return;
+  }
+  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
+  if (!ytMatch) {
+    msg.textContent = 'Please enter a valid YouTube link.';
+    msg.className = 'settings-msg error'; return;
+  }
+  if (!_fetchedTitle) {
+    msg.textContent = 'Wait for the title to load, or check the link.';
+    msg.className = 'settings-msg error'; return;
+  }
+
+  const session = getSession();
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true; btn.textContent = 'Posting…';
+
+  try {
+    const db = await getDB();
+    if (!db.submissions) db.submissions = [];
+    if (db.submissions.find(v => v.url === url) || videos.find(v => v.url === url)) {
+      msg.textContent = 'This video has already been submitted.';
+      msg.className = 'settings-msg error'; return;
+    }
+
+    const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const newVideo = { url, show: _fetchedTitle, efed, date: today, submittedBy: session?.username || 'member', community: true };
+    db.submissions.unshift(newVideo);
+
+    await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
+      body: JSON.stringify(db)
+    });
+    _dbCache = db;
+
+    videos.unshift(newVideo);
+    buildPills();
+    renderGrid();
+
+    msg.textContent = '✓ Posted! Now live for everyone.';
+    msg.className = 'settings-msg success';
+    setTimeout(() => closeSubmit(), 1600);
+  } catch(e) {
+    msg.textContent = 'Could not post. Try again.';
+    msg.className = 'settings-msg error';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Post Video';
+  }
 }
 
 // ── SETTINGS ──
