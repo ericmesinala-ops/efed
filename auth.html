@@ -305,14 +305,27 @@ async function getDB() {
   return j.record;
 }
 
-async function setDB(data) {
-  const r = await fetch(BIN_URL, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-    body: JSON.stringify(data),
-    cache: 'no-store'
-  });
-  if (!r.ok) throw new Error('DB write failed ' + r.status);
+async function setDB(data, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const r = await fetch(BIN_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
+        body: JSON.stringify(data),
+        cache: 'no-store'
+      });
+      if (r.status === 429) {
+        await new Promise(res => setTimeout(res, 1200 * (i + 1)));
+        continue;
+      }
+      if (!r.ok) throw new Error('DB write failed ' + r.status);
+      return;
+    } catch(e) {
+      if (i === retries - 1) throw e;
+      await new Promise(res => setTimeout(res, 1000));
+    }
+  }
+  throw new Error('DB write failed after retries');
 }
 
 // ── SESSION ──
