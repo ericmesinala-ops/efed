@@ -1475,15 +1475,16 @@ function updateRowArrows() {
 // ── COMMUNITY VIDEOS ──
 async function loadCommunityVideos() {
   try {
+    _dbCache = null; // always fresh fetch on page load
     const db = await getDB();
     const submissions = db.submissions || [];
-    // Sort newest first by submittedAt timestamp
+    // Sort newest first
     const sorted = [...submissions].sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
-    sorted.forEach(v => {
-      if (!videos.find(x => x.url === v.url)) {
-        videos.unshift({ ...v, community: true });
-      }
-    });
+    // Add in reverse so that after all unshifts, newest ends up at index 0
+    const toAdd = sorted.filter(v => !videos.find(x => x.url === v.url));
+    for (let i = toAdd.length - 1; i >= 0; i--) {
+      videos.unshift({ ...toAdd[i], community: true });
+    }
   } catch(e) { console.warn('Could not load community videos', e); }
 }
 
@@ -2455,6 +2456,7 @@ async function submitRemovalRequest() {
 
 // ── SUBMIT VIDEO ──
 let _fetchedTitle = '';
+let _fetchedDate = '';
 let _fetchTimer = null;
 
 function openSubmit() {
@@ -2464,6 +2466,7 @@ function openSubmit() {
   const msg = document.getElementById('submit-msg');
   msg.className = 'settings-msg'; msg.textContent = '';
   _fetchedTitle = '';
+  _fetchedDate = '';
   document.getElementById('submit-modal-bg').classList.add('open');
   document.body.style.overflow = 'hidden';
 }
@@ -2476,22 +2479,51 @@ function closeSubmit() {
 function onSubmitUrlInput() {
   clearTimeout(_fetchTimer);
   _fetchedTitle = '';
+  _fetchedDate = '';
   const preview = document.getElementById('submit-title-preview');
   const url = document.getElementById('submit-url').value.trim();
   const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
   if (!ytMatch) { preview.textContent = ''; return; }
-  preview.textContent = 'Fetching title…';
+  const videoId = ytMatch[1];
+  preview.textContent = 'Fetching info…';
   preview.style.color = 'var(--muted)';
   _fetchTimer = setTimeout(async () => {
     try {
-      const res = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      _fetchedTitle = data.title || '';
-      preview.textContent = '✓ ' + _fetchedTitle;
+      // Get title via oEmbed
+      const oEmbedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+      if (!oEmbedRes.ok) throw new Error();
+      const oData = await oEmbedRes.json();
+      _fetchedTitle = oData.title || '';
+
+      // Get publish date via noembed (includes published_at)
+      try {
+        const noEmbedRes = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`);
+        const noData = await noEmbedRes.json();
+        if (noData.upload_date) {
+          // upload_date format: YYYYMMDD
+          const d = noData.upload_date;
+          const parsed = new Date(`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`);
+          _fetchedDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+      } catch(_) {}
+
+      // Fallback: try to get date from YouTube page meta via allorigins proxy
+      if (!_fetchedDate) {
+        try {
+          const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`);
+          const proxyData = await proxyRes.json();
+          const dateMatch = proxyData.contents?.match(/"datePublished":"([^"]+)"/);
+          if (dateMatch) {
+            const parsed = new Date(dateMatch[1]);
+            _fetchedDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          }
+        } catch(_) {}
+      }
+
+      preview.textContent = '✓ ' + _fetchedTitle + (_fetchedDate ? '  ·  ' + _fetchedDate : '');
       preview.style.color = 'var(--gold)';
     } catch(e) {
-      preview.textContent = 'Could not fetch title — video may be private.';
+      preview.textContent = 'Could not fetch info — video may be private.';
       preview.style.color = '#ff6b6b';
     }
   }, 600);
@@ -2522,6 +2554,7 @@ async function doSubmitVideo() {
   btn.disabled = true; btn.textContent = 'Posting…';
 
   try {
+    _dbCache = null; // bust cache — always write to latest DB state
     const db = await getDB();
     if (!db.submissions) db.submissions = [];
     if (db.submissions.find(v => v.url === url) || videos.find(v => v.url === url)) {
@@ -2536,7 +2569,7 @@ async function doSubmitVideo() {
       url,
       show: _fetchedTitle,
       efed,
-      date: today,
+      date: _fetchedDate || today,
       submittedBy: session?.username || 'member',
       community: true,
       submittedAt: Date.now()
