@@ -1023,10 +1023,12 @@
         </svg>
       </button>
     </div>
-    <button class="nav-invite-btn" id="nav-submit-btn" onclick="openSubmit()" style="display:none;">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+
+    <button class="nav-invite-btn" id="nav-submit-btn" onclick="submitDisabledToast()" style="display:none;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       Submit
     </button>
+
     <button class="nav-invite-btn" id="nav-invite-btn" onclick="openInvite()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
       Invite
@@ -1113,31 +1115,7 @@
 </div>
 
 <!-- ── SUBMIT VIDEO MODAL ── -->
-<div class="settings-bg" id="submit-modal-bg" onclick="if(event.target===this)closeSubmit()">
-  <div class="settings-modal">
-    <div class="settings-header">
-      <span class="settings-title">Submit Your Content</span>
-      <button class="settings-close" onclick="closeSubmit()">✕</button>
-    </div>
-    <div class="settings-body">
-      <div style="background:rgba(192,0,14,.08);border:1px solid rgba(192,0,14,.25);border-radius:8px;padding:10px 13px;margin-bottom:16px;">
-        <p style="font-size:.68rem;color:rgba(255,100,100,.85);line-height:1.6;"><strong style="letter-spacing:.5px;">⚠ eFed Wrestling only.</strong> Non-wrestling videos will be removed and repeat offenders will be banned.</p>
-      </div>
-      <div class="settings-section">
-        <label class="settings-label">YouTube Link</label>
-        <input class="settings-input" id="submit-url" type="url" placeholder="https://youtube.com/watch?v=..." autocomplete="off" oninput="onSubmitUrlInput()">
-        <div id="submit-title-preview" style="margin-top:8px;font-size:.72rem;color:var(--gold);min-height:18px;"></div>
-        <div id="submit-wrestling-check" style="margin-top:5px;font-size:.65rem;min-height:16px;"></div>
-      </div>
-      <div class="settings-section">
-        <label class="settings-label">eFed / Promotion Name</label>
-        <input class="settings-input" id="submit-efed" type="text" placeholder="e.g. First Strike Wrestling" autocomplete="off">
-      </div>
-      <div class="settings-msg" id="submit-msg"></div>
-      <button class="settings-save-btn" id="submit-btn" onclick="doSubmitVideo()">Post Video</button>
-    </div>
-  </div>
-</div>
+
 
 
 
@@ -1376,6 +1354,7 @@ async function deleteSubmittedVideo(e, url) {
     const idx = db.submissions.findIndex(v => v.url === url && v.submittedBy === session.username);
     if (idx === -1) { alert('Video not found or you do not own it.'); return; }
     db.submissions.splice(idx, 1);
+    await new Promise(res => setTimeout(res, 500));
     await setDB(db);
     // Small delay before re-render so JSONBin propagates the write
     await new Promise(r => setTimeout(r, 600));
@@ -1621,26 +1600,7 @@ function updateRowArrows() {
 }
 
 // ── COMMUNITY VIDEOS ──
-async function loadCommunityVideos() {
-  try {
-    const db = await getDB();
-    const submissions = db.submissions || [];
-    console.log('[EFED] DB submissions on load:', submissions.length, submissions.map(v => v.url));
-    const sorted = [...submissions].sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
-    sorted.forEach(v => {
-      if (!videos.find(x => x.url === v.url)) {
-        if (!v.dateMs && v.date) v.dateMs = new Date(v.date).getTime();
-        videos.push({ ...v, community: true });
-      } else {
-        console.log('[EFED] Skipped (already in hardcoded list):', v.url);
-      }
-    });
-    console.log('[EFED] Total videos after load:', videos.length);
-  } catch(e) { console.warn('Could not load community videos', e); }
-}
-
 async function initHub() {
-  await loadCommunityVideos();
   buildPills();
   renderGrid();
 }
@@ -2401,16 +2361,29 @@ async function getDB() {
   return _dbCache;
 }
 
-async function setDB(data) {
-  const r = await fetch(BIN_URL, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-    body: JSON.stringify(data),
-    cache: 'no-store'
-  });
-  if (!r.ok) throw new Error('DB write failed ' + r.status);
-  _dbCache = data;
-  return data;
+async function setDB(data, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const r = await fetch(BIN_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
+        body: JSON.stringify(data),
+        cache: 'no-store'
+      });
+      if (r.status === 429) {
+        // Rate limited — wait and retry
+        await new Promise(res => setTimeout(res, 1200 * (i + 1)));
+        continue;
+      }
+      if (!r.ok) throw new Error('DB write failed ' + r.status);
+      _dbCache = data;
+      return data;
+    } catch(e) {
+      if (i === retries - 1) throw e;
+      await new Promise(res => setTimeout(res, 1000));
+    }
+  }
+  throw new Error('DB write failed after retries');
 }
 
 // Update nav with username from session — also sync displayName from DB
@@ -2429,6 +2402,7 @@ async function setDB(data) {
   if (inviteBtn) inviteBtn.classList.add('visible');
   const submitNavBtn = document.getElementById('nav-submit-btn');
   if (submitNavBtn) submitNavBtn.style.display = 'flex';
+
 
   // Set immediately from local session so nav isn't blank while loading
   let displayName = session.displayName || session.username || 'Member';
@@ -2451,6 +2425,29 @@ async function setDB(data) {
     }
   } catch(_) {} // non-critical — nav still works from local session
 })();
+
+function submitDisabledToast() {
+  let toast = document.getElementById('submit-disabled-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'submit-disabled-toast';
+    toast.style.cssText = `
+      position:fixed; bottom:28px; left:50%; transform:translateX(-50%);
+      background:rgba(20,20,20,.95); border:1px solid rgba(255,255,255,.15);
+      backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+      color:rgba(255,255,255,.85); font-family:'DM Sans',sans-serif;
+      font-size:.75rem; letter-spacing:.5px; padding:12px 22px;
+      border-radius:40px; z-index:9999; white-space:nowrap;
+      box-shadow:0 4px 24px rgba(0,0,0,.4);
+      transition:opacity .3s;
+    `;
+    document.body.appendChild(toast);
+  }
+  toast.textContent = '🚧 Submit is temporarily disabled';
+  toast.style.opacity = '1';
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 2800);
+}
 
 function handleSignOut() {
   localStorage.removeItem('efed_session');
@@ -2571,261 +2568,6 @@ function openSettings() {
   document.body.style.overflow = 'hidden';
 }
 
-// ── SUBMIT VIDEO ──
-let _fetchedTitle = '';
-let _fetchedDate = '';
-let _isWrestling = false;
-let _fetchTimer = null;
-
-const WRESTLING_KEYWORDS = [
-  'wrestling','wrestler','efed','e-fed','wwe','aew','nxt','roh','tna','impact',
-  'promo','heel','face','kayfabe','ppv','pay-per-view','ple','championship','title match',
-  'royal rumble','summerslam','wrestlemania','superstar','submission','pinfall',
-  'suplex','powerbomb','chokeslam','finisher','entrance','vignette','stable','faction',
-  'tag team','ladder match','cage match','iron man','federation','promotion',
-  'show ep','episode','event','card','results','bout','reign','belt',
-  // eFed show naming patterns
-  'fsw','frontier','fighting spirit','maximum','bloodsport','battleground',
-  'showdown','collision','rampage','warfare','havoc','carnage','mayhem',
-  'vs.','vs ','versus',' ep ',' ep.','episode ','show #','show ep',
-  ' v ','title defense','grudge match','main event','semi-main',
-  'heel turn','face turn','turn heel','went heel','character','gimmick',
-  'manager','valet','rivalry','feud','angle','storyline','build',
-  'squash','jobber','push','buried','midcard','main card','opener',
-  'contract','signing','confrontation','beatdown','ambush','promo segment'
-];
-
-// Non-wrestling signals that suggest the video is clearly off-topic
-const NON_WRESTLING_KEYWORDS = [
-  'minecraft','fortnite','gaming','gameplay','tutorial','cooking','recipe',
-  'vlog','travel','reaction','music video','official video','official audio',
-  'lyric video','album','song','dance','comedy','skit','prank',
-  'makeup','beauty','fashion','fitness','workout','yoga','review',
-  'unboxing','tech','phone','laptop','car','driving','sports highlights',
-  'basketball','football','soccer','baseball','nfl','nba','mlb','fifa'
-];
-
-function checkWrestling(text) {
-  const lower = (text || '').toLowerCase();
-  return WRESTLING_KEYWORDS.some(kw => lower.includes(kw));
-}
-
-function checkNonWrestling(text) {
-  const lower = (text || '').toLowerCase();
-  return NON_WRESTLING_KEYWORDS.some(kw => lower.includes(kw));
-}
-
-function openSubmit() {
-  document.getElementById('submit-url').value = '';
-  document.getElementById('submit-efed').value = '';
-  document.getElementById('submit-title-preview').textContent = '';
-  document.getElementById('submit-wrestling-check').textContent = '';
-  const msg = document.getElementById('submit-msg');
-  msg.className = 'settings-msg'; msg.textContent = '';
-  _fetchedTitle = '';
-  _fetchedDate = '';
-  _isWrestling = false;
-  // Gray out button until a URL is fetched
-  const btn = document.getElementById('submit-btn');
-  btn.disabled = true; btn.textContent = 'Post Video';
-  document.getElementById('submit-modal-bg').classList.add('open');
-  document.body.style.overflow = 'hidden';
-}
-
-function closeSubmit() {
-  document.getElementById('submit-modal-bg').classList.remove('open');
-  document.body.style.overflow = '';
-}
-
-function onSubmitUrlInput() {
-  clearTimeout(_fetchTimer);
-  _fetchedTitle = '';
-  _fetchedDate = '';
-  _isWrestling = false;
-  const preview = document.getElementById('submit-title-preview');
-  const checkEl = document.getElementById('submit-wrestling-check');
-  const btn = document.getElementById('submit-btn');
-  const url = document.getElementById('submit-url').value.trim();
-  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
-  if (!ytMatch) {
-    preview.textContent = ''; checkEl.textContent = '';
-    btn.disabled = true; btn.textContent = 'Post Video';
-    return;
-  }
-  const videoId = ytMatch[1];
-  preview.textContent = 'Fetching info…';
-  preview.style.color = 'var(--muted)';
-  checkEl.textContent = '';
-  btn.disabled = true; btn.textContent = 'Please wait…';
-  _fetchTimer = setTimeout(async () => {
-    try {
-      // Title via oEmbed
-      const oEmbedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
-      if (!oEmbedRes.ok) throw new Error();
-      const oData = await oEmbedRes.json();
-      _fetchedTitle = oData.title || '';
-      _isWrestling = checkWrestling(_fetchedTitle);
-      let _gotPageData = false;
-      let _isDefinitelyNotWrestling = false;
-
-      // Date + description/tags via allorigins proxy
-      try {
-        const proxyRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`);
-        const proxyData = await proxyRes.json();
-        const html = proxyData.contents || '';
-
-        if (html.length > 500) _gotPageData = true;
-
-        const dateMatch = html.match(/"datePublished":"([^"]+)"/);
-        if (dateMatch) {
-          _fetchedDate = new Date(dateMatch[1]).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        }
-
-        const desc = (html.match(/"shortDescription":"([^"]{0,600})"/) || [])[1] || '';
-        const tags = (html.match(/"keywords":"([^"]+)"/) || [])[1] || '';
-        const category = (html.match(/"category":"([^"]+)"/) || [])[1] || '';
-        const allText = [_fetchedTitle, desc, tags, category].join(' ');
-
-        if (!_isWrestling) _isWrestling = checkWrestling(allText);
-
-        // Only flag as definitely non-wrestling if we got real page data AND it has non-wrestling signals but zero wrestling signals
-        if (_gotPageData && !_isWrestling && checkNonWrestling(allText)) {
-          _isDefinitelyNotWrestling = true;
-        }
-        // Store for doSubmitVideo to check
-        window._isDefinitelyNotWrestling = _isDefinitelyNotWrestling;
-      } catch(_) {
-        window._isDefinitelyNotWrestling = false;
-      }
-
-      // Date fallback via noembed
-      if (!_fetchedDate) {
-        try {
-          const noData = await (await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`)).json();
-          if (noData.upload_date) {
-            const d = noData.upload_date;
-            _fetchedDate = new Date(`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-          }
-        } catch(_) {}
-      }
-
-      preview.textContent = '✓ ' + _fetchedTitle + (_fetchedDate ? '  ·  ' + _fetchedDate : '');
-      preview.style.color = 'var(--gold)';
-
-      // Check live DB for duplicate — only block if it's actually visible in the hub right now
-      try {
-        const db = await getDB();
-        const inDB = db.submissions?.find(v => v.url === url);
-        const inGrid = videos.find(v => v.url === url);
-        if (inDB && inGrid) {
-          checkEl.textContent = '⚠ This video is already in the hub';
-          checkEl.style.color = '#ff6b6b';
-          btn.disabled = true; btn.textContent = 'Already Submitted';
-          return;
-        }
-      } catch(_) {}
-
-      // Re-enable button — fetch is done, info confirmed
-      btn.disabled = false; btn.textContent = 'Post Video';
-
-      if (_isWrestling) {
-        checkEl.textContent = '✓ Wrestling content detected';
-        checkEl.style.color = '#4caf8a';
-      } else if (window._isDefinitelyNotWrestling) {
-        checkEl.textContent = '⛔ This does not look like wrestling content';
-        checkEl.style.color = '#ff6b6b';
-      } else {
-        checkEl.textContent = '⚠ Could not auto-confirm — make sure this is an eFed video';
-        checkEl.style.color = 'rgba(255,180,50,.85)';
-      }
-
-    } catch(e) {
-      preview.textContent = 'Could not fetch info — video may be private.';
-      preview.style.color = '#ff6b6b';
-      checkEl.textContent = '';
-      btn.disabled = true; btn.textContent = 'Post Video';
-      window._isDefinitelyNotWrestling = false;
-    }
-  }, 600);
-}
-
-async function doSubmitVideo() {
-  const url  = document.getElementById('submit-url').value.trim();
-  const efed = document.getElementById('submit-efed').value.trim();
-  const msg  = document.getElementById('submit-msg');
-  msg.className = 'settings-msg'; msg.textContent = '';
-
-  if (!url || !efed) {
-    msg.textContent = 'Please fill in all fields.';
-    msg.className = 'settings-msg error'; return;
-  }
-  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
-  if (!ytMatch) {
-    msg.textContent = 'Please enter a valid YouTube link.';
-    msg.className = 'settings-msg error'; return;
-  }
-  if (!_fetchedTitle) {
-    msg.textContent = 'Wait for the title to load, or check the link.';
-    msg.className = 'settings-msg error'; return;
-  }
-  if (window._isDefinitelyNotWrestling) {
-    msg.textContent = '⛔ This video does not appear to be wrestling-related. Only eFed wrestling content is allowed.';
-    msg.className = 'settings-msg error';
-    const session = getSession();
-    try {
-      const db = await getDB();
-      if (!db.violations) db.violations = [];
-      db.violations.push({ username: session?.username || 'unknown', url, title: _fetchedTitle, attemptedAt: Date.now() });
-      await setDB(db);
-    } catch(_) {}
-    return;
-  }
-
-  const session = getSession();
-  const btn = document.getElementById('submit-btn');
-  btn.disabled = true; btn.textContent = 'Posting…';
-
-  try {
-    const db = await getDB(); // always fresh — see latest state
-    if (!db.submissions) db.submissions = [];
-    if (db.submissions.find(v => v.url === url) && videos.find(v => v.url === url)) {
-      msg.textContent = 'This video is already in the hub.';
-      msg.className = 'settings-msg error';
-      btn.disabled = false; btn.textContent = 'Post Video';
-      return;
-    }
-
-    const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const dateMs = _fetchedDate ? new Date(_fetchedDate).getTime() : Date.now();
-    const newVideo = {
-      url,
-      show: _fetchedTitle,
-      efed,
-      date: _fetchedDate || today,
-      dateMs,
-      submittedBy: session?.username || 'member',
-      community: true,
-      submittedAt: Date.now()
-    };
-    db.submissions.push(newVideo);
-    db.submissions.sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
-
-    await setDB(db); // confirmed write
-
-    videos.push({ ...newVideo }); // add to local list — sortByDate handles order
-    buildPills();
-    renderGrid();
-
-    msg.textContent = '✓ Posted! Now live for everyone.';
-    msg.className = 'settings-msg success';
-    setTimeout(() => closeSubmit(), 1600);
-  } catch(err) {
-    msg.textContent = 'Could not post. Try again.';
-    msg.className = 'settings-msg error';
-  } finally {
-    btn.disabled = false; btn.textContent = 'Post Video';
-  }
-}
 
 function closeSettings() {
   document.getElementById('settings-bg').classList.remove('open');
@@ -2861,6 +2603,7 @@ async function saveDisplayName() {
     const db = await getDB(); // always fresh
     if (!db.users[session.username]) throw new Error('User not found');
     db.users[session.username].displayName = name;
+    await new Promise(res => setTimeout(res, 500));
     await setDB(db);
     // Persist to local session so it survives logout/login
     session.displayName = name;
@@ -2895,6 +2638,7 @@ async function savePassword() {
     if (!user) throw new Error('User not found');
     if (user.passwordHash !== hash(curPass)) return showSettingsMsg('settings-pass-msg', 'Current password is incorrect.', 'error');
     db.users[session.username].passwordHash = hash(newPass);
+    await new Promise(res => setTimeout(res, 500));
     await setDB(db);
     document.getElementById('settings-cur-pass').value = '';
     document.getElementById('settings-new-pass').value = '';
