@@ -251,6 +251,7 @@
   .card-efed { font-size: .6rem; color: var(--gold); letter-spacing: 2px; text-transform: uppercase; font-weight: 700; margin-bottom: 2px; }
   .card-show { font-size: .82rem; font-weight: 600; color: var(--text); line-height: 1.3; margin-bottom: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .card-date { font-size: .68rem; color: var(--muted); }
+  .card-posted-by { font-size: .58rem; color: rgba(255,255,255,.18); margin-top: 3px; font-style: italic; letter-spacing: .3px; }
 
   .empty-state { padding: 60px 56px; text-align: center; color: var(--muted); font-size: .85rem; display: none; }
   .empty-state.visible { display: block; }
@@ -932,14 +933,9 @@
         </svg>
       </button>
     </div>
-    <a class="nav-contact-link" onclick="openContact()"><span class="nav-contact-full">Submit Your Content</span><span class="nav-contact-short">Submit</span></a>
     <button class="nav-invite-btn" id="nav-invite-btn" onclick="openInvite()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
       Invite
-    </button>
-    <button class="nav-invite-btn" id="nav-submit-btn" onclick="openSubmit()" style="display:none;">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-      Submit
     </button>
     <div class="nav-user-wrap" id="nav-user-wrap">
       <button class="nav-auth-btn" id="nav-sign-in-btn" onclick="openAuth('sign-in')">
@@ -1018,32 +1014,24 @@
         <button class="settings-save-btn" onclick="savePassword()">Update Password</button>
       </div>
 
+      <hr class="settings-divider">
+
+      <div class="settings-section">
+        <label class="settings-label">Request Removal</label>
+        <p style="font-size:.68rem;color:var(--muted);line-height:1.6;margin-bottom:12px;">Select one of your submitted videos to request its removal.</p>
+        <select class="settings-input" id="settings-removal-select" style="appearance:none;cursor:pointer;margin-bottom:8px;">
+          <option value="" disabled selected style="background:#111">Choose a video…</option>
+        </select>
+        <input class="settings-input" id="settings-removal-reason" type="text" placeholder="Reason for removal (optional)" autocomplete="off">
+        <div class="settings-msg" id="settings-removal-msg"></div>
+        <button class="settings-save-btn" onclick="submitRemovalRequest()" style="background:rgba(192,0,14,.15);color:#ff6b6b;border:1px solid rgba(192,0,14,.3);">Request Removal</button>
+      </div>
+
     </div>
   </div>
 </div>
 
-<!-- ── SUBMIT VIDEO MODAL ── -->
-<div class="settings-bg" id="submit-modal-bg" onclick="if(event.target===this)closeSubmit()">
-  <div class="settings-modal">
-    <div class="settings-header">
-      <span class="settings-title">Submit a Video</span>
-      <button class="settings-close" onclick="closeSubmit()">✕</button>
-    </div>
-    <div class="settings-body">
-      <div class="settings-section">
-        <label class="settings-label">YouTube Link</label>
-        <input class="settings-input" id="submit-url" type="url" placeholder="https://youtube.com/watch?v=..." autocomplete="off" oninput="onSubmitUrlInput()">
-        <div id="submit-title-preview" style="margin-top:8px;font-size:.72rem;color:var(--gold);min-height:18px;"></div>
-      </div>
-      <div class="settings-section">
-        <label class="settings-label">eFed / Promotion Name</label>
-        <input class="settings-input" id="submit-efed" type="text" placeholder="e.g. First Strike Wrestling" autocomplete="off">
-      </div>
-      <div class="settings-msg" id="submit-msg"></div>
-      <button class="settings-save-btn" id="submit-btn" onclick="doSubmitVideo()">Post Video</button>
-    </div>
-  </div>
-</div>
+
 
 <section class="hero" id="hero">
   <!-- Video layer — src hardcoded so browser fires autoplay immediately -->
@@ -1317,6 +1305,7 @@ function makeCard(v) {
       <div class="card-efed">${v.efed}</div>
       <div class="card-show">${v.show}</div>
       <div class="card-date">${v.date || ''}</div>
+      ${v.community && v.submittedBy ? `<div class="card-posted-by">posted by ${v.submittedBy}</div>` : ''}
     </div>`;
   return el;
 }
@@ -2237,8 +2226,6 @@ async function getDB() {
   if (signInBtn) signInBtn.classList.add('hidden');
   if (userBtn) userBtn.classList.add('visible');
   if (inviteBtn) inviteBtn.classList.add('visible');
-  const submitBtn = document.getElementById('nav-submit-btn');
-  if (submitBtn) submitBtn.style.display = 'flex';
   const u = session.displayName || session.username || 'Member';
   if (nameEl) nameEl.textContent = u;
   if (initialsEl) initialsEl.textContent = u[0].toUpperCase();
@@ -2351,120 +2338,89 @@ function copyCode(btn, code) {
   });
 }
 
-// ── SUBMIT VIDEO ──
-let _fetchedTitle = '';
-let _fetchTimer = null;
 
-function openSubmit() {
-  document.getElementById('submit-url').value = '';
-  document.getElementById('submit-efed').value = '';
-  document.getElementById('submit-title-preview').textContent = '';
-  const msg = document.getElementById('submit-msg');
-  msg.className = 'settings-msg'; msg.textContent = '';
-  _fetchedTitle = '';
-  document.getElementById('submit-modal-bg').classList.add('open');
+// ── SETTINGS ──
+function openSettings() {
+  const session = getSession();
+  if (!session) return;
+  const displayName = session.displayName || session.username;
+  document.getElementById('settings-name').value = displayName;
+  document.getElementById('settings-cur-pass').value = '';
+  document.getElementById('settings-new-pass').value = '';
+  document.getElementById('settings-removal-reason').value = '';
+  clearSettingsMsgs();
+
+  // Populate removal dropdown with this user's submitted videos
+  const select = document.getElementById('settings-removal-select');
+  select.innerHTML = '<option value="" disabled selected style="background:#111">Choose a video…</option>';
+  const myVideos = videos.filter(v => v.community && v.submittedBy === session.username);
+  if (myVideos.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = ''; opt.disabled = true;
+    opt.textContent = 'No submitted videos found';
+    opt.style.background = '#111';
+    select.appendChild(opt);
+  } else {
+    myVideos.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.url;
+      opt.textContent = v.show + (v.efed ? ' — ' + v.efed : '');
+      opt.style.background = '#111';
+      select.appendChild(opt);
+    });
+  }
+
+  document.getElementById('settings-bg').classList.add('open');
   document.body.style.overflow = 'hidden';
 }
 
-function closeSubmit() {
-  document.getElementById('submit-modal-bg').classList.remove('open');
-  document.body.style.overflow = '';
-}
-
-function onSubmitUrlInput() {
-  clearTimeout(_fetchTimer);
-  _fetchedTitle = '';
-  const preview = document.getElementById('submit-title-preview');
-  const url = document.getElementById('submit-url').value.trim();
-  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
-  if (!ytMatch) { preview.textContent = ''; return; }
-  preview.textContent = 'Fetching title…';
-  preview.style.color = 'var(--muted)';
-  _fetchTimer = setTimeout(async () => {
-    try {
-      const res = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      _fetchedTitle = data.title || '';
-      preview.textContent = '✓ ' + _fetchedTitle;
-      preview.style.color = 'var(--gold)';
-    } catch(e) {
-      preview.textContent = 'Could not fetch title — video may be private.';
-      preview.style.color = '#ff6b6b';
-    }
-  }, 600);
-}
-
-async function doSubmitVideo() {
-  const url  = document.getElementById('submit-url').value.trim();
-  const efed = document.getElementById('submit-efed').value.trim();
-  const msg  = document.getElementById('submit-msg');
-  msg.className = 'settings-msg'; msg.textContent = '';
-
-  if (!url || !efed) {
-    msg.textContent = 'Please fill in all fields.';
-    msg.className = 'settings-msg error'; return;
-  }
-  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
-  if (!ytMatch) {
-    msg.textContent = 'Please enter a valid YouTube link.';
-    msg.className = 'settings-msg error'; return;
-  }
-  if (!_fetchedTitle) {
-    msg.textContent = 'Wait for the title to load, or check the link.';
-    msg.className = 'settings-msg error'; return;
-  }
-
+async function submitRemovalRequest() {
   const session = getSession();
-  const btn = document.getElementById('submit-btn');
-  btn.disabled = true; btn.textContent = 'Posting…';
+  if (!session) return;
+  const url = document.getElementById('settings-removal-select').value;
+  const reason = document.getElementById('settings-removal-reason').value.trim();
+  const msgEl = document.getElementById('settings-removal-msg');
+  msgEl.className = 'settings-msg'; msgEl.textContent = '';
+
+  if (!url) {
+    msgEl.textContent = 'Please select a video first.';
+    msgEl.className = 'settings-msg error'; return;
+  }
+
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = 'Submitting…';
 
   try {
     const db = await getDB();
-    if (!db.submissions) db.submissions = [];
-    if (db.submissions.find(v => v.url === url) || videos.find(v => v.url === url)) {
-      msg.textContent = 'This video has already been submitted.';
-      msg.className = 'settings-msg error'; return;
+    if (!db.removalRequests) db.removalRequests = [];
+    const alreadyRequested = db.removalRequests.find(r => r.url === url && r.status === 'pending');
+    if (alreadyRequested) {
+      msgEl.textContent = 'A removal request for this video is already pending.';
+      msgEl.className = 'settings-msg error'; return;
     }
-
-    const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const newVideo = { url, show: _fetchedTitle, efed, date: today, submittedBy: session?.username || 'member', community: true };
-    db.submissions.unshift(newVideo);
-
+    db.removalRequests.push({
+      url,
+      requestedBy: session.username,
+      reason: reason || 'No reason provided',
+      requestedAt: Date.now(),
+      status: 'pending'
+    });
     await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
       body: JSON.stringify(db)
     });
     _dbCache = db;
-
-    videos.unshift(newVideo);
-    buildPills();
-    renderGrid();
-
-    msg.textContent = '✓ Posted! Now live for everyone.';
-    msg.className = 'settings-msg success';
-    setTimeout(() => closeSubmit(), 1600);
+    msgEl.textContent = '✓ Removal request submitted. We\'ll review it shortly.';
+    msgEl.className = 'settings-msg success';
+    document.getElementById('settings-removal-select').value = '';
+    document.getElementById('settings-removal-reason').value = '';
   } catch(e) {
-    msg.textContent = 'Could not post. Try again.';
-    msg.className = 'settings-msg error';
+    msgEl.textContent = 'Could not submit request. Try again.';
+    msgEl.className = 'settings-msg error';
   } finally {
-    btn.disabled = false; btn.textContent = 'Post Video';
+    btn.disabled = false; btn.textContent = 'Request Removal';
   }
-}
-
-// ── SETTINGS ──
-function openSettings() {
-  const session = getSession();
-  if (!session) return;
-  // Pre-fill display name
-  const displayName = session.displayName || session.username;
-  document.getElementById('settings-name').value = displayName;
-  document.getElementById('settings-cur-pass').value = '';
-  document.getElementById('settings-new-pass').value = '';
-  clearSettingsMsgs();
-  document.getElementById('settings-bg').classList.add('open');
-  document.body.style.overflow = 'hidden';
 }
 
 function closeSettings() {
