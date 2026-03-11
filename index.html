@@ -1372,21 +1372,17 @@ async function deleteSubmittedVideo(e, url) {
   if (!session) return;
   if (!confirm('Delete this video? This cannot be undone.')) return;
   try {
-    const db = await getDB(); // always fresh
-    if (!db.submissions) db.submissions = [];
-    const idx = db.submissions.findIndex(v => v.url === url && v.submittedBy === session.username);
-    if (idx === -1) { alert('Video not found or you do not own it.'); return; }
-    db.submissions.splice(idx, 1);
-    await new Promise(res => setTimeout(res, 500));
-    await setDB(db);
-    // Small delay before re-render so JSONBin propagates the write
-    await new Promise(r => setTimeout(r, 600));
+    // Only delete if this user submitted it
+    const existing = await sbGet('submissions', `url=eq.${encodeURIComponent(url)}&submitted_by=eq.${encodeURIComponent(session.username)}`);
+    if (!existing.length) { alert('Video not found or you do not own it.'); return; }
+    await sbDelete('submissions', `url=eq.${encodeURIComponent(url)}&submitted_by=eq.${encodeURIComponent(session.username)}`);
     const vi = videos.findIndex(v => v.url === url);
     if (vi !== -1) videos.splice(vi, 1);
     buildPills();
     renderGrid();
   } catch(err) {
     alert('Delete failed — the video is still in the hub. Please try again in a moment.');
+    console.error(err);
   }
 }
 
@@ -1626,6 +1622,29 @@ function updateRowArrows() {
 async function initHub() {
   buildPills();
   renderGrid();
+
+  // Load community submissions from Supabase and merge into videos array
+  try {
+    const subs = await sbGet('submissions', 'community=eq.true&order=submitted_at.desc');
+    const existingUrls = new Set(videos.map(v => v.url));
+    subs.forEach(s => {
+      if (!existingUrls.has(s.url)) {
+        videos.push({
+          url: s.url,
+          show: s.show_name || '',
+          efed: s.efed || 'Community',
+          date: s.date || '',
+          dateMs: s.date_ms || s.submitted_at || 0,
+          submittedBy: s.submitted_by || '',
+          community: true
+        });
+      }
+    });
+    buildPills();
+    renderGrid();
+  } catch(e) {
+    console.warn('Could not load community submissions:', e);
+  }
 }
 
 initHub();
@@ -2361,52 +2380,34 @@ handleFormSubmit('cf-remove-form', 'cf-remove-success');
 </div>
 
 <script>
-// ── SESSION-BASED AUTH ──
-const JSONBIN_BIN_ID = '69b1c65caa77b81da9d84234';
-const JSONBIN_API_KEY = '$2a$10$t3Exa5qDTGK.3u7NiWeos.y4wFyko086XvkE//4hDy53cZu/uHYzW';
-const BIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+// ── SUPABASE CONFIG ──
+const SUPABASE_URL = 'https://osbarvhklizidsffytye.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
+const SB_HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
 
 function getSession() {
   try { return JSON.parse(localStorage.getItem('efed_session')); } catch { return null; }
 }
 
-let _dbCache = null;
-
-async function getDB() {
-  _dbCache = null;
-  const r = await fetch(BIN_URL + '/latest?t=' + Date.now(), {
-    headers: { 'X-Master-Key': JSONBIN_API_KEY },
-    cache: 'no-store'
-  });
-  if (!r.ok) throw new Error('DB read failed ' + r.status);
-  const j = await r.json();
-  _dbCache = j.record;
-  return _dbCache;
+async function sbGet(table, filters = '') {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filters}`, { headers: SB_HEADERS });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
 }
-
-async function setDB(data, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const r = await fetch(BIN_URL, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-        body: JSON.stringify(data),
-        cache: 'no-store'
-      });
-      if (r.status === 429) {
-        // Rate limited — wait and retry
-        await new Promise(res => setTimeout(res, 1200 * (i + 1)));
-        continue;
-      }
-      if (!r.ok) throw new Error('DB write failed ' + r.status);
-      _dbCache = data;
-      return data;
-    } catch(e) {
-      if (i === retries - 1) throw e;
-      await new Promise(res => setTimeout(res, 1000));
-    }
-  }
-  throw new Error('DB write failed after retries');
+async function sbInsert(table, data) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, { method: 'POST', headers: SB_HEADERS, body: JSON.stringify(data) });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+async function sbUpdate(table, data, filters) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filters}`, { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(data) });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+async function sbDelete(table, filters) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filters}`, { method: 'DELETE', headers: SB_HEADERS });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
 }
 
 // Update nav with username from session — also sync displayName from DB
@@ -2436,15 +2437,17 @@ async function setDB(data, retries = 3) {
 
   // Then sync from DB — catches changes made on other devices
   try {
-    const db = await getDB();
-    const user = db.users?.[session.username];
-    if (user?.displayName && user.displayName !== session.displayName) {
-      session.displayName = user.displayName;
-      localStorage.setItem('efed_session', JSON.stringify(session));
-      displayName = user.displayName;
-      if (nameEl) nameEl.textContent = displayName;
-      if (initialsEl) initialsEl.textContent = displayName[0].toUpperCase();
-      if (ddName) ddName.textContent = displayName;
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+    if (users.length) {
+      const user = users[0];
+      if (user.display_name && user.display_name !== session.displayName) {
+        session.displayName = user.display_name;
+        localStorage.setItem('efed_session', JSON.stringify(session));
+        displayName = user.display_name;
+        if (nameEl) nameEl.textContent = displayName;
+        if (initialsEl) initialsEl.textContent = displayName[0].toUpperCase();
+        if (ddName) ddName.textContent = displayName;
+      }
     }
   } catch(_) {} // non-critical — nav still works from local session
 })();
@@ -2479,11 +2482,10 @@ async function openInvite() {
   const session = getSession();
   if (!session) return;
   try {
-    const db = await getDB();
-    const user = db.users?.[session.username];
-    _userCodes = user?.invites || [];
-    const unusedCodes = _userCodes.filter(c => !db.invites?.[c]?.used);
-    _activeCode = unusedCodes[0] || null;
+    const codes = await sbGet('invites', `created_by=eq.${encodeURIComponent(session.username)}&order=code.asc`);
+    _userCodes = codes.map(c => c.code);
+    const unusedCode = codes.find(c => !c.used);
+    _activeCode = unusedCode?.code || null;
 
     if (_activeCode) {
       document.getElementById('invite-code-block').style.display = 'flex';
@@ -2495,7 +2497,7 @@ async function openInvite() {
       document.getElementById('invite-hint').style.display = 'none';
       document.getElementById('invite-no-codes').style.display = 'block';
     }
-    renderInviteCodes(db);
+    renderInviteCodes(codes);
   } catch(e) { console.error(e); }
 }
 
@@ -2508,21 +2510,19 @@ function handleInviteBgClick(e) {
   if (e.target === document.getElementById('invite-modal-bg')) closeInvite();
 }
 
-function renderInviteCodes(db) {
+function renderInviteCodes(codes) {
   const list = document.getElementById('invite-codes-list');
   list.innerHTML = '';
-  if (!_userCodes.length) {
+  if (!codes.length) {
     list.innerHTML = '<p style="font-size:.68rem;color:var(--muted)">No codes available.</p>';
     return;
   }
-  _userCodes.forEach(code => {
-    const info = db.invites?.[code];
-    const used = info?.used;
+  codes.forEach(invite => {
     const row = document.createElement('div');
     row.className = 'invite-code-row';
-    row.innerHTML = used
-      ? `<span class="invite-code-row-used">${code}</span><span style="font-size:.6rem;color:var(--muted)">Used</span>`
-      : `<span class="invite-code-row-text">${code}</span><button class="invite-code-row-copy" onclick="copyCode(this,'${code}')">Copy</button>`;
+    row.innerHTML = invite.used
+      ? `<span class="invite-code-row-used">${invite.code}</span><span style="font-size:.6rem;color:var(--muted)">Used</span>`
+      : `<span class="invite-code-row-text">${invite.code}</span><button class="invite-code-row-copy" onclick="copyCode(this,'${invite.code}')">Copy</button>`;
     list.appendChild(row);
   });
 }
@@ -2601,12 +2601,7 @@ async function saveDisplayName() {
   if (name.length > 24) return showSettingsMsg('settings-name-msg', 'Max 24 characters.', 'error');
 
   try {
-    const db = await getDB(); // always fresh
-    if (!db.users[session.username]) throw new Error('User not found');
-    db.users[session.username].displayName = name;
-    await new Promise(res => setTimeout(res, 500));
-    await setDB(db);
-    // Persist to local session so it survives logout/login
+    await sbUpdate('users', { display_name: name }, `username=eq.${encodeURIComponent(session.username)}`);
     session.displayName = name;
     localStorage.setItem('efed_session', JSON.stringify(session));
     const nameEl = document.getElementById('nav-user-name');
@@ -2634,13 +2629,10 @@ async function savePassword() {
   }
 
   try {
-    const db = await getDB(); // always fresh — get real current password hash
-    const user = db.users[session.username];
-    if (!user) throw new Error('User not found');
-    if (user.passwordHash !== hash(curPass)) return showSettingsMsg('settings-pass-msg', 'Current password is incorrect.', 'error');
-    db.users[session.username].passwordHash = hash(newPass);
-    await new Promise(res => setTimeout(res, 500));
-    await setDB(db);
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+    if (!users.length) throw new Error('User not found');
+    if (users[0].password_hash !== hash(curPass)) return showSettingsMsg('settings-pass-msg', 'Current password is incorrect.', 'error');
+    await sbUpdate('users', { password_hash: hash(newPass) }, `username=eq.${encodeURIComponent(session.username)}`);
     document.getElementById('settings-cur-pass').value = '';
     document.getElementById('settings-new-pass').value = '';
     showSettingsMsg('settings-pass-msg', 'Password updated!', 'success');

@@ -272,13 +272,25 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
 
 <script>
 // ── CONFIG ──
-// Replace these with your JSONBin details after setup
-const JSONBIN_BIN_ID = '69b1c65caa77b81da9d84234';
-const JSONBIN_API_KEY = '$2a$10$t3Exa5qDTGK.3u7NiWeos.y4wFyko086XvkE//4hDy53cZu/uHYzW';
-const BIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+const SUPABASE_URL = 'https://osbarvhklizidsffytye.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
+const SB_HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
 
-// ── SEED INVITE CODES (first 5, generated at build time) ──
-const SEED_CODES = ['EFED-F7X2', 'EFED-K9M4', 'EFED-R3P8', 'EFED-W6T1', 'EFED-B5N7'];
+async function sbGet(table, filters = '') {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filters}`, { headers: SB_HEADERS });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+async function sbInsert(table, data) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, { method: 'POST', headers: SB_HEADERS, body: JSON.stringify(data) });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+async function sbUpdate(table, data, filters) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filters}`, { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(data) });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
 
 // ── HELPERS ──
 function genCode() {
@@ -289,43 +301,9 @@ function genCode() {
 }
 
 function hash(str) {
-  // Simple non-crypto hash — fine for a fan site
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
   return h.toString(36);
-}
-
-async function getDB() {
-  const r = await fetch(BIN_URL + '/latest?t=' + Date.now(), {
-    headers: { 'X-Master-Key': JSONBIN_API_KEY },
-    cache: 'no-store'
-  });
-  if (!r.ok) throw new Error('DB read failed ' + r.status);
-  const j = await r.json();
-  return j.record;
-}
-
-async function setDB(data, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const r = await fetch(BIN_URL, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_API_KEY },
-        body: JSON.stringify(data),
-        cache: 'no-store'
-      });
-      if (r.status === 429) {
-        await new Promise(res => setTimeout(res, 1200 * (i + 1)));
-        continue;
-      }
-      if (!r.ok) throw new Error('DB write failed ' + r.status);
-      return;
-    } catch(e) {
-      if (i === retries - 1) throw e;
-      await new Promise(res => setTimeout(res, 1000));
-    }
-  }
-  throw new Error('DB write failed after retries');
 }
 
 // ── SESSION ──
@@ -340,13 +318,11 @@ function switchTab(tab) {
   const tabs = { login: 0, register: 1 };
   document.getElementById('tab-login').classList.toggle('active', tab === 'login');
   document.getElementById('tab-register').classList.toggle('active', tab === 'register');
-  // Show/hide tabs bar on forgot
   document.querySelector('.tabs').style.display = tab === 'forgot' ? 'none' : 'flex';
   document.getElementById('panel-login').classList.toggle('active', tab === 'login');
   document.getElementById('panel-register').classList.toggle('active', tab === 'register');
   document.getElementById('panel-forgot').classList.toggle('active', tab === 'forgot');
   clearMsgs();
-  // Reset forgot steps
   if (tab === 'forgot') {
     document.getElementById('forgot-step1').style.display = 'block';
     document.getElementById('forgot-step2').style.display = 'none';
@@ -360,17 +336,8 @@ function switchTab(tab) {
 function clearMsgs() {
   document.querySelectorAll('.msg').forEach(el => { el.classList.remove('visible'); el.textContent=''; });
 }
-
-function showErr(id, msg) {
-  const el = document.getElementById(id);
-  el.textContent = msg; el.classList.add('visible');
-}
-
-function showOk(id, msg) {
-  const el = document.getElementById(id);
-  el.textContent = msg; el.classList.add('visible');
-}
-
+function showErr(id, msg) { const el = document.getElementById(id); el.textContent = msg; el.classList.add('visible'); }
+function showOk(id, msg) { const el = document.getElementById(id); el.textContent = msg; el.classList.add('visible'); }
 function setLoading(btnId, loading) {
   document.getElementById(btnId).disabled = loading;
   document.getElementById(btnId).textContent = loading ? 'Please wait…' : (btnId === 'login-btn' ? 'Sign In' : 'Create Account');
@@ -384,23 +351,16 @@ async function doLogin() {
   if (!identifier || !pass) return showErr('login-err', 'Please fill in all fields.');
   setLoading('login-btn', true);
   try {
-    const db = await getDB();
-    // Find by username first, then by email
-    let username = db.users?.[identifier] ? identifier : null;
-    if (!username) {
-      username = Object.keys(db.users || {}).find(u => db.users[u].email === identifier) || null;
-    }
-    if (!username) return showErr('login-err', 'No account found. Check your username or email.');
-    const account = db.users[username];
-    if (account.passwordHash !== hash(pass)) return showErr('login-err', 'Incorrect password.');
-    // Store full session including displayName so it's consistent across devices
-    setSession({
-      username,
-      displayName: account.displayName || username
-    });
+    // Try username first, then email
+    let users = await sbGet('users', `username=eq.${encodeURIComponent(identifier)}`);
+    if (!users.length) users = await sbGet('users', `email=eq.${encodeURIComponent(identifier)}`);
+    if (!users.length) return showErr('login-err', 'No account found. Check your username or email.');
+    const account = users[0];
+    if (account.password_hash !== hash(pass)) return showErr('login-err', 'Incorrect password.');
+    setSession({ username: account.username, displayName: account.display_name || account.username });
     window.location.replace('index.html');
   } catch(e) {
-    showErr('login-err', 'Could not connect. Check your setup.');
+    showErr('login-err', 'Could not connect. Try again.');
     console.error(e);
   } finally {
     setLoading('login-btn', false);
@@ -423,36 +383,43 @@ async function doRegister() {
   if (!/^[a-z0-9_]+$/.test(user)) return showErr('reg-err', 'Username: letters, numbers, underscores only.');
   setLoading('reg-btn', true);
   try {
-    const db = await getDB();
-    const inviteData = db.invites?.[invite];
-    if (!inviteData) return showErr('reg-err', 'Invalid invite code.');
-    if (inviteData.used) return showErr('reg-err', 'This invite code has already been used.');
-    if (db.users?.[user]) return showErr('reg-err', 'Username already taken. Try another.');
+    // Check invite code
+    const invites = await sbGet('invites', `code=eq.${encodeURIComponent(invite)}`);
+    if (!invites.length) return showErr('reg-err', 'Invalid invite code.');
+    if (invites[0].used) return showErr('reg-err', 'This invite code has already been used.');
+    // Check username taken
+    const existing = await sbGet('users', `username=eq.${encodeURIComponent(user)}`);
+    if (existing.length) return showErr('reg-err', 'Username already taken. Try another.');
+    // Check email taken
+    const existingEmail = await sbGet('users', `email=eq.${encodeURIComponent(email)}`);
+    if (existingEmail.length) return showErr('reg-err', 'Email already registered.');
 
-    const myCodes = {};
+    // Create user
+    await sbInsert('users', {
+      username: user,
+      password_hash: hash(pass),
+      email,
+      display_name: user,
+      security_question: sq,
+      security_answer_hash: hash(sa),
+      joined_at: Date.now()
+    });
+
+    // Mark invite as used
+    await sbUpdate('invites', { used: true, used_by: user }, `code=eq.${encodeURIComponent(invite)}`);
+
+    // Generate 5 new invite codes for the new user
+    const newCodes = [];
     for (let i = 0; i < 5; i++) {
-      const c = genCode();
-      myCodes[c] = { used: false, usedBy: null };
+      newCodes.push({ code: genCode(), used: false, used_by: null, created_by: user });
     }
-
-    db.users[user] = {
-      passwordHash: hash(pass),
-      email: email,
-      securityQuestion: sq,
-      securityAnswerHash: hash(sa),
-      invites: Object.keys(myCodes),
-      joinedAt: Date.now()
-    };
-    db.invites[invite].used = true;
-    db.invites[invite].usedBy = user;
-    Object.assign(db.invites, myCodes);
-    await setDB(db);
+    await sbInsert('invites', newCodes);
 
     setSession({ username: user, displayName: user });
     showOk('reg-ok', 'Account created! Welcome to the Hub.');
     setTimeout(() => window.location.replace('index.html'), 800);
   } catch(e) {
-    showErr('reg-err', 'Could not connect. Check your setup.');
+    showErr('reg-err', 'Could not connect. Try again.');
     console.error(e);
   } finally {
     setLoading('reg-btn', false);
@@ -477,14 +444,12 @@ async function doForgotStep1() {
   document.getElementById('forgot-btn1').disabled = true;
   document.getElementById('forgot-btn1').textContent = 'Please wait…';
   try {
-    const db = await getDB();
-    // Find user by email
-    const username = Object.keys(db.users || {}).find(u => db.users[u].email === email);
-    if (!username) return showErr('forgot-err', 'No account found with that email.');
-    const account = db.users[username];
-    if (!account.securityQuestion) return showErr('forgot-err', 'No security question set. Contact an admin.');
-    _forgotUsername = username;
-    document.getElementById('forgot-q-label').textContent = QUESTIONS[account.securityQuestion] || 'Security Question';
+    const users = await sbGet('users', `email=eq.${encodeURIComponent(email)}`);
+    if (!users.length) return showErr('forgot-err', 'No account found with that email.');
+    const account = users[0];
+    if (!account.security_question) return showErr('forgot-err', 'No security question set. Contact an admin.');
+    _forgotUsername = account.username;
+    document.getElementById('forgot-q-label').textContent = QUESTIONS[account.security_question] || 'Security Question';
     document.getElementById('forgot-step1').style.display = 'none';
     document.getElementById('forgot-step2').style.display = 'block';
     document.getElementById('forgot-sub').textContent = 'Answer your security question.';
@@ -503,9 +468,8 @@ async function doForgotStep2() {
   document.getElementById('forgot-btn2').disabled = true;
   document.getElementById('forgot-btn2').textContent = 'Please wait…';
   try {
-    const db = await getDB();
-    const account = db.users?.[_forgotUsername];
-    if (account.securityAnswerHash !== hash(answer)) return showErr('forgot-err', 'Incorrect answer. Try again.');
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(_forgotUsername)}`);
+    if (!users.length || users[0].security_answer_hash !== hash(answer)) return showErr('forgot-err', 'Incorrect answer. Try again.');
     document.getElementById('forgot-step2').style.display = 'none';
     document.getElementById('forgot-step3').style.display = 'block';
     document.getElementById('forgot-sub').textContent = 'Choose a new password.';
@@ -524,9 +488,7 @@ async function doForgotStep3() {
   document.getElementById('forgot-btn3').disabled = true;
   document.getElementById('forgot-btn3').textContent = 'Please wait…';
   try {
-    const db = await getDB();
-    db.users[_forgotUsername].passwordHash = hash(newPass);
-    await setDB(db);
+    await sbUpdate('users', { password_hash: hash(newPass) }, `username=eq.${encodeURIComponent(_forgotUsername)}`);
     showOk('forgot-ok', 'Password reset! You can now sign in.');
     document.getElementById('forgot-step3').style.display = 'none';
     setTimeout(() => switchTab('login'), 1500);
@@ -539,31 +501,33 @@ async function doForgotStep3() {
 }
 
 // ── SHOW LOGGED IN VIEW ──
-function showLoggedIn(username, db) {
+async function showLoggedIn(username) {
   document.getElementById('view-auth').style.display = 'none';
   const hub = document.getElementById('view-hub');
   hub.classList.add('active');
   document.getElementById('hub-name').textContent = username.toUpperCase();
 
-  const userCodes = db.users?.[username]?.invites || [];
   const list = document.getElementById('invite-list');
-  list.innerHTML = '';
+  list.innerHTML = '<p style="font-size:.72rem;color:var(--muted)">Loading codes…</p>';
 
-  if (userCodes.length === 0) {
-    list.innerHTML = '<p style="font-size:.72rem;color:var(--muted)">No invite codes yet.</p>';
-    return;
+  try {
+    const codes = await sbGet('invites', `created_by=eq.${encodeURIComponent(username)}&order=code.asc`);
+    list.innerHTML = '';
+    if (!codes.length) {
+      list.innerHTML = '<p style="font-size:.72rem;color:var(--muted)">No invite codes yet.</p>';
+      return;
+    }
+    codes.forEach(invite => {
+      const row = document.createElement('div');
+      row.className = 'invite-row';
+      row.innerHTML = invite.used
+        ? `<span class="invite-used">${invite.code}</span><span style="font-size:.6rem;color:var(--muted)">Used by ${invite.used_by || '?'}</span>`
+        : `<span class="invite-code">${invite.code}</span><button class="copy-btn" onclick="copyCode(this,'${invite.code}')">Copy</button>`;
+      list.appendChild(row);
+    });
+  } catch(e) {
+    list.innerHTML = '<p style="font-size:.72rem;color:#ff6b6b">Could not load codes.</p>';
   }
-
-  userCodes.forEach(code => {
-    const info = db.invites?.[code];
-    const used = info?.used;
-    const row = document.createElement('div');
-    row.className = 'invite-row';
-    row.innerHTML = used
-      ? `<span class="invite-used">${code}</span><span style="font-size:.6rem;color:var(--muted)">Used by ${info.usedBy || '?'}</span>`
-      : `<span class="invite-code">${code}</span><button class="copy-btn" onclick="copyCode(this,'${code}')">Copy</button>`;
-    list.appendChild(row);
-  });
 }
 
 function copyCode(btn, code) {
@@ -586,15 +550,15 @@ async function init() {
   const session = getSession();
   if (session?.username) {
     try {
-      const db = await getDB();
-      const user = db.users?.[session.username];
-      if (user) {
-        // Always sync displayName from DB — may have changed on another device
-        if (user.displayName && user.displayName !== session.displayName) {
-          session.displayName = user.displayName;
+      const users = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+      if (users.length) {
+        const user = users[0];
+        // Sync displayName from DB
+        if (user.display_name && user.display_name !== session.displayName) {
+          session.displayName = user.display_name;
           setSession(session);
         }
-        showLoggedIn(session.username, db);
+        showLoggedIn(session.username);
         return;
       }
     } catch(e) {}
