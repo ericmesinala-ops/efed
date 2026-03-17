@@ -2411,7 +2411,7 @@ async function initHub() {
   showSkeletons(8);
   buildPills();
   try {
-    const subs = await sbGet('submissions', 'status=eq.approved&order=submitted_at.desc&select=*,users(display_name)');
+    const subs = await sbGet('submissions', 'status=eq.approved&order=submitted_at.desc');
     const existingUrls = new Set(videos.map(v => v.url));
     subs.forEach(s => {
       if (!existingUrls.has(s.url)) {
@@ -2423,7 +2423,7 @@ async function initHub() {
           dateMs: s.date_ms || s.submitted_at || 0,
           submittedAt: s.submitted_at || 0,
           submittedBy: s.submitted_by || '',
-          displayName: s.users?.display_name || s.display_name || s.submitted_by || '',
+          displayName: s.submitted_by || '',
           community: true,
           status: 'approved',
           thumb: s.thumb_url || null
@@ -2433,6 +2433,18 @@ async function initHub() {
   } catch(e) {
     console.warn('Could not load community submissions:', e);
   }
+
+  // Fetch display names for community video posters
+  try {
+    const usernames = [...new Set(videos.filter(v => v.community && v.submittedBy).map(v => v.submittedBy))];
+    if (usernames.length) {
+      const users = await sbGet('users', 'username=in.(' + usernames.map(u => encodeURIComponent(u)).join(',') + ')&select=username,display_name');
+      const nameMap = {};
+      users.forEach(u => { if (u.display_name) nameMap[u.username] = u.display_name; });
+      videos.forEach(v => { if (v.community && nameMap[v.submittedBy]) v.displayName = nameMap[v.submittedBy]; });
+    }
+  } catch(e) {}
+
   buildPills();
   renderGrid();
   loadBookmarksRow();
