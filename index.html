@@ -1688,6 +1688,22 @@
     </div>
   </section>
 
+  <!-- ── EFED OWNER ROW ── -->
+  <section class="section" id="section-efed-owner" style="display:none;">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar" style="background:var(--accent);"></div>
+        <div class="sec-title" id="efed-owner-row-title">My eFed</div>
+        <span class="sec-count" id="efed-owner-count"></span>
+      </div>
+    </div>
+    <div class="row-wrap">
+      <button class="pill-arr left hidden" id="efed-owner-arr-left" onclick="scrollNamedRow('efed-owner',-1)">&#8249;</button>
+      <div class="card-grid" id="row-efed-owner"></div>
+      <button class="pill-arr right" id="efed-owner-arr-right" onclick="scrollNamedRow('efed-owner',1)">&#8250;</button>
+    </div>
+  </section>
+
   <section class="section">
     <div class="sec-head">
       <div class="sec-title-wrap">
@@ -1695,10 +1711,7 @@
         <div class="sec-title">Latest Shows</div>
         <span class="sec-count" id="vid-count"></span>
       </div>
-      <button id="sort-toggle-btn" onclick="toggleSort()" style="display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:40px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .2s;white-space:nowrap;">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-        <span id="sort-toggle-label">Post Date</span>
-      </button>
+      <div style="font-size:.6rem;color:var(--muted);letter-spacing:1px;text-transform:uppercase;">By YouTube Date</div>
     </div>
     <div class="filter-outer">
       <button class="pill-arr left" onclick="scrollPills(-1)">&#8249;</button>
@@ -1969,19 +1982,9 @@ function toggleSort() {
 
 function sortByDate(arr) {
   return [...arr].sort((a, b) => {
-    let ta, tb;
-    if (_sortMode === 'event') {
-      // Sort by show/event date
-      ta = a.dateMs || new Date(a.date || 0).getTime();
-      tb = b.dateMs || new Date(b.date || 0).getTime();
-    } else {
-      // Sort by post date, fall back to event date for hardcoded videos
-      ta = a.submittedAt || a.dateMs || new Date(a.date || 0).getTime();
-      tb = b.submittedAt || b.dateMs || new Date(b.date || 0).getTime();
-      // Hardcoded videos have no submittedAt — give them their event date
-      if (!ta) ta = new Date(a.date || 0).getTime();
-      if (!tb) tb = new Date(b.date || 0).getTime();
-    }
+    // Always sort by YouTube upload date (dateMs or parsed date string)
+    const ta = a.dateMs || new Date(a.date || 0).getTime();
+    const tb = b.dateMs || new Date(b.date || 0).getTime();
     return tb - ta;
   });
 }
@@ -2036,6 +2039,55 @@ function renderGrid() {
   list.forEach(v => grid.appendChild(makeCard(v)));
   setTimeout(updateRowArrows, 50);
   setTimeout(loadAllCardRatings, 300);
+}
+
+// ── EFED OWNER ROW ──
+async function loadEfedOwnerRow() {
+  const session = getSession();
+  const section = document.getElementById('section-efed-owner');
+  if (!session || !section) return;
+
+  try {
+    const users = await sbGet('users', 'username=eq.' + encodeURIComponent(session.username));
+    const user = users[0];
+    if (!user || (!user.is_efed_owner && user.role !== 'owner')) return;
+
+    const efedName = user.promo_name || user.display_name || user.username;
+    if (!efedName) return;
+
+    // Get all videos from this eFed (hardcoded + community)
+    const efedVideos = videos
+      .filter(v => v.efed && v.efed.toLowerCase() === efedName.toLowerCase())
+      .sort((a, b) => {
+        const ta = a.dateMs || new Date(a.date || 0).getTime();
+        const tb = b.dateMs || new Date(b.date || 0).getTime();
+        return tb - ta;
+      });
+
+    if (!efedVideos.length) return;
+
+    // Update title and show section
+    const titleEl = document.getElementById('efed-owner-row-title');
+    const countEl = document.getElementById('efed-owner-count');
+    if (titleEl) titleEl.textContent = efedName + ' Videos';
+    if (countEl) countEl.textContent = ' · ' + efedVideos.length;
+    section.style.display = '';
+
+    const grid = document.getElementById('row-efed-owner');
+    grid.innerHTML = '';
+    efedVideos.forEach(v => grid.appendChild(makeCard(v)));
+
+    grid.onscroll = () => {
+      const left = document.getElementById('efed-owner-arr-left');
+      const right = document.getElementById('efed-owner-arr-right');
+      if (left) left.classList.toggle('hidden', grid.scrollLeft <= 0);
+      if (right) right.classList.toggle('hidden', grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 4);
+    };
+    setTimeout(() => {
+      const right = document.getElementById('efed-owner-arr-right');
+      if (right) right.classList.toggle('hidden', grid.scrollWidth <= grid.clientWidth);
+    }, 50);
+  } catch(e) { console.warn('eFed owner row failed', e); }
 }
 
 // ── BOOKMARKS ROW ──
@@ -2365,6 +2417,8 @@ async function initHub() {
   }
   buildPills();
   renderGrid();
+  loadBookmarksRow();
+  loadEfedOwnerRow();
   buildHeroDots();
   loadSlide();
 }
@@ -3159,6 +3213,16 @@ handleFormSubmit('cf-remove-form', 'cf-remove-success');
           if (initialsEl) initialsEl.style.display = 'none';
         }
       }
+      // Show eFed owner label or default
+      if (ddEmail) {
+        if ((user.is_efed_owner || user.role === 'owner') && user.promo_name) {
+          ddEmail.textContent = 'Owner of ' + user.promo_name;
+          ddEmail.style.color = '#c8a84b';
+        } else {
+          ddEmail.textContent = 'EFED Member';
+          ddEmail.style.color = '';
+        }
+      }
     }
   } catch(_) {} // non-critical — nav still works from local session
 })();
@@ -3520,32 +3584,40 @@ async function doSubmitPost() {
 
     // Get upload date via multiple proxy attempts
     let uploadDate = '';
+    let uploadDateRaw = null;
     const proxies = [
       `https://api.allorigins.win/raw?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + vidId)}`,
-      `https://corsproxy.io/?https://www.youtube.com/watch?v=${vidId}`
+      `https://corsproxy.io/?https://www.youtube.com/watch?v=${vidId}`,
+      `https://api.codetabs.com/v1/proxy?quest=https://www.youtube.com/watch?v=${vidId}`
     ];
     for (const proxyUrl of proxies) {
       try {
-        const ytRes = await fetch(proxyUrl);
+        const ytRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(5000) });
         if (!ytRes.ok) continue;
         const ytHtml = await ytRes.text();
         const dateMatch = ytHtml.match(/"datePublished":"([^"]+)"/) ||
-                          ytHtml.match(/"publishDate":"([^"]+)"/);
+                          ytHtml.match(/"publishDate":"([^"]+)"/) ||
+                          ytHtml.match(/"uploadDate":"([^"]+)"/);
         if (dateMatch) {
           const parsed = new Date(dateMatch[1]);
           if (!isNaN(parsed)) {
+            uploadDateRaw = parsed;
             uploadDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            console.log('Got date from proxy:', proxyUrl, uploadDate);
             break;
           }
         }
-      } catch(e) { continue; }
+      } catch(e) { console.log('Proxy failed:', proxyUrl); continue; }
     }
+
+
 
     _fetchedMeta = {
       title: oData.title || '',
       channel: oData.author_name || '',
       vidId,
-      uploadDate
+      uploadDate,
+      uploadDateMs: uploadDateRaw ? uploadDateRaw.getTime() : null
     };
 
     // Check against banned promotions list — name, title and channel handle
@@ -3559,7 +3631,7 @@ async function doSubmitPost() {
 
     // Show preview
     document.getElementById('submit-preview-title').textContent = _fetchedMeta.title;
-    document.getElementById('submit-preview-channel').textContent = _fetchedMeta.channel;
+    document.getElementById('submit-preview-channel').textContent = _fetchedMeta.channel + (_fetchedMeta.uploadDate ? '  ·  ' + _fetchedMeta.uploadDate : '  ·  Date unavailable');
     document.getElementById('submit-preview').style.display = 'block';
 
     // Post to Supabase — goes live instantly
@@ -3570,7 +3642,7 @@ async function doSubmitPost() {
       show_name: _fetchedMeta.title,
       efed: _fetchedMeta.channel,
       date: _fetchedMeta.uploadDate || '',
-      date_ms: Date.now(),
+      date_ms: _fetchedMeta.uploadDateMs || Date.now(),
       submitted_by: session.username,
       submitted_at: Date.now(),
       community: true,
@@ -3584,7 +3656,7 @@ async function doSubmitPost() {
       show: _fetchedMeta.title,
       efed: _fetchedMeta.channel,
       date: _fetchedMeta.uploadDate || '',
-      dateMs: Date.now(),
+      dateMs: _fetchedMeta.uploadDateMs || Date.now(),
       submittedAt: Date.now(),
       submittedBy: session.username,
       community: true,
