@@ -194,3 +194,13 @@ create index if not exists idx_likes_video_id on likes(video_id);
 create index if not exists idx_bookmarks_video_id on bookmarks(video_id);
 create index if not exists idx_comments_video_id on comments(video_id);
 create index if not exists idx_watch_time_video_id on watch_time(video_id);
+
+-- Supports table (user supports an eFed, not a specific video)
+create table if not exists supports (
+  id bigserial primary key,
+  username text not null references users(username),
+  efed text not null,
+  supported_at bigint default extract(epoch from now()) * 1000,
+  unique(username, efed)
+);
+alter table supports disable row level security;
