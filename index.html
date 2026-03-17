@@ -3,9 +3,45 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#c0000e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="EFED Hub">
+<link rel="apple-touch-icon" href="/efed-hub-icon.svg">
 <title>EFED Streaming Hub</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
 <script>
+  const ADMIN_USERNAME = 'derrick';
+  // ── SUPABASE CONFIG ──
+  const SUPABASE_URL = 'https://osbarvhklizidsffytye.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
+  const SB_HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+
+  function getSession() {
+    try { return JSON.parse(localStorage.getItem('efed_session')); } catch { return null; }
+  }
+  async function sbGet(table, filters = '') {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + filters, { headers: SB_HEADERS });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+  async function sbInsert(table, data) {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/' + table, { method: 'POST', headers: SB_HEADERS, body: JSON.stringify(data) });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+  async function sbUpdate(table, data, filters) {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + filters, { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(data) });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+  async function sbDelete(table, filters) {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + filters, { method: 'DELETE', headers: SB_HEADERS });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
   // Simple session-based auth guard — no third party needed
   (function() {
     try {
@@ -283,6 +319,25 @@
   .card-show { font-size: .82rem; font-weight: 600; color: var(--text); line-height: 1.3; margin-bottom: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .card-date { font-size: .68rem; color: var(--muted); }
   .card-posted-by { font-size: .58rem; color: rgba(255,255,255,.18); margin-top: 3px; font-style: italic; letter-spacing: .3px; }
+
+  /* Pending card styles */
+  .card.pending { pointer-events: none; }
+  .card.pending .card-thumb img { filter: blur(6px); opacity: .5; }
+  .card.pending .card-over { display: none; }
+  .pending-badge {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 6px;
+    background: rgba(0,0,0,.4);
+  }
+  .pending-badge-icon {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: rgba(200,168,75,.15); border: 1px solid rgba(200,168,75,.4);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pending-badge-text {
+    font-size: .55rem; letter-spacing: 2px; text-transform: uppercase;
+    color: #c8a84b; font-weight: 700;
+  }
 
   /* 3-dot card menu */
   .card-menu-btn {
@@ -1028,12 +1083,343 @@
     .auth-row { grid-template-columns: 1fr; }
     .nav-btn-label { display: none; }
     .nav-invite-btn { padding: 6px 10px; }
+    /* Hide top nav buttons on mobile — bottom nav handles them */
+    #nav-submit-btn { display: none !important; }
+    #nav-invite-btn { display: none !important; }
+    .nav-search-wrap { display: none !important; }
+    /* Add bottom padding so content doesn't hide behind bottom nav */
+    body { padding-bottom: 80px; }
+  }
+
+  /* ── BOTTOM NAV ── */
+  #bottom-nav {
+    display: none;
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 400;
+    background: rgba(7,7,10,.75);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-top: 1px solid rgba(255,255,255,.08);
+    padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+    justify-content: space-around; align-items: center;
+  }
+  @media (max-width: 768px) { #bottom-nav { display: flex; } }
+
+  .bnav-item {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 6px 16px; border-radius: 14px; cursor: pointer;
+    background: none; border: none; transition: background .2s;
+    position: relative;
+  }
+  .bnav-item.active svg { stroke: #c0000e; filter: drop-shadow(0 0 6px rgba(192,0,14,.4)); }
+  .bnav-item.active .bnav-label { color: #c0000e; }
+  .bnav-label {
+    font-size: .48rem; letter-spacing: 1.5px; text-transform: uppercase;
+    color: rgba(255,255,255,.3); font-weight: 700; transition: color .2s;
+  }
+  .bnav-post {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: #c0000e; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px rgba(192,0,14,.45); border: none; cursor: pointer;
+    transition: transform .2s, background .2s; margin-bottom: 2px;
+  }
+  .bnav-post:hover { transform: scale(1.08); background: #e0001a; }
+  .bnav-notif-dot {
+    position: absolute; top: 4px; right: 10px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #c0000e; border: 1.5px solid #07070a;
+    display: none;
+  }
+  .bnav-notif-dot.visible { display: block; }
+
+  /* ── NOTIFICATION PANEL ── */
+  #notif-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 800;
+    width: 100%; max-width: 420px;
+    background: #0d0d10;
+    border-left: 1px solid rgba(255,255,255,.07);
+    transform: translateX(100%);
+    transition: transform .35s cubic-bezier(.32,.72,0,1);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  #notif-panel.open { transform: translateX(0); }
+  #notif-overlay {
+    position: fixed; inset: 0; z-index: 799;
+    background: rgba(0,0,0,.5); backdrop-filter: blur(4px);
+    opacity: 0; pointer-events: none; transition: opacity .3s;
+  }
+  #notif-overlay.open { opacity: 1; pointer-events: all; }
+
+  .notif-panel-header {
+    padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.06);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .notif-panel-title {
+    font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem;
+    letter-spacing: 3px; color: #fff;
+  }
+  .notif-panel-actions { display: flex; gap: 10px; align-items: center; }
+  .notif-mark-all {
+    font-size: .6rem; letter-spacing: 1px; text-transform: uppercase;
+    color: #5a5a6a; background: none; border: none; cursor: pointer;
+    transition: color .2s;
+  }
+  .notif-mark-all:hover { color: #c8a84b; }
+  .notif-close {
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+    color: #fff; width: 28px; height: 28px; border-radius: 50%;
+    cursor: pointer; font-size: .9rem; display: flex; align-items: center; justify-content: center;
+  }
+  .notif-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+  .notif-item {
+    display: flex; gap: 12px; padding: 14px 20px;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    cursor: pointer; transition: background .15s; position: relative;
+  }
+  .notif-item:hover { background: rgba(255,255,255,.03); }
+  .notif-item.unread { background: rgba(192,0,14,.04); }
+  .notif-item.unread::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    width: 3px; background: #c0000e; border-radius: 0 2px 2px 0;
+  }
+  .notif-icon {
+    width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem;
+  }
+  .notif-icon.type-comment { background: rgba(100,149,237,.15); }
+  .notif-icon.type-like { background: rgba(192,0,14,.15); }
+  .notif-icon.type-rating { background: rgba(200,168,75,.15); }
+  .notif-icon.type-invite { background: rgba(76,175,100,.15); }
+  .notif-icon.type-claim { background: rgba(200,168,75,.15); }
+  .notif-icon.type-admin { background: rgba(192,0,14,.2); }
+  .notif-body { flex: 1; min-width: 0; }
+  .notif-msg { font-size: .78rem; color: #e8e8e8; line-height: 1.5; margin-bottom: 4px; }
+  .notif-time { font-size: .62rem; color: #5a5a6a; }
+  .notif-empty {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; height: 200px; gap: 10px;
+    color: #5a5a6a; font-size: .8rem;
+  }
+
+  /* ── INSTALL BANNER ── */
+  #install-banner {
+    display: none;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+    background: rgba(7,7,10,.95);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(200,168,75,.2);
+    padding: 12px 20px;
+    align-items: center; gap: 12px;
+    animation: slideDown .3s ease;
+  }
+  @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+  #install-banner.visible { display: flex; }
+  .install-icon {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: #c0000e; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .install-text { flex: 1; }
+  .install-title { font-size: .75rem; font-weight: 700; color: #fff; margin-bottom: 1px; }
+  .install-sub { font-size: .62rem; color: #5a5a6a; }
+  .install-btn {
+    padding: 7px 14px; border-radius: 40px;
+    background: #c8a84b; border: none; color: #000;
+    font-family: 'DM Sans', sans-serif; font-size: .65rem; font-weight: 700;
+    cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  }
+  .install-close {
+    background: none; border: none; color: #5a5a6a;
+    cursor: pointer; font-size: 1.1rem; padding: 4px; flex-shrink: 0;
+  }
+
+  /* ── SKELETON SCREENS ── */
+  @keyframes shimmer {
+    0% { background-position: -400px 0; }
+    100% { background-position: 400px 0; }
+  }
+  .skeleton {
+    background: linear-gradient(90deg, #1a1a1f 25%, #222228 50%, #1a1a1f 75%);
+    background-size: 800px 100%;
+    animation: shimmer 1.4s infinite;
+    border-radius: 6px;
+  }
+  .skeleton-card {
+    flex-shrink: 0; width: var(--card-w);
+  }
+  .skeleton-thumb {
+    width: 100%; height: var(--card-h);
+    border-radius: 8px; margin-bottom: 10px;
+  }
+  .skeleton-line {
+    height: 10px; margin-bottom: 6px; border-radius: 4px;
+  }
+  .skeleton-line.short { width: 60%; }
+  .skeleton-line.medium { width: 85%; }
+  .skeleton-line.tiny { width: 40%; height: 8px; }
+
+  /* ── PULL TO REFRESH ── */
+  #ptr-indicator {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 350;
+    display: flex; align-items: center; justify-content: center;
+    height: 0; overflow: hidden;
+    background: rgba(7,7,10,.9);
+    backdrop-filter: blur(10px);
+    transition: height .2s ease;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  #ptr-indicator.visible { height: 52px; }
+  #ptr-spinner {
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid rgba(192,0,14,.2);
+    border-top-color: #c0000e;
+    animation: none;
+  }
+  #ptr-spinner.spinning { animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #ptr-text {
+    font-size: .65rem; color: #5a5a6a; letter-spacing: 1px;
+    text-transform: uppercase; margin-left: 10px;
+  }
+
+  /* ── CARD EXPAND OVERLAY ── */
+  #card-expand {
+    position: fixed; inset: 0; z-index: 500;
+    display: flex; flex-direction: column;
+    transform: translateY(100%);
+    transition: transform .45s cubic-bezier(.32,.72,0,1);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  #card-expand.open { transform: translateY(0); }
+
+  #expand-hero {
+    position: relative; width: 100%; flex-shrink: 0;
+    background: #000;
+    height: 56vw; max-height: 420px; min-height: 220px;
+  }
+  #expand-hero iframe {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    border: none;
+  }
+  #expand-hero-thumb {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; transition: opacity .4s;
+  }
+  #expand-play-btn {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.3); cursor: pointer; transition: background .2s;
+    border: none;
+  }
+  #expand-play-btn:hover { background: rgba(0,0,0,.5); }
+  #expand-play-btn .play-circle {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: rgba(192,0,14,.9);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 40px rgba(192,0,14,.5);
+    transition: transform .2s;
+  }
+  #expand-play-btn:hover .play-circle { transform: scale(1.08); }
+
+  #expand-body {
+    background: #07070a; flex: 1;
+    padding: 20px 20px 48px;
+    min-height: 100vh;
+  }
+  #expand-efed {
+    font-size: .6rem; letter-spacing: 3px; text-transform: uppercase;
+    color: #c8a84b; font-weight: 700; margin-bottom: 6px;
+  }
+  #expand-show {
+    font-size: 1.1rem; font-weight: 700; color: #e8e8e8;
+    line-height: 1.3; margin-bottom: 4px;
+  }
+  #expand-meta {
+    font-size: .72rem; color: #5a5a6a; margin-bottom: 6px;
+  }
+  #expand-poster {
+    font-size: .68rem; color: #5a5a6a; margin-bottom: 20px;
+  }
+  #expand-poster span { color: #c8a84b; }
+
+  .expand-actions {
+    display: flex; gap: 12px; margin-bottom: 28px;
+  }
+  .expand-action-btn {
+    display: flex; align-items: center; gap: 7px;
+    padding: 10px 18px; border-radius: 40px;
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.1);
+    color: #e8e8e8; font-family: 'DM Sans', sans-serif;
+    font-size: .75rem; font-weight: 600; cursor: pointer;
+    transition: background .2s, border-color .2s;
+    backdrop-filter: blur(10px);
+  }
+  .expand-action-btn:hover { background: rgba(255,255,255,.12); }
+  .expand-action-btn.liked { color: #c0000e; border-color: rgba(192,0,14,.4); background: rgba(192,0,14,.1); }
+  .expand-action-btn.bookmarked { color: #c8a84b; border-color: rgba(200,168,75,.4); background: rgba(200,168,75,.1); }
+
+  /* Comments */
+  #expand-comments-section { margin-top: 4px; }
+  .expand-comments-title {
+    font-size: .65rem; letter-spacing: 2px; text-transform: uppercase;
+    color: #5a5a6a; font-weight: 600; margin-bottom: 14px;
+  }
+  .expand-comment {
+    display: flex; gap: 10px; margin-bottom: 16px;
+  }
+  .expand-comment-avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: rgba(192,0,14,.2); border: 1px solid rgba(192,0,14,.3);
+    display: flex; align-items: center; justify-content: center;
+    font-size: .65rem; font-weight: 700; color: #c0000e;
+    flex-shrink: 0;
+  }
+  .expand-comment-body { flex: 1; }
+  .expand-comment-user { font-size: .68rem; font-weight: 700; color: #c8a84b; margin-bottom: 3px; }
+  .expand-comment-text { font-size: .8rem; color: #e8e8e8; line-height: 1.5; }
+  .expand-comment-time { font-size: .62rem; color: #5a5a6a; margin-top: 3px; }
+
+  .expand-comment-input-wrap {
+    display: flex; gap: 10px; margin-top: 16px; align-items: flex-end;
+  }
+  .expand-comment-input {
+    flex: 1; padding: 10px 14px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09);
+    border-radius: 10px; color: #fff; font-family: 'DM Sans', sans-serif;
+    font-size: .82rem; outline: none; resize: none; line-height: 1.4;
+    transition: border-color .2s;
+  }
+  .expand-comment-input:focus { border-color: rgba(255,255,255,.25); }
+  .expand-comment-send {
+    padding: 10px 16px; background: #c0000e; border: none;
+    border-radius: 10px; color: #fff; font-family: 'DM Sans', sans-serif;
+    font-size: .75rem; font-weight: 700; cursor: pointer;
+    transition: opacity .2s; white-space: nowrap;
+  }
+  .expand-comment-send:hover { opacity: .85; }
+
+  /* Collapse hint */
+  #expand-collapse-hint {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    pointer-events: none; opacity: .6;
+  }
+  #expand-collapse-hint .hint-bar {
+    width: 36px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.4);
   }
 </style>
 </head>
 <body>
 
 <nav id="nav">
+  <!-- Pull to refresh indicator -->
+  <div id="ptr-indicator">
+    <div id="ptr-spinner"></div>
+    <span id="ptr-text">Pull to refresh</span>
+  </div>
   <a href="#" class="logo">
     <span class="logo-eyebrow">The Official</span>
     <span class="logo-main"><em>EFED</em> Streaming Hub</span>
@@ -1048,8 +1434,9 @@
       </button>
     </div>
 
-    <button class="nav-invite-btn" onclick="showDisabledMsg()">
-      Submit
+    <button class="nav-invite-btn" id="nav-submit-btn" onclick="openSubmitModal()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <span class="nav-btn-label">Post</span>
     </button>
 
     <button class="nav-invite-btn" id="nav-invite-btn" onclick="openInvite()">
@@ -1057,12 +1444,13 @@
       <span class="nav-btn-label">Invite</span>
     </button>
     <div class="nav-user-wrap" id="nav-user-wrap">
-      <button class="nav-auth-btn" id="nav-sign-in-btn" onclick="openAuth('sign-in')">
+      <button class="nav-auth-btn" id="nav-sign-in-btn" onclick="window.location.replace('auth.html')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         Sign In
       </button>
       <button class="nav-user-btn" id="nav-user-btn" onclick="toggleDropdown()">
         <div class="nav-avatar-initials" id="nav-avatar-wrap">
+          <img id="nav-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:none;">
           <span id="nav-initials">??</span>
         </div>
         <span class="nav-user-name" id="nav-user-name"></span>
@@ -1072,9 +1460,17 @@
           <div class="dropdown-name" id="dd-name"></div>
           <div class="dropdown-email" id="dd-email"></div>
         </div>
+        <button class="dropdown-item" onclick="toggleDropdown(true); window.location.href='profile.html'">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          My Profile
+        </button>
         <button class="dropdown-item" onclick="toggleDropdown(true); openSettings()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           Settings
+        </button>
+        <button class="dropdown-item" id="admin-panel-btn" onclick="toggleDropdown(true); openAdminPanel()" style="display:none;color:#c8a84b;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Admin Panel
         </button>
         <button class="dropdown-item danger" onclick="handleSignOut()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -1085,6 +1481,90 @@
   </div>
 </nav>
 <div class="search-results-panel" id="search-results-panel"></div>
+
+<!-- ── INSTALL BANNER ── -->
+<div id="install-banner">
+  <div class="install-icon">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+  </div>
+  <div class="install-text">
+    <div class="install-title">Add EFED Hub to your home screen</div>
+    <div class="install-sub">Get the full app experience</div>
+  </div>
+  <button class="install-btn" id="install-btn" onclick="triggerInstall()">Install</button>
+  <button class="install-close" onclick="dismissInstallBanner()">✕</button>
+</div>
+
+<!-- ── BOTTOM NAV ── -->
+<div id="bottom-nav">
+  <!-- Home -->
+  <button class="bnav-item active" id="bnav-home" onclick="bnavGo('home')">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z"/>
+      <path d="M9 21V12h6v9"/>
+    </svg>
+    <span class="bnav-label">Home</span>
+  </button>
+
+  <!-- Search -->
+  <button class="bnav-item" id="bnav-search" onclick="bnavGo('search')">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10.5" cy="10.5" r="6.5"/>
+      <path d="M15.5 15.5L21 21"/>
+    </svg>
+    <span class="bnav-label">Search</span>
+  </button>
+
+  <!-- Post -->
+  <button class="bnav-item" onclick="openSubmitModal()" style="padding:0;">
+    <div class="bnav-post">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </div>
+  </button>
+
+  <!-- Notifications -->
+  <button class="bnav-item" id="bnav-notif" onclick="bnavGo('notif')">
+    <div style="position:relative;display:inline-block;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+      <div class="bnav-notif-dot" id="bnav-notif-dot"></div>
+    </div>
+    <span class="bnav-label">Notifs</span>
+  </button>
+
+  <!-- Profile -->
+  <button class="bnav-item" id="bnav-profile" onclick="bnavGo('profile')">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="8" r="4"/>
+      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+    </svg>
+    <span class="bnav-label">Profile</span>
+  </button>
+</div>
+
+<!-- ── NOTIFICATION OVERLAY ── -->
+<div id="notif-overlay" onclick="closeNotifPanel()"></div>
+
+<!-- ── NOTIFICATION PANEL ── -->
+<div id="notif-panel">
+  <div class="notif-panel-header">
+    <div class="notif-panel-title">Notifications</div>
+    <div class="notif-panel-actions">
+      <button class="notif-mark-all" onclick="markAllNotifsRead()">Mark all read</button>
+      <button class="notif-close" onclick="closeNotifPanel()">✕</button>
+    </div>
+  </div>
+  <div class="notif-list" id="notif-list">
+    <div class="notif-empty">
+      <span style="font-size:1.5rem;">🔔</span>
+      No notifications yet
+    </div>
+  </div>
+</div>
 
 <!-- ── INVITE MODAL ── -->
 <div class="invite-modal-bg" id="invite-modal-bg" onclick="handleInviteBgClick(event)">
@@ -1101,6 +1581,10 @@
 
     <div class="invite-no-codes" id="invite-no-codes" style="display:none;">No invite codes remaining.</div>
 
+    <p style="font-size:.65rem;color:var(--muted);line-height:1.7;margin-bottom:16px;padding:10px 12px;background:rgba(200,168,75,.06);border:1px solid rgba(200,168,75,.12);border-radius:8px;">
+      <span style="color:#c8a84b;font-weight:700;">Note:</span> You will receive 2 Hub access codes. Please share them only with trusted members of the community. Misuse may result in the removal of invite privileges or a permanent ban from the Hub.
+    </p>
+
     <hr class="invite-codes-divider">
     <div class="invite-codes-label">All Your Codes</div>
     <div id="invite-codes-list"></div>
@@ -1115,6 +1599,24 @@
       <button class="settings-close" onclick="closeSettings()">✕</button>
     </div>
     <div class="settings-body">
+
+      <!-- Avatar -->
+      <div class="settings-section">
+        <label class="settings-label">Profile Picture</label>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+          <div id="settings-avatar-preview" style="width:48px;height:48px;border-radius:50%;background:rgba(192,0,14,.2);border:2px solid rgba(192,0,14,.3);overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;color:#c0000e;">
+            <span id="settings-avatar-initial">?</span>
+          </div>
+          <div style="flex:1;">
+            <input class="settings-input" id="settings-avatar" type="url" placeholder="Paste image URL (e.g. from X/Twitter)" autocomplete="off">
+            <div style="font-size:.6rem;color:#5a5a6a;margin-top:4px;">Right click your profile pic on X → Copy Image Address</div>
+          </div>
+        </div>
+        <div class="settings-msg" id="settings-avatar-msg"></div>
+        <button class="settings-save-btn" onclick="saveAvatar()">Save Picture</button>
+      </div>
+
+      <hr class="settings-divider">
 
       <div class="settings-section">
         <label class="settings-label">Display Name</label>
@@ -1196,6 +1698,20 @@
         <div class="sec-title">Latest Videos</div>
         <span class="sec-count" id="vid-count"></span>
       </div>
+      <button id="sort-toggle-btn" onclick="toggleSort()" style="
+        display:flex;align-items:center;gap:6px;
+        padding:7px 14px;border-radius:40px;
+        background:rgba(200,168,75,.12);
+        border:1px solid rgba(200,168,75,.3);
+        color:#c8a84b;
+        font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;
+        letter-spacing:1px;text-transform:uppercase;
+        cursor:pointer;transition:all .2s;
+        white-space:nowrap;
+      ">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        <span id="sort-toggle-label">Post Date</span>
+      </button>
     </div>
     <div class="filter-outer">
       <button class="pill-arr left" onclick="scrollPills(-1)">&#8249;</button>
@@ -1273,8 +1789,57 @@
   </div>
 </div>
 
-<script>
-// ── VIDEO DATA ────────────────────────────────────────────────────────────────
+<!-- ── CARD EXPAND OVERLAY ── -->
+<div id="card-expand">
+  <div id="expand-hero">
+    <div id="expand-collapse-hint"><div class="hint-bar"></div></div>
+    <img id="expand-hero-thumb" src="" alt="">
+    <iframe id="expand-frame" src="" frameborder="0" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen style="display:none;"></iframe>
+    <button id="expand-play-btn" onclick="expandStartVideo()">
+      <div class="play-circle">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="white" style="margin-left:3px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      </div>
+    </button>
+  </div>
+
+  <div id="expand-body">
+    <div id="expand-efed"></div>
+    <div id="expand-show"></div>
+    <div id="expand-meta"></div>
+    <div id="expand-poster"></div>
+
+    <div class="expand-actions">
+      <button class="expand-action-btn" id="expand-like-btn" onclick="toggleExpandLike()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        <span id="expand-like-count">0</span>
+      </button>
+      <button class="expand-action-btn" id="expand-rate-btn" onclick="openRatingModal()" style="opacity:.4;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        Rate
+      </button>
+      <button class="expand-action-btn" id="expand-bookmark-btn" onclick="toggleExpandBookmark()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+        Bookmark
+      </button>
+      <button class="expand-action-btn" onclick="expandWatchFull()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Watch Full
+      </button>
+    </div>
+
+    <div id="expand-comments-section">
+      <div class="expand-comments-title">Comments</div>
+      <div id="expand-comments-list"></div>
+      <div class="expand-comment-input-wrap" id="expand-comment-wrap" style="display:none;">
+        <textarea class="expand-comment-input" id="expand-comment-input" rows="1" placeholder="Add a comment…" oninput="autoResizeComment(this)"></textarea>
+        <button class="expand-comment-send" onclick="postExpandComment()">Post</button>
+      </div>
+      <div id="expand-comment-login-msg" style="font-size:.72rem;color:#5a5a6a;padding:8px 0;">Sign in to leave a comment.</div>
+    </div>
+  </div>
+</div>
+
+
 const videos = [
   // ── BANNED PROMOTIONS (do not add without checking with site owner first) ──
   // Pro Wrestling Enterprise (PWE) — BANNED
@@ -1366,30 +1931,70 @@ document.addEventListener('click', () => {
   document.querySelectorAll('.card-menu-btn.open').forEach(b => b.classList.remove('open'));
 });
 
+async function deleteByCardId(e, btn) {
+  const id = btn.getAttribute('data-url');
+  const video = videos.find(v => extractId(v.url) === id);
+  if (!video) { alert('Could not find video.'); return; }
+  await deleteSubmittedVideo(e, video.url);
+}
+
 async function deleteSubmittedVideo(e, url) {
   e.stopPropagation();
   const session = (typeof getSession === 'function') ? getSession() : null;
   if (!session) return;
   if (!confirm('Delete this video? This cannot be undone.')) return;
+  const isAdmin = session.username.toLowerCase() === ADMIN_USERNAME;
   try {
-    // Only delete if this user submitted it
-    const existing = await sbGet('submissions', `url=eq.${encodeURIComponent(url)}&submitted_by=eq.${encodeURIComponent(session.username)}`);
-    if (!existing.length) { alert('Video not found or you do not own it.'); return; }
-    await sbDelete('submissions', `url=eq.${encodeURIComponent(url)}&submitted_by=eq.${encodeURIComponent(session.username)}`);
+    if (isAdmin) {
+      await sbDelete('submissions', `url=eq.${encodeURIComponent(url)}`);
+    } else {
+      const existing = await sbGet('submissions', `url=eq.${encodeURIComponent(url)}&submitted_by=eq.${encodeURIComponent(session.username)}`);
+      if (!existing.length) { alert('Video not found or you do not own it.'); return; }
+      await sbDelete('submissions', `url=eq.${encodeURIComponent(url)}&submitted_by=eq.${encodeURIComponent(session.username)}`);
+    }
     const vi = videos.findIndex(v => v.url === url);
     if (vi !== -1) videos.splice(vi, 1);
     buildPills();
     renderGrid();
   } catch(err) {
-    alert('Delete failed — the video is still in the hub. Please try again in a moment.');
+    alert('Delete failed. Please try again.');
     console.error(err);
   }
 }
 
+// ── SORT TOGGLE ──
+let _sortMode = 'post'; // 'post' = post date, 'event' = event date
+
+function toggleSort() {
+  _sortMode = _sortMode === 'post' ? 'event' : 'post';
+  const btn = document.getElementById('sort-toggle-btn');
+  const label = document.getElementById('sort-toggle-label');
+  if (_sortMode === 'event') {
+    label.textContent = 'Event Date';
+    btn.style.background = 'rgba(192,0,14,.12)';
+    btn.style.borderColor = 'rgba(192,0,14,.3)';
+    btn.style.color = '#c0000e';
+  } else {
+    label.textContent = 'Post Date';
+    btn.style.background = 'rgba(200,168,75,.12)';
+    btn.style.borderColor = 'rgba(200,168,75,.3)';
+    btn.style.color = '#c8a84b';
+  }
+  renderGrid();
+}
+
 function sortByDate(arr) {
   return [...arr].sort((a, b) => {
-    const ta = a.dateMs || new Date(a.date || 0).getTime();
-    const tb = b.dateMs || new Date(b.date || 0).getTime();
+    let ta, tb;
+    if (_sortMode === 'event') {
+      // Sort by show/event date
+      ta = a.dateMs || new Date(a.date || 0).getTime();
+      tb = b.dateMs || new Date(b.date || 0).getTime();
+    } else {
+      // Sort by when it was submitted/posted — newest first
+      ta = a.submittedAt || a.dateMs || new Date(a.date || 0).getTime();
+      tb = b.submittedAt || b.dateMs || new Date(b.date || 0).getTime();
+    }
     return tb - ta;
   });
 }
@@ -1416,6 +2021,22 @@ function setFilter(f, btn) {
   btn.classList.add('active');
   renderGrid();
 }
+// ── SKELETON LOADING ──
+function showSkeletons(count = 6) {
+  const grid = document.getElementById('card-grid');
+  grid.innerHTML = '';
+  for (let i = 0; i < count; i++) {
+    const card = document.createElement('div');
+    card.className = 'skeleton-card';
+    card.innerHTML = `
+      <div class="skeleton skeleton-thumb"></div>
+      <div class="skeleton skeleton-line tiny" style="width:45%;margin-bottom:5px;"></div>
+      <div class="skeleton skeleton-line medium"></div>
+      <div class="skeleton skeleton-line short"></div>`;
+    grid.appendChild(card);
+  }
+}
+
 function renderGrid() {
   const grid = document.getElementById('card-grid');
   const empty = document.getElementById('empty-state');
@@ -1430,6 +2051,7 @@ function renderGrid() {
   const showList = list;
   showList.forEach(v => grid.appendChild(makeCard(v)));
   setTimeout(updateRowArrows, 50);
+  setTimeout(loadAllCardRatings, 300);
 }
 
 
@@ -1445,11 +2067,13 @@ function makeCard(v) {
     : `this.src='https://i.ytimg.com/vi/${id}/hqdefault.jpg';this.onerror=function(){this.src='https://i.ytimg.com/vi/${id}/mqdefault.jpg';this.onerror=function(){this.style.background='#1a1a1f'}}`;
 
   const session = (typeof getSession === 'function') ? getSession() : null;
+  const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
   const isOwner = v.community && session && v.submittedBy === session.username;
+  const canDelete = isAdmin || isOwner;
 
   const el = document.createElement('div');
   el.className = 'card';
-  el.onclick = () => openM(v);
+  el.onclick = () => openExpand(v);
   el._videoUrl = v.url;
   el.innerHTML = `
     <div class="card-thumb">
@@ -1457,28 +2081,19 @@ function makeCard(v) {
       <div class="now-playing-badge"><div class="now-playing-eq"><span></span><span></span><span></span></div> Now Playing</div>
       ${v.new ? '<div class="new-badge">Just Added</div>' : ''}
       ${v.community ? '<div class="community-badge">Community</div>' : ''}
-      ${v.game ? `<div class="game-badge">${v.game}</div>` : ''}
+      ${v.game ? '<div class="game-badge">' + v.game + '</div>' : ''}
       <div class="card-over">
         <div class="play-c">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         </div>
       </div>
-      ${isOwner ? `
-      <button class="card-menu-btn" id="cmb-${id}" onclick="toggleCardMenu(event,'${id}')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
-      </button>
-      <div class="card-menu-dropdown" id="cmd-${id}">
-        <button class="card-menu-item" onclick="deleteSubmittedVideo(event,'${v.url}')">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-          Delete
-        </button>
-      </div>` : ''}
+      ${canDelete ? '<button class="card-menu-btn" id="cmb-' + id + '" onclick="toggleCardMenu(event,\'' + id + '\')"><svg width="14" height="14" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button><div class="card-menu-dropdown" id="cmd-' + id + '"><button class="card-menu-item" data-url="' + id + '" onclick="deleteByCardId(event,this)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>Delete</button></div>' : ''}
     </div>
     <div class="card-info">
       <div class="card-efed">${v.efed}</div>
       <div class="card-show">${v.show}</div>
       <div class="card-date">${v.date || ''}</div>
-      ${v.community && v.submittedBy ? `<div class="card-posted-by">posted by ${v.submittedBy}</div>` : ''}
+      ${v.community && v.submittedBy ? '<div class="card-posted-by">posted by ' + v.submittedBy + '</div>' : ''}
     </div>`;
   return el;
 }
@@ -1620,12 +2235,14 @@ function updateRowArrows() {
 
 // ── COMMUNITY VIDEOS ──
 async function initHub() {
+  // Show skeletons immediately while loading
+  showSkeletons(8);
   buildPills();
-  renderGrid();
 
-  // Load community submissions from Supabase and merge into videos array
+  // Load community submissions from Supabase
   try {
-    const subs = await sbGet('submissions', 'community=eq.true&order=submitted_at.desc');
+    const session = getSession();
+    const subs = await sbGet('submissions', 'community=eq.true&status=eq.approved&order=date_ms.desc');
     const existingUrls = new Set(videos.map(v => v.url));
     subs.forEach(s => {
       if (!existingUrls.has(s.url)) {
@@ -1635,8 +2252,10 @@ async function initHub() {
           efed: s.efed || 'Community',
           date: s.date || '',
           dateMs: s.date_ms || s.submitted_at || 0,
+          submittedAt: s.submitted_at || 0,
           submittedBy: s.submitted_by || '',
-          community: true
+          community: true,
+          status: 'approved'
         });
       }
     });
@@ -1644,6 +2263,7 @@ async function initHub() {
     renderGrid();
   } catch(e) {
     console.warn('Could not load community submissions:', e);
+    renderGrid(); // show static videos even if fetch fails
   }
 }
 
@@ -2003,10 +2623,12 @@ loadSlide();
 <script>
 // ── BANNED PROMOTION CHECK ────────────────────────────────────────────────
 const BANNED_PROMOS = [
-  'pro wrestling enterprise', 'pwe',
-  'deathwishhausen', 'wrestlinghausen', 'deathwish2k',
-  'empower', 'dwa', 'rhw',
-  'united kingdom wrestling', 'ukw',
+  'pro wrestling enterprise', 'pwe', 'prowrestlingenterprise',
+  'deathwishhausen', 'wrestlinghausen', 'deathwish2k', 'nuchieyt', 'dwa_pro',
+  'empower', 'dwa', 'rhw', 'rhwwrestling',
+  'united kingdom wrestling', 'ukw', 'ukwpro',
+  'coh', 'circle of honor', 'cohwrestling',
+  'pwj', 'pro wrestling japan', 'prowrestlingjapan',
 ];
 function checkBannedPromo(val, noticeId) {
   const notice = document.getElementById(noticeId);
@@ -2221,6 +2843,7 @@ handleFormSubmit('cf-remove-form', 'cf-remove-success');
   const wrap  = document.getElementById('nav-search-wrap');
   const input = document.getElementById('nav-search-input');
   const panel = document.getElementById('search-results-panel');
+  if (!btn || !wrap || !input || !panel) return;
 
   btn.addEventListener('click', function(e) {
     e.stopPropagation();
@@ -2380,36 +3003,6 @@ handleFormSubmit('cf-remove-form', 'cf-remove-success');
 </div>
 
 <script>
-// ── SUPABASE CONFIG ──
-const SUPABASE_URL = 'https://osbarvhklizidsffytye.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
-const SB_HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
-
-function getSession() {
-  try { return JSON.parse(localStorage.getItem('efed_session')); } catch { return null; }
-}
-
-async function sbGet(table, filters = '') {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filters}`, { headers: SB_HEADERS });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-async function sbInsert(table, data) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, { method: 'POST', headers: SB_HEADERS, body: JSON.stringify(data) });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-async function sbUpdate(table, data, filters) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filters}`, { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(data) });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-async function sbDelete(table, filters) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filters}`, { method: 'DELETE', headers: SB_HEADERS });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
 // Update nav with username from session — also sync displayName from DB
 (async function() {
   const session = getSession();
@@ -2426,6 +3019,12 @@ async function sbDelete(table, filters) {
   if (inviteBtn) inviteBtn.classList.add('visible');
   const submitNavBtn = document.getElementById('nav-submit-btn');
   if (submitNavBtn) submitNavBtn.style.display = 'flex';
+
+  // Show admin panel button only for admin
+  if (session.username.toLowerCase() === ADMIN_USERNAME) {
+    const adminBtn = document.getElementById('admin-panel-btn');
+    if (adminBtn) adminBtn.style.display = 'flex';
+  }
 
 
   // Set immediately from local session so nav isn't blank while loading
@@ -2447,6 +3046,17 @@ async function sbDelete(table, filters) {
         if (nameEl) nameEl.textContent = displayName;
         if (initialsEl) initialsEl.textContent = displayName[0].toUpperCase();
         if (ddName) ddName.textContent = displayName;
+      }
+      // Show avatar if set
+      if (user.avatar_url) {
+        session.avatarUrl = user.avatar_url;
+        localStorage.setItem('efed_session', JSON.stringify(session));
+        const imgEl = document.getElementById('nav-avatar-img');
+        if (imgEl) {
+          imgEl.src = user.avatar_url;
+          imgEl.style.display = 'block';
+          if (initialsEl) initialsEl.style.display = 'none';
+        }
       }
     }
   } catch(_) {} // non-critical — nav still works from local session
@@ -2557,18 +3167,31 @@ function copyCode(btn, code) {
 
 
 // ── SETTINGS ──
-function openSettings() {
+async function openSettings() {
   const session = getSession();
   if (!session) return;
   const displayName = session.displayName || session.username;
   document.getElementById('settings-name').value = displayName;
   document.getElementById('settings-cur-pass').value = '';
   document.getElementById('settings-new-pass').value = '';
+  document.getElementById('settings-avatar').value = '';
   clearSettingsMsgs();
   document.getElementById('settings-bg').classList.add('open');
   document.body.style.overflow = 'hidden';
-}
 
+  // Load current avatar
+  try {
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+    if (users.length && users[0].avatar_url) {
+      const url = users[0].avatar_url;
+      document.getElementById('settings-avatar').value = url;
+      const preview = document.getElementById('settings-avatar-preview');
+      preview.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';document.getElementById('settings-avatar-initial').style.display='block';">`;
+    }
+    const initial = displayName[0].toUpperCase();
+    document.getElementById('settings-avatar-initial').textContent = initial;
+  } catch(e) {}
+}
 
 function closeSettings() {
   document.getElementById('settings-bg').classList.remove('open');
@@ -2580,11 +3203,34 @@ function handleSettingsBgClick(e) {
 }
 
 function clearSettingsMsgs() {
-  ['settings-name-msg','settings-pass-msg'].forEach(id => {
+  ['settings-name-msg','settings-pass-msg','settings-avatar-msg'].forEach(id => {
     const el = document.getElementById(id);
-    el.className = 'settings-msg';
-    el.textContent = '';
+    if (el) { el.className = 'settings-msg'; el.textContent = ''; }
   });
+}
+
+async function saveAvatar() {
+  const session = getSession();
+  if (!session) return;
+  const url = document.getElementById('settings-avatar').value.trim();
+  if (!url) return showSettingsMsg('settings-avatar-msg', 'Please paste an image URL.', 'error');
+  if (!url.startsWith('http')) return showSettingsMsg('settings-avatar-msg', 'Please enter a valid URL starting with http.', 'error');
+
+  try {
+    await sbUpdate('users', { avatar_url: url }, `username=eq.${encodeURIComponent(session.username)}`);
+    // Update preview
+    const preview = document.getElementById('settings-avatar-preview');
+    preview.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;">`;
+    // Update nav avatar if showing
+    const navAvatar = document.getElementById('nav-avatar-img');
+    if (navAvatar) navAvatar.src = url;
+    // Save to session
+    session.avatarUrl = url;
+    localStorage.setItem('efed_session', JSON.stringify(session));
+    showSettingsMsg('settings-avatar-msg', 'Profile picture updated!', 'success');
+  } catch(e) {
+    showSettingsMsg('settings-avatar-msg', 'Could not save. Try again.', 'error');
+  }
 }
 
 function showSettingsMsg(id, msg, type) {
@@ -2640,4 +3286,1649 @@ async function savePassword() {
     showSettingsMsg('settings-pass-msg', 'Could not save. Try again.', 'error');
   }
 }
+</script>
+
+<!-- ── SUBMIT MODAL ── -->
+<div id="submit-modal-bg" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="handleSubmitBgClick(event)">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:90%;max-width:480px;padding:36px 32px;position:relative;box-shadow:0 40px 80px rgba(0,0,0,.6);">
+    <button onclick="closeSubmitModal()" style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;">✕</button>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:3px;color:#fff;margin-bottom:4px;">Post a Show</div>
+    <p style="font-size:.72rem;color:#5a5a6a;margin-bottom:24px;line-height:1.6;">Paste a YouTube link and we'll pull the info automatically.</p>
+
+    <div id="submit-err" style="display:none;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;font-size:.75rem;padding:10px 14px;border-radius:8px;margin-bottom:16px;"></div>
+    <div id="submit-ok" style="display:none;background:rgba(76,175,100,.12);border:1px solid rgba(76,175,100,.3);color:#4caf64;font-size:.75rem;padding:10px 14px;border-radius:8px;margin-bottom:16px;"></div>
+
+    <!-- Link input -->
+    <div style="margin-bottom:16px;">
+      <label style="display:block;font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a6a;font-weight:600;margin-bottom:6px;">YouTube Link</label>
+      <input id="submit-url" type="url" placeholder="https://youtube.com/watch?v=..." autocomplete="off"
+        style="width:100%;padding:11px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;outline:none;"
+        oninput="clearSubmitPreview()" />
+    </div>
+
+    <!-- Preview (shown after fetch) -->
+    <div id="submit-preview" style="display:none;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px;margin-bottom:16px;">
+      <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:6px;">Preview</div>
+      <div id="submit-preview-title" style="font-size:.85rem;font-weight:600;color:#e8e8e8;margin-bottom:4px;"></div>
+      <div id="submit-preview-channel" style="font-size:.7rem;color:#5a5a6a;"></div>
+    </div>
+
+    <!-- Screening result -->
+    <div id="submit-screening" style="display:none;font-size:.72rem;padding:10px 14px;border-radius:8px;margin-bottom:16px;"></div>
+
+    <button id="submit-post-btn" onclick="doSubmitPost()"
+      style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;">
+      Post to Hub
+    </button>
+  </div>
+</div>
+
+<style>
+#submit-url:focus { border-color:rgba(255,255,255,.25)!important;background:rgba(255,255,255,.08)!important; }
+</style>
+
+<script>
+// ── ADMIN ──
+
+// ── SUBMIT MODAL ──
+function openSubmitModal() {
+  const session = getSession();
+  if (!session) {
+    window.location.replace('auth.html');
+    return;
+  }
+  document.getElementById('submit-modal-bg').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  document.getElementById('submit-url').value = '';
+  clearSubmitPreview();
+  document.getElementById('submit-err').style.display = 'none';
+  document.getElementById('submit-ok').style.display = 'none';
+}
+
+function closeSubmitModal() {
+  document.getElementById('submit-modal-bg').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function handleSubmitBgClick(e) {
+  if (e.target === document.getElementById('submit-modal-bg')) closeSubmitModal();
+}
+
+function clearSubmitPreview() {
+  document.getElementById('submit-preview').style.display = 'none';
+  document.getElementById('submit-screening').style.display = 'none';
+  document.getElementById('submit-err').style.display = 'none';
+  document.getElementById('submit-ok').style.display = 'none';
+}
+
+let _fetchedMeta = null;
+
+async function doSubmitPost() {
+  const session = getSession();
+  if (!session) return;
+  const url = document.getElementById('submit-url').value.trim();
+  if (!url) return showSubmitErr('Please paste a YouTube link.');
+
+  // Extract video ID
+  const vidId = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/)?.[1];
+  if (!vidId) return showSubmitErr('That doesn\'t look like a valid YouTube link.');
+
+  const btn = document.getElementById('submit-post-btn');
+  btn.disabled = true;
+  btn.textContent = 'Fetching info…';
+  document.getElementById('submit-err').style.display = 'none';
+  document.getElementById('submit-ok').style.display = 'none';
+
+  try {
+    // Check duplicate
+    const existing = await sbGet('submissions', `url=eq.${encodeURIComponent(url)}`);
+    if (existing.length) {
+      // Check if user is a Creator who can claim this video
+      const userRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+      const user = userRows[0];
+      const isCreator = user?.is_creator;
+      const ytChannel = (user?.yt_channel || '').toLowerCase();
+
+      // Fetch video metadata to check channel ownership
+      const oembedCheck = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${vidId}&format=json`);
+      const oDataCheck = await oembedCheck.json();
+      const videoChannel = (oDataCheck.author_name || '').toLowerCase();
+
+      // Check if creator's registered channel matches the video channel
+      const channelMatch = ytChannel && (
+        videoChannel.includes(ytChannel.replace('https://youtube.com/@','').replace('@','')) ||
+        ytChannel.includes(videoChannel)
+      );
+
+      if (isCreator && channelMatch && !existing[0].claimed_by) {
+        // Show claim prompt
+        showClaimPrompt(existing[0], oDataCheck.title, session.username);
+        btn.disabled = false;
+        btn.textContent = 'Post to Hub';
+        return;
+      }
+
+      return showSubmitErr('This video has already been posted.');
+    }
+
+    // Fetch oEmbed metadata
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${vidId}&format=json`;
+    const oRes = await fetch(oembedUrl);
+    if (!oRes.ok) return showSubmitErr('Could not fetch video info. Check the link.');
+    const oData = await oRes.json();
+
+    _fetchedMeta = {
+      title: oData.title || '',
+      channel: oData.author_name || '',
+      vidId
+    };
+
+    // Check against banned promotions list — name, title and channel handle
+    const channelLower = _fetchedMeta.channel.toLowerCase().replace(/\s/g, '').replace(/@/g, '');
+    const titleLower = _fetchedMeta.title.toLowerCase();
+    const isBanned = BANNED_PROMOS.some(b => {
+      const clean = b.replace(/@/g, '');
+      return channelLower.includes(clean) || titleLower.includes(clean);
+    });
+    if (isBanned) return showSubmitErr('This promotion is not permitted on the EFED Streaming Hub.');
+
+    // Show preview
+    document.getElementById('submit-preview-title').textContent = _fetchedMeta.title;
+    document.getElementById('submit-preview-channel').textContent = _fetchedMeta.channel;
+    document.getElementById('submit-preview').style.display = 'block';
+
+    // Post to Supabase — goes live instantly
+    btn.textContent = 'Posting…';
+    await sbInsert('submissions', {
+      url,
+      show_name: _fetchedMeta.title,
+      efed: _fetchedMeta.channel,
+      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      date_ms: Date.now(),
+      submitted_by: session.username,
+      submitted_at: Date.now(),
+      community: true,
+      status: 'approved'
+    });
+
+    // Add to local videos array immediately — live for everyone
+    videos.push({
+      url,
+      show: _fetchedMeta.title,
+      efed: _fetchedMeta.channel,
+      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      dateMs: Date.now(),
+      submittedAt: Date.now(),
+      submittedBy: session.username,
+      community: true,
+      status: 'approved'
+    });
+    buildPills();
+    renderGrid();
+
+    document.getElementById('submit-ok').style.display = 'block';
+    document.getElementById('submit-ok').textContent = '🎉 Your show is now live on the Hub!';
+    btn.textContent = 'Posted!';
+    setTimeout(() => closeSubmitModal(), 2000);
+
+  } catch(e) {
+    showSubmitErr('Something went wrong. Try again.');
+    console.error(e);
+    btn.textContent = 'Post to Hub';
+    btn.disabled = false;
+  }
+}
+
+function showSubmitErr(msg) {
+  const el = document.getElementById('submit-err');
+  el.textContent = msg;
+  el.style.display = 'block';
+  document.getElementById('submit-post-btn').disabled = false;
+  document.getElementById('submit-post-btn').textContent = 'Post to Hub';
+}
+</script>
+
+<script>
+// ── CARD EXPAND ──
+let _expandVideo = null;
+let _expandLikes = {};
+let _expandBookmarks = {};
+
+function openExpand(v) {
+  _expandVideo = v;
+  const id = extractId(v.url);
+
+  // Set hero thumbnail
+  const thumb = v.thumb || `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`;
+  document.getElementById('expand-hero-thumb').src = thumb;
+  document.getElementById('expand-hero-thumb').style.display = 'block';
+  document.getElementById('expand-frame').style.display = 'none';
+  document.getElementById('expand-frame').src = '';
+  document.getElementById('expand-play-btn').style.display = 'flex';
+
+  // Info
+  document.getElementById('expand-efed').textContent = v.efed || '';
+  document.getElementById('expand-show').textContent = v.show || '';
+  document.getElementById('expand-meta').textContent = v.date || '';
+  const posterEl = document.getElementById('expand-poster');
+  posterEl.innerHTML = v.submittedBy ? `Posted by <span>${v.submittedBy}</span>` : '';
+
+  // Actions state
+  const session = getSession();
+  const videoKey = encodeURIComponent(v.url);
+
+  // Like button
+  const likeBtn = document.getElementById('expand-like-btn');
+  const liked = session && _expandLikes[videoKey]?.includes(session.username);
+  likeBtn.classList.toggle('liked', !!liked);
+
+  // Bookmark button
+  const bookmarkBtn = document.getElementById('expand-bookmark-btn');
+  const bookmarked = session && _expandBookmarks[session.username]?.includes(v.url);
+  bookmarkBtn.classList.toggle('bookmarked', !!bookmarked);
+
+  // Comments
+  document.getElementById('expand-comment-wrap').style.display = session ? 'flex' : 'none';
+  document.getElementById('expand-comment-login-msg').style.display = session ? 'none' : 'block';
+  loadExpandComments(v.url);
+  loadExpandLikeCount(v.url);
+
+  // Open overlay
+  const overlay = document.getElementById('card-expand');
+  overlay.scrollTop = 0;
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  // Collapse on scroll down
+  let lastScroll = 0;
+  overlay.onscroll = () => {
+    const cur = overlay.scrollTop;
+    if (cur < 10 && lastScroll > cur + 30) {
+      closeExpand();
+    }
+    lastScroll = cur;
+  };
+}
+
+function closeExpand() {
+  const overlay = document.getElementById('card-expand');
+  if (_expandVideo) stopWatchTimer(_expandVideo.url);
+  overlay.classList.remove('open');
+  document.body.style.overflow = '';
+  document.getElementById('expand-frame').src = '';
+  _expandVideo = null;
+}
+
+function expandStartVideo() {
+  if (!_expandVideo) return;
+  const id = extractId(_expandVideo.url);
+  const t = extractT(_expandVideo.url);
+  const src = `https://www.youtube.com/embed/${id}?autoplay=1&start=${t}&rel=0&modestbranding=1`;
+  document.getElementById('expand-frame').src = src;
+  document.getElementById('expand-frame').style.display = 'block';
+  document.getElementById('expand-hero-thumb').style.display = 'none';
+  document.getElementById('expand-play-btn').style.display = 'none';
+  // Start watch timer
+  startWatchTimer(_expandVideo.url);
+}
+
+function expandWatchFull() {
+  if (!_expandVideo) return;
+  openM(_expandVideo);
+}
+
+// ── LIKES ──
+async function loadExpandLikeCount(url) {
+  try {
+    const rows = await sbGet('likes', `video_id=eq.${encodeURIComponent(extractId(url))}`);
+    document.getElementById('expand-like-count').textContent = rows.length;
+    const session = getSession();
+    if (session) {
+      const liked = rows.some(r => r.username === session.username);
+      document.getElementById('expand-like-btn').classList.toggle('liked', liked);
+      if (!_expandLikes[encodeURIComponent(url)]) _expandLikes[encodeURIComponent(url)] = [];
+      if (liked && !_expandLikes[encodeURIComponent(url)].includes(session.username)) {
+        _expandLikes[encodeURIComponent(url)].push(session.username);
+      }
+    }
+  } catch(e) { console.warn('Likes load failed', e); }
+}
+
+async function toggleExpandLike() {
+  const session = getSession();
+  if (!session) { alert('Sign in to like shows.'); return; }
+  if (!_expandVideo) return;
+  const url = _expandVideo.url;
+  const key = encodeURIComponent(url);
+  const btn = document.getElementById('expand-like-btn');
+  const countEl = document.getElementById('expand-like-count');
+  const isLiked = btn.classList.contains('liked');
+
+  try {
+    if (isLiked) {
+      await sbDelete('likes', `video_id=eq.${encodeURIComponent(extractId(url))}&username=eq.${encodeURIComponent(session.username)}`);
+      btn.classList.remove('liked');
+      countEl.textContent = Math.max(0, parseInt(countEl.textContent) - 1);
+    } else {
+      await sbInsert('likes', { video_url: url, video_id: extractId(url), username: session.username, liked_at: Date.now() });
+      btn.classList.add('liked');
+      countEl.textContent = parseInt(countEl.textContent) + 1;
+      // Notify the video owner
+      const vidOwner = _expandVideo?.submittedBy;
+      if (vidOwner && vidOwner !== session.username) {
+        await sendNotification(vidOwner, 'like',
+          `❤️ @${session.username} liked your show "${_expandVideo?.show || ''}"`,
+          url);
+      }
+    }
+  } catch(e) { console.warn('Like failed', e); }
+}
+
+// ── BOOKMARKS ──
+async function toggleExpandBookmark() {
+  const session = getSession();
+  if (!session) { alert('Sign in to bookmark shows.'); return; }
+  if (!_expandVideo) return;
+  const url = _expandVideo.url;
+  const btn = document.getElementById('expand-bookmark-btn');
+  const isBookmarked = btn.classList.contains('bookmarked');
+
+  try {
+    if (isBookmarked) {
+      await sbDelete('bookmarks', `video_id=eq.${encodeURIComponent(extractId(url))}&username=eq.${encodeURIComponent(session.username)}`);
+      btn.classList.remove('bookmarked');
+    } else {
+      await sbInsert('bookmarks', { video_url: url, video_id: extractId(url), username: session.username, saved_at: Date.now() });
+      btn.classList.add('bookmarked');
+    }
+  } catch(e) { console.warn('Bookmark failed', e); }
+}
+
+// ── COMMENTS ──
+async function loadExpandComments(url) {
+  const list = document.getElementById('expand-comments-list');
+  list.innerHTML = '<div style="font-size:.72rem;color:#5a5a6a;">Loading…</div>';
+  try {
+    const session = getSession();
+    const rows = await sbGet('comments', `video_id=eq.${encodeURIComponent(extractId(url))}&removed=eq.false&order=created_at.asc`);
+    if (!rows.length) {
+      list.innerHTML = '<div style="font-size:.72rem;color:#5a5a6a;padding:8px 0;">No comments yet. Be the first!</div>';
+      return;
+    }
+
+    // Fetch avatars for unique usernames
+    const usernames = [...new Set(rows.map(r => r.username))];
+    const avatarMap = {};
+    try {
+      const users = await sbGet('users', `username=in.(${usernames.map(u => encodeURIComponent(u)).join(',')})`);
+      users.forEach(u => { avatarMap[u.username] = u.avatar_url || null; });
+    } catch(e) {}
+
+    list.innerHTML = '';
+    rows.forEach(c => {
+      const avatar = avatarMap[c.username];
+      const avatarHtml = avatar
+        ? `<img src="${avatar}" style="width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.outerHTML='<div class=expand-comment-avatar>${(c.username||'?')[0].toUpperCase()}</div>'">`
+        : `<div class="expand-comment-avatar">${(c.username || '?')[0].toUpperCase()}</div>`;
+
+      const div = document.createElement('div');
+      div.className = 'expand-comment';
+      div.innerHTML = `
+        ${avatarHtml}
+        <div class="expand-comment-body" style="flex:1;">
+          <div class="expand-comment-user">${c.username} ${c.is_creator ? '<span style="color:#c8a84b;font-size:.55rem;letter-spacing:1px;">🎬</span>' : ''}</div>
+          <div class="expand-comment-text">${c.text}</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:6px;">
+            <div class="expand-comment-time">${new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div>
+            <button id="clike-${c.id}" onclick="toggleCommentLike(${c.id},this)" style="display:flex;align-items:center;gap:3px;background:none;border:none;cursor:pointer;color:#5a5a6a;font-size:.72rem;padding:0;transition:color .15s;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              <span id="clike-count-${c.id}">0</span>
+            </button>
+            ${session && session.username !== c.username ? `<button onclick="openFlagModal(${c.id},this)" style="background:none;border:none;color:#5a5a6a;font-size:.6rem;cursor:pointer;padding:0;letter-spacing:.5px;text-transform:uppercase;">⚑ Report</button>` : ''}
+          </div>
+        </div>`;
+      list.appendChild(div);
+    });
+    // Load like counts for all comments
+    loadCommentLikes(rows.map(c => c.id), session);
+  } catch(e) {
+    list.innerHTML = '<div style="font-size:.72rem;color:#5a5a6a;">Could not load comments.</div>';
+  }
+}
+
+async function loadCommentLikes(commentIds, session) {
+  if (!commentIds.length) return;
+  try {
+    const likes = await sbGet('comment_likes', `comment_id=in.(${commentIds.join(',')})`);
+    // Group by comment_id
+    const counts = {};
+    const userLiked = {};
+    likes.forEach(l => {
+      counts[l.comment_id] = (counts[l.comment_id] || 0) + 1;
+      if (session && l.username === session.username) userLiked[l.comment_id] = true;
+    });
+    commentIds.forEach(id => {
+      const countEl = document.getElementById('clike-count-' + id);
+      const btn = document.getElementById('clike-' + id);
+      if (countEl) countEl.textContent = counts[id] || 0;
+      if (btn && userLiked[id]) {
+        btn.style.color = '#c0000e';
+        btn.querySelector('svg').setAttribute('fill', '#c0000e');
+      }
+    });
+  } catch(e) {}
+}
+
+async function toggleCommentLike(commentId, btn) {
+  const session = getSession();
+  if (!session) { alert('Sign in to like comments.'); return; }
+  const isLiked = btn.style.color === 'rgb(192, 0, 14)';
+  const countEl = document.getElementById('clike-count-' + commentId);
+  const current = parseInt(countEl?.textContent || '0');
+  try {
+    if (isLiked) {
+      await sbDelete('comment_likes', `comment_id=eq.${commentId}&username=eq.${encodeURIComponent(session.username)}`);
+      btn.style.color = '#5a5a6a';
+      btn.querySelector('svg').setAttribute('fill', 'none');
+      if (countEl) countEl.textContent = Math.max(0, current - 1);
+    } else {
+      await sbInsert('comment_likes', { comment_id: commentId, username: session.username, liked_at: Date.now() });
+      btn.style.color = '#c0000e';
+      btn.querySelector('svg').setAttribute('fill', '#c0000e');
+      if (countEl) countEl.textContent = current + 1;
+    }
+  } catch(e) { console.warn('Comment like failed', e); }
+}
+
+// ── COMMENT MODERATION ──
+const BANNED_WORDS = [
+  // Slurs and hate speech
+  'nigger','nigga','faggot','fag','chink','spic','kike','gook','tranny',
+  'retard','cunt','whore','slut','rape','kill yourself','kys','die bitch',
+  'go kill','shoot yourself','hang yourself','fuck you','suck my','eat shit',
+  'piece of shit','you suck','trash ass','stupid bitch','dumb bitch','ugly bitch',
+  // FSW protection — block any accusations/attacks on FSW
+  'fsw is transphobic','fsw transphobic','fsw hates trans','fsw anti trans',
+  'fsw is anti-woke','fsw anti woke','fsw is anti woke','fsw is problematic',
+  'fsw is racist','fsw is homophobic','fsw hates','fsw is trash','fsw is garbage',
+  'fsw is dead','fsw is fake','fsw is a joke','fsw sucks','fsw is terrible',
+  'fsw is awful','fsw is horrible','first strike wrestling is','first strike is',
+];
+
+function containsBannedWord(text) {
+  const lower = text.toLowerCase();
+  const stripped = lower.replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  return BANNED_WORDS.some(w => stripped.includes(w.toLowerCase()));
+}
+
+async function screenComment(text) {
+  // Keyword filter — instant, free, no API needed
+  if (containsBannedWord(text)) return { blocked: true, reason: 'hate' };
+  return { blocked: false };
+}
+
+async function addStrike(username) {
+  try {
+    // Get current strikes
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(username)}`);
+    if (!users.length) return;
+    const strikes = (users[0].strikes || 0) + 1;
+    if (strikes >= 3) {
+      // Auto ban
+      await sbUpdate('users', { strikes, banned: true, banned_reason: 'Automatic ban: 3 strikes for hateful comments' }, `username=eq.${encodeURIComponent(username)}`);
+    } else {
+      await sbUpdate('users', { strikes }, `username=eq.${encodeURIComponent(username)}`);
+    }
+  } catch(e) { console.warn('Strike update failed', e); }
+}
+
+async function postExpandComment() {
+  const session = getSession();
+  if (!session || !_expandVideo) return;
+  const input = document.getElementById('expand-comment-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const btn = document.querySelector('.expand-comment-send');
+  btn.disabled = true; btn.textContent = 'Checking…';
+
+  try {
+    // Check if user is banned
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+    if (users.length && users[0].banned) {
+      btn.disabled = false; btn.textContent = 'Post';
+      alert('Your account has been suspended from the Hub.');
+      return;
+    }
+
+    // Screen the comment
+    const screen = await screenComment(text);
+    if (screen.blocked) {
+      // Add strike silently
+      await addStrike(session.username);
+      const users2 = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+      const strikes = users2[0]?.strikes || 1;
+      btn.disabled = false; btn.textContent = 'Post';
+      input.value = '';
+      input.style.height = '';
+      if (strikes >= 3) {
+        alert('Your comment violated community guidelines. Your account has been suspended.');
+      } else {
+        alert(`Your comment was removed for violating community guidelines. Strike ${strikes} of 3.`);
+      }
+      return;
+    }
+
+    // Post the comment
+    btn.textContent = 'Posting…';
+    await sbInsert('comments', {
+      video_url: _expandVideo.url,
+      video_id: extractId(_expandVideo.url),
+      username: session.username,
+      text,
+      created_at: Date.now(),
+      flagged: false,
+      removed: false
+    });
+
+    // Notify the video owner
+    const vidOwner = videos.find(v => v.url === _expandVideo.url)?.submittedBy;
+    if (vidOwner && vidOwner !== session.username) {
+      await sendNotification(vidOwner, 'comment',
+        `💬 @${session.username} commented on your show "${_expandVideo.show || ''}"`,
+        _expandVideo.url);
+    }
+    input.value = '';
+    input.style.height = '';
+    loadExpandComments(_expandVideo.url);
+  } catch(e) {
+    alert('Could not post comment. Try again.');
+    console.error(e);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Post';
+  }
+}
+
+function autoResizeComment(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+// Swipe down to close on mobile
+(function() {
+  const overlay = document.getElementById('card-expand');
+  if (!overlay) return;
+  let startY = 0;
+  overlay.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
+  overlay.addEventListener('touchend', e => {
+    const diff = e.changedTouches[0].clientY - startY;
+    if (diff > 80 && overlay.scrollTop === 0) closeExpand();
+  }, { passive: true });
+})();
+</script>
+
+<!-- ── ADMIN PANEL ── -->
+<div id="admin-panel-bg" style="display:none;position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);overflow-y:auto;" onclick="handleAdminBgClick(event)">
+  <div style="min-height:100%;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;">
+    <div style="background:#0f0f12;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:100%;max-width:640px;padding:32px;position:relative;">
+      <button onclick="closeAdminPanel()" style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;">✕</button>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:3px;color:#fff;margin-bottom:4px;">Admin Panel</div>
+      <p style="font-size:.7rem;color:#5a5a6a;margin-bottom:20px;">Manage the Hub</p>
+
+      <!-- Tabs -->
+      <div style="display:flex;gap:8px;margin-bottom:20px;">
+        <button id="admin-tab-pending" onclick="switchAdminTab('pending')" style="padding:8px 16px;border-radius:40px;border:1px solid rgba(192,0,14,.4);background:rgba(192,0,14,.15);color:#fff;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;letter-spacing:1px;">Pending</button>
+        <button id="admin-tab-flagged" onclick="switchAdminTab('flagged')" style="padding:8px 16px;border-radius:40px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:#5a5a6a;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;letter-spacing:1px;">Flagged Comments</button>
+        <button id="admin-tab-users" onclick="switchAdminTab('users')" style="padding:8px 16px;border-radius:40px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:#5a5a6a;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;letter-spacing:1px;">Users</button>
+        <button id="admin-tab-broadcast" onclick="switchAdminTab('broadcast')" style="padding:8px 16px;border-radius:40px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:#5a5a6a;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;letter-spacing:1px;">📢 Broadcast</button>
+      </div>
+
+      <div id="admin-pending-list"></div>
+      <div id="admin-flagged-list" style="display:none;"></div>
+      <div id="admin-users-list" style="display:none;"></div>
+      <div id="admin-broadcast-list" style="display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let _flagCommentId = null;
+let _flagBtn = null;
+
+function openFlagModal(commentId, btn) {
+  _flagCommentId = commentId;
+  _flagBtn = btn;
+  document.getElementById('flag-reason-select').value = '';
+  document.getElementById('flag-modal-bg').style.display = 'flex';
+}
+
+function closeFlagModal() {
+  document.getElementById('flag-modal-bg').style.display = 'none';
+  _flagCommentId = null;
+  _flagBtn = null;
+}
+
+async function submitFlag() {
+  const selected = document.querySelector('input[name="flag-reason"]:checked');
+  if (!selected) {
+    alert('Please select a reason.');
+    return;
+  }
+  const reason = selected.value;
+  try {
+    await sbUpdate('comments', { flagged: true, flag_reason: reason }, `id=eq.${_flagCommentId}`);
+    if (_flagBtn) {
+      _flagBtn.textContent = '⚑ Reported';
+      _flagBtn.style.color = '#c0000e';
+      _flagBtn.disabled = true;
+    }
+    closeFlagModal();
+  } catch(e) { console.warn('Flag failed', e); }
+}
+
+function openAdminPanel() {
+  const session = getSession();
+  if (!session || session.username.toLowerCase() !== ADMIN_USERNAME) return;
+  document.getElementById('admin-panel-bg').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+  switchAdminTab('pending');
+}
+
+function switchAdminTab(tab) {
+  ['pending','flagged','users','broadcast'].forEach(t => {
+    document.getElementById('admin-' + t + '-list').style.display = t === tab ? 'block' : 'none';
+    const btn = document.getElementById('admin-tab-' + t);
+    if (t === tab) {
+      btn.style.background = 'rgba(192,0,14,.15)';
+      btn.style.borderColor = 'rgba(192,0,14,.4)';
+      btn.style.color = '#fff';
+    } else {
+      btn.style.background = 'rgba(255,255,255,.05)';
+      btn.style.borderColor = 'rgba(255,255,255,.1)';
+      btn.style.color = '#5a5a6a';
+    }
+  });
+  if (tab === 'pending') loadAdminPending();
+  if (tab === 'flagged') loadAdminFlagged();
+  if (tab === 'users') loadAdminUsers();
+  if (tab === 'broadcast') loadAdminBroadcast();
+}
+function closeAdminPanel() {
+  document.getElementById('admin-panel-bg').style.display = 'none';
+  document.body.style.overflow = '';
+}
+function handleAdminBgClick(e) {
+  if (e.target === document.getElementById('admin-panel-bg')) closeAdminPanel();
+}
+
+async function loadAdminPending() {
+  const list = document.getElementById('admin-pending-list');
+  list.innerHTML = '<div style="font-size:.75rem;color:#5a5a6a;padding:12px 0;">Loading…</div>';
+  try {
+    const rows = await sbGet('submissions', 'status=eq.pending&order=submitted_at.asc');
+    if (!rows.length) {
+      list.innerHTML = '<div style="font-size:.75rem;color:#5a5a6a;padding:12px 0;">No pending submissions. You\'re all caught up! ✅</div>';
+      return;
+    }
+    list.innerHTML = '';
+    rows.forEach(s => {
+      const id = s.url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/)?.[1] || '';
+      const thumb = id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '';
+      const card = document.createElement('div');
+      card.id = 'admin-row-' + s.id;
+      card.style.cssText = 'display:flex;gap:14px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06);align-items:flex-start;';
+      card.innerHTML = `
+        ${thumb ? `<img src="${thumb}" style="width:100px;height:56px;object-fit:cover;border-radius:6px;flex-shrink:0;">` : ''}
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:.6rem;color:#c8a84b;letter-spacing:2px;text-transform:uppercase;font-weight:700;margin-bottom:3px;">${s.efed || ''}</div>
+          <div style="font-size:.82rem;font-weight:600;color:#e8e8e8;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.show_name || ''}</div>
+          <div style="font-size:.65rem;color:#5a5a6a;">by ${s.submitted_by || '?'} · ${s.date || ''}</div>
+          <a href="${s.url}" target="_blank" style="font-size:.6rem;color:#5a5a6a;text-decoration:none;display:block;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.url}</a>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
+          <button onclick="adminApprove(${s.id})" style="padding:7px 14px;background:#c0000e;border:none;border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">Approve</button>
+          <button onclick="adminReject(${s.id})" style="padding:7px 14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">Reject</button>
+        </div>`;
+      list.appendChild(card);
+    });
+  } catch(e) {
+    list.innerHTML = '<div style="font-size:.75rem;color:#ff6b6b;">Could not load submissions.</div>';
+    console.error(e);
+  }
+}
+
+async function adminApprove(id) {
+  const row = document.getElementById('admin-row-' + id);
+  if (row) row.style.opacity = '.4';
+  try {
+    await sbUpdate('submissions', { status: 'approved' }, `id=eq.${id}`);
+    if (row) row.remove();
+    // Update local videos array
+    const v = videos.find(v => v._subId === id);
+    if (v) { v.status = 'approved'; buildPills(); renderGrid(); }
+    // Reload to pick up the approved video
+    const approved = await sbGet('submissions', `id=eq.${id}`);
+    if (approved.length) {
+      const s = approved[0];
+      const existing = videos.find(v => v.url === s.url);
+      if (existing) { existing.status = 'approved'; }
+      else {
+        videos.push({ url: s.url, show: s.show_name||'', efed: s.efed||'Community', date: s.date||'', dateMs: s.date_ms||0, submittedBy: s.submitted_by||'', community: true, status: 'approved' });
+      }
+      buildPills(); renderGrid();
+    }
+    loadAdminPending();
+  } catch(e) {
+    if (row) row.style.opacity = '1';
+    alert('Could not approve. Try again.');
+  }
+}
+
+async function adminReject(id) {
+  if (!confirm('Reject and delete this submission?')) return;
+  const row = document.getElementById('admin-row-' + id);
+  if (row) row.style.opacity = '.4';
+  try {
+    await sbDelete('submissions', `id=eq.${id}`);
+    if (row) row.remove();
+    loadAdminPending();
+  } catch(e) {
+    if (row) row.style.opacity = '1';
+    alert('Could not reject. Try again.');
+  }
+}
+
+async function loadAdminFlagged() {
+  const list = document.getElementById('admin-flagged-list');
+  list.innerHTML = '<div style="font-size:.75rem;color:#5a5a6a;padding:12px 0;">Loading…</div>';
+  try {
+    const rows = await sbGet('comments', 'flagged=eq.true&removed=eq.false&order=created_at.asc');
+    if (!rows.length) {
+      list.innerHTML = '<div style="font-size:.75rem;color:#5a5a6a;padding:12px 0;">No flagged comments. All clear! ✅</div>';
+      return;
+    }
+    list.innerHTML = '';
+    rows.forEach(c => {
+      const div = document.createElement('div');
+      div.id = 'flagged-row-' + c.id;
+      div.style.cssText = 'padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06);';
+      div.innerHTML = `
+        <div style="font-size:.65rem;color:#c8a84b;font-weight:700;margin-bottom:4px;">${c.username}</div>
+        <div style="font-size:.82rem;color:#e8e8e8;margin-bottom:4px;">${c.text}</div>
+        ${c.flag_reason ? `<div style="font-size:.62rem;color:#c0000e;margin-bottom:8px;">Reason: ${c.flag_reason.replace(/_/g,' ')}</div>` : ''}
+        <div style="display:flex;gap:8px;">
+          <button onclick="adminRemoveComment(${c.id})" style="padding:6px 12px;background:#c0000e;border:none;border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.68rem;font-weight:700;cursor:pointer;">Remove</button>
+          <button onclick="adminDismissFlag(${c.id})" style="padding:6px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.68rem;font-weight:700;cursor:pointer;">Dismiss</button>
+          <button onclick="adminBanUser('${c.username}')" style="padding:6px 12px;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.3);border-radius:8px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.68rem;font-weight:700;cursor:pointer;">Ban User</button>
+        </div>`;
+      list.appendChild(div);
+    });
+  } catch(e) {
+    list.innerHTML = '<div style="font-size:.75rem;color:#ff6b6b;">Could not load flagged comments.</div>';
+  }
+}
+
+async function adminRemoveComment(id) {
+  try {
+    // Get comment details first for notification
+    const comments = await sbGet('comments', `id=eq.${id}`);
+    await sbUpdate('comments', { removed: true }, `id=eq.${id}`);
+    // Notify the user
+    if (comments.length) {
+      await sendNotification(comments[0].username, 'admin',
+        '📢 Your comment was removed for violating community guidelines.',
+        comments[0].video_url);
+    }
+    const row = document.getElementById('flagged-row-' + id);
+    if (row) row.remove();
+  } catch(e) { alert('Could not remove. Try again.'); }
+}
+
+async function adminDismissFlag(id) {
+  try {
+    await sbUpdate('comments', { flagged: false }, `id=eq.${id}`);
+    const row = document.getElementById('flagged-row-' + id);
+    if (row) row.remove();
+  } catch(e) { alert('Could not dismiss. Try again.'); }
+}
+
+async function adminBanUser(username) {
+  if (!confirm('Ban ' + username + '? They will not be able to log in.')) return;
+  try {
+    await sbUpdate('users', { banned: true, banned_reason: 'Banned by admin' }, `username=eq.${encodeURIComponent(username)}`);
+    alert(username + ' has been banned.');
+    loadAdminFlagged();
+  } catch(e) { alert('Could not ban user. Try again.'); }
+}
+
+async function loadAdminUsers() {
+  const list = document.getElementById('admin-users-list');
+  list.innerHTML = '<div style="font-size:.75rem;color:#5a5a6a;padding:12px 0;">Loading…</div>';
+  try {
+    const rows = await sbGet('users', 'order=joined_at.desc');
+    list.innerHTML = '';
+    rows.forEach(u => {
+      const div = document.createElement('div');
+      div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06);';
+      div.innerHTML = `
+        <div>
+          <div style="font-size:.78rem;font-weight:600;color:${u.banned ? '#ff6b6b' : '#e8e8e8'};">${u.username} ${u.banned ? '🚫' : ''} ${u.is_creator ? '<span style="color:#c8a84b;font-size:.6rem;letter-spacing:1px;">🎬 CREATOR</span>' : ''}</div>
+          <div style="font-size:.62rem;color:#5a5a6a;">Strikes: ${u.strikes || 0} · Joined ${new Date(u.joined_at).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</div>
+          ${u.is_efed_owner ? `<div style="font-size:.62rem;color:#c8a84b;margin-top:2px;">eFed Owner: ${u.promo_name || '?'} ${u.yt_channel ? '· <a href="'+u.yt_channel+'" target="_blank" style="color:#c8a84b;">YouTube ↗</a>' : ''} ${u.x_handle ? '· @'+u.x_handle : ''}</div>` : ''}
+        </div>
+        ${u.username.toLowerCase() !== ADMIN_USERNAME ? `
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+          ${u.is_creator
+            ? `<button onclick="adminToggleCreator('${u.username}',false)" style="padding:5px 10px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.3);border-radius:6px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;cursor:pointer;">Remove Badge</button>`
+            : `<button onclick="adminToggleCreator('${u.username}',true)" style="padding:5px 10px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.3);border-radius:6px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;cursor:pointer;">🎬 Creator</button>`
+          }
+          ${u.banned
+            ? `<button onclick="adminUnbanUser('${u.username}')" style="padding:5px 10px;background:rgba(76,175,100,.15);border:1px solid rgba(76,175,100,.3);border-radius:6px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;cursor:pointer;">Unban</button>`
+            : `<button onclick="adminBanUser('${u.username}')" style="padding:5px 10px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);border-radius:6px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;cursor:pointer;">Ban</button>`
+          }
+        </div>` : '<div style="font-size:.6rem;color:#c8a84b;">ADMIN</div>'}`;
+      list.appendChild(div);
+    });
+  } catch(e) {
+    list.innerHTML = '<div style="font-size:.75rem;color:#ff6b6b;">Could not load users.</div>';
+  }
+}
+
+async function adminUnbanUser(username) {
+  try {
+    await sbUpdate('users', { banned: false, banned_reason: null, strikes: 0 }, `username=eq.${encodeURIComponent(username)}`);
+    loadAdminUsers();
+  } catch(e) { alert('Could not unban. Try again.'); }
+}
+
+function loadAdminBroadcast() {
+  const list = document.getElementById('admin-broadcast-list');
+  list.innerHTML = `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a6a;font-weight:600;margin-bottom:8px;">Send to a specific user</div>
+      <input id="broadcast-username" type="text" placeholder="@username (leave empty for everyone)" style="width:100%;padding:10px 13px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;margin-bottom:8px;">
+      <div style="font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a6a;font-weight:600;margin-bottom:8px;margin-top:8px;">Message</div>
+      <textarea id="broadcast-msg" placeholder="Type your message…" rows="4" style="width:100%;padding:10px 13px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;resize:none;margin-bottom:12px;"></textarea>
+      <div style="display:flex;gap:8px;">
+        <button onclick="adminSendBroadcast(false)" style="flex:1;padding:11px;background:#c0000e;border:none;border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;">Send to User</button>
+        <button onclick="adminSendBroadcast(true)" style="flex:1;padding:11px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.3);border-radius:8px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;">📢 Broadcast to All</button>
+      </div>
+      <div id="broadcast-result" style="margin-top:10px;font-size:.72rem;"></div>
+    </div>`;
+}
+
+async function adminSendBroadcast(toAll) {
+  const msg = document.getElementById('broadcast-msg').value.trim();
+  const targetUser = document.getElementById('broadcast-username').value.trim().replace('@','').toLowerCase();
+  const resultEl = document.getElementById('broadcast-result');
+
+  if (!msg) { resultEl.style.color='#ff6b6b'; resultEl.textContent='Please enter a message.'; return; }
+  if (!toAll && !targetUser) { resultEl.style.color='#ff6b6b'; resultEl.textContent='Please enter a username or use Broadcast to All.'; return; }
+
+  resultEl.textContent = 'Sending…'; resultEl.style.color = '#5a5a6a';
+
+  try {
+    if (toAll) {
+      // Get all users and send to each
+      const users = await sbGet('users', 'select=username&banned=eq.false');
+      const inserts = users.map(u => ({
+        username: u.username,
+        type: 'admin',
+        message: '📢 ' + msg,
+        video_url: null,
+        read: false,
+        created_at: Date.now()
+      }));
+      // Insert in batches of 50
+      for (let i = 0; i < inserts.length; i += 50) {
+        await sbInsert('notifications', inserts.slice(i, i + 50));
+      }
+      resultEl.style.color = '#4caf64';
+      resultEl.textContent = `✅ Broadcast sent to ${users.length} users.`;
+    } else {
+      const users = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}`);
+      if (!users.length) { resultEl.style.color='#ff6b6b'; resultEl.textContent='User not found.'; return; }
+      await sbInsert('notifications', {
+        username: targetUser,
+        type: 'admin',
+        message: '📢 ' + msg,
+        video_url: null,
+        read: false,
+        created_at: Date.now()
+      });
+      resultEl.style.color = '#4caf64';
+      resultEl.textContent = `✅ Message sent to @${targetUser}.`;
+    }
+    document.getElementById('broadcast-msg').value = '';
+    document.getElementById('broadcast-username').value = '';
+  } catch(e) {
+    resultEl.style.color = '#ff6b6b';
+    resultEl.textContent = 'Could not send. Try again.';
+  }
+}
+
+async function adminToggleCreator(username, grant) {
+  try {
+    await sbUpdate('users', { is_creator: grant }, `username=eq.${encodeURIComponent(username)}`);
+    loadAdminUsers();
+  } catch(e) { alert('Could not update badge. Try again.'); }
+}
+</script>
+
+<!-- ── FLAG MODAL ── -->
+<div id="flag-modal-bg" style="display:none;position:fixed;inset:0;z-index:9700;background:rgba(0,0,0,.8);backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeFlagModal()">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:90%;max-width:400px;padding:28px 24px;position:relative;">
+    <button onclick="closeFlagModal()" style="position:absolute;top:14px;right:14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:.9rem;display:flex;align-items:center;justify-content:center;">✕</button>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:3px;color:#fff;margin-bottom:4px;">Report Comment</div>
+    <p style="font-size:.68rem;color:#5a5a6a;margin-bottom:20px;">Why are you reporting this comment?</p>
+
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;cursor:pointer;">
+        <input type="radio" name="flag-reason" id="flag-reason-select" value="hate_speech" style="accent-color:#c0000e;"> 
+        <span style="font-size:.78rem;color:#e8e8e8;">Hate speech or harassment</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;cursor:pointer;">
+        <input type="radio" name="flag-reason" value="spam" style="accent-color:#c0000e;"> 
+        <span style="font-size:.78rem;color:#e8e8e8;">Spam or irrelevant</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;cursor:pointer;">
+        <input type="radio" name="flag-reason" value="false_info" style="accent-color:#c0000e;"> 
+        <span style="font-size:.78rem;color:#e8e8e8;">False or misleading information</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;cursor:pointer;">
+        <input type="radio" name="flag-reason" value="targeted_attack" style="accent-color:#c0000e;"> 
+        <span style="font-size:.78rem;color:#e8e8e8;">Targeted attack on a person or promotion</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;cursor:pointer;">
+        <input type="radio" name="flag-reason" value="other" style="accent-color:#c0000e;"> 
+        <span style="font-size:.78rem;color:#e8e8e8;">Other</span>
+      </label>
+    </div>
+
+    <button onclick="submitFlag()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Submit Report</button>
+  </div>
+</div>
+
+<!-- ── RATING MODAL ── -->
+<div id="rating-modal-bg" style="display:none;position:fixed;inset:0;z-index:9600;background:rgba(0,0,0,.8);backdrop-filter:blur(8px);align-items:flex-end;justify-content:center;" onclick="handleRatingBgClick(event)">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.08);border-radius:20px 20px 0 0;width:100%;max-width:520px;padding:28px 24px 40px;position:relative;">
+    <div style="width:36px;height:4px;border-radius:2px;background:rgba(255,255,255,.15);margin:0 auto 20px;"></div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:3px;color:#fff;margin-bottom:4px;">Rate This Show</div>
+    <p style="font-size:.68rem;color:#5a5a6a;margin-bottom:20px;line-height:1.6;">Rate accurately based on your experience watching this show.</p>
+
+    <!-- Overall — big stars -->
+    <div style="margin-bottom:20px;padding:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:12px;">
+      <div style="font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:10px;">⭐ Overall Experience</div>
+      <div class="star-row" id="stars-overall" data-cat="overall" style="gap:10px;"></div>
+    </div>
+
+    <!-- 4 categories -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;">
+      <div style="padding:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;">
+        <div style="font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:#5a5a6a;font-weight:700;margin-bottom:8px;">📺 Production</div>
+        <div class="star-row" id="stars-production" data-cat="production"></div>
+      </div>
+      <div style="padding:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;">
+        <div style="font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:#5a5a6a;font-weight:700;margin-bottom:8px;">🎤 Promo & Storyline</div>
+        <div class="star-row" id="stars-promo" data-cat="promo"></div>
+      </div>
+      <div style="padding:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;">
+        <div style="font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:#5a5a6a;font-weight:700;margin-bottom:8px;">🤼 Match Quality</div>
+        <div class="star-row" id="stars-match" data-cat="match"></div>
+      </div>
+      <div style="padding:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;">
+        <div style="font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:#5a5a6a;font-weight:700;margin-bottom:8px;">👥 Roster & Talent</div>
+        <div class="star-row" id="stars-roster" data-cat="roster"></div>
+      </div>
+    </div>
+
+    <div id="rating-msg" style="font-size:.72rem;color:#ff6b6b;margin-bottom:12px;display:none;"></div>
+    <button onclick="submitRating()" style="width:100%;padding:14px;background:#c0000e;border:none;border-radius:12px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;">Submit Rating</button>
+  </div>
+</div>
+
+<style>
+.star-row { display:flex; gap:6px; }
+.star-btn {
+  background: none; border: none; cursor: pointer; padding: 2px;
+  font-size: 1.4rem; line-height: 1; transition: transform .15s;
+  color: rgba(255,255,255,.15);
+}
+.star-btn.filled { color: #c8a84b; }
+.star-btn:hover { transform: scale(1.2); }
+#stars-overall .star-btn { font-size: 1.8rem; }
+</style>
+
+<script>
+// ── RATING SYSTEM ──
+const RATING_CATEGORIES = ['overall','production','promo','match','roster'];
+let _ratingValues = { overall:0, production:0, promo:0, match:0, roster:0 };
+let _watchTimers = {}; // { videoUrl: { interval, seconds } }
+let _watchUnlocked = {}; // { videoUrl: true/false }
+
+// Init star rows
+function initStarRows() {
+  RATING_CATEGORIES.forEach(cat => {
+    const rowId = cat === 'promo' ? 'stars-promo' : cat === 'match' ? 'stars-match' : cat === 'roster' ? 'stars-roster' : 'stars-' + cat;
+    const row = document.getElementById(rowId);
+    if (!row) return;
+    row.innerHTML = '';
+    for (let i = 1; i <= 5; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'star-btn';
+      btn.textContent = '★';
+      btn.dataset.val = i;
+      btn.dataset.cat = cat;
+      btn.onclick = () => setStars(cat, i);
+      btn.onmouseover = () => highlightStars(cat, i);
+      btn.onmouseout = () => highlightStars(cat, _ratingValues[cat]);
+      row.appendChild(btn);
+    }
+  });
+}
+
+function setStars(cat, val) {
+  _ratingValues[cat] = val;
+  highlightStars(cat, val);
+}
+
+function highlightStars(cat, val) {
+  const rowId = cat === 'promo' ? 'stars-promo' : cat === 'match' ? 'stars-match' : cat === 'roster' ? 'stars-roster' : 'stars-' + cat;
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  row.querySelectorAll('.star-btn').forEach(btn => {
+    btn.classList.toggle('filled', parseInt(btn.dataset.val) <= val);
+  });
+}
+
+function openRatingModal() {
+  const session = getSession();
+  if (!session) return;
+  if (!_expandVideo) return;
+
+  // Check if rating already unlocked
+  const url = _expandVideo.url;
+  if (!_watchUnlocked[url]) {
+    showExpandMsg('Come back after watching a bit more to rate this show.');
+    return;
+  }
+
+  _ratingValues = { overall:0, production:0, promo:0, match:0, roster:0 };
+  initStarRows();
+  document.getElementById('rating-msg').style.display = 'none';
+
+  // Load existing rating if any
+  loadExistingRating(url);
+
+  document.getElementById('rating-modal-bg').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+async function loadExistingRating(url) {
+  const session = getSession();
+  if (!session) return;
+  try {
+    const rows = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
+    if (rows.length) {
+      const r = rows[0];
+      ['overall','production','promo','match','roster'].forEach((cat, i) => {
+        const cols = ['overall','production','promo_storyline','match_quality','roster_talent'];
+        const val = Math.round(r[cols[i]] || 0);
+        setStars(cat, val);
+        _ratingValues[cat] = val;
+      });
+    }
+  } catch(e) {}
+}
+
+function closeRatingModal() {
+  document.getElementById('rating-modal-bg').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function handleRatingBgClick(e) {
+  if (e.target === document.getElementById('rating-modal-bg')) closeRatingModal();
+}
+
+async function submitRating() {
+  const session = getSession();
+  if (!session || !_expandVideo) return;
+
+  if (Object.values(_ratingValues).some(v => v === 0)) {
+    const msg = document.getElementById('rating-msg');
+    msg.textContent = 'Please rate all categories before submitting.';
+    msg.style.display = 'block';
+    return;
+  }
+
+  const url = _expandVideo.url;
+  try {
+    const existing = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
+    const data = {
+      username: session.username,
+      video_url: url,
+      video_id: extractId(url),
+      overall: _ratingValues.overall,
+      production: _ratingValues.production,
+      promo_storyline: _ratingValues.promo,
+      match_quality: _ratingValues.match,
+      roster_talent: _ratingValues.roster,
+      created_at: Date.now()
+    };
+
+    if (existing.length) {
+      await sbUpdate('ratings', data, `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
+    } else {
+      await sbInsert('ratings', data);
+    }
+
+    closeRatingModal();
+    // Notify the video owner
+    const vidOwner = videos.find(v => v.url === url)?.submittedBy;
+    if (vidOwner && vidOwner !== session.username) {
+      await sendNotification(vidOwner, 'rating',
+        `⭐ @${session.username} rated your show "${videos.find(v => v.url === url)?.show || ''}" ${_ratingValues.overall}/5`,
+        url);
+    }
+    // Update rating display on card
+    loadVideoRating(url);
+  } catch(e) {
+    const msg = document.getElementById('rating-msg');
+    msg.textContent = 'Could not save rating. Try again.';
+    msg.style.display = 'block';
+  }
+}
+
+// ── WATCH TIMER ──
+function startWatchTimer(url) {
+  if (_watchTimers[url]) return; // already running
+  if (_watchUnlocked[url]) return; // already unlocked
+
+  // Check DB first
+  checkWatchTime(url);
+
+  _watchTimers[url] = {
+    interval: setInterval(() => tickWatchTimer(url), 10000), // tick every 10 seconds
+    seconds: 0
+  };
+}
+
+function stopWatchTimer(url) {
+  if (!url || !_watchTimers[url]) return;
+  clearInterval(_watchTimers[url].interval);
+  // Save accumulated time to DB
+  saveWatchTime(url, _watchTimers[url].seconds);
+  delete _watchTimers[url];
+}
+
+function tickWatchTimer(url) {
+  if (!_watchTimers[url]) return;
+  _watchTimers[url].seconds += 10;
+  // Save every minute
+  if (_watchTimers[url].seconds % 60 === 0) {
+    saveWatchTime(url, _watchTimers[url].seconds);
+  }
+}
+
+async function checkWatchTime(url) {
+  const session = getSession();
+  if (!session) return;
+  try {
+    const rows = await sbGet('watch_time', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
+    if (rows.length) {
+      const totalSecs = rows[0].total_seconds || 0;
+      if (rows[0].rating_unlocked || totalSecs >= 600) {
+        _watchUnlocked[url] = true;
+        updateRateButton(true);
+        if (_watchTimers[url]) {
+          clearInterval(_watchTimers[url].interval);
+          delete _watchTimers[url];
+        }
+      } else if (_watchTimers[url]) {
+        _watchTimers[url].seconds = totalSecs;
+      }
+    }
+  } catch(e) {}
+}
+
+async function saveWatchTime(url, newSeconds) {
+  const session = getSession();
+  if (!session || newSeconds <= 0) return;
+  try {
+    const rows = await sbGet('watch_time', `username=eq.${encodeURIComponent(session.username)}&video_url=eq.${encodeURIComponent(url)}`);
+    const existing = rows[0];
+    const total = (existing?.total_seconds || 0) + newSeconds;
+    const unlocked = total >= 600;
+
+    if (existing) {
+      await sbUpdate('watch_time', { total_seconds: total, rating_unlocked: unlocked },
+        `username=eq.${encodeURIComponent(session.username)}&video_url=eq.${encodeURIComponent(url)}`);
+    } else {
+      await sbInsert('watch_time', { username: session.username, video_url: url, video_id: extractId(url), total_seconds: total, rating_unlocked: unlocked });
+    }
+
+    if (unlocked && !_watchUnlocked[url]) {
+      _watchUnlocked[url] = true;
+      updateRateButton(true);
+    }
+  } catch(e) { console.warn('Watch time save failed', e); }
+}
+
+function updateRateButton(unlocked) {
+  const btn = document.getElementById('expand-rate-btn');
+  if (!btn) return;
+  if (unlocked) {
+    btn.style.opacity = '1';
+    btn.style.color = '#c8a84b';
+    btn.style.borderColor = 'rgba(200,168,75,.4)';
+    btn.style.background = 'rgba(200,168,75,.1)';
+  }
+}
+
+function showExpandMsg(msg) {
+  // Show a brief toast inside the expand view
+  const existing = document.getElementById('expand-toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.id = 'expand-toast';
+  toast.textContent = msg;
+  toast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(18,18,18,.97);border:1px solid rgba(255,255,255,.15);color:#e8e8e8;font-family:DM Sans,sans-serif;font-size:.75rem;padding:10px 20px;border-radius:40px;z-index:9700;white-space:nowrap;pointer-events:none;';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2500);
+}
+
+// ── RATING DISPLAY ON CARDS ──
+async function loadVideoRating(url) {
+  try {
+    const rows = await sbGet('ratings', `video_id=eq.${encodeURIComponent(extractId(url))}`);
+    if (!rows.length) return;
+    const avg = rows.reduce((sum, r) => sum + (r.overall || 0), 0) / rows.length;
+    const rounded = Math.round(avg * 10) / 10;
+    // Update all cards with this URL
+    document.querySelectorAll('.card').forEach(card => {
+      if (card._videoUrl === url) {
+        let ratingEl = card.querySelector('.card-rating');
+        if (!ratingEl) {
+          ratingEl = document.createElement('div');
+          ratingEl.className = 'card-rating';
+          ratingEl.style.cssText = 'font-size:.6rem;color:#c8a84b;font-weight:700;margin-top:2px;';
+          card.querySelector('.card-info').appendChild(ratingEl);
+        }
+        ratingEl.textContent = '★ ' + rounded.toFixed(1);
+      }
+    });
+  } catch(e) {}
+}
+
+// Load ratings for all visible cards
+async function loadAllCardRatings() {
+  try {
+    const allRatings = await sbGet('ratings', 'select=video_url,video_id,overall');
+    // Group by video_url
+    const grouped = {};
+    allRatings.forEach(r => {
+      const key = r.video_id || r.video_url;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(r.overall || 0);
+    });
+    // Update cards
+    document.querySelectorAll('.card').forEach(card => {
+      const url = card._videoUrl;
+      const key = extractId(url) || url;
+      if (url && grouped[key]) {
+        const avg = grouped[url].reduce((a,b) => a+b, 0) / grouped[url].length;
+        const rounded = Math.round(avg * 10) / 10;
+        let ratingEl = card.querySelector('.card-rating');
+        if (!ratingEl) {
+          ratingEl = document.createElement('div');
+          ratingEl.className = 'card-rating';
+          ratingEl.style.cssText = 'font-size:.6rem;color:#c8a84b;font-weight:700;margin-top:2px;';
+          card.querySelector('.card-info')?.appendChild(ratingEl);
+        }
+        ratingEl.textContent = '★ ' + rounded.toFixed(1);
+      }
+    });
+  } catch(e) {}
+}
+</script>
+
+<script>
+// ── BOTTOM NAV ──
+let _deferredInstallPrompt = null;
+
+function bnavSetActive(id) {
+  ['bnav-home','bnav-search','bnav-notif','bnav-profile'].forEach(b => {
+    const el = document.getElementById(b);
+    if (!el) return;
+    el.classList.toggle('active', b === id);
+    const svg = el.querySelector('svg');
+    if (svg) svg.setAttribute('stroke', b === id ? '#c0000e' : 'rgba(255,255,255,.45)');
+  });
+}
+
+function bnavGo(tab) {
+  if (tab === 'home') {
+    bnavSetActive('bnav-home');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } else if (tab === 'search') {
+    bnavSetActive('bnav-search');
+    const searchWrap = document.getElementById('nav-search-wrap');
+    const searchInput = document.getElementById('nav-search-input');
+    if (searchWrap) searchWrap.classList.add('open');
+    if (searchInput) { searchInput.focus(); }
+  } else if (tab === 'notif') {
+    bnavSetActive('bnav-notif');
+    openNotifPanel();
+  } else if (tab === 'profile') {
+    bnavSetActive('bnav-profile');
+    window.location.href = 'profile.html';
+  }
+}
+
+// Set home as default active on load
+document.addEventListener('DOMContentLoaded', () => {
+  bnavSetActive('bnav-home');
+});
+
+// ── PWA INSTALL BANNER ──
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  // Only show if not dismissed before
+  if (!localStorage.getItem('efed_install_dismissed')) {
+    document.getElementById('install-banner').classList.add('visible');
+  }
+});
+
+function triggerInstall() {
+  if (_deferredInstallPrompt) {
+    _deferredInstallPrompt.prompt();
+    _deferredInstallPrompt.userChoice.then(() => {
+      _deferredInstallPrompt = null;
+      dismissInstallBanner();
+    });
+  } else {
+    // iOS fallback
+    alert('To install: tap the Share button below, then "Add to Home Screen"');
+  }
+}
+
+function dismissInstallBanner() {
+  document.getElementById('install-banner').classList.remove('visible');
+  localStorage.setItem('efed_install_dismissed', '1');
+}
+
+// ── NOTIFICATION PANEL PLACEHOLDER ──
+// ── NOTIFICATION SYSTEM ──
+const NOTIF_ICONS = {
+  comment: { emoji: '💬', cls: 'type-comment' },
+  like: { emoji: '❤️', cls: 'type-like' },
+  rating: { emoji: '⭐', cls: 'type-rating' },
+  invite: { emoji: '🎟️', cls: 'type-invite' },
+  claim: { emoji: '🎉', cls: 'type-claim' },
+  admin: { emoji: '📢', cls: 'type-admin' },
+  approved: { emoji: '✅', cls: 'type-admin' },
+};
+
+function openNotifPanel() {
+  document.getElementById('notif-panel').classList.add('open');
+  document.getElementById('notif-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  loadNotifications();
+}
+
+function closeNotifPanel() {
+  document.getElementById('notif-panel').classList.remove('open');
+  document.getElementById('notif-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+async function loadNotifications() {
+  const session = getSession();
+  if (!session) return;
+  const list = document.getElementById('notif-list');
+  list.innerHTML = '<div style="padding:20px;font-size:.75rem;color:#5a5a6a;">Loading…</div>';
+
+  try {
+    const notifs = await sbGet('notifications',
+      `username=eq.${encodeURIComponent(session.username)}&order=created_at.desc&limit=50`);
+
+    if (!notifs.length) {
+      list.innerHTML = '<div class="notif-empty"><span style="font-size:1.5rem;">🔔</span>No notifications yet</div>';
+      return;
+    }
+
+    list.innerHTML = '';
+    notifs.forEach(n => {
+      const icon = NOTIF_ICONS[n.type] || { emoji: '🔔', cls: 'type-admin' };
+      const timeAgo = getTimeAgo(n.created_at);
+      const div = document.createElement('div');
+      div.className = 'notif-item' + (n.read ? '' : ' unread');
+      div.innerHTML = `
+        <div class="notif-icon ${icon.cls}">${icon.emoji}</div>
+        <div class="notif-body">
+          <div class="notif-msg">${n.message}</div>
+          <div class="notif-time">${timeAgo}</div>
+        </div>`;
+      if (n.video_url) {
+        div.onclick = () => {
+          markNotifRead(n.id);
+          div.classList.remove('unread');
+          closeNotifPanel();
+          const v = videos.find(v => v.url === n.video_url);
+          if (v) openExpand(v);
+        };
+      } else {
+        div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
+      }
+      list.appendChild(div);
+    });
+
+    // Mark dot as cleared
+    updateNotifDot(false);
+  } catch(e) {
+    list.innerHTML = '<div class="notif-empty">Could not load notifications.</div>';
+  }
+}
+
+async function markNotifRead(id) {
+  try {
+    await sbUpdate('notifications', { read: true }, `id=eq.${id}`);
+  } catch(e) {}
+}
+
+async function markAllNotifsRead() {
+  const session = getSession();
+  if (!session) return;
+  try {
+    await sbUpdate('notifications', { read: true },
+      `username=eq.${encodeURIComponent(session.username)}&read=eq.false`);
+    document.querySelectorAll('.notif-item.unread').forEach(el => el.classList.remove('unread'));
+    updateNotifDot(false);
+  } catch(e) {}
+}
+
+function updateNotifDot(hasUnread) {
+  const dot = document.getElementById('bnav-notif-dot');
+  if (dot) dot.classList.toggle('visible', hasUnread);
+}
+
+async function checkUnreadNotifications() {
+  const session = getSession();
+  if (!session) return;
+  try {
+    const unread = await sbGet('notifications',
+      `username=eq.${encodeURIComponent(session.username)}&read=eq.false&limit=1`);
+    updateNotifDot(unread.length > 0);
+  } catch(e) {}
+}
+
+function getTimeAgo(timestamp) {
+  const diff = Date.now() - timestamp;
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// Helper to send notifications (used throughout the app)
+async function sendNotification(username, type, message, videoUrl = null) {
+  try {
+    await sbInsert('notifications', {
+      username,
+      type,
+      message,
+      video_url: videoUrl,
+      read: false,
+      created_at: Date.now()
+    });
+  } catch(e) { console.warn('Notification send failed', e); }
+}
+
+// Check unread on load
+setTimeout(checkUnreadNotifications, 2000);
+</script>
+
+<!-- ── CLAIM MODAL ── -->
+<div id="claim-modal-bg" style="display:none;position:fixed;inset:0;z-index:9800;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeClaimModal()">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:90%;max-width:420px;padding:28px 24px;position:relative;">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:3px;color:#fff;margin-bottom:4px;">Claim This Post</div>
+    <p style="font-size:.72rem;color:#5a5a6a;margin-bottom:16px;line-height:1.7;" id="claim-modal-desc"></p>
+    <div style="background:rgba(200,168,75,.06);border:1px solid rgba(200,168,75,.15);border-radius:10px;padding:12px 14px;margin-bottom:20px;">
+      <div style="font-size:.6rem;color:#c8a84b;letter-spacing:2px;text-transform:uppercase;font-weight:700;margin-bottom:4px;">Originally posted by</div>
+      <div style="font-size:.82rem;color:#e8e8e8;font-weight:600;" id="claim-original-poster"></div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="confirmClaim()" style="flex:1;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Claim as My Show</button>
+      <button onclick="closeClaimModal()" style="flex:1;padding:13px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── CREATOR CLAIM SYSTEM ──
+let _claimData = null;
+
+function showClaimPrompt(submission, title, claimerUsername) {
+  _claimData = { submission, claimerUsername };
+  document.getElementById('claim-modal-desc').textContent =
+    '"' + title + '" was already posted by another user. Since you\'re the verified creator of this show, you can claim it as the official upload.';
+  document.getElementById('claim-original-poster').textContent = '@' + submission.submitted_by;
+  document.getElementById('claim-modal-bg').style.display = 'flex';
+  closeSubmitModal();
+}
+
+function closeClaimModal() {
+  document.getElementById('claim-modal-bg').style.display = 'none';
+  _claimData = null;
+}
+
+async function confirmClaim() {
+  if (!_claimData) return;
+  const { submission, claimerUsername } = _claimData;
+  const session = getSession();
+  if (!session) return;
+
+  try {
+    // Transfer the post to the creator
+    await sbUpdate('submissions', {
+      submitted_by: claimerUsername,
+      claimed_by: claimerUsername,
+      originally_posted_by: submission.submitted_by
+    }, `id=eq.${submission.id}`);
+
+    // Increment supported_count for the original poster
+    const origUsers = await sbGet('users', `username=eq.${encodeURIComponent(submission.submitted_by)}`);
+    if (origUsers.length) {
+      const newSupported = (origUsers[0].supported_count || 0) + 1;
+      await sbUpdate('users', { supported_count: newSupported }, `username=eq.${encodeURIComponent(submission.submitted_by)}`);
+    }
+
+    // Send notification to original poster
+    await sbInsert('notifications', {
+      username: submission.submitted_by,
+      type: 'claim',
+      message: '🎉 @' + claimerUsername + ' appreciated your post of "' + (submission.show_name || 'a show') + '" and claimed it as the official upload. Thanks for supporting the community!',
+      video_url: submission.url,
+      read: false,
+      created_at: Date.now()
+    });
+
+    // Update local videos array
+    const v = videos.find(v => v.url === submission.url);
+    if (v) {
+      v.submittedBy = claimerUsername;
+      v.originallyPostedBy = submission.submitted_by;
+    }
+    buildPills();
+    renderGrid();
+
+    closeClaimModal();
+
+    // Show success toast
+    const toast = document.createElement('div');
+    toast.textContent = '✅ Show claimed successfully!';
+    toast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(18,18,18,.97);border:1px solid rgba(76,175,100,.3);color:#4caf64;font-family:DM Sans,sans-serif;font-size:.75rem;padding:10px 20px;border-radius:40px;z-index:9999;white-space:nowrap;pointer-events:none;';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2500);
+
+  } catch(e) {
+    alert('Could not claim. Try again.');
+    console.error(e);
+  }
+}
+</script>
+
+<script>
+// ── PULL TO REFRESH ──
+(function() {
+  let startY = 0;
+  let pulling = false;
+  let refreshing = false;
+  const indicator = document.getElementById('ptr-indicator');
+  const spinner = document.getElementById('ptr-spinner');
+  const ptrText = document.getElementById('ptr-text');
+
+  document.addEventListener('touchstart', e => {
+    if (window.scrollY === 0) {
+      startY = e.touches[0].clientY;
+      pulling = true;
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    if (!pulling || refreshing) return;
+    const dist = e.touches[0].clientY - startY;
+    if (dist > 10 && dist < 80) {
+      indicator.classList.add('visible');
+      ptrText.textContent = dist > 50 ? 'Release to refresh' : 'Pull to refresh';
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchend', async e => {
+    if (!pulling || refreshing) return;
+    pulling = false;
+    const dist = e.changedTouches[0].clientY - startY;
+    if (dist > 50) {
+      refreshing = true;
+      ptrText.textContent = 'Refreshing…';
+      spinner.classList.add('spinning');
+      // Refresh the hub
+      try {
+        await initHub();
+        await checkUnreadNotifications();
+      } finally {
+        refreshing = false;
+        spinner.classList.remove('spinning');
+        indicator.classList.remove('visible');
+        ptrText.textContent = 'Pull to refresh';
+      }
+    } else {
+      indicator.classList.remove('visible');
+    }
+  }, { passive: true });
+})();
 </script>
