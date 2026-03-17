@@ -316,17 +316,8 @@
   .now-playing-eq span:nth-child(3) { animation-duration: .4s;  height: 45%; animation-delay: .2s; }
   .card-thumb { width: 100%; height: var(--card-h); border-radius: 8px; overflow: hidden; position: relative; background: var(--surface2); }
   .card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .card-over {
-    position: absolute; inset: 0; z-index: 4;
-    background: linear-gradient(to top, rgba(0,0,0,.85) 0%, transparent 55%);
-    border-radius: 8px; opacity: 0; transition: opacity .25s;
-    display: flex; align-items: center; justify-content: center;
-    pointer-events: none;
-  }
-  .card:hover .card-over { pointer-events: none; }
-  .card:hover .card-over { opacity: 1; }
-  .play-c { width: 52px; height: 52px; border-radius: 50%; background: rgba(192,0,14,.95); display: flex; align-items: center; justify-content: center; transition: transform .2s; box-shadow: 0 0 24px rgba(192,0,14,.5); }
-  .card:hover .play-c { transform: scale(1.1); }
+  .card-over { display: none; }
+  .play-c { display: none; }
   .card-info { padding: 10px 2px 0; }
   .card-efed { font-size: .6rem; color: var(--gold); letter-spacing: 2px; text-transform: uppercase; font-weight: 700; margin-bottom: 2px; }
   .card-show { font-size: .82rem; font-weight: 600; color: var(--text); line-height: 1.3; margin-bottom: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -353,16 +344,7 @@
   }
 
   /* 3-dot card menu */
-  .card-menu-btn {
-    position: absolute; top: 7px; right: 7px; z-index: 30;
-    width: 28px; height: 28px; border-radius: 50%;
-    background: rgba(0,0,0,.65); border: none; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    opacity: 0; transition: opacity .18s;
-    backdrop-filter: blur(4px);
-  }
-  .card:hover .card-menu-btn, .card-menu-btn.open { opacity: 1; }
-  .card-menu-btn svg { pointer-events: none; }
+  .card-menu-btn { display: none; }
   .card-menu-dropdown {
     position: absolute; top: 38px; right: 7px; z-index: 30;
     background: #1a1a20; border: 1px solid rgba(255,255,255,.1);
@@ -2341,6 +2323,27 @@ function makeBookmarkCard(v, session) {
   infoDiv.appendChild(efedDiv);
   infoDiv.appendChild(showDiv);
   infoDiv.appendChild(dateDiv);
+
+  // Bottom row: posted-by + 3-dot for owners
+  if (v.community && v.submittedBy) {
+    const bottomRow = document.createElement('div');
+    bottomRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-top:5px;';
+    const postedDiv = document.createElement('div');
+    postedDiv.className = 'card-posted-by';
+    postedDiv.textContent = 'by ' + (v.displayName || v.submittedBy);
+    bottomRow.appendChild(postedDiv);
+    if (canDelete) {
+      const dotBtn = document.createElement('button');
+      dotBtn.style.cssText = 'background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;padding:2px 4px;font-size:1rem;line-height:1;transition:color .15s;';
+      dotBtn.textContent = '···';
+      dotBtn.onmouseover = () => dotBtn.style.color = 'rgba(255,255,255,.8)';
+      dotBtn.onmouseout = () => dotBtn.style.color = 'rgba(255,255,255,.3)';
+      dotBtn.onclick = (e) => { e.stopPropagation(); toggleCardMenu(e, id); };
+      bottomRow.appendChild(dotBtn);
+    }
+    infoDiv.appendChild(bottomRow);
+  }
+
   el.appendChild(infoDiv);
 
   return el;
@@ -3923,7 +3926,7 @@ let _expandVideo = null;
 let _expandLikes = {};
 let _expandBookmarks = {};
 
-async function openExpand(v) {
+function openExpand(v) {
   _expandVideo = v;
   const id = extractId(v.url);
 
@@ -3946,16 +3949,15 @@ async function openExpand(v) {
   document.getElementById('expand-show').textContent = v.show || '';
   document.getElementById('expand-meta').textContent = v.date || '';
   const posterEl = document.getElementById('expand-poster');
+  // Fire-and-forget poster name fetch (no await so panel opens immediately)
   if (v.submittedBy) {
-    // Try to get promo_name/display_name for this user
-    try {
-      const uRows = await sbGet('users', `username=eq.${encodeURIComponent(v.submittedBy)}&select=username,display_name,promo_name`);
-      const u = uRows[0];
-      const label = (u && (u.promo_name || u.display_name)) || v.displayName || v.submittedBy;
-      posterEl.innerHTML = `by <span>${label}</span>`;
-    } catch(e) {
-      posterEl.innerHTML = `by <span>${v.displayName || v.submittedBy}</span>`;
-    }
+    posterEl.innerHTML = `by <span>${v.displayName || v.submittedBy}</span>`;
+    sbGet('users', `username=eq.${encodeURIComponent(v.submittedBy)}&select=username,display_name,promo_name`)
+      .then(uRows => {
+        const u = uRows[0];
+        const label = (u && (u.promo_name || u.display_name)) || v.displayName || v.submittedBy;
+        posterEl.innerHTML = `by <span>${label}</span>`;
+      }).catch(() => {});
   } else { posterEl.innerHTML = ''; }
 
   // Actions state
