@@ -1,4 +1,4 @@
-const CACHE = 'efed-hub-v2';
+const CACHE = 'efed-hub-v3';
 const STATIC = [
   '/',
   '/index.html',
@@ -21,6 +21,7 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
+  // Only cache same-origin GET requests
   if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin)) return;
   e.respondWith(
     fetch(e.request)
