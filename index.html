@@ -1686,16 +1686,67 @@
 </section>
 
 <main>
-  <div class="divider">
-    <div class="divider-line"></div>
-    <div class="divider-text">Latest Videos</div>
-    <div class="divider-line"></div>
-  </div>
-  <section class="section">
+
+  <!-- ── ROW: LATEST SHOWS ── -->
+  <section class="section" id="section-latest">
     <div class="sec-head">
       <div class="sec-title-wrap">
         <div class="s-bar"></div>
-        <div class="sec-title">Latest Videos</div>
+        <div class="sec-title">Latest Shows</div>
+        <span class="sec-count" id="latest-count"></span>
+      </div>
+    </div>
+    <div class="row-wrap">
+      <button class="pill-arr left hidden" id="latest-arr-left" onclick="scrollNamedRow('latest',-1)">&#8249;</button>
+      <div class="card-grid" id="row-latest"></div>
+      <button class="pill-arr right" id="latest-arr-right" onclick="scrollNamedRow('latest',1)">&#8250;</button>
+    </div>
+  </section>
+
+  <!-- ── ROW: TOP RATED ── -->
+  <section class="section" id="section-toprated" style="display:none;">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar" style="background:var(--gold);"></div>
+        <div class="sec-title">Top Rated</div>
+        <span class="sec-count" id="toprated-count"></span>
+      </div>
+    </div>
+    <div class="row-wrap">
+      <button class="pill-arr left hidden" id="toprated-arr-left" onclick="scrollNamedRow('toprated',-1)">&#8249;</button>
+      <div class="card-grid" id="row-toprated"></div>
+      <button class="pill-arr right" id="toprated-arr-right" onclick="scrollNamedRow('toprated',1)">&#8250;</button>
+    </div>
+  </section>
+
+  <!-- ── ROW: JUST ADDED ── -->
+  <section class="section" id="section-justadded" style="display:none;">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar" style="background:#4caf8a;"></div>
+        <div class="sec-title">Just Added</div>
+        <span class="sec-count" id="justadded-count"></span>
+      </div>
+    </div>
+    <div class="row-wrap">
+      <button class="pill-arr left hidden" id="justadded-arr-left" onclick="scrollNamedRow('justadded',-1)">&#8249;</button>
+      <div class="card-grid" id="row-justadded"></div>
+      <button class="pill-arr right" id="justadded-arr-right" onclick="scrollNamedRow('justadded',1)">&#8250;</button>
+    </div>
+  </section>
+
+  <div class="divider" style="margin-top:8px;">
+    <div class="divider-line"></div>
+    <div class="divider-text">Browse All</div>
+    <div class="divider-line"></div>
+  </div>
+
+  <!-- ── BROWSE ALL (filterable) ── -->
+  <section class="section">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar" style="background:var(--muted);"></div>
+        <div class="sec-title">All Videos</div>
         <span class="sec-count" id="vid-count"></span>
       </div>
       <button id="sort-toggle-btn" onclick="toggleSort()" style="
@@ -2047,11 +2098,95 @@ function renderGrid() {
   countEl.textContent = ' \u00b7 ' + list.length + ' video' + (list.length !== 1 ? 's' : '');
   if (!list.length) { empty.classList.add('visible'); loadBtn.classList.remove('visible'); return; }
   empty.classList.remove('visible');
-  const mobile = window.innerWidth <= 768;
   const showList = list;
   showList.forEach(v => grid.appendChild(makeCard(v)));
   setTimeout(updateRowArrows, 50);
   setTimeout(loadAllCardRatings, 300);
+  renderNamedRows();
+}
+
+// ── NAMED ROWS ──
+function scrollNamedRow(name, dir) {
+  const grid = document.getElementById('row-' + name);
+  if (!grid) return;
+  grid.scrollBy({ left: dir * 600, behavior: 'smooth' });
+  setTimeout(() => updateNamedRowArrows(name), 350);
+}
+
+function updateNamedRowArrows(name) {
+  if (window.innerWidth <= 768) return;
+  const grid = document.getElementById('row-' + name);
+  const left = document.getElementById(name + '-arr-left');
+  const right = document.getElementById(name + '-arr-right');
+  if (!grid || !left || !right) return;
+  left.classList.toggle('hidden', grid.scrollLeft <= 0);
+  right.classList.toggle('hidden', grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 4);
+}
+
+function fillRow(rowId, list, countId) {
+  const grid = document.getElementById(rowId);
+  const countEl = document.getElementById(countId);
+  if (!grid) return;
+  grid.innerHTML = '';
+  list.forEach(v => grid.appendChild(makeCard(v)));
+  if (countEl) countEl.textContent = ' \u00b7 ' + list.length;
+  const name = rowId.replace('row-', '');
+  setTimeout(() => updateNamedRowArrows(name), 50);
+  grid.onscroll = () => updateNamedRowArrows(name);
+}
+
+function renderNamedRows() {
+  const approved = videos.filter(v => !v.status || v.status === 'approved');
+
+  // Latest Shows: 10 most recently submitted/dated
+  const latest = [...approved]
+    .sort((a, b) => {
+      const ta = a.submittedAt || a.dateMs || new Date(a.date || 0).getTime();
+      const tb = b.submittedAt || b.dateMs || new Date(b.date || 0).getTime();
+      return tb - ta;
+    })
+    .slice(0, 10);
+  fillRow('row-latest', latest, 'latest-count');
+  const secLatest = document.getElementById('section-latest');
+  if (secLatest) secLatest.style.display = latest.length ? '' : 'none';
+
+  // Just Added: videos with new:true flag
+  const justAdded = approved.filter(v => v.new).slice(0, 10);
+  fillRow('row-justadded', justAdded, 'justadded-count');
+  const secJust = document.getElementById('section-justadded');
+  if (secJust) secJust.style.display = justAdded.length ? '' : 'none';
+
+  // Top Rated: async, handled separately
+  renderTopRatedRow();
+}
+
+async function renderTopRatedRow() {
+  try {
+    const rows = await sbGet('ratings', 'select=video_id,overall&order=overall.desc');
+    if (!rows.length) return;
+    const totals = {};
+    rows.forEach(r => {
+      if (!totals[r.video_id]) totals[r.video_id] = { sum: 0, count: 0 };
+      totals[r.video_id].sum += r.overall;
+      totals[r.video_id].count += 1;
+    });
+    const approved = videos.filter(v => !v.status || v.status === 'approved');
+    const scored = approved
+      .map(v => {
+        const vid = extractId(v.url);
+        const t = totals[vid];
+        return { v, avg: t ? t.sum / t.count : 0 };
+      })
+      .filter(x => x.avg > 0)
+      .sort((a, b) => b.avg - a.avg)
+      .slice(0, 10)
+      .map(x => x.v);
+    fillRow('row-toprated', scored, 'toprated-count');
+    const sec = document.getElementById('section-toprated');
+    if (sec) sec.style.display = scored.length ? '' : 'none';
+  } catch(e) {
+    console.warn('Top rated fetch failed', e);
+  }
 }
 
 
