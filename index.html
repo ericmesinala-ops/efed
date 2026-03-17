@@ -2160,7 +2160,7 @@ const HERO_SKIP = 20;
 const HERO_DUR  = 20;
 let heroIdx   = 0;
 let heroTimer = null;
-let _heroFirstLoad = true;
+window._heroFirstLoad = true;
 
 initHub();
 const _grid = document.getElementById('card-grid');
@@ -2271,8 +2271,8 @@ function loadSlide() {
 
   setHeroDot(heroIdx);
 
-  if (_heroFirstLoad) {
-    _heroFirstLoad = false;
+  if (window._heroFirstLoad) {
+    window._heroFirstLoad = false;
     thumb.classList.add('hidden');
     // Update iframe to match the actual first video in sorted order
     const firstSrc = heroSrc(id);
@@ -3305,10 +3305,24 @@ async function doSubmitPost() {
     if (!oRes.ok) return showSubmitErr('Could not fetch video info. Check the link.');
     const oData = await oRes.json();
 
+    // Try to get upload date from noembed
+    let uploadDate = '';
+    try {
+      const noRes = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${vidId}`);
+      const noData = await noRes.json();
+      if (noData.upload_date) {
+        // upload_date is YYYYMMDD format
+        const d = noData.upload_date;
+        const parsed = new Date(d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8));
+        uploadDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+    } catch(e) {}
+
     _fetchedMeta = {
       title: oData.title || '',
       channel: oData.author_name || '',
-      vidId
+      vidId,
+      uploadDate
     };
 
     // Check against banned promotions list — name, title and channel handle
@@ -3332,7 +3346,7 @@ async function doSubmitPost() {
       url,
       show_name: _fetchedMeta.title,
       efed: _fetchedMeta.channel,
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      date: _fetchedMeta.uploadDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       date_ms: Date.now(),
       submitted_by: session.username,
       submitted_at: Date.now(),
@@ -3346,7 +3360,7 @@ async function doSubmitPost() {
       url,
       show: _fetchedMeta.title,
       efed: _fetchedMeta.channel,
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      date: _fetchedMeta.uploadDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       dateMs: Date.now(),
       submittedAt: Date.now(),
       submittedBy: session.username,
@@ -3358,16 +3372,24 @@ async function doSubmitPost() {
     buildPills();
     renderGrid();
 
+    // Re-init hero so new video appears as slide 1
+    window._heroFirstLoad = true;
+    heroIdx = 0;
+    buildHeroDots();
+    loadSlide();
+
     document.getElementById('submit-ok').style.display = 'block';
     document.getElementById('submit-ok').textContent = '🎉 Your show is now live on the Hub!';
     btn.textContent = 'Posted!';
     setTimeout(() => closeSubmitModal(), 2000);
 
   } catch(e) {
-    showSubmitErr('Something went wrong. Try again.');
-    console.error(e);
-    btn.textContent = 'Post to Hub';
-    btn.disabled = false;
+    if (btn.textContent !== 'Posted!') {
+      showSubmitErr('Something went wrong. Try again.');
+      console.error(e);
+      btn.textContent = 'Post to Hub';
+      btn.disabled = false;
+    }
   }
 }
 
