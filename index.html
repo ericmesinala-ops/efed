@@ -3476,7 +3476,7 @@ async function savePassword() {
       <label style="display:block;font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a6a;font-weight:600;margin-bottom:6px;">YouTube Link</label>
       <input id="submit-url" type="url" placeholder="https://youtube.com/watch?v=..." autocomplete="off"
         style="width:100%;padding:11px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;outline:none;"
-        oninput="clearSubmitPreview()" />
+        oninput="clearSubmitPreview(); debounceFetchPreview()" />
     </div>
 
     <!-- Preview (shown after fetch) -->
@@ -3575,65 +3575,43 @@ function clearSubmitPreview() {
 
 let _fetchedMeta = null;
 
-async function doSubmitPost() {
-  const session = getSession();
-  if (!session) return;
-  const url = document.getElementById('submit-url').value.trim();
-  if (!url) return showSubmitErr('Please paste a YouTube link.');
+async let _fetchDebounce = null;
+function debounceFetchPreview() {
+  clearTimeout(_fetchDebounce);
+  _fetchDebounce = setTimeout(fetchSubmitPreview, 600);
+}
 
-  // Extract video ID
+async function fetchSubmitPreview() {
+  const url = document.getElementById('submit-url').value.trim();
+  if (!url) return;
   const vidId = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/)?.[1];
-  if (!vidId) return showSubmitErr('That doesn\'t look like a valid YouTube link.');
+  if (!vidId) return;
 
   const btn = document.getElementById('submit-post-btn');
-  btn.disabled = true;
-  btn.style.opacity = '.7';
-  btn.style.cursor = 'not-allowed';
   btn.textContent = 'Fetching info…';
-  document.getElementById('submit-err').style.display = 'none';
-  document.getElementById('submit-ok').style.display = 'none';
 
   try {
-    // Check duplicate
-    const existing = await sbGet('submissions', `url=eq.${encodeURIComponent(url)}`);
-    if (existing.length) {
-      // Check if user is a Creator who can claim this video
-      const userRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
-      const user = userRows[0];
-      const isCreator = user?.is_creator;
-      const ytChannel = (user?.yt_channel || '').toLowerCase();
-
-      // Fetch video metadata to check channel ownership
-      const oembedCheck = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${vidId}&format=json`);
-      const oDataCheck = await oembedCheck.json();
-      const videoChannel = (oDataCheck.author_name || '').toLowerCase();
-
-      // Check if creator's registered channel matches the video channel
-      const channelMatch = ytChannel && (
-        videoChannel.includes(ytChannel.replace('https://youtube.com/@','').replace('@','')) ||
-        ytChannel.includes(videoChannel)
-      );
-
-      if (isCreator && channelMatch && !existing[0].claimed_by) {
-        // Show claim prompt
-        showClaimPrompt(existing[0], oDataCheck.title, session.username);
-        btn.disabled = false;
-        btn.textContent = 'Post to Hub';
-        return;
-      }
-
-      return showSubmitErr('This video has already been posted.');
-    }
-
-    // Fetch oEmbed metadata
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${vidId}&format=json`;
     const oRes = await fetch(oembedUrl);
-    if (!oRes.ok) return showSubmitErr('Could not fetch video info. Check the link.');
+    if (!oRes.ok) return;
     const oData = await oRes.json();
 
-    // Get upload date via multiple proxy attempts
+    // Check banned promos
+    const channelLower = (oData.author_name || '').toLowerCase().replace(/\s/g,'').replace(/@/g,'');
+    const titleLower = (oData.title || '').toLowerCase();
+    const isBanned = BANNED_PROMOS.some(b => {
+      const clean = b.replace(/@/g,'');
+      return channelLower.includes(clean) || titleLower.includes(clean);
+    });
+    if (isBanned) {
+      showSubmitErr('This promotion is not permitted on the EFED Streaming Hub.');
+      btn.textContent = 'Post to Hub';
+      return;
+    }
+
+    // Try to get YouTube upload date
     let uploadDate = '';
-    let uploadDateRaw = null;
+    let uploadDateMs = null;
     const proxies = [
       `https://api.allorigins.win/raw?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + vidId)}`,
       `https://corsproxy.io/?https://www.youtube.com/watch?v=${vidId}`,
@@ -3650,134 +3628,148 @@ async function doSubmitPost() {
         if (dateMatch) {
           const parsed = new Date(dateMatch[1]);
           if (!isNaN(parsed)) {
-            uploadDateRaw = parsed;
+            uploadDateMs = parsed.getTime();
             uploadDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-            console.log('Got date from proxy:', proxyUrl, uploadDate);
             break;
           }
         }
-      } catch(e) { console.log('Proxy failed:', proxyUrl); continue; }
+      } catch(e) { continue; }
     }
 
+    _fetchedMeta = { title: oData.title || '', channel: oData.author_name || '', vidId, uploadDate, uploadDateMs };
 
-
-    _fetchedMeta = {
-      title: oData.title || '',
-      channel: oData.author_name || '',
-      vidId,
-      uploadDate,
-      uploadDateMs: uploadDateRaw ? uploadDateRaw.getTime() : null
-    };
-
-    // Check against banned promotions list — name, title and channel handle
-    const channelLower = _fetchedMeta.channel.toLowerCase().replace(/\s/g, '').replace(/@/g, '');
-    const titleLower = _fetchedMeta.title.toLowerCase();
-    const isBanned = BANNED_PROMOS.some(b => {
-      const clean = b.replace(/@/g, '');
-      return channelLower.includes(clean) || titleLower.includes(clean);
-    });
-    if (isBanned) return showSubmitErr('This promotion is not permitted on the EFED Streaming Hub.');
-
-    // Show preview
     document.getElementById('submit-preview-title').textContent = _fetchedMeta.title;
     document.getElementById('submit-preview-channel').textContent = _fetchedMeta.channel + (_fetchedMeta.uploadDate ? '  ·  ' + _fetchedMeta.uploadDate : '');
     document.getElementById('submit-preview').style.display = 'block';
-    // Show date input and pre-fill with YouTube upload date if available
     document.getElementById('submit-date-wrap').style.display = 'block';
-    // Keep button disabled until date is entered
-    const postBtn = document.getElementById('submit-post-btn');
-    postBtn.disabled = true; postBtn.style.opacity = '.4'; postBtn.style.cursor = 'not-allowed';
-    if (_fetchedMeta.uploadDateMs) {
-      const d = new Date(_fetchedMeta.uploadDateMs);
+
+    // Pre-fill date if available
+    if (uploadDateMs) {
+      const d = new Date(uploadDateMs);
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth()+1).padStart(2,'0');
       const dd = String(d.getDate()).padStart(2,'0');
       document.getElementById('submit-event-date').value = yyyy + '-' + mm + '-' + dd;
       validateSubmitDate();
+    } else {
+      btn.textContent = 'Post to Hub';
     }
-
-    // Post to Supabase — goes live instantly
-    btn.textContent = 'Posting…';
-    // Validate event date if manually entered
-    const eventDateVal = document.getElementById('submit-event-date').value;
-    if (eventDateVal) {
-      const eventParsed = new Date(eventDateVal + 'T00:00:00');
-      const today = new Date(); today.setHours(0,0,0,0);
-      if (eventParsed > today) {
-        btn.disabled = false; btn.textContent = 'Post to Hub';
-        return showSubmitErr('The event date cannot be in the future. Please enter an accurate date.');
-      }
-    }
-
-    const thumbUrl = 'https://i.ytimg.com/vi/' + _fetchedMeta.vidId + '/mqdefault.jpg';
-    await sbInsert('submissions', {
-      url,
-      show_name: _fetchedMeta.title,
-      efed: _fetchedMeta.channel,
-      date: (function() {
-        const d = document.getElementById('submit-event-date').value;
-        if (d) {
-          const parsed = new Date(d + 'T00:00:00');
-          return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        }
-        return _fetchedMeta.uploadDate || '';
-      })(),
-      date_ms: (function() {
-        const d = document.getElementById('submit-event-date').value;
-        if (d) return new Date(d + 'T00:00:00').getTime();
-        return _fetchedMeta.uploadDateMs || Date.now();
-      })(),
-      submitted_by: session.username,
-      submitted_at: Date.now(),
-      community: true,
-      status: 'approved',
-      thumb_url: thumbUrl
-    });
-
-    // Add to local videos array immediately — live for everyone
-    videos.push({
-      url,
-      show: _fetchedMeta.title,
-      efed: _fetchedMeta.channel,
-      date: (function() {
-        const d = document.getElementById('submit-event-date').value;
-        if (d) {
-          const parsed = new Date(d + 'T00:00:00');
-          return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        }
-        return _fetchedMeta.uploadDate || '';
-      })(),
-      dateMs: _fetchedMeta.uploadDateMs || Date.now(),
-      submittedAt: Date.now(),
-      submittedBy: session.username,
-      community: true,
-      status: 'approved',
-      thumb: thumbUrl
-    });
-    buildPills();
-    renderGrid();
-
-    // Re-init hero so new video appears as slide 1
-    window._heroFirstLoad = true;
-    heroIdx = 0;
-    buildHeroDots();
-    loadSlide();
-
-    document.getElementById('submit-ok').style.display = 'block';
-    document.getElementById('submit-ok').textContent = '🎉 Your show is now live on the Hub!';
-    btn.textContent = 'Posted!';
-    btn.disabled = true;
-    btn.style.opacity = '.6';
-    setTimeout(() => closeSubmitModal(), 2000);
-
   } catch(e) {
-    if (btn.textContent !== 'Posted!') {
+    console.warn('Preview fetch failed', e);
+    btn.textContent = 'Post to Hub';
+  }
+}
+
+function doSubmitPost() {
+  const session = getSession();
+  if (!session) return;
+  const url = document.getElementById('submit-url').value.trim();
+  if (!url) return;
+  if (!_fetchedMeta || !_fetchedMeta.title) return;
+
+  const btn = document.getElementById('submit-post-btn');
+  btn.disabled = true;
+  btn.style.opacity = '.7';
+  btn.textContent = 'Posting…';
+
+  (async () => {
+    try {
+      // Check duplicate
+      const existing = await sbGet('submissions', `url=eq.${encodeURIComponent(url)}`);
+      if (existing.length) {
+        const userRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+        const user = userRows[0];
+        const isCreator = user?.is_creator;
+        const ytChannel = (user?.yt_channel || '').toLowerCase();
+        const videoChannel = (_fetchedMeta.channel || '').toLowerCase();
+        const channelMatch = ytChannel && (
+          videoChannel.includes(ytChannel.replace('https://youtube.com/@','').replace('@','')) ||
+          ytChannel.includes(videoChannel)
+        );
+        if (isCreator && channelMatch && !existing[0].claimed_by) {
+          showClaimPrompt(existing[0], _fetchedMeta.title, session.username);
+          btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Post to Hub';
+          return;
+        }
+        showSubmitErr('This video has already been posted.');
+        btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Post to Hub';
+        return;
+      }
+
+      // Validate event date
+      const eventDateVal = document.getElementById('submit-event-date').value;
+      if (eventDateVal) {
+        const eventParsed = new Date(eventDateVal + 'T00:00:00');
+        const today = new Date(); today.setHours(0,0,0,0);
+        if (eventParsed > today) {
+          showSubmitErr('The event date cannot be in the future.');
+          btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Post to Hub';
+          return;
+        }
+      }
+
+      const dateStr = eventDateVal
+        ? new Date(eventDateVal + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        : _fetchedMeta.uploadDate || '';
+      const dateMs = eventDateVal
+        ? new Date(eventDateVal + 'T00:00:00').getTime()
+        : _fetchedMeta.uploadDateMs || Date.now();
+
+      const thumbUrl = 'https://i.ytimg.com/vi/' + _fetchedMeta.vidId + '/mqdefault.jpg';
+
+      await sbInsert('submissions', {
+        url,
+        show_name: _fetchedMeta.title,
+        efed: _fetchedMeta.channel,
+        date: dateStr,
+        date_ms: dateMs,
+        submitted_by: session.username,
+        submitted_at: Date.now(),
+        community: true,
+        status: 'approved',
+        thumb_url: thumbUrl
+      });
+
+      videos.push({
+        url,
+        show: _fetchedMeta.title,
+        efed: _fetchedMeta.channel,
+        date: dateStr,
+        dateMs: dateMs,
+        submittedAt: Date.now(),
+        submittedBy: session.username,
+        community: true,
+        status: 'approved',
+        new: true,
+        thumb: thumbUrl
+      });
+
+      buildPills();
+      renderGrid();
+      loadBookmarksRow();
+      loadEfedOwnerRow();
+
+      window._heroFirstLoad = true;
+      heroIdx = 0;
+      buildHeroDots();
+      loadSlide();
+
+      document.getElementById('submit-ok').style.display = 'block';
+      document.getElementById('submit-ok').textContent = '🎉 Your show is now live on the Hub!';
+      btn.textContent = 'Posted!';
+      btn.disabled = true;
+      btn.style.opacity = '.6';
+      setTimeout(() => closeSubmitModal(), 2000);
+
+    } catch(e) {
       console.error(e);
       btn.textContent = 'Post to Hub';
       btn.disabled = false;
+      btn.style.opacity = '1';
     }
-  }
+  })();
 }
+
 
 function showSubmitErr(msg) {
   const el = document.getElementById('submit-err');
