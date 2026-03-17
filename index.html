@@ -1918,10 +1918,16 @@
         <button class="expand-action-btn" id="expand-bookmark-btn" onclick="toggleExpandBookmark()">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
         </button>
-        <button class="expand-action-btn" id="expand-support-btn" onclick="toggleExpandSupport()">
+        <button class="expand-action-btn" id="expand-support-btn" onclick="toggleExpandSupport()" style="display:none;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           Support
         </button>
+        <button class="expand-action-btn" id="expand-more-btn" onclick="toggleExpandMore(event)" style="padding:9px 12px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+        </button>
+        <div id="expand-more-dropdown" style="display:none;position:absolute;background:#1a1a20;border:1px solid rgba(255,255,255,.1);border-radius:10px;overflow:hidden;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,.6);z-index:50;">
+          <button id="expand-delete-btn" class="card-menu-item" style="display:none;color:#ff6b6b;width:100%;text-align:left;" onclick="expandDeleteVideo()">🗑 Delete</button>
+        </div>
       </div>
 
       <div id="expand-comments-section">
@@ -2500,7 +2506,7 @@ function makeCard(v) {
   if (v.community && v.submittedBy) {
     const postedDiv = document.createElement('div');
     postedDiv.className = 'card-posted-by';
-    postedDiv.textContent = 'posted by ' + (v.displayName || v.submittedBy);
+    postedDiv.textContent = 'by ' + (v.displayName || v.submittedBy);
     infoDiv.appendChild(postedDiv);
   }
 
@@ -2548,9 +2554,9 @@ async function initHub() {
   try {
     const usernames = [...new Set(videos.filter(v => v.community && v.submittedBy).map(v => v.submittedBy))];
     if (usernames.length) {
-      const users = await sbGetWithTimeout('users', 'username=in.(' + usernames.map(u => encodeURIComponent(u)).join(',') + ')&select=username,display_name');
+      const users = await sbGetWithTimeout('users', 'username=in.(' + usernames.map(u => encodeURIComponent(u)).join(',') + ')&select=username,display_name,promo_name');
       const nameMap = {};
-      users.forEach(u => { if (u.display_name) nameMap[u.username] = u.display_name; });
+      users.forEach(u => { nameMap[u.username] = u.promo_name || u.display_name || u.username; });
       videos.forEach(v => { if (v.community && nameMap[v.submittedBy]) v.displayName = nameMap[v.submittedBy]; });
     }
   } catch(e) {}
@@ -3942,7 +3948,17 @@ function openExpand(v) {
   document.getElementById('expand-show').textContent = v.show || '';
   document.getElementById('expand-meta').textContent = v.date || '';
   const posterEl = document.getElementById('expand-poster');
-  posterEl.innerHTML = v.submittedBy ? `Posted by <span>${v.submittedBy}</span>` : '';
+  if (v.submittedBy) {
+    // Try to get promo_name/display_name for this user
+    try {
+      const uRows = await sbGet('users', `username=eq.${encodeURIComponent(v.submittedBy)}&select=username,display_name,promo_name`);
+      const u = uRows[0];
+      const label = (u && (u.promo_name || u.display_name)) || v.displayName || v.submittedBy;
+      posterEl.innerHTML = `by <span>${label}</span>`;
+    } catch(e) {
+      posterEl.innerHTML = `by <span>${v.displayName || v.submittedBy}</span>`;
+    }
+  } else { posterEl.innerHTML = ''; }
 
   // Actions state
   const session = getSession();
@@ -3967,7 +3983,17 @@ function openExpand(v) {
   document.getElementById('expand-comment-login-msg').style.display = session ? 'none' : 'block';
   loadExpandComments(v.url);
   loadExpandLikeCount(v.url);
-  loadExpandSupport();
+
+  // Support button: hide if user owns this eFed or submitted this video
+  const supportBtn = document.getElementById('expand-support-btn');
+  const deleteBtn = document.getElementById('expand-delete-btn');
+  const moreBtn = document.getElementById('expand-more-btn');
+  const isOwnVideo = session && v.submittedBy && v.submittedBy === session.username;
+  const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
+  if (supportBtn) supportBtn.style.display = isOwnVideo ? 'none' : '';
+  if (deleteBtn) deleteBtn.style.display = (isOwnVideo || isAdmin) && v.community ? 'block' : 'none';
+  if (moreBtn) moreBtn.style.display = (isOwnVideo || isAdmin) && v.community ? '' : 'none';
+  if (!isOwnVideo) loadExpandSupport();
 
   // Open overlay
   const overlay = document.getElementById('card-expand');
@@ -3997,6 +4023,9 @@ function closeExpand() {
   // Reset EQ bar
   const eq = document.getElementById('expand-eq-bar');
   if (eq) eq.classList.remove('playing');
+  // Close 3-dot dropdown if open
+  const moreDrop = document.getElementById('expand-more-dropdown');
+  if (moreDrop) moreDrop.style.display = 'none';
   // Restore title overlay
   const overlay = document.getElementById('expand-title-overlay');
   if (overlay) { overlay.style.opacity = '1'; overlay.style.pointerEvents = ''; }
@@ -4037,6 +4066,49 @@ function expandStartVideo() {
     inlinePlay.onclick = null; // pause not supported via iframe, just cosmetic
   }
   startWatchTimer(_expandVideo.url);
+}
+
+function toggleExpandMore(e) {
+  e.stopPropagation();
+  const drop = document.getElementById('expand-more-dropdown');
+  if (!drop) return;
+  const btn = document.getElementById('expand-more-btn');
+  const rect = btn.getBoundingClientRect();
+  drop.style.top = (rect.bottom + 6) + 'px';
+  drop.style.left = rect.left + 'px';
+  drop.style.position = 'fixed';
+  const isOpen = drop.style.display === 'block';
+  drop.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    setTimeout(() => document.addEventListener('click', () => { drop.style.display = 'none'; }, { once: true }), 0);
+  }
+}
+
+async function expandDeleteVideo() {
+  document.getElementById('expand-more-dropdown').style.display = 'none';
+  if (!_expandVideo) return;
+  if (!confirm('Delete this video? This cannot be undone.')) return;
+  const session = getSession();
+  if (!session) return;
+  const url = _expandVideo.url;
+  const isAdmin = session.username.toLowerCase() === ADMIN_USERNAME;
+  try {
+    if (isAdmin) {
+      await sbDelete('submissions', `url=eq.${encodeURIComponent(url)}`);
+    } else {
+      const existing = await sbGet('submissions', `url=eq.${encodeURIComponent(url)}&submitted_by=eq.${encodeURIComponent(session.username)}`);
+      if (!existing.length) { alert('Video not found or you do not own it.'); return; }
+      await sbDelete('submissions', `url=eq.${encodeURIComponent(url)}&submitted_by=eq.${encodeURIComponent(session.username)}`);
+    }
+    const vi = videos.findIndex(v => v.url === url);
+    if (vi !== -1) videos.splice(vi, 1);
+    closeExpand();
+    buildPills();
+    renderGrid();
+  } catch(err) {
+    alert('Delete failed. Please try again.');
+    console.error(err);
+  }
 }
 
 function expandWatchFull() {
