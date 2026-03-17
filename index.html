@@ -3518,21 +3518,28 @@ async function doSubmitPost() {
     if (!oRes.ok) return showSubmitErr('Could not fetch video info. Check the link.');
     const oData = await oRes.json();
 
-    // Get upload date from YouTube page via CORS proxy
+    // Get upload date via multiple proxy attempts
     let uploadDate = '';
-    try {
-      const ytRes = await fetch(`https://corsproxy.io/?https://www.youtube.com/watch?v=${vidId}`);
-      const ytHtml = await ytRes.text();
-      const dateMatch = ytHtml.match(/"datePublished":"([^"]+)"/) ||
-                        ytHtml.match(/"publishDate":"([^"]+)"/) ||
-                        ytHtml.match(/itemprop="datePublished" content="([^"]+)"/);
-      if (dateMatch) {
-        const parsed = new Date(dateMatch[1]);
-        if (!isNaN(parsed)) {
-          uploadDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const proxies = [
+      `https://api.allorigins.win/raw?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + vidId)}`,
+      `https://corsproxy.io/?https://www.youtube.com/watch?v=${vidId}`
+    ];
+    for (const proxyUrl of proxies) {
+      try {
+        const ytRes = await fetch(proxyUrl);
+        if (!ytRes.ok) continue;
+        const ytHtml = await ytRes.text();
+        const dateMatch = ytHtml.match(/"datePublished":"([^"]+)"/) ||
+                          ytHtml.match(/"publishDate":"([^"]+)"/);
+        if (dateMatch) {
+          const parsed = new Date(dateMatch[1]);
+          if (!isNaN(parsed)) {
+            uploadDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            break;
+          }
         }
-      }
-    } catch(e) {}
+      } catch(e) { continue; }
+    }
 
     _fetchedMeta = {
       title: oData.title || '',
@@ -3562,7 +3569,7 @@ async function doSubmitPost() {
       url,
       show_name: _fetchedMeta.title,
       efed: _fetchedMeta.channel,
-      date: _fetchedMeta.uploadDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      date: _fetchedMeta.uploadDate || '',
       date_ms: Date.now(),
       submitted_by: session.username,
       submitted_at: Date.now(),
@@ -3576,7 +3583,7 @@ async function doSubmitPost() {
       url,
       show: _fetchedMeta.title,
       efed: _fetchedMeta.channel,
-      date: _fetchedMeta.uploadDate || new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      date: _fetchedMeta.uploadDate || '',
       dateMs: Date.now(),
       submittedAt: Date.now(),
       submittedBy: session.username,
