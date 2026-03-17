@@ -3994,6 +3994,25 @@ function openExpand(v) {
   if (deleteBtn) deleteBtn.style.display = (isOwnVideo || isAdmin) && v.community ? 'block' : 'none';
   if (moreBtn) moreBtn.style.display = (isOwnVideo || isAdmin) && v.community ? '' : 'none';
   if (!isOwnVideo) loadExpandSupport();
+  // Seed rate button countdown from saved watch time immediately
+  if (session) {
+    sbGet('watch_time', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(v.url))}`)
+      .then(rows => {
+        if (rows.length) {
+          const totalSecs = rows[0].total_seconds || 0;
+          if (rows[0].rating_unlocked || totalSecs >= 600) {
+            _watchUnlocked[v.url] = true;
+            updateRateButton(true);
+          } else {
+            updateRateButton(false, totalSecs);
+          }
+        } else {
+          updateRateButton(false, 0);
+        }
+      }).catch(() => { updateRateButton(false, 0); });
+  } else {
+    updateRateButton(false, 0);
+  }
 
   // Open overlay
   const overlay = document.getElementById('card-expand');
@@ -5111,6 +5130,10 @@ function stopWatchTimer(url) {
 function tickWatchTimer(url) {
   if (!_watchTimers[url]) return;
   _watchTimers[url].seconds += 10;
+  // Update countdown display every tick
+  if (!_watchUnlocked[url]) {
+    updateRateButton(false, _watchTimers[url].seconds);
+  }
   // Save every minute
   if (_watchTimers[url].seconds % 60 === 0) {
     saveWatchTime(url, _watchTimers[url].seconds);
@@ -5133,6 +5156,9 @@ async function checkWatchTime(url) {
         }
       } else if (_watchTimers[url]) {
         _watchTimers[url].seconds = totalSecs;
+        updateRateButton(false, totalSecs);
+      } else {
+        updateRateButton(false, totalSecs);
       }
     }
   } catch(e) {}
@@ -5161,7 +5187,7 @@ async function saveWatchTime(url, newSeconds) {
   } catch(e) { console.warn('Watch time save failed', e); }
 }
 
-function updateRateButton(unlocked) {
+function updateRateButton(unlocked, secondsWatched) {
   const btn = document.getElementById('expand-rate-btn');
   if (!btn) return;
   if (unlocked) {
@@ -5169,6 +5195,17 @@ function updateRateButton(unlocked) {
     btn.style.color = '#c8a84b';
     btn.style.borderColor = 'rgba(200,168,75,.4)';
     btn.style.background = 'rgba(200,168,75,.1)';
+    btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Rate';
+  } else if (secondsWatched !== undefined) {
+    const remaining = Math.max(0, 600 - secondsWatched);
+    const m = Math.floor(remaining / 60);
+    const s = remaining % 60;
+    const timeStr = m + ':' + String(s).padStart(2, '0');
+    btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ' + timeStr;
+    btn.style.opacity = '0.5';
+    btn.style.color = '';
+    btn.style.borderColor = '';
+    btn.style.background = '';
   }
 }
 
