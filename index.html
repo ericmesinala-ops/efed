@@ -299,6 +299,18 @@
     font-size: .48rem; letter-spacing: 2px; text-transform: uppercase;
     font-weight: 700; padding: 3px 7px; border-radius: 4px;
   }
+  .live-badge {
+    position: absolute; top: 7px; left: 7px; z-index: 6;
+    background: #c0000e; color: #fff;
+    font-size: .48rem; letter-spacing: 2px; text-transform: uppercase;
+    font-weight: 700; padding: 3px 7px; border-radius: 4px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .live-dot {
+    width: 5px; height: 5px; border-radius: 50%; background: #fff;
+    animation: live-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes live-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
   .game-badge {
     position: absolute; bottom: 7px; left: 7px; z-index: 6;
     background: rgba(0,0,0,.75); border: 1px solid rgba(255,255,255,.2);
@@ -2022,9 +2034,9 @@ const videos = [
   { url: "https://youtu.be/kgxCddYL2Yo",                       show: "IWF Presents: The IWF Awards",                           efed: "International Wrestling Federation", date: "Mar 7, 2026" },
   { url: "https://youtu.be/pd7280pJGUY",                       show: "IBW Elimination Chamber",                                efed: "Insanely Brutal Wrestling",       date: "Mar 7, 2026" },
   { url: "https://youtu.be/YSQlFynBMrE",                       show: "HeartXSoul New Foundations",                             efed: "Dragon1 WCNW HXS",               date: "Mar 7, 2026", thumb: "https://i.ytimg.com/vi/YSQlFynBMrE/hqdefault.jpg" },
-  { url: "https://www.youtube.com/watch?v=r3Db2WTYLnY",        show: "IWE: Ignition | Ep27",                                   efed: "IWE",                             date: "Mar 15, 2026" },
-  { url: "https://www.youtube.com/watch?v=xmh9ZOVxTt0",        show: "RPW Week 198: FIRST ORIGYN SHOW!!",                       efed: "RegentsProWrestling",             date: "Mar 18, 2026" },
-  { url: "https://www.youtube.com/watch?v=9mmCAFwKAMw",         show: "SWW Rush S2 Ep.10",                                       efed: "Virtual Wrestling Network",       date: "Mar 14, 2026" },
+  { url: "https://www.youtube.com/watch?v=r3Db2WTYLnY",        show: "IWE: Ignition | Ep27",                                   efed: "IWE",                             date: "Mar 15, 2026", new: true },
+  { url: "https://www.youtube.com/watch?v=xmh9ZOVxTt0",        show: "RPW Week 198: FIRST ORIGYN SHOW!!",                       efed: "RegentsProWrestling",             date: "Mar 18, 2026", new: true },
+  { url: "https://www.youtube.com/watch?v=9mmCAFwKAMw",         show: "SWW Rush S2 Ep.10",                                       efed: "Virtual Wrestling Network",       date: "Mar 14, 2026", new: true },
   { url: "https://youtu.be/P6S0zC7nA9U",                       show: "OOCW Rumble 2026",                                       efed: "OutOfContextWrasslin",            date: "Feb 28, 2026" },
 ];
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2050,6 +2062,22 @@ function showConfirm(title = 'Delete Show', msg = 'Are you sure? This cannot be 
     document.getElementById('confirm-modal-bg').style.display = 'none';
     resolve(val);
   }; });
+}
+
+const YT_API_KEY = 'AIzaSyAM-nfslj5NW47qdj-dlzcCvKf-I3gKPqs';
+
+async function checkLiveStatus(videoIds) {
+  if (!videoIds.length) return {};
+  try {
+    const ids = videoIds.join(',');
+    const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${ids}&key=${YT_API_KEY}`);
+    const data = await r.json();
+    const map = {};
+    (data.items || []).forEach(item => {
+      map[item.id] = item.snippet.liveBroadcastContent === 'live';
+    });
+    return map;
+  } catch(e) { return {}; }
 }
 
 function extractId(url) {
@@ -2209,6 +2237,34 @@ function renderGrid() {
   list.forEach(v => { try { grid.appendChild(makeCard(v)); } catch(err) { console.error("makeCard failed for", v.url, err); } });
   setTimeout(updateRowArrows, 50);
   setTimeout(loadAllCardRatings, 300);
+  setTimeout(updateLiveBadges, 500);
+}
+
+async function updateLiveBadges() {
+  const cards = document.querySelectorAll('.card');
+  const videoIds = [];
+  cards.forEach(card => {
+    const id = extractId(card._videoUrl || '');
+    if (id) videoIds.push(id);
+  });
+  if (!videoIds.length) return;
+  // Check in batches of 50 (YouTube API limit)
+  const batch = videoIds.slice(0, 50);
+  const liveMap = await checkLiveStatus(batch);
+  cards.forEach(card => {
+    const id = extractId(card._videoUrl || '');
+    if (!id || !liveMap[id]) return;
+    const thumb = card.querySelector('.card-thumb');
+    if (!thumb) return;
+    // Remove existing live badge if any
+    const existing = thumb.querySelector('.live-badge');
+    if (existing) existing.remove();
+    // Add live badge
+    const badge = document.createElement('div');
+    badge.className = 'live-badge';
+    badge.innerHTML = '<div class="live-dot"></div> LIVE';
+    thumb.appendChild(badge);
+  });
 }
 
 // ── EFED OWNER ROW ──
@@ -2500,7 +2556,7 @@ function makeCard(v) {
   // Show Just Added badge if submitted within last 24 hours
   const now = Date.now();
   const submittedAt = v.submittedAt || v.dateMs || 0;
-  const isNew = submittedAt && (now - submittedAt) < 24 * 60 * 60 * 1000;
+  const isNew = v.new || (submittedAt && (now - submittedAt) < 24 * 60 * 60 * 1000);
   if (isNew) {
     const nb = document.createElement('div');
     nb.className = 'new-badge';
