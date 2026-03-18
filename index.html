@@ -4872,26 +4872,41 @@ async function loadExistingRating(url) {
     const rows = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
     if (rows.length) {
       const r = rows[0];
-      // Map DB cols back to display categories when loading existing rating
-      const loadMap = {
-        overall: 'overall', production: 'production', sound: 'sound',
-        promo: 'promo', match: 'match', roster: 'roster'
-      };
       const dbCols = { overall:'overall', production:'production', promo_storyline:'promo2', match_quality:'match', roster_talent:'roster' };
       Object.entries(dbCols).forEach(([col, cat]) => {
-        const val = Math.round(r[cols[i]] || 0);
+        const val = Math.round(r[col] || 0);
         setStars(cat, val);
         _ratingValues[cat] = val;
-        if (cat === 'production') _ratingValues.sound = val; // mirror graphics→sound on load
       });
-      msg.textContent = "✅ You've already rated this show. You can update your rating below.";
+
+      // Lock — no re-rating allowed
+      msg.innerHTML = '🔒 You\'ve already rated this show. Ratings are final to keep scores accurate.';
       msg.style.display = 'block';
       msg.style.color = '#c8a84b';
-      if (submitBtn) submitBtn.textContent = 'Update Rating';
+
+      // Disable all star buttons
+      document.querySelectorAll('#rating-modal-bg .star-btn').forEach(btn => {
+        btn.disabled = true;
+        btn.style.cursor = 'default';
+        btn.style.pointerEvents = 'none';
+      });
+
+      // Disable and grey out submit button
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Already Rated';
+        submitBtn.style.opacity = '.35';
+        submitBtn.style.cursor = 'not-allowed';
+      }
     } else {
       msg.style.display = 'none';
       msg.style.color = '#ff6b6b';
-      if (submitBtn) submitBtn.textContent = 'Submit Rating';
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Rating';
+        submitBtn.style.opacity = '';
+        submitBtn.style.cursor = '';
+      }
     }
   } catch(e) {
     if (submitBtn) submitBtn.textContent = 'Submit Rating';
@@ -4961,6 +4976,21 @@ async function submitRating() {
   const session = getSession();
   if (!session || !_expandVideo) return;
 
+  // Hard block — check DB before doing anything, no re-rating allowed
+  const url = _expandVideo.url;
+  try {
+    const existing = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
+    if (existing.length) {
+      const msg = document.getElementById('rating-msg');
+      msg.textContent = '🔒 You\'ve already rated this show. Ratings are final.';
+      msg.style.display = 'block';
+      msg.style.color = '#c8a84b';
+      const submitBtn = document.querySelector('#rating-modal-bg button[onclick="submitRating()"]');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Already Rated'; submitBtn.style.opacity = '.35'; }
+      return;
+    }
+  } catch(e) {}
+
   if (Object.values(_ratingValues).some(v => v === 0)) {
     const msg = document.getElementById('rating-msg');
     msg.textContent = 'Please rate all categories before submitting.';
@@ -4968,9 +4998,7 @@ async function submitRating() {
     return;
   }
 
-  const url = _expandVideo.url;
   try {
-    const existing = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
     const data = {
       username: session.username,
       video_url: url,
@@ -4992,11 +5020,7 @@ async function submitRating() {
       created_at: Date.now()
     };
 
-    if (existing.length) {
-      await sbUpdate('ratings', data, `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
-    } else {
-      await sbInsert('ratings', data);
-    }
+    await sbInsert('ratings', data);
 
     closeRatingModal();
 
