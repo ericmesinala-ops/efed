@@ -1879,6 +1879,15 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         Support
       </button>
+      <div style="position:relative;margin-left:auto;" id="expand-dot-wrap">
+        <button class="expand-action-btn" id="expand-dot-btn" onclick="toggleExpandDotMenu()" style="padding:7px 12px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+        </button>
+        <div id="expand-dot-menu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:#1a1a20;border:1px solid rgba(255,255,255,.1);border-radius:10px;overflow:hidden;min-width:140px;box-shadow:0 8px 24px rgba(0,0,0,.6);z-index:10;">
+          <button id="expand-delete-btn" class="card-menu-item" style="display:none;color:#ff6b6b;" onclick="deleteExpandVideo()">🗑 Delete</button>
+          <button class="card-menu-item" style="color:#e8e8e8;" onclick="closeExpandDotMenu();openEditDateModal(_expandVideo);" id="expand-edit-date-btn" style="display:none;">📅 Edit Date</button>
+        </div>
+      </div>
     </div>
 
     <div id="expand-comments-section">
@@ -3952,10 +3961,22 @@ function openExpand(v) {
   document.getElementById('expand-show').textContent = v.show || '';
   document.getElementById('expand-meta').textContent = v.date || '';
   const posterEl = document.getElementById('expand-poster');
-  posterEl.innerHTML = v.submittedBy ? `Posted by <span>${v.submittedBy}</span>` : '';
+  posterEl.innerHTML = v.efed ? `Posted by <span>${v.efed}</span>` : (v.submittedBy ? `Posted by <span>${v.submittedBy}</span>` : '');
+
+  // 3-dot menu in actions row
+  const session = getSession();
+  const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
+  const isOwner = session && v.community && v.submittedBy === session.username;
+  const canDelete = isAdmin || isOwner;
+  const delBtn = document.getElementById('expand-delete-btn');
+  const editDateBtn = document.getElementById('expand-edit-date-btn');
+  const dotWrap = document.getElementById('expand-dot-wrap');
+  if (delBtn) delBtn.style.display = canDelete ? 'flex' : 'none';
+  if (editDateBtn) editDateBtn.style.display = isAdmin ? 'flex' : 'none';
+  if (dotWrap) dotWrap.style.display = (canDelete || isAdmin) ? 'block' : 'none';
+  closeExpandDotMenu();
 
   // Actions state
-  const session = getSession();
   const videoKey = encodeURIComponent(v.url);
 
   // Like button
@@ -3994,6 +4015,30 @@ function openExpand(v) {
     }
     lastScroll = cur;
   };
+}
+
+function toggleExpandDotMenu() {
+  const menu = document.getElementById('expand-dot-menu');
+  if (menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+function closeExpandDotMenu() {
+  const menu = document.getElementById('expand-dot-menu');
+  if (menu) menu.style.display = 'none';
+}
+async function deleteExpandVideo() {
+  closeExpandDotMenu();
+  if (!_expandVideo) return;
+  if (!confirm('Delete this video? This cannot be undone.')) return;
+  const session = getSession();
+  if (!session) return;
+  try {
+    await sbDelete('submissions', `url=eq.${encodeURIComponent(_expandVideo.url)}`);
+    const vi = videos.findIndex(v => v.url === _expandVideo.url);
+    if (vi !== -1) videos.splice(vi, 1);
+    closeExpand();
+    buildPills();
+    renderGrid();
+  } catch(e) { alert('Delete failed. Try again.'); console.error(e); }
 }
 
 function closeExpand() {
