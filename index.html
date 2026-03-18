@@ -1957,9 +1957,17 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
         <span id="expand-like-count">0</span>
       </button>
-      <button class="expand-action-btn" id="expand-rate-btn" onclick="openRatingModal()">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-        Rate
+      <button class="expand-action-btn" id="expand-rate-btn" onclick="handleRateClick()" style="position:relative;overflow:hidden;min-width:90px;flex-direction:column;gap:3px;padding:8px 14px;">
+        <div style="display:flex;align-items:center;gap:5px;" id="rate-btn-inner">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span id="rate-btn-label">Rate</span>
+        </div>
+        <div id="rate-watch-bar-wrap" style="display:none;width:100%;flex-direction:column;align-items:center;gap:3px;">
+          <div style="font-size:.5rem;letter-spacing:1px;color:rgba(255,255,255,.4);white-space:nowrap;" id="rate-watch-timer">0:00 / 10:00</div>
+          <div style="width:100%;height:2px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;">
+            <div id="rate-watch-bar" style="height:100%;width:0%;background:var(--gold);border-radius:2px;transition:width .5s linear;"></div>
+          </div>
+        </div>
       </button>
       <button class="expand-action-btn" id="expand-bookmark-btn" onclick="toggleExpandBookmark()">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
@@ -4252,13 +4260,20 @@ function openExpand(v) {
   _expandVideo = v;
   const id = extractId(v.url);
 
-  // Reset rate button
+  // Reset rate button to locked state
   const rateBtn = document.getElementById('expand-rate-btn');
   if (rateBtn) {
+    rateBtn.style.opacity = '0.4';
     rateBtn.style.color = '';
     rateBtn.style.borderColor = '';
     rateBtn.style.background = '';
-    rateBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Rate`;
+    rateBtn.style.cursor = 'default';
+    const label = document.getElementById('rate-btn-label');
+    if (label) label.textContent = 'Rate';
+    const barWrap = document.getElementById('rate-watch-bar-wrap');
+    if (barWrap) barWrap.style.display = 'none';
+    const inner = document.getElementById('rate-btn-inner');
+    if (inner) inner.style.display = 'flex';
   }
 
   // Set hero thumbnail
@@ -4316,6 +4331,9 @@ function openExpand(v) {
 
   // Actions state
   const videoKey = encodeURIComponent(v.url);
+
+  // Seed watch time from DB so progress bar shows on open
+  if (session) checkWatchTime(v.url);
 
   // Like button
   const likeBtn = document.getElementById('expand-like-btn');
@@ -5270,6 +5288,7 @@ const RATING_CATEGORIES = ['overall','production','sound','promo','match','promo
 let _ratingValues = { overall:0, production:0, sound:0, promo:0, match:0, promo2:0, roster:0 };
 let _watchTimers = {}; // { videoUrl: { interval, seconds } }
 let _watchUnlocked = {}; // { videoUrl: true/false }
+let _watchSeeded = {}; // { videoUrl: seconds from DB }
 
 // Init star rows
 function initStarRows() {
@@ -5350,6 +5369,22 @@ async function loadExistingRating(url) {
       msg.innerHTML = '🔒 You\'ve already rated this show. Ratings are final to keep scores accurate.';
       msg.style.display = 'block';
       msg.style.color = '#c8a84b';
+
+      // Show score on rate button
+      const rateBtn = document.getElementById('expand-rate-btn');
+      if (rateBtn) {
+        rateBtn.style.opacity = '1';
+        rateBtn.style.color = '#c8a84b';
+        rateBtn.style.borderColor = 'rgba(200,168,75,.4)';
+        rateBtn.style.background = 'rgba(200,168,75,.1)';
+        rateBtn.style.cursor = 'pointer';
+        const label = document.getElementById('rate-btn-label');
+        if (label) label.textContent = `★ ${Math.round(r.overall || 0)}/5`;
+        const barWrap = document.getElementById('rate-watch-bar-wrap');
+        if (barWrap) barWrap.style.display = 'none';
+        const inner = document.getElementById('rate-btn-inner');
+        if (inner) inner.style.display = 'flex';
+      }
 
       // Disable all star buttons
       document.querySelectorAll('#rating-modal-bg .star-btn').forEach(btn => {
@@ -5494,10 +5529,17 @@ async function submitRating() {
     // Update rate button to show rated state
     const rateBtn = document.getElementById('expand-rate-btn');
     if (rateBtn) {
+      rateBtn.style.opacity = '1';
       rateBtn.style.color = '#c8a84b';
       rateBtn.style.borderColor = 'rgba(200,168,75,.4)';
       rateBtn.style.background = 'rgba(200,168,75,.1)';
-      rateBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="#c8a84b" stroke="#c8a84b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> ${_ratingValues.overall}/5`;
+      rateBtn.style.cursor = 'pointer';
+      const label = document.getElementById('rate-btn-label');
+      if (label) label.textContent = `★ ${_ratingValues.overall}/5`;
+      const barWrap = document.getElementById('rate-watch-bar-wrap');
+      if (barWrap) barWrap.style.display = 'none';
+      const inner = document.getElementById('rate-btn-inner');
+      if (inner) inner.style.display = 'flex';
     }
 
     // Toast
@@ -5552,7 +5594,9 @@ function stopWatchTimer(url) {
 function tickWatchTimer(url) {
   if (!_watchTimers[url]) return;
   _watchTimers[url].seconds += 10;
-  const total = _watchTimers[url].seconds;
+  const total = _watchTimers[url].seconds + (_watchSeeded[url] || 0);
+  // Update progress bar live
+  if (_expandVideo && _expandVideo.url === url) updateWatchProgress(url);
   // Unlock from memory — no DB needed
   if (total >= WATCH_UNLOCK_SECS && !_watchUnlocked[url]) {
     _watchUnlocked[url] = true;
@@ -5563,7 +5607,7 @@ function tickWatchTimer(url) {
     return;
   }
   // Save to DB every 60s
-  if (total % 60 === 0) saveWatchTime(url, total);
+  if (_watchTimers[url] && _watchTimers[url].seconds % 60 === 0) saveWatchTime(url, total);
 }
 
 async function checkWatchTime(url) {
@@ -5574,6 +5618,7 @@ async function checkWatchTime(url) {
     const rows = await sbGet('watch_time', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
     if (!rows.length) return;
     const totalSecs = rows[0].total_seconds || 0;
+    _watchSeeded[url] = totalSecs;
     if (rows[0].rating_unlocked || totalSecs >= WATCH_UNLOCK_SECS) {
       _watchUnlocked[url] = true;
       updateRateButton(true);
@@ -5584,6 +5629,10 @@ async function checkWatchTime(url) {
     } else if (_watchTimers[url]) {
       // Seed local counter with DB value so progress carries across sessions
       _watchTimers[url].seconds = Math.max(_watchTimers[url].seconds, totalSecs);
+    }
+    // Show progress bar immediately if any time accumulated
+    if (_expandVideo && _expandVideo.url === url && totalSecs > 0 && !_watchUnlocked[url]) {
+      updateWatchProgress(url);
     }
   } catch(e) {} // watch_time table may not exist yet — silent fail is fine
 }
@@ -5613,6 +5662,54 @@ function updateRateButton(unlocked) {
     btn.style.color = '#c8a84b';
     btn.style.borderColor = 'rgba(200,168,75,.4)';
     btn.style.background = 'rgba(200,168,75,.1)';
+    btn.style.cursor = 'pointer';
+    const barWrap = document.getElementById('rate-watch-bar-wrap');
+    if (barWrap) barWrap.style.display = 'none';
+    const inner = document.getElementById('rate-btn-inner');
+    if (inner) inner.style.display = 'flex';
+    const label = document.getElementById('rate-btn-label');
+    if (label) label.textContent = 'Rate';
+  }
+}
+
+function handleRateClick() {
+  if (!_expandVideo) return;
+  const url = _expandVideo.url;
+  if (_watchUnlocked[url]) {
+    openRatingModal();
+    return;
+  }
+  // Show the progress bar on click even if video isn't playing
+  const btn = document.getElementById('expand-rate-btn');
+  const barWrap = document.getElementById('rate-watch-bar-wrap');
+  const inner = document.getElementById('rate-btn-inner');
+  if (barWrap && inner) {
+    inner.style.display = 'none';
+    barWrap.style.display = 'flex';
+  }
+  updateWatchProgress(url);
+  showExpandMsg('Watch at least 10 minutes to unlock ratings');
+}
+
+function updateWatchProgress(url) {
+  const secs = (_watchTimers[url]?.seconds) || 0;
+  const dbSecs = _watchSeeded[url] || 0;
+  const total = Math.max(secs, dbSecs);
+  const pct = Math.min(100, (total / WATCH_UNLOCK_SECS) * 100);
+  const bar = document.getElementById('rate-watch-bar');
+  const timerEl = document.getElementById('rate-watch-timer');
+  const barWrap = document.getElementById('rate-watch-bar-wrap');
+  const inner = document.getElementById('rate-btn-inner');
+  if (bar) bar.style.width = pct + '%';
+  if (timerEl) {
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    timerEl.textContent = `${m}:${String(s).padStart(2,'0')} / 10:00`;
+  }
+  // Show bar if any time accumulated
+  if (total > 0 && barWrap && inner) {
+    inner.style.display = 'none';
+    barWrap.style.display = 'flex';
   }
 }
 
