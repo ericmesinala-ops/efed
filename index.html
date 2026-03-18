@@ -325,8 +325,8 @@
   }
   .card:hover .card-over { pointer-events: none; }
   .card:hover .card-over { opacity: 1; }
-  .play-c { width: 52px; height: 52px; border-radius: 50%; background: rgba(192,0,14,.95); display: flex; align-items: center; justify-content: center; transition: transform .2s; box-shadow: 0 0 24px rgba(192,0,14,.5); }
-  .card:hover .play-c { transform: scale(1.1); }
+  .play-c { display: none; }
+  .card:hover .play-c { display: none; }
   .card-info { padding: 10px 2px 0; }
   .card-efed { font-size: .6rem; color: var(--gold); letter-spacing: 2px; text-transform: uppercase; font-weight: 700; margin-bottom: 2px; }
   .card-show { font-size: .82rem; font-weight: 600; color: var(--text); line-height: 1.3; margin-bottom: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -352,6 +352,21 @@
     color: #c8a84b; font-weight: 700;
   }
 
+  .card-actions-row {
+    display: flex; align-items: center; margin-top: 7px;
+  }
+  .card-menu-btn-inline {
+    position: static; width: auto; height: auto; border-radius: 6px;
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1);
+    color: rgba(255,255,255,.5); padding: 4px 8px;
+    opacity: 1 !important; /* always visible, not hover-only */
+    backdrop-filter: none;
+  }
+  .card-menu-btn-inline:hover { background: rgba(255,255,255,.12); color: #fff; }
+  .card-menu-dropdown-inline {
+    top: calc(100% + 4px); right: auto; left: 0; bottom: auto;
+  }
+
   /* 3-dot card menu */
   .card-menu-btn {
     position: absolute; top: 7px; right: 7px; z-index: 30;
@@ -361,7 +376,7 @@
     opacity: 0.6; transition: opacity .18s;
     backdrop-filter: blur(4px);
   }
-  .card:hover .card-menu-btn, .card-menu-btn.open { opacity: 1; }
+  .card:hover .card-menu-btn:not(.card-menu-btn-inline), .card-menu-btn.open:not(.card-menu-btn-inline) { opacity: 1; }
   .card-menu-btn svg { pointer-events: none; }
   .card-menu-dropdown {
     position: absolute; top: 38px; right: 7px; z-index: 30;
@@ -2169,23 +2184,39 @@ function makeBookmarkCard(v, session) {
 
   const cardOver = document.createElement('div');
   cardOver.className = 'card-over';
-  cardOver.innerHTML = '<div class="play-c"><svg width="18" height="18" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>';
   thumbDiv.appendChild(cardOver);
 
-  // 3-dot menu
+  el.appendChild(thumbDiv);
+
+  const infoDiv = document.createElement('div');
+  infoDiv.className = 'card-info';
+  const efedDiv = document.createElement('div'); efedDiv.className = 'card-efed'; efedDiv.textContent = v.efed || '';
+  const showDiv = document.createElement('div'); showDiv.className = 'card-show'; showDiv.textContent = v.show || '';
+  const dateDiv = document.createElement('div'); dateDiv.className = 'card-date'; dateDiv.textContent = v.date || '';
+  infoDiv.appendChild(efedDiv);
+  infoDiv.appendChild(showDiv);
+  infoDiv.appendChild(dateDiv);
+
+  // 3-dot menu — in actions row below info, not on thumbnail
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'card-actions-row';
+  actionsRow.onclick = e => e.stopPropagation();
+
+  const menuWrap = document.createElement('div');
+  menuWrap.style.cssText = 'position:relative;display:inline-block;';
+
   const menuBtn = document.createElement('button');
-  menuBtn.className = 'card-menu-btn';
-  menuBtn.style.opacity = '1';
-  menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>';
+  menuBtn.className = 'card-menu-btn card-menu-btn-inline';
+  menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
   menuBtn.onclick = function(e) {
     e.stopPropagation();
     const drop = el.querySelector('.bm-dropdown');
+    document.querySelectorAll('.card-menu-dropdown.open').forEach(m => { if (m !== drop) m.classList.remove('open'); });
     if (drop) drop.classList.toggle('open');
   };
-  thumbDiv.appendChild(menuBtn);
 
   const drop = document.createElement('div');
-  drop.className = 'card-menu-dropdown bm-dropdown';
+  drop.className = 'card-menu-dropdown bm-dropdown card-menu-dropdown-inline';
 
   // Always show Remove Bookmark
   const removeBtn = document.createElement('button');
@@ -2197,7 +2228,6 @@ function makeBookmarkCard(v, session) {
     try {
       await sbDelete('bookmarks', 'video_id=eq.' + encodeURIComponent(id) + '&username=eq.' + encodeURIComponent(session.username));
       el.remove();
-      // Update count
       const grid = document.getElementById('row-bookmarks');
       const countEl = document.getElementById('bookmarks-count');
       const remaining = grid ? grid.querySelectorAll('.card').length : 0;
@@ -2218,7 +2248,6 @@ function makeBookmarkCard(v, session) {
       if (!confirm('Delete this video permanently?')) return;
       try {
         await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url));
-        // Remove from videos array
         const vi = videos.findIndex(x => x.url === v.url);
         if (vi !== -1) videos.splice(vi, 1);
         el.remove();
@@ -2229,17 +2258,10 @@ function makeBookmarkCard(v, session) {
     drop.appendChild(delBtn);
   }
 
-  thumbDiv.appendChild(drop);
-  el.appendChild(thumbDiv);
-
-  const infoDiv = document.createElement('div');
-  infoDiv.className = 'card-info';
-  const efedDiv = document.createElement('div'); efedDiv.className = 'card-efed'; efedDiv.textContent = v.efed || '';
-  const showDiv = document.createElement('div'); showDiv.className = 'card-show'; showDiv.textContent = v.show || '';
-  const dateDiv = document.createElement('div'); dateDiv.className = 'card-date'; dateDiv.textContent = v.date || '';
-  infoDiv.appendChild(efedDiv);
-  infoDiv.appendChild(showDiv);
-  infoDiv.appendChild(dateDiv);
+  menuWrap.appendChild(menuBtn);
+  menuWrap.appendChild(drop);
+  actionsRow.appendChild(menuWrap);
+  infoDiv.appendChild(actionsRow);
   el.appendChild(infoDiv);
 
   return el;
@@ -2349,35 +2371,6 @@ function makeCard(v) {
 
   thumbDiv.appendChild(cardOver);
 
-  if (canDelete) {
-    const menuBtn = document.createElement('button');
-    menuBtn.className = 'card-menu-btn';
-    menuBtn.id = 'cmb-' + id;
-    menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>';
-    menuBtn.onclick = function(e) { toggleCardMenu(e, id); };
-    thumbDiv.appendChild(menuBtn);
-
-    const menuDrop = document.createElement('div');
-    menuDrop.className = 'card-menu-dropdown';
-    menuDrop.id = 'cmd-' + id;
-    if (isAdmin) {
-      const editDateBtn = document.createElement('button');
-      editDateBtn.className = 'card-menu-item';
-      editDateBtn.style.color = '#c8a84b';
-      editDateBtn.textContent = '📅 Edit Date';
-      editDateBtn.onclick = function(e) { e.stopPropagation(); openEditDateModal(v); };
-      menuDrop.appendChild(editDateBtn);
-    }
-    const delBtn = document.createElement('button');
-    delBtn.className = 'card-menu-item';
-    delBtn.style.color = '#ff6b6b';
-    delBtn.setAttribute('data-url', id);
-    delBtn.onclick = function(e) { deleteByCardId(e, this); };
-    delBtn.textContent = '🗑 Delete';
-    menuDrop.appendChild(delBtn);
-    thumbDiv.appendChild(menuDrop);
-  }
-
   el.appendChild(thumbDiv);
 
   // info
@@ -2404,6 +2397,45 @@ function makeCard(v) {
     postedDiv.className = 'card-posted-by';
     postedDiv.textContent = 'by ' + (v.displayName || v.submittedBy);
     infoDiv.appendChild(postedDiv);
+  }
+
+  if (canDelete) {
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'card-actions-row';
+    actionsRow.onclick = e => e.stopPropagation();
+
+    const menuWrap = document.createElement('div');
+    menuWrap.style.cssText = 'position:relative;display:inline-block;';
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'card-menu-btn card-menu-btn-inline';
+    menuBtn.id = 'cmb-' + id;
+    menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
+    menuBtn.onclick = function(e) { toggleCardMenu(e, id); };
+
+    const menuDrop = document.createElement('div');
+    menuDrop.className = 'card-menu-dropdown card-menu-dropdown-inline';
+    menuDrop.id = 'cmd-' + id;
+    if (isAdmin) {
+      const editDateBtn = document.createElement('button');
+      editDateBtn.className = 'card-menu-item';
+      editDateBtn.style.color = '#c8a84b';
+      editDateBtn.textContent = '📅 Edit Date';
+      editDateBtn.onclick = function(e) { e.stopPropagation(); openEditDateModal(v); };
+      menuDrop.appendChild(editDateBtn);
+    }
+    const delBtn = document.createElement('button');
+    delBtn.className = 'card-menu-item';
+    delBtn.style.color = '#ff6b6b';
+    delBtn.setAttribute('data-url', id);
+    delBtn.onclick = function(e) { deleteByCardId(e, this); };
+    delBtn.textContent = '🗑 Delete';
+    menuDrop.appendChild(delBtn);
+
+    menuWrap.appendChild(menuBtn);
+    menuWrap.appendChild(menuDrop);
+    actionsRow.appendChild(menuWrap);
+    infoDiv.appendChild(actionsRow);
   }
 
   el.appendChild(infoDiv);
@@ -3796,6 +3828,10 @@ function doSubmitPost() {
   })();
 }
 
+
+function validateSubmitDate() {
+  // No-op stub — date validation handled inline in fetchSubmitPreview
+}
 
 function showSubmitErr(msg) {
   const el = document.getElementById('submit-err');
