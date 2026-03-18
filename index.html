@@ -5598,12 +5598,15 @@ window.addEventListener('message', (e) => {
 // the unlock fires from local seconds so it works even without watch_time table.
 const WATCH_UNLOCK_SECS = 600; // 10 minutes
 
-function startWatchTimer(url) {
+async function startWatchTimer(url) {
   if (_watchTimers[url]) return; // already running
   if (_watchUnlocked[url]) { updateRateButton(true); return; } // already unlocked
 
-  // Seed from DB if available (non-blocking) — only on first start
-  if (!_watchSeeded[url]) checkWatchTime(url);
+  // Always await DB seed before starting so prior progress is never lost
+  if (!_watchSeeded.hasOwnProperty(url)) await checkWatchTime(url);
+
+  // Re-check after await in case it unlocked
+  if (_watchUnlocked[url]) { updateRateButton(true); return; }
 
   _watchTimers[url] = {
     interval: setInterval(() => tickWatchTimer(url), 1000),
@@ -5646,7 +5649,10 @@ async function checkWatchTime(url) {
   if (!session) return;
   try {
     const rows = await sbGet('watch_time', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
-    if (!rows.length) return;
+    if (!rows.length) {
+      _watchSeeded[url] = 0; // mark as checked
+      return;
+    }
     const totalSecs = rows[0].total_seconds || 0;
     _watchSeeded[url] = totalSecs;
     if (rows[0].rating_unlocked || totalSecs >= WATCH_UNLOCK_SECS) {
