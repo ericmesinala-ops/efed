@@ -17,7 +17,14 @@ export default async function handler(req, res) {
         max_tokens: 100,
         messages: [{
           role: 'user',
-          content: `Is this a real eFed (e-federation / CAW wrestling promotion) show video? Title: "${title}" | Channel: "${channel}". Reply with only JSON: {"approved": true/false, "reason": "one sentence"}`
+        content: `You are screening YouTube video submissions for an eFed (electronic federation) wrestling community platform. eFeds are fan-made CAW (Create-A-Wrestler) wrestling shows made in video games like WWE 2K, Fire Pro Wrestling, or similar.
+
+Title: "${title}"
+Channel: "${channel}"
+
+Is this a real eFed/CAW wrestling show? Be STRICT. Reject anything that is not clearly a fan-made CAW wrestling show — this includes real wrestling (WWE, AEW, NJPW etc), reaction videos, podcasts, reviews, comedy, gaming content, music, vlogs, or anything unrelated to eFed/CAW wrestling.
+
+Reply with ONLY valid JSON, no extra text: {"approved": true/false, "reason": "one sentence"}`
         }]
       })
     });
