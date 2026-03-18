@@ -4426,7 +4426,10 @@ async function deleteExpandVideo() {
 
 function closeExpand() {
   const overlay = document.getElementById('card-expand');
-  if (_expandVideo) stopWatchTimer(_expandVideo.url);
+  if (_expandVideo) {
+    stopWatchTimer(_expandVideo.url);
+    delete _watchSessionSecs[_expandVideo.url];
+  }
   overlay.classList.remove('open');
   document.body.style.overflow = '';
   document.getElementById('expand-frame').src = '';
@@ -4444,7 +4447,7 @@ function expandStartVideo() {
   const bgFrame = document.getElementById('expand-bg-frame');
   if (bgFrame) { bgFrame.src = ''; bgFrame.style.display = 'none'; }
   const t = extractT(_expandVideo.url);
-  const src = `https://www.youtube.com/embed/${id}?autoplay=1&start=${t}&rel=0&modestbranding=1`;
+  const src = `https://www.youtube.com/embed/${id}?autoplay=1&start=${t}&rel=0&modestbranding=1&enablejsapi=1`;
   document.getElementById('expand-frame').src = src;
   document.getElementById('expand-frame').style.display = 'block';
   document.getElementById('expand-hero-thumb').style.display = 'none';
@@ -5289,6 +5292,7 @@ let _ratingValues = { overall:0, production:0, sound:0, promo:0, match:0, promo2
 let _watchTimers = {}; // { videoUrl: { interval, seconds } }
 let _watchUnlocked = {}; // { videoUrl: true/false }
 let _watchSeeded = {}; // { videoUrl: seconds from DB }
+let _watchSessionSecs = {}; // { videoUrl: seconds accumulated this session (survives pause) }
 
 // Init star rows
 function initStarRows() {
@@ -5565,7 +5569,31 @@ async function submitRating() {
   }
 }
 
-// ── WATCH TIMER ──
+// ── YOUTUBE PLAYER STATE via postMessage ──
+// YT playerState: -1=unstarted, 0=ended, 1=playing, 2=paused, 3=buffering, 5=cued
+window.addEventListener('message', (e) => {
+  if (!e.data || typeof e.data !== 'string') return;
+  try {
+    const msg = JSON.parse(e.data);
+    if (msg.event !== 'infoDelivery' || !msg.info) return;
+    const state = msg.info.playerState;
+    if (state === undefined) return;
+    if (!_expandVideo) return;
+    const url = _expandVideo.url;
+    const eq = document.getElementById('expand-eq');
+    if (state === 1) {
+      // Playing — resume timer
+      if (!_watchTimers[url] && !_watchUnlocked[url]) {
+        startWatchTimer(url);
+      }
+      if (eq) eq.classList.add('playing');
+    } else if (state === 2 || state === 0) {
+      // Paused or ended — stop timer
+      stopWatchTimer(url);
+      if (eq) eq.classList.remove('playing');
+    }
+  } catch(e) {}
+});
 // Time is tracked in memory (_watchTimers). DB sync is best-effort only —
 // the unlock fires from local seconds so it works even without watch_time table.
 const WATCH_UNLOCK_SECS = 600; // 10 minutes
@@ -5574,12 +5602,12 @@ function startWatchTimer(url) {
   if (_watchTimers[url]) return; // already running
   if (_watchUnlocked[url]) { updateRateButton(true); return; } // already unlocked
 
-  // Seed from DB if available (non-blocking)
-  checkWatchTime(url);
+  // Seed from DB if available (non-blocking) — only on first start
+  if (!_watchSeeded[url]) checkWatchTime(url);
 
   _watchTimers[url] = {
-    interval: setInterval(() => tickWatchTimer(url), 1000), // tick every 1s
-    seconds: 0
+    interval: setInterval(() => tickWatchTimer(url), 1000),
+    seconds: _watchSessionSecs[url] || 0 // resume from where we paused
   };
 }
 
@@ -5587,8 +5615,10 @@ function stopWatchTimer(url) {
   if (!url || !_watchTimers[url]) return;
   clearInterval(_watchTimers[url].interval);
   const secs = _watchTimers[url].seconds;
+  _watchSessionSecs[url] = secs; // preserve in-session seconds for resume
   delete _watchTimers[url];
-  if (secs > 0) saveWatchTime(url, secs); // best-effort DB save
+  const total = secs + (_watchSeeded[url] || 0);
+  if (secs > 0) saveWatchTime(url, total); // best-effort DB save
 }
 
 function tickWatchTimer(url) {
