@@ -134,6 +134,17 @@ nav {
 .post-date { font-size: .62rem; color: var(--muted); margin-top: 2px; }
 
 .empty { text-align: center; padding: 40px 0; color: var(--muted); font-size: .8rem; line-height: 1.6; }
+.efed-list-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid var(--border);
+}
+.efed-list-item:last-child { border-bottom: none; }
+.efed-list-icon {
+  width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0;
+  background: rgba(200,168,75,.1); border: 1px solid rgba(200,168,75,.2);
+  display: flex; align-items: center; justify-content: center;
+}
+.efed-list-name { font-size: .85rem; font-weight: 600; color: var(--text); }
 .loading { text-align: center; padding: 40px 0; color: var(--muted); font-size: .8rem; }
 
 @media (max-width: 480px) {
@@ -174,9 +185,14 @@ nav {
 
   <div class="profile-stats">
     <div class="stat"><div class="stat-num" id="stat-posts">—</div><div class="stat-label">Posts</div></div>
-    <div class="stat"><div class="stat-num" id="stat-supported">—</div><div class="stat-label">Supported</div></div>
+    <div class="stat" style="cursor:pointer;" onclick="openSupportedList()"><div class="stat-num" id="stat-supported">—</div><div class="stat-label">Supported</div></div>
     <div class="stat"><div class="stat-num" id="stat-rated">—</div><div class="stat-label">Rated</div></div>
     <div class="stat" id="stat-invites-wrap"><div class="stat-num" id="stat-invites">—</div><div class="stat-label">Invites Left</div></div>
+  </div>
+
+  <div class="section-title">Supporting eFeds</div>
+  <div id="supporting-efeds-list" style="margin-bottom:28px;">
+    <div class="loading">Loading…</div>
   </div>
 
   <div class="section-title">Posted Shows</div>
@@ -211,7 +227,25 @@ function goToSettings() {
   window.location.href = 'index.html#settings';
 }
 
-async function loadProfile() {
+async function loadSupportingEfeds(targetUser) {
+  const el = document.getElementById('supporting-efeds-list');
+  try {
+    const rows = await sbGet('supports', `username=eq.${encodeURIComponent(targetUser)}&order=supported_at.desc`);
+    if (!rows.length) {
+      el.innerHTML = '<div class="empty" style="padding:16px 0;">Not supporting any eFeds yet.</div>';
+      return;
+    }
+    el.innerHTML = rows.map(r => `
+      <div class="efed-list-item">
+        <div class="efed-list-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <div class="efed-list-name">${r.efed}</div>
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = '<div class="empty" style="padding:16px 0;">Could not load.</div>';
+  }
+}
   const session = getSession();
   if (!session) { window.location.replace('auth.html'); return; }
 
@@ -219,6 +253,8 @@ async function loadProfile() {
   const params = new URLSearchParams(window.location.search);
   const targetUser = params.get('u') || session.username;
   const isOwn = targetUser.toLowerCase() === session.username.toLowerCase();
+
+  loadSupportingEfeds(targetUser);
 
   try {
     // Load user data
@@ -306,6 +342,44 @@ async function loadProfile() {
 }
 
 loadProfile();
+</script>
+<!-- Supported eFeds Modal -->
+<div id="supported-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="if(event.target===this)this.style.display='none';">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:90%;max-width:400px;padding:28px 24px;max-height:80vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Supported eFeds</div>
+      <button onclick="document.getElementById('supported-modal-bg').style.display='none'" style="background:none;border:none;color:#5a5a6a;font-size:1.1rem;cursor:pointer;">✕</button>
+    </div>
+    <div id="supported-efeds-list"></div>
+  </div>
+</div>
+
+<script>
+async function openSupportedList() {
+  const params = new URLSearchParams(window.location.search);
+  const session = getSession();
+  const targetUser = params.get('u') || (session && session.username);
+  if (!targetUser) return;
+  document.getElementById('supported-modal-bg').style.display = 'flex';
+  const list = document.getElementById('supported-efeds-list');
+  list.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;text-align:center;padding:20px 0;">Loading…</div>';
+  try {
+    const rows = await sbGet('supports', `username=eq.${encodeURIComponent(targetUser)}&order=supported_at.desc`);
+    if (!rows.length) {
+      list.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;text-align:center;padding:20px 0;">No eFeds supported yet.</div>';
+      return;
+    }
+    list.innerHTML = rows.map(r => `
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06);">
+        <div style="width:32px;height:32px;border-radius:6px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <div style="font-size:.82rem;font-weight:600;color:#e8e8e8;">${r.efed}</div>
+      </div>`).join('');
+  } catch(e) {
+    list.innerHTML = '<div style="font-size:.78rem;color:#ff6b6b;text-align:center;padding:20px 0;">Could not load.</div>';
+  }
+}
 </script>
 </body>
 </html>
