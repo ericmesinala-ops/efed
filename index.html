@@ -3594,7 +3594,53 @@ function clearSubmitPreview() {
   if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
 }
 
-let _fetchedMeta = null;
+// ── SCREENING ENGINE (swap this function body for an API call when key available) ──
+function screenVideo(title, channel) {
+  const t = (title || '').toLowerCase();
+  const c = (channel || '').toLowerCase();
+  const combined = t + ' ' + c;
+
+  // Hard block — definitely not eFed
+  const blockKeywords = [
+    'mrbeast','ksi','pewdiepie','mkbhd','logan paul','jake paul','sidemen',
+    'react','reaction','reacts','review','reviewing','podcast','episode review',
+    'top 10','top 5','ranked','ranking','tier list','analysis','breakdown',
+    'vlog','challenge','prank','unboxing','tutorial','how to','tips','guide',
+    'minecraft','fortnite','call of duty','cod','gta','valorant','apex','fifa',
+    'nba 2k','madden','gameplay','let\'s play','playthrough','speedrun',
+    'music video','official audio','lyrics','ft.','feat.','album','mixtape',
+    'trailer','movie','film','netflix','highlights','nfl','nba','mlb','nhl',
+    'real wrestling','wwe raw','wwe smackdown','aew dynamite','aew rampage',
+    'njpw','roh ring of honor','impact wrestling','tna','nxt takeover',
+    'comedy','funny','meme','tiktok compilation','shorts compilation'
+  ];
+
+  for (const kw of blockKeywords) {
+    if (combined.includes(kw)) {
+      return { approved: false, reason: `This doesn't appear to be an eFed show (detected: ${kw}).` };
+    }
+  }
+
+  // Must have at least one eFed signal
+  const efedKeywords = [
+    'efed','e-fed','caw','create a wrestler','create-a-wrestler',
+    'wrestling federation','wrestling promotion','wrestling show','wrestling ep',
+    'episode','ep.','ep ','season','event','ppv','pay per view','pay-per-view',
+    'championship','title match','vs','vs.','versus','superstar','roster',
+    'wwe 2k','fire pro','no mercy','here comes the pain','svr',
+    'smackdown vs raw','wrestling universe','wrestling network',
+    'wrestling hub','wrestling tv','wrestling weekly'
+  ];
+
+  const hasSignal = efedKeywords.some(kw => combined.includes(kw));
+  if (!hasSignal) {
+    return { approved: false, reason: 'Could not verify this as an eFed show. Make sure it\'s a CAW wrestling show.' };
+  }
+
+  return { approved: true, reason: 'Verified eFed show.' };
+}
+
+
 let _fetchDebounce = null;
 function debounceFetchPreview() {
   clearTimeout(_fetchDebounce);
@@ -3663,45 +3709,37 @@ async function fetchSubmitPreview() {
     document.getElementById('submit-preview').style.display = 'block';
     document.getElementById('submit-date-wrap').style.display = 'block';
 
-    // Claude API screening via serverless function
+    // ── SCREENING — keyword-based (swap screenVideo() for API call when key is available) ──
     btn.textContent = 'Checking…';
     btn.disabled = true;
     const screenEl = document.getElementById('submit-screening');
-    try {
-      const screenRes = await fetch('/api/screen', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: _fetchedMeta.title, channel: _fetchedMeta.channel })
-      });
-      const result = await screenRes.json();
-      if (!result.approved) {
-        screenEl.textContent = '❌ ' + (result.reason || 'This does not appear to be an eFed show.');
-        screenEl.style.display = 'block';
-        screenEl.style.background = 'rgba(192,0,14,.1)';
-        screenEl.style.border = '1px solid rgba(192,0,14,.3)';
-        screenEl.style.color = '#ff6b6b';
-        btn.textContent = 'Post to Hub';
-        btn.disabled = true;
-        btn.style.opacity = '.4';
-        btn.style.cursor = 'not-allowed';
-        _fetchedMeta = null;
-        return;
-      }
-      screenEl.textContent = '✅ Verified eFed show — ready to post!';
+
+    // Simulate async for UX feel
+    await new Promise(r => setTimeout(r, 800));
+
+    const result = screenVideo(_fetchedMeta.title, _fetchedMeta.channel);
+    if (!result.approved) {
+      screenEl.textContent = '❌ ' + result.reason;
       screenEl.style.display = 'block';
-      screenEl.style.background = 'rgba(76,175,138,.08)';
-      screenEl.style.border = '1px solid rgba(76,175,138,.25)';
-      screenEl.style.color = '#4caf8a';
-      btn.disabled = false;
-      btn.style.opacity = '';
-      btn.style.cursor = '';
-    } catch(e) {
-      // If screening fails, allow submission — don't block on API error
-      screenEl.style.display = 'none';
-      btn.disabled = false;
-      btn.style.opacity = '';
-      btn.style.cursor = '';
+      screenEl.style.background = 'rgba(192,0,14,.1)';
+      screenEl.style.border = '1px solid rgba(192,0,14,.3)';
+      screenEl.style.color = '#ff6b6b';
+      btn.textContent = 'Post to Hub';
+      btn.disabled = true;
+      btn.style.opacity = '.4';
+      btn.style.cursor = 'not-allowed';
+      _fetchedMeta = null;
+      return;
     }
+    screenEl.textContent = '✅ Verified eFed show — ready to post!';
+    screenEl.style.display = 'block';
+    screenEl.style.background = 'rgba(76,175,138,.08)';
+    screenEl.style.border = '1px solid rgba(76,175,138,.25)';
+    screenEl.style.color = '#4caf8a';
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.cursor = '';
+    btn.textContent = 'Post to Hub';
 
     // Pre-fill date if available
     if (uploadDateMs) {
