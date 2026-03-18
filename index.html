@@ -29,7 +29,8 @@
     return r.json();
   }
   async function sbInsert(table, data) {
-    const r = await fetch(SUPABASE_URL + '/rest/v1/' + table, { method: 'POST', headers: SB_HEADERS, body: JSON.stringify(data) });
+    const headers = { ...SB_HEADERS, 'Prefer': 'return=representation' };
+    const r = await fetch(SUPABASE_URL + '/rest/v1/' + table, { method: 'POST', headers, body: JSON.stringify(data) });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   }
@@ -311,6 +312,12 @@
     animation: live-pulse 1.2s ease-in-out infinite;
   }
   @keyframes live-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .upcoming-badge {
+    position: absolute; top: 7px; left: 7px; z-index: 6;
+    background: #c8a84b; color: #07070a;
+    font-size: .48rem; letter-spacing: 2px; text-transform: uppercase;
+    font-weight: 700; padding: 3px 7px; border-radius: 4px;
+  }
   .game-badge {
     position: absolute; bottom: 7px; left: 7px; z-index: 6;
     background: rgba(0,0,0,.75); border: 1px solid rgba(255,255,255,.2);
@@ -570,6 +577,7 @@
     .hero-thumb.hidden { opacity: 0 !important; }
     .hero-thumb.video-playing { opacity: 0 !important; }
     nav { padding: 14px 20px; }
+    #online-counter { display: none !important; }
   }
     .hero { padding: 0 20px 50px; height: 70vh; min-height: 400px; }
     .hero-title { font-size: 2.8rem; }
@@ -1547,6 +1555,10 @@
     <span class="logo-main"><em>EFED</em> Streaming Hub</span>
   </a>
   <div class="nav-right">
+    <div id="online-counter" style="display:none;align-items:center;gap:5px;font-size:.62rem;letter-spacing:1.5px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-weight:500;white-space:nowrap;">
+      <div style="width:6px;height:6px;border-radius:50%;background:#4caf64;box-shadow:0 0 6px rgba(76,175,100,.7);flex-shrink:0;"></div>
+      <span id="online-count-label">1 online</span>
+    </div>
     <button class="nav-invite-btn" id="nav-invite-btn" onclick="openInvite()">
       🎟 Invite
     </button>
@@ -1812,6 +1824,22 @@
     </div>
   </section>
 
+  <!-- ── UPCOMING SHOWS ── -->
+  <section class="section" id="section-upcoming" style="display:none;">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar" style="background:var(--gold);"></div>
+        <div class="sec-title">Upcoming Shows</div>
+        <span class="sec-count" id="upcoming-count"></span>
+      </div>
+    </div>
+    <div class="row-wrap">
+      <button class="pill-arr left hidden" id="upcoming-arr-left" onclick="scrollNamedRow('upcoming',-1)">&#8249;</button>
+      <div class="card-grid" id="row-upcoming"></div>
+      <button class="pill-arr right" id="upcoming-arr-right" onclick="scrollNamedRow('upcoming',1)">&#8250;</button>
+    </div>
+  </section>
+
   <!-- ── BOOKMARKED SHOWS ── -->
   <section class="section" id="section-bookmarks" style="display:none;">
     <div class="sec-head">
@@ -2074,7 +2102,8 @@ async function checkLiveStatus(videoIds) {
     const data = await r.json();
     const map = {};
     (data.items || []).forEach(item => {
-      map[item.id] = item.snippet.liveBroadcastContent === 'live';
+      const bc = item.snippet.liveBroadcastContent;
+      if (bc === 'live' || bc === 'upcoming') map[item.id] = bc;
     });
     return map;
   } catch(e) { return {}; }
@@ -2172,7 +2201,8 @@ function toggleSort() {
   renderGrid();
 }
 
-const liveVideoMap = {}; // videoId -> true if live
+const liveVideoMap = {}; // videoId -> 'live' | 'upcoming'
+let upcomingVideos = []; // DB upcoming submissions
 
 function sortByDate(arr) {
   return [...arr].sort((a, b) => {
@@ -2257,13 +2287,10 @@ async function updateLiveBadges() {
   const batch = videoIds.slice(0, 50);
   const liveMap = await checkLiveStatus(batch);
 
-  // Update liveVideoMap
-  let changed = false;
+  // Update liveVideoMap (now stores 'live' | 'upcoming' | undefined)
   batch.forEach(id => {
-    const wasLive = !!liveVideoMap[id];
-    const isLive = !!liveMap[id];
-    if (wasLive !== isLive) changed = true;
-    if (isLive) liveVideoMap[id] = true;
+    const now = liveMap[id];
+    if (now) liveVideoMap[id] = now;
     else delete liveVideoMap[id];
   });
 
@@ -2273,24 +2300,153 @@ async function updateLiveBadges() {
     if (!id) return;
     const thumb = card.querySelector('.card-thumb');
     if (!thumb) return;
-    const existingLive = thumb.querySelector('.live-badge');
-    if (liveVideoMap[id]) {
-      if (!existingLive) {
-        const badge = document.createElement('div');
-        badge.className = 'live-badge';
-        badge.innerHTML = '<div class="live-dot"></div> LIVE';
-        thumb.appendChild(badge);
-      }
+    const existing = thumb.querySelector('.live-badge, .upcoming-badge');
+    const status = liveVideoMap[id];
+    if (status === 'live') {
+      if (existing && existing.classList.contains('live-badge')) return;
+      if (existing) existing.remove();
+      const badge = document.createElement('div');
+      badge.className = 'live-badge';
+      badge.innerHTML = '<div class="live-dot"></div> LIVE';
+      thumb.appendChild(badge);
+    } else if (status === 'upcoming') {
+      if (existing && existing.classList.contains('upcoming-badge')) return;
+      if (existing) existing.remove();
+      const badge = document.createElement('div');
+      badge.className = 'upcoming-badge';
+      badge.textContent = 'UPCOMING';
+      thumb.appendChild(badge);
     } else {
-      if (existingLive) existingLive.remove();
+      if (existing) existing.remove();
     }
   });
+
+  // Auto-promote upcoming videos that are now live or ended
+  let promoted = false;
+  for (let i = upcomingVideos.length - 1; i >= 0; i--) {
+    const uv = upcomingVideos[i];
+    const id = extractId(uv.url);
+    const ytStatus = liveMap[id]; // 'live', 'upcoming', or undefined (ended/vod)
+    // Promote if now live OR if the scheduled date has passed and YT returned it as a normal vod (undefined = no longer upcoming)
+    const datePassed = uv.dateMs && Date.now() > uv.dateMs + 4 * 3600000; // 4hr grace
+    if (ytStatus === 'live' || (!ytStatus && datePassed)) {
+      // Promote to main grid
+      const promoted_v = { ...uv, status: 'approved', submittedAt: Date.now() };
+      if (!videos.find(v => v.url === promoted_v.url)) {
+        videos.push(promoted_v);
+      }
+      upcomingVideos.splice(i, 1);
+      // Update DB status
+      if (uv.dbId) {
+        sbUpdate('submissions', { status: 'approved' }, `id=eq.${uv.dbId}`).catch(() => {});
+      }
+      promoted = true;
+    }
+  }
+  if (promoted) {
+    renderGrid();
+    loadUpcomingRow();
+  }
 }
 
 // Poll every 60 seconds to detect stream start/end
 setInterval(updateLiveBadges, 60000);
 
 // ── EFED OWNER ROW ──
+// ── UPCOMING SHOWS ROW ──
+function loadUpcomingRow() {
+  // Merge hardcoded + DB upcoming, dedupe by url
+  const hardcoded = (typeof upcoming !== 'undefined' ? upcoming : []).map(v => ({ ...v, status: 'upcoming' }));
+  const dbUrls = new Set(upcomingVideos.map(v => v.url));
+  const merged = [...upcomingVideos, ...hardcoded.filter(v => !dbUrls.has(v.url))];
+
+  const section = document.getElementById('section-upcoming');
+  const grid = document.getElementById('row-upcoming');
+  const countEl = document.getElementById('upcoming-count');
+  if (!section || !grid) return;
+
+  if (!merged.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+  countEl.textContent = ' · ' + merged.length;
+  grid.innerHTML = '';
+  merged.forEach(v => grid.appendChild(makeUpcomingCard(v)));
+
+  grid.onscroll = () => {
+    const l = document.getElementById('upcoming-arr-left');
+    const r = document.getElementById('upcoming-arr-right');
+    if (l) l.classList.toggle('hidden', grid.scrollLeft <= 0);
+    if (r) r.classList.toggle('hidden', grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 4);
+  };
+  setTimeout(() => {
+    const r = document.getElementById('upcoming-arr-right');
+    if (r) r.classList.toggle('hidden', grid.scrollWidth <= grid.clientWidth);
+  }, 50);
+}
+
+function makeUpcomingCard(v) {
+  const id = extractId(v.url);
+  const thumbUrl = v.thumb || (id ? 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg' : '');
+
+  const el = document.createElement('div');
+  el.className = 'upcoming-card';
+  el._videoUrl = v.url;
+
+  // Compute countdown
+  const dateMs = v.dateMs || (v.date ? new Date(v.date).getTime() : 0);
+  const diff = dateMs - Date.now();
+  const days = Math.max(0, Math.floor(diff / 86400000));
+  const hrs  = Math.max(0, Math.floor((diff % 86400000) / 3600000));
+  const mins = Math.max(0, Math.floor((diff % 3600000) / 60000));
+
+  const thumbDiv = document.createElement('div');
+  thumbDiv.className = 'upcoming-thumb';
+  const img = document.createElement('img');
+  img.src = thumbUrl;
+  img.alt = v.show || '';
+  img.loading = 'lazy';
+  img.onerror = function() { this.style.display = 'none'; this.parentNode.style.background = '#1a1a1f'; };
+  thumbDiv.appendChild(img);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'upcoming-overlay';
+
+  const soonBadge = document.createElement('div');
+  soonBadge.className = 'upcoming-soon-badge';
+  soonBadge.textContent = days === 0 ? 'TODAY' : 'COMING SOON';
+  overlay.appendChild(soonBadge);
+
+  if (dateMs) {
+    const cwrap = document.createElement('div');
+    cwrap.className = 'countdown-wrap';
+    const units = days > 0
+      ? [{ n: days, l: 'Days' }, { n: hrs, l: 'Hrs' }, { n: mins, l: 'Min' }]
+      : [{ n: hrs, l: 'Hrs' }, { n: mins, l: 'Min' }];
+    units.forEach((u, i) => {
+      const unit = document.createElement('div');
+      unit.className = 'countdown-unit';
+      unit.innerHTML = `<span class="countdown-num">${String(u.n).padStart(2,'0')}</span><span class="countdown-label">${u.l}</span>`;
+      cwrap.appendChild(unit);
+      if (i < units.length - 1) {
+        const sep = document.createElement('div');
+        sep.className = 'countdown-sep';
+        sep.textContent = ':';
+        cwrap.appendChild(sep);
+      }
+    });
+    overlay.appendChild(cwrap);
+  }
+
+  thumbDiv.appendChild(overlay);
+  el.appendChild(thumbDiv);
+
+  const info = document.createElement('div');
+  info.className = 'upcoming-card-info';
+  info.innerHTML = `<div class="upcoming-card-efed">${v.efed || ''}</div><div class="upcoming-card-show">${v.show || ''}</div><div class="upcoming-card-date">${v.date || ''}</div>`;
+  el.appendChild(info);
+
+  return el;
+}
+
 async function loadEfedOwnerRow() {
   const session = getSession();
   const section = document.getElementById('section-efed-owner');
@@ -2668,6 +2824,25 @@ async function initHub() {
     console.warn('Could not load community submissions:', e);
   }
 
+  // Fetch upcoming submissions
+  try {
+    const upSubs = await sbGetWithTimeout('submissions', 'status=eq.upcoming&order=date_ms.asc');
+    upcomingVideos = upSubs.map(s => ({
+      url: s.url,
+      show: s.show_name || '',
+      efed: s.efed || 'Community',
+      date: s.date || '',
+      dateMs: s.date_ms || 0,
+      submittedBy: s.submitted_by || '',
+      community: true,
+      status: 'upcoming',
+      thumb: s.thumb_url || null,
+      dbId: s.id
+    }));
+  } catch(e) {
+    console.warn('Could not load upcoming submissions:', e);
+  }
+
   // Fetch display names for community video posters
   try {
     const usernames = [...new Set(videos.filter(v => v.community && v.submittedBy).map(v => v.submittedBy))];
@@ -2681,6 +2856,7 @@ async function initHub() {
 
   buildPills();
   renderGrid();
+  loadUpcomingRow();
   loadBookmarksRow();
   loadEfedOwnerRow();
   buildHeroDots();
@@ -2697,7 +2873,64 @@ initHub();
 const _grid = document.getElementById('card-grid');
 if (_grid) _grid.addEventListener('scroll', updateRowArrows);
 
-// ── NETFLIX HERO SLIDESHOW ────────────────────────────────────────────────────
+// ── ONLINE PRESENCE COUNTER ──
+// Uses a lightweight Supabase presence table. Run this SQL if not done:
+// create table if not exists presence (
+//   id text primary key,
+//   last_seen bigint not null
+// );
+// alter table presence disable row level security;
+
+(function initPresence() {
+  // Generate or retrieve a session token for this browser tab
+  let visitorId = sessionStorage.getItem('efed_visitor_id');
+  if (!visitorId) {
+    visitorId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    sessionStorage.setItem('efed_visitor_id', visitorId);
+  }
+
+  const PRESENCE_TTL = 120000; // 2 minutes — if no heartbeat, considered offline
+  const HEARTBEAT_INTERVAL = 60000; // ping every 60s
+
+  async function heartbeat() {
+    try {
+      // Upsert this visitor's last_seen
+      await fetch(SUPABASE_URL + '/rest/v1/presence', {
+        method: 'POST',
+        headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates' },
+        body: JSON.stringify({ id: visitorId, last_seen: Date.now() })
+      });
+      // Clean up stale rows older than TTL
+      const cutoff = Date.now() - PRESENCE_TTL;
+      await fetch(SUPABASE_URL + '/rest/v1/presence?last_seen=lt.' + cutoff, {
+        method: 'DELETE',
+        headers: SB_HEADERS
+      });
+      // Count active visitors
+      const r = await fetch(SUPABASE_URL + '/rest/v1/presence?select=id', {
+        headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' }
+      });
+      const count = parseInt(r.headers.get('Content-Range')?.split('/')[1] || '1', 10);
+      const el = document.getElementById('online-count-label');
+      const wrap = document.getElementById('online-counter');
+      if (el && wrap) {
+        el.textContent = count + (count === 1 ? ' online' : ' online');
+        wrap.style.display = 'flex';
+      }
+    } catch(e) {
+      // Presence table may not exist yet — silently skip
+    }
+  }
+
+  heartbeat();
+  setInterval(heartbeat, HEARTBEAT_INTERVAL);
+
+  // Remove presence on tab close (best-effort)
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') heartbeat();
+  });
+})();
+
 
 function heroExtractId(url) {
   if (url && url.includes('twitch.tv')) {
@@ -3586,14 +3819,14 @@ async function savePassword() {
   <div style="background:#111114;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:90%;max-width:480px;padding:36px 32px;position:relative;box-shadow:0 40px 80px rgba(0,0,0,.6);">
     <button onclick="closeSubmitModal()" style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;">✕</button>
     <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:3px;color:#fff;margin-bottom:4px;">Post a Show</div>
-    <p style="font-size:.72rem;color:#5a5a6a;margin-bottom:24px;line-height:1.6;">Have an eFed show the community needs to see? Submit a YouTube link below, and we'll handle everything. Share your own show or a favorite. Just paste the link, and we'll pull the details automatically.</p>
+    <p style="font-size:.75rem;color:rgba(255,255,255,.6);margin-bottom:24px;line-height:1.7;">Have an eFed show the community needs to see? Submit a YouTube link below, and we'll handle everything. Share your own show or a favorite. Just paste the link, and we'll pull the details automatically.</p>
 
     <div id="submit-err" style="display:none;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;font-size:.75rem;padding:10px 14px;border-radius:8px;margin-bottom:16px;"></div>
     <div id="submit-ok" style="display:none;background:rgba(76,175,100,.12);border:1px solid rgba(76,175,100,.3);color:#4caf64;font-size:.75rem;padding:10px 14px;border-radius:8px;margin-bottom:16px;"></div>
 
     <!-- Link input -->
     <div style="margin-bottom:16px;">
-      <label style="display:block;font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a6a;font-weight:600;margin-bottom:6px;">YouTube Link</label>
+      <label style="display:block;font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.5);font-weight:600;margin-bottom:6px;">YouTube Link</label>
       <input id="submit-url" type="url" placeholder="https://youtube.com/watch?v=..." autocomplete="off"
         style="width:100%;padding:11px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;outline:none;"
         oninput="clearSubmitPreview(); debounceFetchPreview()" />
@@ -3603,16 +3836,16 @@ async function savePassword() {
     <div id="submit-preview" style="display:none;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px;margin-bottom:16px;">
       <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:6px;">Preview</div>
       <div id="submit-preview-title" style="font-size:.85rem;font-weight:600;color:#e8e8e8;margin-bottom:4px;"></div>
-      <div id="submit-preview-channel" style="font-size:.7rem;color:#5a5a6a;"></div>
+      <div id="submit-preview-channel" style="font-size:.7rem;color:rgba(255,255,255,.45);"></div>
     </div>
 
     <!-- Event date input (shown after preview loads) -->
     <div id="submit-date-wrap" style="display:none;margin-bottom:16px;">
-      <label style="display:block;font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a6a;font-weight:600;margin-bottom:6px;">Date of Event</label>
+      <label style="display:block;font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.5);font-weight:600;margin-bottom:6px;">Date of Event</label>
       <input id="submit-event-date" type="date" autocomplete="off"
         style="width:100%;padding:11px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;outline:none;color-scheme:dark;"
         />
-      <div style="font-size:.6rem;color:#5a5a6a;margin-top:5px;">When did this event take place?</div>
+      <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-top:5px;">When did this event take place? Pick a future date to add it to Upcoming Shows.</div>
     </div>
 
     <!-- Screening result -->
@@ -3885,22 +4118,15 @@ function doSubmitPost() {
       }
       const eventParsed = new Date(eventDateVal + 'T00:00:00');
       const today = new Date(); today.setHours(0,0,0,0);
-      if (eventParsed > today) {
-        showSubmitErr('The event date cannot be in the future.');
-        btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Post to Hub';
-        return;
-      }
+      const isFuture = eventParsed > today;
 
-      const dateStr = eventDateVal
-        ? new Date(eventDateVal + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-        : _fetchedMeta.uploadDate || '';
-      const dateMs = eventDateVal
-        ? new Date(eventDateVal + 'T00:00:00').getTime()
-        : _fetchedMeta.uploadDateMs || Date.now();
+      const dateStr = new Date(eventDateVal + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const dateMs = new Date(eventDateVal + 'T00:00:00').getTime();
+      const submitStatus = isFuture ? 'upcoming' : 'approved';
 
       const thumbUrl = 'https://i.ytimg.com/vi/' + _fetchedMeta.vidId + '/mqdefault.jpg';
 
-      await sbInsert('submissions', {
+      const inserted = await sbInsert('submissions', {
         url,
         show_name: _fetchedMeta.title,
         efed: _fetchedMeta.channel,
@@ -3909,7 +4135,7 @@ function doSubmitPost() {
         submitted_by: session.username,
         submitted_at: Date.now(),
         community: true,
-        status: 'approved'
+        status: submitStatus
       });
 
       // Get display name for card label
@@ -3919,37 +4145,59 @@ function doSubmitPost() {
         if (uRows[0]?.display_name) posterDisplayName = uRows[0].display_name;
       } catch(e) {}
 
-      videos.push({
-        url,
-        show: _fetchedMeta.title,
-        efed: _fetchedMeta.channel,
-        date: dateStr,
-        dateMs: dateMs,
-        submittedAt: Date.now(),
-        submittedBy: session.username,
-        displayName: posterDisplayName,
-        community: true,
-        status: 'approved',
-        new: true,
-        thumb: thumbUrl
-      });
+      if (isFuture) {
+        // Add to upcoming row, not main grid
+        const uv = {
+          url,
+          show: _fetchedMeta.title,
+          efed: _fetchedMeta.channel,
+          date: dateStr,
+          dateMs,
+          submittedBy: session.username,
+          community: true,
+          status: 'upcoming',
+          thumb: thumbUrl,
+          dbId: inserted?.[0]?.id || null
+        };
+        upcomingVideos.push(uv);
+        loadUpcomingRow();
 
-      buildPills();
-      renderGrid();
-      loadBookmarksRow();
-      loadEfedOwnerRow();
+        document.getElementById('submit-ok').style.display = 'block';
+        document.getElementById('submit-ok').textContent = '📅 Added to Upcoming Shows! It\'ll move to Latest Videos when it goes live.';
+      } else {
+        videos.push({
+          url,
+          show: _fetchedMeta.title,
+          efed: _fetchedMeta.channel,
+          date: dateStr,
+          dateMs,
+          submittedAt: Date.now(),
+          submittedBy: session.username,
+          displayName: posterDisplayName,
+          community: true,
+          status: 'approved',
+          new: true,
+          thumb: thumbUrl
+        });
 
-      window._heroFirstLoad = true;
-      heroIdx = 0;
-      buildHeroDots();
-      loadSlide();
+        buildPills();
+        renderGrid();
+        loadBookmarksRow();
+        loadEfedOwnerRow();
 
-      document.getElementById('submit-ok').style.display = 'block';
-      document.getElementById('submit-ok').textContent = '🎉 Your show is now live on the Hub!';
+        window._heroFirstLoad = true;
+        heroIdx = 0;
+        buildHeroDots();
+        loadSlide();
+
+        document.getElementById('submit-ok').style.display = 'block';
+        document.getElementById('submit-ok').textContent = '🎉 Your show is now live on the Hub!';
+      }
+
       btn.textContent = 'Posted!';
       btn.disabled = true;
       btn.style.opacity = '.6';
-      setTimeout(() => closeSubmitModal(), 2000);
+      setTimeout(() => closeSubmitModal(), 2500);
 
     } catch(e) {
       console.error('Post failed:', e);
