@@ -4811,7 +4811,7 @@ function openRatingModal() {
   // Check if rating already unlocked
   const url = _expandVideo.url;
   if (!_watchUnlocked[url]) {
-    showExpandMsg('Come back after watching a bit more to rate this show.');
+    showExpandMsg('Only shows longer than 10 minutes can be rated. Come back after watching a bit more!');
     return;
   }
 
@@ -4914,15 +4914,19 @@ async function submitRating() {
 }
 
 // ── WATCH TIMER ──
+// Time is tracked in memory (_watchTimers). DB sync is best-effort only —
+// the unlock fires from local seconds so it works even without watch_time table.
+const WATCH_UNLOCK_SECS = 600; // 10 minutes
+
 function startWatchTimer(url) {
   if (_watchTimers[url]) return; // already running
-  if (_watchUnlocked[url]) return; // already unlocked
+  if (_watchUnlocked[url]) { updateRateButton(true); return; } // already unlocked
 
-  // Check DB first
+  // Seed from DB if available (non-blocking)
   checkWatchTime(url);
 
   _watchTimers[url] = {
-    interval: setInterval(() => tickWatchTimer(url), 10000), // tick every 10 seconds
+    interval: setInterval(() => tickWatchTimer(url), 10000), // tick every 10s
     seconds: 0
   };
 }
@@ -4930,39 +4934,48 @@ function startWatchTimer(url) {
 function stopWatchTimer(url) {
   if (!url || !_watchTimers[url]) return;
   clearInterval(_watchTimers[url].interval);
-  // Save accumulated time to DB
-  saveWatchTime(url, _watchTimers[url].seconds);
+  const secs = _watchTimers[url].seconds;
   delete _watchTimers[url];
+  if (secs > 0) saveWatchTime(url, secs); // best-effort DB save
 }
 
 function tickWatchTimer(url) {
   if (!_watchTimers[url]) return;
   _watchTimers[url].seconds += 10;
-  // Save every minute
-  if (_watchTimers[url].seconds % 60 === 0) {
-    saveWatchTime(url, _watchTimers[url].seconds);
+  const total = _watchTimers[url].seconds;
+  // Unlock from memory — no DB needed
+  if (total >= WATCH_UNLOCK_SECS && !_watchUnlocked[url]) {
+    _watchUnlocked[url] = true;
+    updateRateButton(true);
+    clearInterval(_watchTimers[url].interval);
+    delete _watchTimers[url];
+    saveWatchTime(url, total); // persist to DB
+    return;
   }
+  // Save to DB every 60s
+  if (total % 60 === 0) saveWatchTime(url, total);
 }
 
 async function checkWatchTime(url) {
+  // Seeds local timer seconds from DB if a prior session exists.
   const session = getSession();
   if (!session) return;
   try {
     const rows = await sbGet('watch_time', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
-    if (rows.length) {
-      const totalSecs = rows[0].total_seconds || 0;
-      if (rows[0].rating_unlocked || totalSecs >= 600) {
-        _watchUnlocked[url] = true;
-        updateRateButton(true);
-        if (_watchTimers[url]) {
-          clearInterval(_watchTimers[url].interval);
-          delete _watchTimers[url];
-        }
-      } else if (_watchTimers[url]) {
-        _watchTimers[url].seconds = totalSecs;
+    if (!rows.length) return;
+    const totalSecs = rows[0].total_seconds || 0;
+    if (rows[0].rating_unlocked || totalSecs >= WATCH_UNLOCK_SECS) {
+      _watchUnlocked[url] = true;
+      updateRateButton(true);
+      if (_watchTimers[url]) {
+        clearInterval(_watchTimers[url].interval);
+        delete _watchTimers[url];
       }
+    } else if (_watchTimers[url]) {
+      // Seed local counter with DB value so progress carries across sessions
+      _watchTimers[url].seconds = Math.max(_watchTimers[url].seconds, totalSecs);
     }
-  } catch(e) {}
+  } catch(e) {} // watch_time table may not exist yet — silent fail is fine
 }
 
 async function saveWatchTime(url, newSeconds) {
@@ -4971,21 +4984,15 @@ async function saveWatchTime(url, newSeconds) {
   try {
     const rows = await sbGet('watch_time', `username=eq.${encodeURIComponent(session.username)}&video_url=eq.${encodeURIComponent(url)}`);
     const existing = rows[0];
-    const total = (existing?.total_seconds || 0) + newSeconds;
-    const unlocked = total >= 600;
-
+    const total = Math.max(existing?.total_seconds || 0, newSeconds);
+    const unlocked = total >= WATCH_UNLOCK_SECS;
     if (existing) {
       await sbUpdate('watch_time', { total_seconds: total, rating_unlocked: unlocked },
         `username=eq.${encodeURIComponent(session.username)}&video_url=eq.${encodeURIComponent(url)}`);
     } else {
       await sbInsert('watch_time', { username: session.username, video_url: url, video_id: extractId(url), total_seconds: total, rating_unlocked: unlocked });
     }
-
-    if (unlocked && !_watchUnlocked[url]) {
-      _watchUnlocked[url] = true;
-      updateRateButton(true);
-    }
-  } catch(e) { console.warn('Watch time save failed', e); }
+  } catch(e) {} // silent — DB sync is optional
 }
 
 function updateRateButton(unlocked) {
