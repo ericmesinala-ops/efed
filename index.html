@@ -2172,9 +2172,15 @@ function toggleSort() {
   renderGrid();
 }
 
+const liveVideoMap = {}; // videoId -> true if live
+
 function sortByDate(arr) {
   return [...arr].sort((a, b) => {
-    // Always sort by YouTube upload date (dateMs or parsed date string)
+    // Live videos always first
+    const aLive = liveVideoMap[extractId(a.url)] ? 1 : 0;
+    const bLive = liveVideoMap[extractId(b.url)] ? 1 : 0;
+    if (bLive !== aLive) return bLive - aLive;
+    // Then sort by date
     const ta = a.dateMs || new Date(a.date || 0).getTime();
     const tb = b.dateMs || new Date(b.date || 0).getTime();
     return tb - ta;
@@ -2248,24 +2254,47 @@ async function updateLiveBadges() {
     if (id) videoIds.push(id);
   });
   if (!videoIds.length) return;
-  // Check in batches of 50 (YouTube API limit)
   const batch = videoIds.slice(0, 50);
   const liveMap = await checkLiveStatus(batch);
-  cards.forEach(card => {
+
+  // Update liveVideoMap — add new live, remove ended ones
+  let changed = false;
+  batch.forEach(id => {
+    const wasLive = !!liveVideoMap[id];
+    const isLive = !!liveMap[id];
+    if (wasLive !== isLive) { changed = true; }
+    if (isLive) liveVideoMap[id] = true;
+    else delete liveVideoMap[id];
+  });
+
+  // Re-render if live status changed
+  if (changed) renderGrid();
+
+  // Sync badges on all cards
+  document.querySelectorAll('.card').forEach(card => {
     const id = extractId(card._videoUrl || '');
-    if (!id || !liveMap[id]) return;
+    if (!id) return;
     const thumb = card.querySelector('.card-thumb');
     if (!thumb) return;
-    // Remove existing live badge if any
-    const existing = thumb.querySelector('.live-badge');
-    if (existing) existing.remove();
-    // Add live badge
-    const badge = document.createElement('div');
-    badge.className = 'live-badge';
-    badge.innerHTML = '<div class="live-dot"></div> LIVE';
-    thumb.appendChild(badge);
+    const existingLive = thumb.querySelector('.live-badge');
+    const existingNew = thumb.querySelector('.new-badge');
+    if (liveVideoMap[id]) {
+      // Show live badge, hide just-added
+      if (!existingLive) {
+        const badge = document.createElement('div');
+        badge.className = 'live-badge';
+        badge.innerHTML = '<div class="live-dot"></div> LIVE';
+        thumb.appendChild(badge);
+      }
+    } else {
+      // Remove live badge if stream ended
+      if (existingLive) existingLive.remove();
+    }
   });
 }
+
+// Poll every 60 seconds to detect stream start/end
+setInterval(updateLiveBadges, 60000);
 
 // ── EFED OWNER ROW ──
 async function loadEfedOwnerRow() {
@@ -2598,7 +2627,7 @@ function makeCard(v) {
   dateDiv.textContent = v.date || '';
   infoDiv.appendChild(dateDiv);
 
-  if (v.community && v.submittedBy) {
+  if (v.community && v.submittedBy && v.submittedBy.toLowerCase() !== 'derrick_maximus') {
     const postedDiv = document.createElement('div');
     postedDiv.className = 'card-posted-by';
     postedDiv.textContent = 'by ' + (v.displayName || v.submittedBy);
@@ -4006,7 +4035,8 @@ function openExpand(v) {
   document.getElementById('expand-show').textContent = v.show || '';
   document.getElementById('expand-meta').textContent = v.date || '';
   const posterEl = document.getElementById('expand-poster');
-  posterEl.innerHTML = v.efed ? `Posted by <span>${v.efed}</span>` : (v.submittedBy ? `Posted by <span>${v.submittedBy}</span>` : '');
+  const isAdmin = v.submittedBy && v.submittedBy.toLowerCase() === 'derrick_maximus';
+  posterEl.innerHTML = isAdmin ? '' : (v.submittedBy ? `Posted by <span>${v.submittedBy}</span>` : '');
 
   // 3-dot menu in actions row
   const session = getSession();
