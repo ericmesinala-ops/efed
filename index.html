@@ -1638,7 +1638,7 @@
       </button>
       <button class="nav-icon-btn" id="nav-user-btn" onclick="toggleDropdown()">
         <div class="nav-avatar-initials" id="nav-avatar-wrap">
-          <img id="nav-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:none;" onerror="this.style.display='none';document.getElementById('nav-initials').style.display=''">
+          <img id="nav-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:none;">
           <span id="nav-initials">??</span>
         </div>
       </button>
@@ -1830,8 +1830,8 @@
               <span id="settings-avatar-initial-full">?</span>
             </div>
             <div style="flex:1;">
-              <input class="settings-input" id="settings-avatar" type="url" placeholder="Paste image URL (Imgur, Discord CDN, etc.)" autocomplete="off">
-              <div style="font-size:.6rem;color:#8a8a9a;margin-top:4px;">Upload to <strong style="color:#c8a84b;">imgur.com</strong> or Discord, then paste the direct image link. X/Twitter links won't work due to browser restrictions.</div>
+              <input class="settings-input" id="settings-avatar" type="url" placeholder="Paste image URL (e.g. from X/Twitter)" autocomplete="off">
+              <div style="font-size:.6rem;color:#8a8a9a;margin-top:4px;">Right click your profile pic on X → Copy Image Address</div>
             </div>
           </div>
           <div class="settings-msg" id="settings-avatar-msg"></div>
@@ -4014,46 +4014,12 @@ async function saveAvatar() {
   const session = getSession();
   if (!session) return;
   const url = document.getElementById('settings-avatar').value.trim();
-  if (!url) {
-    // Clear avatar — revert to letter
-    try {
-      await sbUpdate('users', { avatar_url: null }, `username=eq.${encodeURIComponent(session.username)}`);
-      const initial = (session.displayName || session.username || '?')[0].toUpperCase();
-      const preview = document.getElementById('settings-avatar-preview');
-      const previewMini = document.getElementById('settings-avatar-preview-mini');
-      const initFull = document.getElementById('settings-avatar-initial-full');
-      const initMini = document.getElementById('settings-avatar-initial');
-      if (preview) preview.innerHTML = `<span id="settings-avatar-initial-full">${initial}</span>`;
-      if (previewMini) previewMini.innerHTML = `<span id="settings-avatar-initial">${initial}</span>`;
-      const navAvatar = document.getElementById('nav-avatar-img');
-      const navInitials = document.getElementById('nav-initials');
-      if (navAvatar) { navAvatar.src = ''; navAvatar.style.display = 'none'; }
-      if (navInitials) navInitials.style.display = '';
-      session.avatarUrl = null;
-      localStorage.setItem('efed_session', JSON.stringify(session));
-      showSettingsMsg('settings-avatar-msg', 'Avatar cleared — showing initials.', 'success');
-    } catch(e) { showSettingsMsg('settings-avatar-msg', 'Could not clear. Try again.', 'error'); }
-    return;
-  }
+  if (!url) return showSettingsMsg('settings-avatar-msg', 'Please paste an image URL.', 'error');
   if (!url.startsWith('http')) return showSettingsMsg('settings-avatar-msg', 'Please enter a valid URL starting with http.', 'error');
-
-  // Test image loads before saving
-  showSettingsMsg('settings-avatar-msg', 'Testing image…', '');
-  const testResult = await new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => resolve(true);
-    img.onerror = () => resolve(false);
-    img.src = url;
-  });
-  if (!testResult) {
-    showSettingsMsg('settings-avatar-msg', "Can't load that image — it may be blocked. Try an Imgur or Discord CDN link instead.", 'error');
-    return;
-  }
 
   try {
     await sbUpdate('users', { avatar_url: url }, `username=eq.${encodeURIComponent(session.username)}`);
-    const initial = (session.displayName || session.username || '?')[0].toUpperCase();
-    const imgHtml = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.outerHTML='<span>${initial}</span>'">`;
+    const imgHtml = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
     const preview = document.getElementById('settings-avatar-preview');
     const previewMini = document.getElementById('settings-avatar-preview-mini');
     if (preview) preview.innerHTML = imgHtml;
@@ -4565,6 +4531,10 @@ function openExpand(v) {
   // Reset rate button to locked state
   const rateBtn = document.getElementById('expand-rate-btn');
   if (rateBtn) {
+    // eFed owners cannot rate their own submitted videos
+    const _rSession = getSession();
+    const _isOwnVideo = _rSession && v.submittedBy && _rSession.username.toLowerCase() === v.submittedBy.toLowerCase();
+    rateBtn.style.display = _isOwnVideo ? 'none' : '';
     rateBtn.style.opacity = '0.4';
     rateBtn.style.color = '';
     rateBtn.style.borderColor = '';
