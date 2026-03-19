@@ -206,9 +206,9 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 </style>
 </head>
 <body>
-<div class="page-card">
-
 <nav id="nav">
+
+<div class="page-card">
   <a href="index.html" class="logo">
     <span class="logo-eyebrow">The Official</span>
     <span class="logo-main"><em>EFED</em> Streaming Hub</span>
@@ -525,40 +525,24 @@ async function saveEditProfile() {
 }
 
 // ── BANNER UPLOAD ──
-async function handleBannerUpload(event, type) {
+function handleBannerUpload(event, type) {
   const file = event.target.files[0];
   if (!file) return;
-  const session = getSession();
-  if (!session) return;
   const reader = new FileReader();
   reader.onload = async e => {
-    const img = new Image();
-    img.onload = async () => {
-      const W = 960, H = 200;
-      const canvas = document.createElement('canvas');
-      canvas.width = W; canvas.height = H;
-      const ctx = canvas.getContext('2d');
-      // Cover crop
-      const scale = Math.max(W/img.width, H/img.height);
-      const sw = W/scale, sh = H/scale;
-      const sx = (img.width - sw)/2, sy = (img.height - sh)/2;
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      // Show immediately
+    openBannerCrop(e.target.result, 960, 200, async (dataUrl) => {
+      const session = getSession();
+      if (!session) return;
       const bannerImg = document.getElementById('profile-banner-img');
       if (bannerImg) { bannerImg.src = dataUrl; bannerImg.style.display = 'block'; }
-      const noiseEl = document.querySelector('.banner-noise');
-      const glowEl = document.querySelector('.banner-glow');
-      if (noiseEl) noiseEl.style.display = 'none';
-      if (glowEl) glowEl.style.display = 'none';
-      // Save
+      document.querySelector('.banner-noise').style.display = 'none';
+      document.querySelector('.banner-glow').style.display = 'none';
       try {
         await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({avatar_banner:dataUrl}) });
         const bmsg = document.getElementById('ep-banner-msg');
-        if (bmsg) { bmsg.textContent = 'Banner saved!'; setTimeout(() => { bmsg.textContent = ''; }, 2000); }
+        if (bmsg) { bmsg.textContent = 'Banner saved!'; setTimeout(() => bmsg.textContent='', 2000); }
       } catch(err) { console.warn('Banner save failed', err); }
-    };
-    img.src = e.target.result;
+    });
   };
   reader.readAsDataURL(file);
   event.target.value = '';
@@ -837,6 +821,124 @@ async function loadProfile() {
 
 initNav();
 loadProfile();
+
+// ── BANNER CROP LOGIC ──
+let _cropState = { img: null, x: 0, y: 0, scale: 1, dragging: false, startX: 0, startY: 0, imgX: 0, imgY: 0, W: 960, H: 200, onSave: null };
+
+function openBannerCrop(dataUrl, W, H, onSave) {
+  _cropState.W = W; _cropState.H = H; _cropState.onSave = onSave;
+  const bg = document.getElementById('banner-crop-bg');
+  const img = document.getElementById('crop-img');
+  const vp = document.getElementById('crop-viewport');
+  bg.style.display = 'flex';
+  img.src = dataUrl;
+  img.onload = () => {
+    const vpW = vp.clientWidth, vpH = vp.clientHeight;
+    const scale = Math.max(vpW / img.naturalWidth, vpH / img.naturalHeight) * 1.0;
+    _cropState.scale = scale;
+    _cropState.x = (vpW - img.naturalWidth * scale) / 2;
+    _cropState.y = (vpH - img.naturalHeight * scale) / 2;
+    _cropState.img = img;
+    applyTransform();
+  };
+}
+
+function applyTransform() {
+  const img = _cropState.img; if (!img) return;
+  img.style.transform = `translate(${_cropState.x}px, ${_cropState.y}px) scale(${_cropState.scale})`;
+  img.style.transformOrigin = '0 0';
+  img.style.width = _cropState.img.naturalWidth + 'px';
+  img.style.height = _cropState.img.naturalHeight + 'px';
+}
+
+function clampPosition() {
+  const vp = document.getElementById('crop-viewport');
+  const vpW = vp.clientWidth, vpH = vp.clientHeight;
+  const iW = _cropState.img.naturalWidth * _cropState.scale;
+  const iH = _cropState.img.naturalHeight * _cropState.scale;
+  _cropState.x = Math.min(0, Math.max(vpW - iW, _cropState.x));
+  _cropState.y = Math.min(0, Math.max(vpH - iH, _cropState.y));
+}
+
+const cropVp = () => document.getElementById('crop-viewport');
+function initCropEvents() {
+  const vp = cropVp(); if (!vp || vp._cropInited) return; vp._cropInited = true;
+  vp.addEventListener('mousedown', e => {
+    _cropState.dragging = true; _cropState.startX = e.clientX; _cropState.startY = e.clientY;
+    _cropState.imgX = _cropState.x; _cropState.imgY = _cropState.y;
+    vp.style.cursor = 'grabbing'; e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!_cropState.dragging) return;
+    _cropState.x = _cropState.imgX + (e.clientX - _cropState.startX);
+    _cropState.y = _cropState.imgY + (e.clientY - _cropState.startY);
+    clampPosition(); applyTransform();
+  });
+  window.addEventListener('mouseup', () => { _cropState.dragging = false; vp.style.cursor = 'grab'; });
+  // Touch
+  vp.addEventListener('touchstart', e => {
+    const t = e.touches[0]; _cropState.dragging = true;
+    _cropState.startX = t.clientX; _cropState.startY = t.clientY;
+    _cropState.imgX = _cropState.x; _cropState.imgY = _cropState.y; e.preventDefault();
+  }, { passive: false });
+  window.addEventListener('touchmove', e => {
+    if (!_cropState.dragging) return;
+    const t = e.touches[0];
+    _cropState.x = _cropState.imgX + (t.clientX - _cropState.startX);
+    _cropState.y = _cropState.imgY + (t.clientY - _cropState.startY);
+    clampPosition(); applyTransform();
+  }, { passive: false });
+  window.addEventListener('touchend', () => { _cropState.dragging = false; });
+  // Scroll to zoom
+  vp.addEventListener('wheel', e => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const newScale = Math.max(
+      Math.max(vp.clientWidth / _cropState.img.naturalWidth, vp.clientHeight / _cropState.img.naturalHeight),
+      Math.min(4, _cropState.scale * delta)
+    );
+    // Zoom toward cursor
+    const rect = vp.getBoundingClientRect();
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    _cropState.x = cx - (cx - _cropState.x) * (newScale / _cropState.scale);
+    _cropState.y = cy - (cy - _cropState.y) * (newScale / _cropState.scale);
+    _cropState.scale = newScale;
+    clampPosition(); applyTransform();
+  }, { passive: false });
+}
+
+function cancelBannerCrop() {
+  document.getElementById('banner-crop-bg').style.display = 'none';
+}
+
+function confirmBannerCrop() {
+  const vp = document.getElementById('crop-viewport');
+  const vpW = vp.clientWidth, vpH = vp.clientHeight;
+  // Render at target resolution
+  const canvas = document.createElement('canvas');
+  canvas.width = _cropState.W; canvas.height = _cropState.H;
+  const ctx = canvas.getContext('2d');
+  const scaleToTarget = _cropState.W / vpW;
+  ctx.drawImage(
+    _cropState.img,
+    (-_cropState.x / _cropState.scale),
+    (-_cropState.y / _cropState.scale),
+    vpW / _cropState.scale,
+    vpH / _cropState.scale,
+    0, 0, _cropState.W, _cropState.H
+  );
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.87);
+  document.getElementById('banner-crop-bg').style.display = 'none';
+  if (_cropState.onSave) _cropState.onSave(dataUrl);
+}
+
+// Init events when modal first becomes visible
+const _cropObserver = new MutationObserver(() => { if (document.getElementById('banner-crop-bg')?.style.display !== 'none') initCropEvents(); });
+document.addEventListener('DOMContentLoaded', () => {
+  const bg = document.getElementById('banner-crop-bg');
+  if (bg) _cropObserver.observe(bg, { attributes: true, attributeFilter: ['style'] });
+});
+
 </script>
 
 <!-- ── EDIT PROFILE MODAL ── -->
@@ -890,5 +992,26 @@ loadProfile();
 </div>
 
 </div><!-- /page-card -->
+
+<!-- ── BANNER CROP MODAL ── -->
+<div id="banner-crop-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.92);backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:700px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.8);">
+    <div style="padding:18px 22px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Position Banner</div>
+      <div style="font-size:.65rem;color:#5a5a6a;letter-spacing:1px;">Drag to reposition</div>
+    </div>
+    <!-- Crop viewport — fixed 960x200 ratio -->
+    <div style="padding:16px 22px;">
+      <div id="crop-viewport" style="width:100%;aspect-ratio:960/200;overflow:hidden;border-radius:8px;position:relative;cursor:grab;user-select:none;background:#1a1a1f;">
+        <img id="crop-img" src="" alt="" style="position:absolute;transform-origin:top left;pointer-events:none;max-width:none;">
+      </div>
+      <div style="font-size:.6rem;color:#5a5a6a;text-align:center;margin-top:8px;letter-spacing:1px;">DRAG TO REPOSITION · SCROLL TO ZOOM</div>
+    </div>
+    <div style="padding:0 22px 20px;display:flex;gap:10px;">
+      <button onclick="cancelBannerCrop()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
+      <button onclick="confirmBannerCrop()" style="flex:2;padding:12px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Banner</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
