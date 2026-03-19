@@ -735,6 +735,11 @@ async function initNav() {
   }
 }
 
+
+  };
+  ownerRow.appendChild(btn);
+}
+
 async function loadPage() {
   // Set page title and banner name from URL param
   document.title = FSW_EFED_NAME + ' — EFED Hub';
@@ -957,8 +962,10 @@ async function loadPage() {
     const memAvHtml = u.avatar_url
       ? `<div class="roster-av"><img src="${u.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;"></div>`
       : `<div class="roster-av">${name[0].toUpperCase()}</div>`;
+    const canRemove = isSelf || isOwner;
     rosterHtml += `
-      <div class="roster-card" ${isSelf ? 'id="roster-self-card"' : ''} onclick="window.location.href='profile.html?u=${encodeURIComponent(u.username)}'" style="cursor:pointer;">
+      <div class="roster-card" ${isSelf ? 'id="roster-self-card"' : ''} style="cursor:pointer;position:relative;" onclick="if(!event.target.closest('.roster-remove-btn'))window.location.href='profile.html?u=${encodeURIComponent(u.username)}'">
+        ${canRemove ? `<button class="roster-remove-btn" title="Remove from roster" onclick="event.stopPropagation();removeFromRoster('${u.username}')" style="position:absolute;top:6px;right:6px;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.25);border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:rgba(255,100,100,.7);font-size:.7rem;line-height:1;transition:background .2s;" onmouseover="this.style.background='rgba(192,0,14,.4)';this.style.color='#fff'" onmouseout="this.style.background='rgba(192,0,14,.15)';this.style.color='rgba(255,100,100,.7)'">✕</button>` : ''}
         ${memAvHtml}
         <div class="roster-name">${_esc(name)}</div>
         <div class="roster-role">Talent</div>
@@ -1054,6 +1061,40 @@ async function joinRoster() {
     btn.disabled = false;
     btn.textContent = 'Join';
   }
+}
+
+async function removeFromRoster(username) {
+  const session = getSession();
+  if (!session) return;
+  const isOwner = FSW_OWNER && session.username.toLowerCase() === FSW_OWNER.toLowerCase();
+  const isSelf = session.username.toLowerCase() === username.toLowerCase();
+  if (!isOwner && !isSelf) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/roster?efed=eq.' + encodeURIComponent(FSW_EFED_NAME) + '&username=eq.' + encodeURIComponent(username), {
+      method: 'DELETE', headers: SB_HEADERS
+    });
+    // Remove card from DOM
+    const grid = document.getElementById('roster-grid');
+    if (grid) {
+      const cards = grid.querySelectorAll('.roster-card');
+      cards.forEach(card => {
+        const nameEl = card.querySelector('.roster-name');
+        if (nameEl && card.querySelector('.roster-remove-btn[onclick*="' + username + '"]')) card.remove();
+      });
+    }
+    // If removed self, reset join button
+    if (isSelf) {
+      const joinBtn = document.getElementById('roster-join-btn');
+      if (joinBtn) {
+        joinBtn.textContent = '+ Join Roster';
+        joinBtn.style.color = 'rgba(255,255,255,.4)';
+        joinBtn.style.borderColor = 'rgba(255,255,255,.12)';
+        joinBtn.onclick = toggleRosterJoin;
+        joinBtn.onmouseover = () => { joinBtn.style.borderColor='rgba(192,0,14,.4)'; joinBtn.style.color='#ff6b6b'; };
+        joinBtn.onmouseout = () => { joinBtn.style.borderColor='rgba(255,255,255,.12)'; joinBtn.style.color='rgba(255,255,255,.4)'; };
+      }
+    }
+  } catch(e) { console.warn('Remove roster failed', e); }
 }
 
 async function leaveRoster() {
