@@ -228,7 +228,10 @@ nav.scrolled { background: rgba(7,7,10,.99); }
     <span class="logo-main"><em>EFED</em> Streaming Hub</span>
   </a>
   <div class="nav-right">
-    <!-- online counter hidden on efed page -->
+    <div id="online-counter" style="display:none;align-items:center;gap:5px;font-size:.62rem;letter-spacing:1.5px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-weight:500;white-space:nowrap;">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span id="total-users-label">— members</span>
+    </div>
     <div class="nav-search-wrap" id="nav-search-wrap">
       <input class="nav-search-input" id="nav-search-input" type="text" placeholder="Search shows, eFeds…" autocomplete="off">
       <button class="nav-icon-btn" id="nav-search-btn" aria-label="Search">
@@ -501,7 +504,7 @@ async function initNav() {
 async function loadPage() {
   // Owner
   try {
-    const users = await sbGet('users', `username=eq.${encodeURIComponent(FSW_OWNER)}&select=username,display_name,promo_name,x_handle,ig_handle,yt_channel,promo_logo,promo_website`);
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(FSW_OWNER)}&select=*`);
     const owner = users[0];
     if (owner) {
       const name = owner.display_name || owner.username;
@@ -585,6 +588,10 @@ async function loadPage() {
   if (!allVideos.length) {
     row.innerHTML = `<div style="font-size:.78rem;color:var(--muted);padding:16px 0;">No episodes yet.</div>`;
   } else {
+    // Parse date strings for hardcoded videos that lack dateMs
+    allVideos.forEach(v => {
+      if (!v.dateMs && v.date) v.dateMs = Date.parse(v.date) || 0;
+    });
     allVideos.sort((a,b) => (b.dateMs||0) - (a.dateMs||0));
     row.innerHTML = allVideos.map(v => {
       const id = extractId(v.url);
@@ -686,19 +693,28 @@ async function handleLogoFile(event) {
   // Convert to base64 data URL for preview immediately
   const reader = new FileReader();
   reader.onload = async (e) => {
-    const dataUrl = e.target.result;
-    setLogoImage(dataUrl);
-
-    // Save to Supabase as data URL (or swap for Imgur upload if needed later)
-    const session = getSession();
-    if (!session) return;
-    try {
-      await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
-        method: 'PATCH',
-        headers: SB_HEADERS,
-        body: JSON.stringify({ promo_logo: dataUrl })
-      });
-    } catch(err) { console.warn('Logo save failed', err); }
+    // Resize to max 200x200 before saving to keep base64 small enough for Supabase
+    const img = new Image();
+    img.onload = async () => {
+      const MAX = 200;
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(MAX / img.width, MAX / img.height, 1);
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+      setLogoImage(dataUrl);
+      const session = getSession();
+      if (!session) return;
+      try {
+        await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+          method: 'PATCH',
+          headers: SB_HEADERS,
+          body: JSON.stringify({ promo_logo: dataUrl })
+        });
+      } catch(err) { console.warn('Logo save failed', err); }
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
   // Reset input so same file can be re-selected
