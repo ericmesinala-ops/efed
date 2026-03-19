@@ -188,7 +188,7 @@ nav {
     <div class="nav-user-wrap" id="nav-user-wrap">
       <button class="nav-icon-btn" id="nav-user-btn" style="display:none;" onclick="toggleDropdown()">
         <div class="nav-avatar-initials" id="nav-avatar-wrap">
-          <img id="nav-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;display:none;" onerror="this.style.display='none';document.getElementById('nav-initials').style.display=''">
+          <img id="nav-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:none;" onerror="this.style.display='none';document.getElementById('nav-initials').style.display=''">
           <span id="nav-initials">??</span>
         </div>
       </button>
@@ -518,31 +518,42 @@ async function loadProfile() {
     ? subsData.map(s => makeVidCard(s.url, s.show_name, s.date, s.thumb_url)).join('')
     : '<div class="empty">No submissions yet.</div>';
 
-  // eFeds
-  const efedList = document.getElementById('efeds-list');
+  // eFeds — My eFeds (roster) + Supporting eFeds (fan)
+  const myEfedList = document.getElementById('myefeds-list');
+  const supEfedList = document.getElementById('efeds-list');
   try {
     const [rosterRows, supportRows] = await Promise.all([
       sbGet('roster', `username=eq.${encodeURIComponent(targetUser)}&order=joined_at.asc`).catch(()=>[]),
       sbGet('supports', `username=eq.${encodeURIComponent(targetUser)}&order=supported_at.desc`).catch(()=>[])
     ]);
-    if (!rosterRows.length && !supportRows.length) {
-      efedList.innerHTML = '<div class="empty">Not part of any eFed yet.</div>';
+    // My eFeds — roster
+    if (!rosterRows.length) {
+      myEfedList.innerHTML = '<div class="empty">Not part of any eFed yet.</div>';
     } else {
-      const rosterEfeds = new Set(rosterRows.map(r => r.efed));
-      let html = rosterRows.map(r => `
-        <div class="efed-item" onclick="window.location.href='efed.html'">
+      myEfedList.innerHTML = rosterRows.map(r => `
+        <div class="efed-item" onclick="window.location.href='efed.html?e=${encodeURIComponent(r.efed)}'">
           <div class="efed-av">${(r.efed||'?')[0].toUpperCase()}</div>
           <div><div class="efed-name-txt">${_esc(r.efed)}</div><div class="efed-role-txt">Talent</div></div>
           <svg style="margin-left:auto;opacity:.25;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
         </div>`).join('');
-      html += supportRows.filter(s => !rosterEfeds.has(s.efed)).map(s => `
-        <div class="efed-item">
+    }
+    // Supporting eFeds — fan (exclude ones already in roster)
+    const rosterEfeds = new Set(rosterRows.map(r => r.efed));
+    const fanRows = supportRows.filter(s => !rosterEfeds.has(s.efed));
+    if (!fanRows.length) {
+      supEfedList.innerHTML = '<div class="empty">Not supporting any eFed yet.</div>';
+    } else {
+      supEfedList.innerHTML = fanRows.map(s => `
+        <div class="efed-item" onclick="window.location.href='efed.html?e=${encodeURIComponent(s.efed)}'">
           <div class="efed-av" style="background:rgba(200,168,75,.1);border-color:rgba(200,168,75,.2);color:var(--gold);">${(s.efed||'?')[0].toUpperCase()}</div>
           <div><div class="efed-name-txt">${_esc(s.efed)}</div><div class="efed-role-txt">Fan</div></div>
+          <svg style="margin-left:auto;opacity:.25;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
         </div>`).join('');
-      efedList.innerHTML = html;
     }
-  } catch(e) { efedList.innerHTML = '<div class="empty">Could not load.</div>'; }
+  } catch(e) {
+    myEfedList.innerHTML = '<div class="empty">Could not load.</div>';
+    supEfedList.innerHTML = '<div class="empty">Could not load.</div>';
+  }
 
   // Bookmarks
   const bmRow = document.getElementById('bookmarks-row');
