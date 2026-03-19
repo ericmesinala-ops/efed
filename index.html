@@ -5182,15 +5182,22 @@ async function loadAdminUsers() {
     list.innerHTML = '';
     rows.forEach(u => {
       const div = document.createElement('div');
-      div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06);';
+      div.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);gap:8px;';
       div.innerHTML = `
-        <div>
-          <div style="font-size:.78rem;font-weight:600;color:${u.banned ? '#ff6b6b' : '#e8e8e8'};">${withVerified(u.username, u.username, false)} ${u.banned ? '🚫' : ''} ${u.is_creator ? '<span style="color:#c8a84b;font-size:.6rem;letter-spacing:1px;">🎬 CREATOR</span>' : ''}</div>
-          <div style="font-size:.62rem;color:#5a5a6a;">Strikes: ${u.strikes || 0} · Joined ${new Date(u.joined_at).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</div>
-          ${u.is_efed_owner ? `<div style="font-size:.62rem;color:#c8a84b;margin-top:2px;">eFed Owner: ${u.promo_name || '?'} ${u.yt_channel ? '· <a href="'+u.yt_channel+'" target="_blank" style="color:#c8a84b;">YouTube ↗</a>' : ''} ${u.x_handle ? '· @'+u.x_handle : ''}</div>` : ''}
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:.78rem;font-weight:600;color:${u.banned ? '#ff6b6b' : '#e8e8e8'};">${withVerified(u.display_name || u.username, u.username, false)} ${u.banned ? '🚫' : ''} ${u.is_creator ? '<span style="color:#c8a84b;font-size:.6rem;letter-spacing:1px;">🎬 CREATOR</span>' : ''}</div>
+          <div style="font-size:.6rem;color:#5a5a6a;margin-top:1px;">@${u.username} · ${u.email || ''}</div>
+          <div style="font-size:.6rem;color:#5a5a6a;">Strikes: ${u.strikes || 0} · Joined ${new Date(u.joined_at).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</div>
+          ${u.is_efed_owner || u.role === 'owner' ? `<div style="font-size:.62rem;color:#c8a84b;margin-top:3px;">
+            eFed: <b>${u.promo_name || '?'}</b>
+            <button onclick="adminEditPromoName('${u.username}','${(u.promo_name||'').replace(/'/g,"\\'")}')" style="background:none;border:none;color:#c8a84b;cursor:pointer;font-size:.6rem;padding:0 4px;opacity:.7;">✏️</button>
+            ${u.yt_channel ? ` · <a href="${u.yt_channel}" target="_blank" style="color:#c8a84b;">YouTube ↗</a>` : ''}
+            ${u.x_handle ? ` · <a href="https://x.com/${u.x_handle.replace('@','')}" target="_blank" style="color:#c8a84b;">@${u.x_handle.replace('@','')}</a>` : ''}
+            ${u.ig_handle ? ` · <a href="https://instagram.com/${u.ig_handle.replace('@','')}" target="_blank" style="color:#c8a84b;">IG</a>` : ''}
+          </div>` : ''}
         </div>
         ${u.username.toLowerCase() !== ADMIN_USERNAME ? `
-        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;">
           ${u.is_creator
             ? `<button onclick="adminToggleCreator('${u.username}',false)" style="padding:5px 10px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.3);border-radius:6px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;cursor:pointer;">Remove Badge</button>`
             : `<button onclick="adminToggleCreator('${u.username}',true)" style="padding:5px 10px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.3);border-radius:6px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;cursor:pointer;">🎬 Creator</button>`
@@ -5199,12 +5206,22 @@ async function loadAdminUsers() {
             ? `<button onclick="adminUnbanUser('${u.username}')" style="padding:5px 10px;background:rgba(76,175,100,.15);border:1px solid rgba(76,175,100,.3);border-radius:6px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;cursor:pointer;">Unban</button>`
             : `<button onclick="adminBanUser('${u.username}')" style="padding:5px 10px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);border-radius:6px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;cursor:pointer;">Ban</button>`
           }
-        </div>` : '<div style="font-size:.6rem;color:#c8a84b;">ADMIN</div>'}`;
+        </div>` : '<div style="font-size:.6rem;color:#c8a84b;flex-shrink:0;">ADMIN</div>'}`;
       list.appendChild(div);
     });
   } catch(e) {
     list.innerHTML = '<div style="font-size:.75rem;color:#ff6b6b;">Could not load users.</div>';
   }
+}
+
+async function adminEditPromoName(username, current) {
+  const newName = prompt(`Edit promo name for @${username}:`, current || '');
+  if (!newName || newName === current) return;
+  try {
+    await sbUpdate('users', { promo_name: newName }, `username=eq.${encodeURIComponent(username)}`);
+    showToast('✅ Promo name updated');
+    loadAdminUsers();
+  } catch(e) { showToast('❌ Update failed'); }
 }
 
 async function adminUnbanUser(username) {
@@ -6093,13 +6110,13 @@ function _esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 const _verifiedUsers = new Set();
 
 async function loadVerifiedUsers() {
+  _verifiedUsers.add(ADMIN_USERNAME);
   try {
-    const rows = await sbGet('users', 'select=username&or=(is_efed_owner.eq.true,role.eq.owner)');
+    const rows = await sbGet('users', 'select=username&is_efed_owner=eq.true');
     rows.forEach(u => _verifiedUsers.add(u.username.toLowerCase()));
-    _verifiedUsers.add(ADMIN_USERNAME);
-  } catch(e) {
-    _verifiedUsers.add(ADMIN_USERNAME);
-  }
+    const rows2 = await sbGet('users', 'select=username&role=eq.owner');
+    rows2.forEach(u => _verifiedUsers.add(u.username.toLowerCase()));
+  } catch(e) {}
 }
 
 function isVerifiedUser(username) {
