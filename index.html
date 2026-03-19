@@ -2221,13 +2221,13 @@ let upcomingVideos = []; // DB upcoming submissions
 
 function sortByDate(arr) {
   return [...arr].sort((a, b) => {
-    // Live videos always first
-    const aLive = liveVideoMap[extractId(a.url)] ? 1 : 0;
-    const bLive = liveVideoMap[extractId(b.url)] ? 1 : 0;
+    // Only pin if actively live (not just 'upcoming' state)
+    const aLive = liveVideoMap[extractId(a.url)] === 'live' ? 1 : 0;
+    const bLive = liveVideoMap[extractId(b.url)] === 'live' ? 1 : 0;
     if (bLive !== aLive) return bLive - aLive;
-    // Then sort by date
-    const ta = a.dateMs || new Date(a.date || 0).getTime();
-    const tb = b.dateMs || new Date(b.date || 0).getTime();
+    // Then sort by submittedAt desc (most recently posted first)
+    const ta = a.submittedAt || a.dateMs || new Date(a.date || 0).getTime();
+    const tb = b.submittedAt || b.dateMs || new Date(b.date || 0).getTime();
     return tb - ta;
   });
 }
@@ -2346,10 +2346,12 @@ async function updateLiveBadges() {
     const datePassed = uv.dateMs && Date.now() > uv.dateMs + 4 * 3600000; // 4hr grace
     if (ytStatus === 'live' || (!ytStatus && datePassed)) {
       // Promote to main grid
-      const promoted_v = { ...uv, status: 'approved', submittedAt: Date.now() };
+      const promoted_v = { ...uv, status: 'approved', submittedAt: uv.dateMs || Date.now() };
       if (!videos.find(v => v.url === promoted_v.url)) {
         videos.push(promoted_v);
       }
+      // Remove from liveVideoMap so it sorts by date not pinned as live
+      delete liveVideoMap[extractId(uv.url)];
       upcomingVideos.splice(i, 1);
       // Update DB status
       if (uv.dbId) {
