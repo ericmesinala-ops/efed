@@ -141,7 +141,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .efed-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: opacity .15s; }
 .efed-item:last-child { border-bottom: none; }
 .efed-item:hover { opacity: .8; }
-.efed-av { width: 40px; height: 40px; border-radius: 8px; background: rgba(192,0,14,.12); border: 1px solid rgba(192,0,14,.25); display: flex; align-items: center; justify-content: center; font-family: 'Bebas Neue', sans-serif; font-size: .9rem; color: var(--accent); flex-shrink: 0; }
+.efed-av { width: 40px; height: 40px; border-radius: 8px; background: rgba(192,0,14,.12); border: 1px solid rgba(192,0,14,.25); display: flex; align-items: center; justify-content: center; font-family: 'Bebas Neue', sans-serif; font-size: .9rem; color: var(--accent); flex-shrink: 0; overflow: hidden; }
 .efed-name-txt { font-size: .85rem; font-weight: 600; color: var(--text); }
 .efed-role-txt { font-size: .6rem; color: var(--muted); margin-top: 2px; letter-spacing: 1px; text-transform: uppercase; }
 
@@ -549,6 +549,50 @@ function handleBannerUpload(event, type) {
   event.target.value = '';
 }
 
+function openProfileSubmit() {
+  document.getElementById('prof-submit-modal-bg').style.display = 'flex';
+}
+function closeProfileSubmit() {
+  document.getElementById('prof-submit-modal-bg').style.display = 'none';
+  document.getElementById('prof-submit-url').value = '';
+  document.getElementById('prof-submit-msg').textContent = '';
+  document.getElementById('prof-submit-btn').disabled = false;
+  document.getElementById('prof-submit-btn').textContent = 'Submit';
+}
+async function submitProfileVideo() {
+  const url = document.getElementById('prof-submit-url').value.trim();
+  const msg = document.getElementById('prof-submit-msg');
+  const btn = document.getElementById('prof-submit-btn');
+  const session = getSession();
+  if (!session) return;
+  if (!url) { msg.textContent = 'Please paste a YouTube URL.'; msg.style.color='#ff6b6b'; return; }
+  if (!url.includes('youtu')) { msg.textContent = 'Must be a YouTube link.'; msg.style.color='#ff6b6b'; return; }
+  btn.disabled = true; btn.textContent = 'Submitting...'; msg.textContent = '';
+  try {
+    const oembed = await fetch('https://www.youtube.com/oembed?url='+encodeURIComponent(url)+'&format=json').then(r=>r.json()).catch(()=>null);
+    const showName = oembed ? oembed.title : '';
+    const existing = await sbGet('submissions', 'url=eq.'+encodeURIComponent(url));
+    if (existing.length) { msg.textContent = 'Already on the hub.'; msg.style.color='#ff6b6b'; btn.disabled=false; btn.textContent='Submit'; return; }
+    await fetch(SUPABASE_URL+'/rest/v1/submissions', {
+      method:'POST', headers:{...SB_HEADERS,'Prefer':'return=representation'},
+      body: JSON.stringify({ url, show_name: showName, efed: 'Community', submitted_by: session.username, submitted_at: Date.now(), status: 'approved', community: true })
+    });
+    msg.textContent = 'Submitted!'; msg.style.color='#4caf64';
+    const row = document.getElementById('submitted-row');
+    if (row) {
+      const id = (url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/) || [])[1] || '';
+      const thumb = id ? 'https://i.ytimg.com/vi/'+id+'/mqdefault.jpg' : '';
+      const card = document.createElement('div');
+      card.className = 'vid-card';
+      card.innerHTML = '<div class="vid-thumb">'+(thumb?'<img src="'+thumb+'" style="width:100%;height:100%;object-fit:cover;">':'')+'</div><div class="vid-title">'+(showName||url)+'</div>';
+      row.prepend(card);
+      const countEl = document.getElementById('stat-submitted');
+      if (countEl) countEl.textContent = parseInt(countEl.textContent||'0')+1;
+    }
+    setTimeout(closeProfileSubmit, 1200);
+  } catch(e) { msg.textContent = 'Could not submit.'; msg.style.color='#ff6b6b'; btn.disabled=false; btn.textContent='Submit'; }
+}
+
 window.addEventListener('scroll', () => {
   document.getElementById('nav').classList.toggle('scrolled', window.scrollY > 20);
 }, { passive: true });
@@ -717,6 +761,8 @@ async function loadProfile() {
     document.getElementById('stat-invites-pill').style.display = 'none';
   } else {
     document.getElementById('edit-pencil').style.display = 'flex';
+    const fab = document.getElementById('prof-submit-fab');
+    if (fab) fab.style.display = 'flex';
   }
 
   // User data
@@ -771,14 +817,30 @@ async function loadProfile() {
       sbGet('roster', `username=eq.${encodeURIComponent(targetUser)}&order=joined_at.asc`).catch(()=>[]),
       sbGet('supports', `username=eq.${encodeURIComponent(targetUser)}&order=supported_at.desc`).catch(()=>[])
     ]);
+    // Fetch logos for all efeds
+    const allEfedNames = [...new Set([...rosterRows.map(r=>r.efed), ...supportRows.map(s=>s.efed)])];
+    let logoMap = {};
+    if (allEfedNames.length) {
+      try {
+        const logoUsers = await sbGet('users', `promo_name=in.(${allEfedNames.map(e=>encodeURIComponent(e)).join(',')})&select=promo_name,promo_logo`);
+        logoUsers.forEach(u => { if (u.promo_logo) logoMap[u.promo_name] = u.promo_logo; });
+      } catch(e) {}
+    }
+    const efedAvHtml = (name, style='') => {
+      const logo = logoMap[name];
+      return logo
+        ? `<div class="efed-av" style="${style}"><img src="${logo}" style="width:100%;height:100%;object-fit:cover;"></div>`
+        : `<div class="efed-av" style="${style}">${(name||'?')[0].toUpperCase()}</div>`;
+    };
+
     // My eFeds — roster
     if (!rosterRows.length) {
       myEfedList.innerHTML = '<div class="empty">Not part of any eFed yet.</div>';
     } else {
       myEfedList.innerHTML = rosterRows.map(r => `
         <div class="efed-item" onclick="window.location.href='efed.html?e=${encodeURIComponent(r.efed)}'">
-          <div class="efed-av">${(r.efed||'?')[0].toUpperCase()}</div>
-          <div><div class="efed-name-txt">${_esc(r.efed)}</div><div class="efed-role-txt">Talent</div></div>
+          ${efedAvHtml(r.efed)}
+          <div><div class="efed-name-txt">${_esc(r.efed)}</div></div>
           <svg style="margin-left:auto;opacity:.25;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
         </div>`).join('');
     }
@@ -790,8 +852,8 @@ async function loadProfile() {
     } else {
       supEfedList.innerHTML = fanRows.map(s => `
         <div class="efed-item" onclick="window.location.href='efed.html?e=${encodeURIComponent(s.efed)}'">
-          <div class="efed-av" style="background:rgba(200,168,75,.1);border-color:rgba(200,168,75,.2);color:var(--gold);">${(s.efed||'?')[0].toUpperCase()}</div>
-          <div><div class="efed-name-txt">${_esc(s.efed)}</div><div class="efed-role-txt">Fan</div></div>
+          ${efedAvHtml(s.efed, 'background:rgba(200,168,75,.1);border-color:rgba(200,168,75,.2);color:var(--gold);')}
+          <div><div class="efed-name-txt">${_esc(s.efed)}</div></div>
           <svg style="margin-left:auto;opacity:.25;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
         </div>`).join('');
     }
@@ -1012,6 +1074,20 @@ document.addEventListener('DOMContentLoaded', () => {
       <button onclick="cancelBannerCrop()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
       <button onclick="confirmBannerCrop()" style="flex:2;padding:12px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Banner</button>
     </div>
+  </div>
+</div>
+
+<!-- ── SUBMIT VIDEO MODAL ── -->
+<div id="prof-submit-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeProfileSubmit()">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:400px;padding:28px 24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Submit Video</div>
+      <button onclick="closeProfileSubmit()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;">&#x2715;</button>
+    </div>
+    <div style="font-size:.72rem;color:#8a8a9a;margin-bottom:16px;line-height:1.6;">Paste a YouTube link to add it to the hub.</div>
+    <input id="prof-submit-url" type="url" placeholder="https://youtube.com/watch?v=..." style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:11px 14px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;margin-bottom:12px;">
+    <div id="prof-submit-msg" style="font-size:.72rem;min-height:18px;margin-bottom:12px;"></div>
+    <button id="prof-submit-btn" onclick="submitProfileVideo()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Submit</button>
   </div>
 </div>
 </body>

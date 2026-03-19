@@ -3014,8 +3014,7 @@ async function initHub() {
   loadEfedOwnerRow();
   buildHeroDots();
   loadSlide();
-  // Handle ?play= param — open expand panel for a specific video (e.g. from efed page)
-  handlePlayParam();
+  // ?play= param handled before initHub for instant open
 }
 
 function handlePlayParam() {
@@ -3048,7 +3047,35 @@ let heroTimer = null;
 window._heroFirstLoad = true;
 
 setTimeout(()=>{ if(typeof loadVerifiedUsers==="function") loadVerifiedUsers(); }, 1000);
-initHub();
+// Fast-path: if ?play= param exists, fetch just that video and open expand immediately
+(async function() {
+  const _playUrl = new URLSearchParams(window.location.search).get('play');
+  if (_playUrl) {
+    history.replaceState(null, '', window.location.pathname);
+    // Try hardcoded videos first
+    const _found = videos.find(v => v.url === _playUrl);
+    if (_found) {
+      await initHub();
+      openExpand(_found);
+    } else {
+      // Fetch just this one video from DB — don't wait for full grid
+      try {
+        const rows = await sbGet('submissions', `url=eq.${encodeURIComponent(_playUrl)}&status=eq.approved`);
+        if (rows.length) {
+          const s = rows[0];
+          const v = { url: s.url, show: s.show_name||'', efed: s.efed||'', date: s.date||'', dateMs: s.date_ms||0, submittedBy: s.submitted_by||'', displayName: s.submitted_by||'', community: true, status: 'approved', thumb: s.thumb_url||null };
+          videos.push(v);
+          initHub(); // load grid in background
+          openExpand(v); // open immediately
+        } else {
+          initHub();
+        }
+      } catch(e) { initHub(); }
+    }
+  } else {
+    initHub();
+  }
+})();
 const _grid = document.getElementById('card-grid');
 if (_grid) _grid.addEventListener('scroll', updateRowArrows);
 
