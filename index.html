@@ -6261,53 +6261,57 @@ async function confirmClaim() {
 <style>
 /* Tab (always visible when collapsed) */
 #chat-tab {
-  position: fixed; top: 50%; right: 0;
-  transform: translateY(-50%);
+  position: fixed; top: calc(70px + 40px); right: 0;
   z-index: 7999;
   writing-mode: vertical-rl; text-orientation: mixed;
   font-family: 'Bebas Neue', sans-serif;
   font-size: .75rem; letter-spacing: 3px;
-  color: rgba(255,255,255,.5);
-  background: rgba(255,255,255,.06);
-  border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.55);
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.12);
   border-right: none;
   border-radius: 8px 0 0 8px;
   padding: 14px 6px;
   cursor: pointer;
-  transition: background .2s, color .2s, transform .3s cubic-bezier(.16,1,.3,1);
+  transition: background .2s, color .2s, opacity .2s;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   display: flex; align-items: center; gap: 8px;
   user-select: none;
 }
-#chat-tab:hover { background: rgba(255,255,255,.12); color: #fff; }
+#chat-tab:hover { background: rgba(255,255,255,.14); color: #fff; }
 #chat-tab.hidden-tab { opacity: 0; pointer-events: none; }
 #chat-tab-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 6px rgba(192,0,14,.8);
-  flex-shrink: 0;
-  display: none;
+  flex-shrink: 0; display: none;
 }
 #chat-tab-dot.visible { display: block; }
 
-/* Side panel */
+/* Side panel — covers only hero area */
 #chat-panel {
-  position: fixed; top: 0; right: 0; bottom: 0;
-  width: 300px; z-index: 8000;
-  background: rgba(7,7,10,.82);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border-left: 1px solid rgba(255,255,255,.07);
+  position: fixed;
+  top: 70px;
+  right: 0;
+  height: calc(88vh - 70px);
+  min-height: 400px;
+  width: 360px;
+  z-index: 8000;
+  background: rgba(7,7,10,.45);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-left: 1px solid rgba(255,255,255,.08);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  border-bottom-left-radius: 12px;
   display: flex; flex-direction: column;
   transform: translateX(100%);
   transition: transform .3s cubic-bezier(.16,1,.3,1);
-  box-shadow: -12px 0 40px rgba(0,0,0,.5);
 }
 #chat-panel.open { transform: translateX(0); }
 
-@media (max-width: 600px) {
-  #chat-panel { width: 100vw; }
+@media (max-width: 768px) {
+  #chat-panel { width: 100vw; top: 0; height: 100vh; border-radius: 0; }
   #chat-tab { top: auto; bottom: 90px; transform: none; }
 }
 
@@ -6572,7 +6576,7 @@ function scrollChatToBottom() {
 
 async function sendChatMessage() {
   const session = getSession();
-  if (!session) return;
+  if (!session) { window.location.replace('auth.html'); return; }
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text || text.length > 400) return;
@@ -6599,11 +6603,28 @@ async function sendChatMessage() {
       const u = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,promo_name`);
       if (u[0]) displayName = u[0].promo_name || u[0].display_name || session.username;
     } catch(e) {}
-    await sbInsert('chat_messages', {
+
+    const msgObj = {
       room_id: _chatRoom, username: session.username,
-      display_name: displayName, message: text, created_at: Date.now()
-    });
-  } catch(e) { console.error('Chat send failed:', e); }
+      display_name: displayName, message: text,
+      created_at: Date.now(), deleted: false
+    };
+
+    // Append immediately — don't wait for realtime
+    appendChatMessage({ ...msgObj, id: '_pending_' + Date.now() }, true);
+
+    const result = await sbInsert('chat_messages', msgObj);
+    // Realtime will handle other users; we already showed ours
+  } catch(e) {
+    console.error('Chat send failed:', e);
+    const box = document.getElementById('chat-messages');
+    const err = document.createElement('div');
+    err.style.cssText = 'font-size:.62rem;color:#ff6b6b;font-family:DM Sans,sans-serif;text-align:center;padding:4px 0;';
+    err.textContent = '⚠️ Failed to send. Check connection.';
+    box.appendChild(err);
+    scrollChatToBottom();
+    setTimeout(() => err.remove(), 3000);
+  }
 }
 
 async function deleteChatMessage(id, btn) {
@@ -6636,7 +6657,11 @@ function connectChatRealtime() {
     try {
       const msg = JSON.parse(e.data);
       if (msg.event === 'INSERT' && msg.payload?.record && !msg.payload.record.deleted) {
-        appendChatMessage(msg.payload.record, true);
+        const rec = msg.payload.record;
+        const session = getSession();
+        // Skip if it's our own message (already appended optimistically)
+        if (session && rec.username === session.username) return;
+        appendChatMessage(rec, true);
       }
       if (msg.event === 'UPDATE' && msg.payload?.record?.deleted) {
         document.querySelector(`.chat-msg[data-id="${msg.payload.record.id}"]`)?.remove();
