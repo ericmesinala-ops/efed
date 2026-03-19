@@ -633,7 +633,14 @@ async function initNav() {
   document.getElementById('nav-initials').textContent = initial;
   const ddName = document.getElementById('dd-name');
   const ddEmail = document.getElementById('dd-email');
-  if (ddName) ddName.textContent = session.displayName || session.username;
+  if (ddName) {
+    const _dname = session.displayName || session.username || '';
+    if (session.username.toLowerCase() === ADMIN_USERNAME) {
+      ddName.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;">${_dname}<svg style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.15)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+    } else {
+      ddName.textContent = session.displayName || session.username;
+    }
+  }
   if (ddEmail) ddEmail.textContent = '@' + session.username;
   if (session.avatarUrl) {
     const img = document.getElementById('nav-avatar-img');
@@ -666,12 +673,19 @@ async function initNav() {
   // Show My eFed if owner
   try {
     const udata = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
-    if (udata[0] && (udata[0].is_efed_owner || udata[0].role === 'owner') && udata[0].promo_name) {
-      const btn = document.getElementById('my-efed-btn');
-      if (btn) {
-        btn.style.display = 'flex';
-        btn.onclick = () => { toggleDropdown(true); window.location.href = 'efed.html?e=' + encodeURIComponent(udata[0].promo_name); };
+    const u = udata[0];
+    const ddEmail = document.getElementById('dd-email');
+    if (u && (u.is_efed_owner || u.role === 'owner') && u.promo_name) {
+      if (ddEmail) { ddEmail.textContent = 'Owner of ' + u.promo_name; ddEmail.style.color = '#c8a84b'; }
+      if (session.username.toLowerCase() === ADMIN_USERNAME) {
+        const btn = document.getElementById('my-efed-btn');
+        if (btn) {
+          btn.style.display = 'flex';
+          btn.onclick = () => { toggleDropdown(true); window.location.href = 'efed.html?e=' + encodeURIComponent(u.promo_name); };
+        }
       }
+    } else {
+      if (ddEmail) { ddEmail.textContent = '@' + session.username; ddEmail.style.color = ''; }
     }
   } catch(e) {}
   // Show Admin Panel for admin user
@@ -692,7 +706,7 @@ async function loadPage() {
 
   // Owner — find user whose promo_name matches this eFed
   try {
-    const owners = await sbGet('users', `promo_name=eq.${encodeURIComponent(FSW_EFED_NAME)}&select=*`);
+    const owners = await sbGet('users', `promo_name=ilike.${encodeURIComponent(FSW_EFED_NAME)}&select=*`);
     const owner = owners[0];
     if (owner) {
       FSW_OWNER = owner.username;
@@ -723,7 +737,55 @@ async function loadPage() {
         web: (owner.promo_website || '').replace(/^https?:\/\//,'')
       });
     } else {
-      document.getElementById('owner-name').textContent = 'Unknown';
+      // Fallback: match submitters whose yt_channel matches a video URL from this eFed
+      try {
+        // Get all submitters for this eFed
+        const subs = await sbGet('submissions', `efed=eq.${encodeURIComponent(FSW_EFED_NAME)}&select=url,submitted_by&order=submitted_at.asc`);
+        const submitters = [...new Set(subs.map(s => s.submitted_by).filter(Boolean))];
+        let fo = null;
+        if (submitters.length) {
+          const users = await sbGet('users', `username=in.(${submitters.map(u => encodeURIComponent(u)).join(',')})&select=*`);
+          // Find a user whose yt_channel appears in any of the submitted video URLs
+          for (const sub of subs) {
+            const submitter = users.find(u => u.username === sub.submitted_by);
+            if (!submitter || !submitter.yt_channel) continue;
+            const ytHandle = submitter.yt_channel.replace(/^https?:\/\/(www\.)?youtube\.com\/@?/,'').toLowerCase().replace(/\//g,'');
+            // Check if the video URL contains this channel handle (via oEmbed author or URL pattern)
+            if (ytHandle && sub.url && sub.url.toLowerCase().includes(ytHandle)) {
+              fo = submitter; break;
+            }
+          }
+          // If no channel match, fall back to user with is_efed_owner=true among submitters
+          if (!fo) fo = users.find(u => u.is_efed_owner || u.role === 'owner') || users[0];
+        }
+        if (fo) {
+          FSW_OWNER = fo.username;
+          // Also save promo_name to DB so future lookups work
+          if (!fo.promo_name) {
+            try { await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(fo.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({promo_name:FSW_EFED_NAME,is_efed_owner:true,role:'owner'}) }); } catch(e3) {}
+          }
+          const name = fo.display_name || fo.username;
+          document.getElementById('owner-name').textContent = name;
+          const ownerAvEl = document.getElementById('owner-av');
+          if (fo.avatar_url) {
+            ownerAvEl.innerHTML = `<img src="${fo.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;">`;
+          } else {
+            ownerAvEl.textContent = name[0].toUpperCase();
+          }
+          window._ownerAvatarUrl = fo.avatar_url || null;
+          if (fo.promo_logo) setLogoImage(fo.promo_logo);
+          renderLinks({
+            yt:  (fo.yt_channel    || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
+            ig:  (fo.ig_handle     || '').replace('@',''),
+            x:   (fo.x_handle      || '').replace('@',''),
+            web: (fo.promo_website || '').replace(/^https?:\/\//,'')
+          });
+        } else {
+          document.getElementById('owner-name').textContent = 'Unknown';
+        }
+      } catch(e2) {
+        document.getElementById('owner-name').textContent = 'Unknown';
+      }
     }
   } catch(e) {
     document.getElementById('owner-name').textContent = 'Could not load';
