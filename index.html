@@ -6364,7 +6364,7 @@ async function confirmClaim() {
 .chat-msg-user.is-admin { color: var(--accent); }
 .chat-msg-time { font-size: .5rem; color: rgba(255,255,255,.2); font-family: 'DM Sans',sans-serif; }
 .chat-msg-text { font-size: .73rem; color: rgba(255,255,255,.78); font-family: 'DM Sans',sans-serif; line-height: 1.5; word-break: break-word; }
-.chat-msg-delete { background: none; border: none; color: rgba(255,255,255,.12); cursor: pointer; font-size: .55rem; padding: 0 0 0 4px; transition: color .15s; display: none; }
+.chat-msg-delete { background: none; border: none; color: rgba(255,255,255,.2); cursor: pointer; font-size: .55rem; padding: 0 0 0 4px; transition: color .15s; display: none; }
 .chat-msg:hover .chat-msg-delete { display: inline; }
 .chat-msg-delete:hover { color: #ff6b6b; }
 .chat-empty { text-align: center; color: rgba(255,255,255,.18); font-size: .68rem; font-family: 'DM Sans',sans-serif; margin: auto; padding: 20px 0; }
@@ -6610,28 +6610,48 @@ async function sendChatMessage() {
       created_at: Date.now(), deleted: false
     };
 
-    // Append immediately — don't wait for realtime
-    appendChatMessage({ ...msgObj, id: '_pending_' + Date.now() }, true);
+    const pendingId = '_pending_' + Date.now();
+    appendChatMessage({ ...msgObj, id: pendingId }, true);
 
     const result = await sbInsert('chat_messages', msgObj);
-    // Realtime will handle other users; we already showed ours
+    // Update pending message with real id if returned
+    if (result?.[0]?.id) {
+      const el = document.querySelector(`.chat-msg[data-id="${pendingId}"]`);
+      if (el) el.dataset.id = result[0].id;
+    }
   } catch(e) {
     console.error('Chat send failed:', e);
+    // Remove the optimistic message
+    document.querySelectorAll('.chat-msg[data-id^="_pending_"]').forEach(el => el.remove());
+    // Put text back in input
+    input.value = text;
+    chatAutoResize(input);
     const box = document.getElementById('chat-messages');
     const err = document.createElement('div');
     err.style.cssText = 'font-size:.62rem;color:#ff6b6b;font-family:DM Sans,sans-serif;text-align:center;padding:4px 0;';
-    err.textContent = '⚠️ Failed to send. Check connection.';
+    err.textContent = '⚠️ Table not set up yet — run chat_setup.sql in Supabase.';
     box.appendChild(err);
     scrollChatToBottom();
-    setTimeout(() => err.remove(), 3000);
+    setTimeout(() => err.remove(), 5000);
   }
 }
 
 async function deleteChatMessage(id, btn) {
+  const el = btn.closest('.chat-msg');
+  // Optimistically remove from UI immediately
+  if (el) el.style.opacity = '0.4';
   try {
+    if (String(id).startsWith('_pending_')) {
+      if (el) el.remove();
+      return;
+    }
     await sbUpdate('chat_messages', { deleted: true }, `id=eq.${id}`);
-    btn.closest('.chat-msg')?.remove();
-  } catch(e) {}
+    if (el) el.remove();
+  } catch(e) {
+    // Restore if failed
+    if (el) el.style.opacity = '1';
+    console.error('Delete failed:', e);
+  }
 }
 
 function chatKeyDown(e) {
