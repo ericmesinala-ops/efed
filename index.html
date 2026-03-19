@@ -2141,12 +2141,12 @@
       <button class="expand-action-btn" id="expand-bookmark-btn" onclick="toggleExpandBookmark()">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
       </button>
-      <button class="expand-action-btn" id="expand-partof-btn" onclick="handlePartOfClick()" style="display:none;font-size:.6rem;letter-spacing:.5px;flex-direction:column;gap:2px;padding:8px 10px;">
+      <button class="expand-action-btn" id="expand-partof-btn" onclick="handlePartOfClick()" style="display:none;">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span id="expand-partof-label">Part of</span>
       </button>
-      <button class="expand-action-btn" id="expand-support-btn" onclick="toggleExpandSupport()" style="font-size:.6rem;letter-spacing:.5px;flex-direction:column;gap:2px;padding:8px 10px;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      <button class="expand-action-btn" id="expand-support-btn" onclick="toggleExpandSupport()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
         <span id="expand-support-label">Support</span>
       </button>
       <div style="position:relative;" id="expand-dot-wrap">
@@ -3149,25 +3149,24 @@ if (_grid) _grid.addEventListener('scroll', updateRowArrows);
       if (wrap) {
         const session = (typeof getSession === 'function') ? getSession() : null;
         const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
-        // Fetch total registered users — visible to everyone
-        try {
-          const ur = await fetch(SUPABASE_URL + '/rest/v1/users?select=username', {
-            headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' }
-          });
-          const userCount = parseInt(ur.headers.get('Content-Range')?.split('/')[1] || '0', 10);
-          const totalEl = document.getElementById('total-users-label');
-          if (totalEl) totalEl.textContent = userCount + (userCount === 1 ? ' member' : ' members');
-        } catch(e) {}
-        // Online count — admin only
-        if (el) {
-          if (isAdmin) {
-            el.textContent = count + (count === 1 ? ' online' : ' online');
+        // Member count + online count — admin only
+        if (isAdmin) {
+          try {
+            const ur = await fetch(SUPABASE_URL + '/rest/v1/users?select=username', {
+              headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' }
+            });
+            const userCount = parseInt(ur.headers.get('Content-Range')?.split('/')[1] || '0', 10);
+            const totalEl = document.getElementById('total-users-label');
+            if (totalEl) totalEl.textContent = userCount + (userCount === 1 ? ' member' : ' members');
+          } catch(e) {}
+          if (el) {
+            el.textContent = count + ' online';
             el.parentElement.style.display = 'flex';
-          } else {
-            el.parentElement.style.display = 'none';
           }
+          wrap.style.display = 'flex';
+        } else {
+          wrap.style.display = 'none';
         }
-        wrap.style.display = 'flex';
       }
     } catch(e) {
       // Presence table may not exist yet — silently skip
@@ -4628,6 +4627,8 @@ function showSubmitErr(msg) {
 <script>
 // ── CARD EXPAND ──
 let _expandVideo = null;
+const _supportedEfedsCache = new Set(); // eFed names the current user supports
+let _supportCacheLoaded = false;
 let _expandLikes = {};
 let _expandBookmarks = {};
 
@@ -5872,7 +5873,7 @@ async function loadExistingRating(url) {
         rateBtn.style.background = 'rgba(200,168,75,.1)';
         rateBtn.style.cursor = 'pointer';
         const label = document.getElementById('rate-btn-label');
-        if (label) label.textContent = `★ ${Math.round(r.overall || 0)}/5`;
+        if (label) label.textContent = `★ ${(Math.round((r.overall || 0) / 10) / 1).toFixed(1)}/5`;
         const barWrap = document.getElementById('rate-watch-bar-wrap');
         if (barWrap) barWrap.style.display = 'none';
         const inner = document.getElementById('rate-btn-inner');
@@ -6256,7 +6257,7 @@ async function loadVideoRating(url) {
     const rows = await sbGet('ratings', `video_id=eq.${encodeURIComponent(extractId(url))}`);
     if (!rows.length) return;
     const avg = rows.reduce((sum, r) => sum + (r.overall || 0), 0) / rows.length;
-    const rounded = Math.round(avg * 10) / 10;
+    const rounded = Math.round((avg / 10) * 10) / 10; // overall stored 0-50, convert to 0-5
     // Update all cards with this URL
     document.querySelectorAll('.card').forEach(card => {
       if (card._videoUrl === url) {
@@ -6291,7 +6292,7 @@ async function loadAllCardRatings() {
       if (existing) existing.remove();
       if (url && grouped[key] && grouped[key].length) {
         const avg = grouped[key].reduce((a,b) => a+b, 0) / grouped[key].length;
-        const rounded = Math.round((avg / 10) * 10) / 10;
+        const rounded = Math.round((avg / 10) * 10) / 10; // avg is 0-50, divide by 10 = 0-5
         // Only show if 4.0 or above (on /5 scale)
         if (rounded >= 4.0) {
           const badge = document.createElement('div');

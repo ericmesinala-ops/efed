@@ -512,16 +512,15 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 </div>
 
 <script>
-// ── HARDCODED FSW DATA (same source as index.html) ──
-const FSW_EFED_NAME = 'First Strike Wrestling';
-const FSW_VIDEOS = [
-  { url: "https://youtu.be/SGQqbCUJvME", show: 'FSW 52: Maximum \u2014 \u201cChoices\u201d', date: "Feb 12, 2026", thumb: "https://i.imgur.com/vUWtsKv.png" },
-];
+// ── DYNAMIC eFED PAGE — driven by ?e= URL param ──
+const _params = new URLSearchParams(window.location.search);
+let FSW_EFED_NAME = decodeURIComponent(_params.get('e') || 'First Strike Wrestling');
+// FSW hardcoded videos — only injected when viewing FSW
+const FSW_VIDEOS = FSW_EFED_NAME === 'First Strike Wrestling' ? [
+  { url: "https://youtu.be/SGQqbCUJvME", show: 'FSW 52: Maximum — “Choices”', date: "Feb 12, 2026", thumb: "https://i.imgur.com/vUWtsKv.png" },
+] : [];
 const FSW_UPCOMING = [];
-const FSW_OWNER = ADMIN_USERNAME;
-        yt: (owner.yt_channel || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
-const FSW_WEBSITE = '';
-const FSW_X = '';
+let FSW_OWNER = ''; // set dynamically after DB lookup by promo_name
 
 function extractId(url) {
   if (!url) return '';
@@ -584,15 +583,17 @@ async function initNav() {
     const adminBtn = document.getElementById('admin-panel-btn');
     if (adminBtn) adminBtn.style.display = 'flex';
   }
-  // Members count
-  try {
-    const r = await fetch(SUPABASE_URL+'/rest/v1/users?select=username', { headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' } });
-    const count = parseInt(r.headers.get('Content-Range')?.split('/')[1] || '0', 10);
-    const el = document.getElementById('total-users-label');
-    if (el) el.textContent = count + ' member' + (count === 1 ? '' : 's');
-    const counter = document.getElementById('online-counter');
-    if (counter) counter.style.display = 'flex';
-  } catch(e) {}
+  // Members count — admin only
+  if (session.username.toLowerCase() === ADMIN_USERNAME) {
+    try {
+      const r = await fetch(SUPABASE_URL+'/rest/v1/users?select=username', { headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' } });
+      const count = parseInt(r.headers.get('Content-Range')?.split('/')[1] || '0', 10);
+      const el = document.getElementById('total-users-label');
+      if (el) el.textContent = count + ' member' + (count === 1 ? '' : 's');
+      const counter = document.getElementById('online-counter');
+      if (counter) counter.style.display = 'flex';
+    } catch(e) {}
+  }
   // Unread notifs
   try {
     const notifs = await sbGet('notifications', `username=eq.${encodeURIComponent(session.username)}&read=eq.false`);
@@ -618,32 +619,38 @@ async function initNav() {
 }
 
 async function loadPage() {
-  // Owner
+  // Set page title and banner name from URL param
+  document.title = FSW_EFED_NAME + ' — EFED Hub';
+  const nameEl = document.getElementById('efed-name');
+  if (nameEl) nameEl.textContent = FSW_EFED_NAME;
+  const initEl = document.getElementById('efed-logo-initials');
+  if (initEl) initEl.textContent = FSW_EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,4).toUpperCase();
+
+  // Owner — find user whose promo_name matches this eFed
   try {
-    const users = await sbGet('users', `username=eq.${encodeURIComponent(FSW_OWNER)}&select=*`);
-    const owner = users[0];
+    const owners = await sbGet('users', `promo_name=eq.${encodeURIComponent(FSW_EFED_NAME)}&select=*`);
+    const owner = owners[0];
     if (owner) {
+      FSW_OWNER = owner.username;
       const name = owner.display_name || owner.username;
       document.getElementById('owner-name').textContent = name;
       document.getElementById('owner-av').textContent = name[0].toUpperCase();
-      if (owner.username.toLowerCase() === ADMIN_USERNAME) {
-        document.getElementById('owner-badge').style.display = '';
-      }
-      if (owner.promo_logo) {
-        setLogoImage(owner.promo_logo);
-      }
-      // Render links
+      document.getElementById('owner-badge').style.display = owner.username.toLowerCase() === ADMIN_USERNAME ? '' : 'none';
+      if (owner.promo_logo) setLogoImage(owner.promo_logo);
       renderLinks({
-        yt: (owner.yt_channel || FSW_YT_URL).replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
-        ig: (owner.ig_handle  || '').replace('@',''),
-        x:  (owner.x_handle   || '').replace('@',''),
+        yt:  (owner.yt_channel    || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
+        ig:  (owner.ig_handle     || '').replace('@',''),
+        x:   (owner.x_handle      || '').replace('@',''),
         web: (owner.promo_website || '').replace(/^https?:\/\//,'')
       });
-      }
+    } else {
+      document.getElementById('owner-name').textContent = 'Unknown';
     }
-  } catch(e) {}
+  } catch(e) {
+    document.getElementById('owner-name').textContent = 'Could not load';
+  }
 
-  // Links rendered after owner fetch — handled in owner block above
+  // Links rendered in owner block above
 
   // Upcoming
   const upEl = document.getElementById('upcoming-content');
