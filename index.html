@@ -3768,6 +3768,12 @@ function handleFormSubmit(formId, successId) {
 
   // Set immediately from local session so nav isn't blank while loading
   let displayName = session.displayName || session.username || 'Member';
+  // Ensure promoName is in session for rate button check
+  if (!session.promoName) {
+    sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name`).then(rows => {
+      if (rows[0]?.promo_name) { session.promoName = rows[0].promo_name; localStorage.setItem('efed_session', JSON.stringify(session)); }
+    }).catch(()=>{});
+  }
   if (nameEl) nameEl.textContent = displayName;
   if (initialsEl) initialsEl.textContent = displayName[0].toUpperCase();
   if (ddName) ddName.innerHTML = withVerified(displayName, session.username, false);
@@ -4548,10 +4554,25 @@ function doSubmitPost() {
 
       const thumbUrl = 'https://i.ytimg.com/vi/' + _fetchedMeta.vidId + '/mqdefault.jpg';
 
+      // Determine eFed — check if submitter's registered yt_channel matches video channel
+      let assignedEfed = 'Community';
+      try {
+        const submitterData = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=yt_channel,promo_name,is_efed_owner,role`);
+        const su = submitterData[0];
+        if (su && su.yt_channel && su.promo_name && (su.is_efed_owner || su.role === 'owner')) {
+          const ytHandle = su.yt_channel.replace(/^https?:\/\/(www\.)?youtube\.com\/@?/,'').toLowerCase().replace(/\//g,'');
+          const videoChannel = (_fetchedMeta.channel || '').toLowerCase().replace(/\s+/g,'').replace(/[^a-z0-9]/g,'');
+          const handleClean = ytHandle.replace(/[^a-z0-9]/g,'');
+          if (ytHandle && (videoChannel.includes(handleClean) || handleClean.includes(videoChannel) || url.toLowerCase().includes(ytHandle))) {
+            assignedEfed = su.promo_name;
+          }
+        }
+      } catch(e) {}
+
       const inserted = await sbInsert('submissions', {
         url,
         show_name: _fetchedMeta.title,
-        efed: _fetchedMeta.channel,
+        efed: assignedEfed,
         date: dateStr,
         date_ms: dateMs,
         submitted_by: session.username,
@@ -4572,7 +4593,7 @@ function doSubmitPost() {
         const uv = {
           url,
           show: _fetchedMeta.title,
-          efed: _fetchedMeta.channel,
+          efed: assignedEfed,
           date: dateStr,
           dateMs,
           submittedBy: session.username,
@@ -4590,7 +4611,7 @@ function doSubmitPost() {
         videos.push({
           url,
           show: _fetchedMeta.title,
-          efed: _fetchedMeta.channel,
+          efed: assignedEfed,
           date: dateStr,
           dateMs,
           submittedAt: Date.now(),
@@ -4693,10 +4714,10 @@ function openExpand(v) {
   // Reset rate button to locked state
   const rateBtn = document.getElementById('expand-rate-btn');
   if (rateBtn) {
-    // Hide rate button for whoever submitted the video (incl. admin)
+    // Hide rate button only if you own this eFed (promo_name matches v.efed)
     const _rSess = getSession();
-    const _isSubmitter = _rSess && v.submittedBy && _rSess.username.toLowerCase() === v.submittedBy.toLowerCase();
-    rateBtn.style.display = _isSubmitter ? 'none' : '';
+    const _isEfedOwner = _rSess && v.efed && _rSess.promoName && _rSess.promoName.toLowerCase() === v.efed.toLowerCase();
+    rateBtn.style.display = _isEfedOwner ? 'none' : 'flex';
     rateBtn.style.opacity = '0.4';
     rateBtn.style.color = '';
     rateBtn.style.borderColor = '';

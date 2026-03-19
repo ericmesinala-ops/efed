@@ -657,7 +657,23 @@ async function doRegister() {
     }
     if (newCodes.length > 0) await sbInsert('invites', newCodes);
 
-    setSession({ username: user, displayName: cawName });
+    // If eFed owner with YouTube channel — retroactively assign matching videos to their eFed
+    if (isEfedOwner && promoName && ytChannel) {
+      try {
+        const ytHandle = ytChannel.replace(/^https?:\/\/(www\.)?youtube\.com\/@?/,'').toLowerCase().replace(/\//g,'').replace(/[^a-z0-9]/g,'');
+        if (ytHandle) {
+          // Find submissions where the submitted_by user's channel matches OR url contains the handle
+          const allSubs = await sbGet('submissions', `efed=eq.Community&select=id,url,submitted_by`);
+          const matchingIds = allSubs.filter(s => s.url && s.url.toLowerCase().replace(/[^a-z0-9]/g,'').includes(ytHandle)).map(s => s.id);
+          // Update each matching submission to this eFed
+          for (const id of matchingIds) {
+            try { await sbUpdate('submissions', { efed: promoName, community: true }, `id=eq.${id}`); } catch(e) {}
+          }
+        }
+      } catch(e) { console.warn('Retroactive eFed assign failed:', e); }
+    }
+
+    setSession({ username: user, displayName: cawName, promoName: promoName || null });
     showOk('reg-ok', 'Account created! Welcome to the Hub.');
     setTimeout(() => window.location.replace('index.html'), 800);
   } catch(e) {
