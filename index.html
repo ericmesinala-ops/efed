@@ -1102,6 +1102,8 @@
     transition: transform .25s cubic-bezier(.16,1,.3,1);
     box-shadow: 0 32px 80px rgba(0,0,0,.7);
     position: relative;
+    max-height: 90vh;
+    display: flex; flex-direction: column;
   }
   .settings-bg.open .settings-modal { transform: scale(1) translateY(0); }
   .settings-header {
@@ -1115,7 +1117,7 @@
     font-size: .9rem; cursor: pointer; transition: color .2s; padding: 4px;
   }
   .settings-close:hover { color: #fff; }
-  .settings-body { padding: 20px 22px 24px; }
+  .settings-body { padding: 20px 22px 24px; overflow-y: auto; flex: 1; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.1) transparent; }
   .settings-section { margin-bottom: 22px; }
   .settings-section:last-child { margin-bottom: 0; }
   .settings-label {
@@ -2945,6 +2947,7 @@ let heroIdx   = 0;
 let heroTimer = null;
 window._heroFirstLoad = true;
 
+loadVerifiedUsers();
 initHub();
 const _grid = document.getElementById('card-grid');
 if (_grid) _grid.addEventListener('scroll', updateRowArrows);
@@ -3637,7 +3640,7 @@ function handleFormSubmit(formId, successId) {
   let displayName = session.displayName || session.username || 'Member';
   if (nameEl) nameEl.textContent = displayName;
   if (initialsEl) initialsEl.textContent = displayName[0].toUpperCase();
-  if (ddName) ddName.textContent = displayName;
+  if (ddName) ddName.innerHTML = withVerified(displayName, session.username, false);
   if (ddEmail) ddEmail.textContent = 'EFED Member';
 
   // Then sync from DB — catches changes made on other devices
@@ -3651,7 +3654,7 @@ function handleFormSubmit(formId, successId) {
         displayName = user.display_name;
         if (nameEl) nameEl.textContent = displayName;
         if (initialsEl) initialsEl.textContent = displayName[0].toUpperCase();
-        if (ddName) ddName.textContent = displayName;
+        if (ddName) ddName.innerHTML = withVerified(displayName, session.username, false);
       }
       // Show avatar if set
       if (user.avatar_url) {
@@ -4355,6 +4358,10 @@ let _expandLikes = {};
 let _expandBookmarks = {};
 
 function openExpand(v) {
+  if (window.innerWidth <= 768) {
+    const tab = document.getElementById('chat-tab');
+    if (tab) tab.style.display = 'none';
+  }
   _expandVideo = v;
   const id = extractId(v.url);
 
@@ -4523,6 +4530,10 @@ async function deleteExpandVideo() {
 }
 
 function closeExpand() {
+  if (window.innerWidth <= 768) {
+    const tab = document.getElementById('chat-tab');
+    if (tab) tab.style.display = '';
+  }
   const overlay = document.getElementById('card-expand');
   if (_expandVideo) {
     stopWatchTimer(_expandVideo.url);
@@ -5189,7 +5200,7 @@ async function loadAdminUsers() {
       div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06);';
       div.innerHTML = `
         <div>
-          <div style="font-size:.78rem;font-weight:600;color:${u.banned ? '#ff6b6b' : '#e8e8e8'};">${u.username} ${u.banned ? '🚫' : ''} ${u.is_creator ? '<span style="color:#c8a84b;font-size:.6rem;letter-spacing:1px;">🎬 CREATOR</span>' : ''}</div>
+          <div style="font-size:.78rem;font-weight:600;color:${u.banned ? '#ff6b6b' : '#e8e8e8'};">${withVerified(u.username, u.username, false)} ${u.banned ? '🚫' : ''} ${u.is_creator ? '<span style="color:#c8a84b;font-size:.6rem;letter-spacing:1px;">🎬 CREATOR</span>' : ''}</div>
           <div style="font-size:.62rem;color:#5a5a6a;">Strikes: ${u.strikes || 0} · Joined ${new Date(u.joined_at).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</div>
           ${u.is_efed_owner ? `<div style="font-size:.62rem;color:#c8a84b;margin-top:2px;">eFed Owner: ${u.promo_name || '?'} ${u.yt_channel ? '· <a href="'+u.yt_channel+'" target="_blank" style="color:#c8a84b;">YouTube ↗</a>' : ''} ${u.x_handle ? '· @'+u.x_handle : ''}</div>` : ''}
         </div>
@@ -6093,13 +6104,28 @@ const VERIFIED_BADGE = `<svg style="display:inline-block;vertical-align:middle;f
 
 function _esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+// Cache of verified usernames (admin + efed owners loaded on init)
+const _verifiedUsers = new Set();
+
+async function loadVerifiedUsers() {
+  try {
+    const rows = await sbGet('users', 'select=username&or=(is_efed_owner.eq.true,role.eq.owner)');
+    rows.forEach(u => _verifiedUsers.add(u.username.toLowerCase()));
+    _verifiedUsers.add(ADMIN_USERNAME);
+  } catch(e) {
+    _verifiedUsers.add(ADMIN_USERNAME);
+  }
+}
+
 function isVerifiedUser(username) {
-  return username && username.toLowerCase() === ADMIN_USERNAME;
+  if (!username) return false;
+  return username.toLowerCase() === ADMIN_USERNAME || _verifiedUsers.has(username.toLowerCase());
 }
 
 function withVerified(displayName, username, useAdminLabel = true) {
   if (!isVerifiedUser(username)) return _esc(displayName || username);
-  return VERIFIED_BADGE + _esc(useAdminLabel ? 'Admin' : (displayName || username));
+  const isAdmin = username && username.toLowerCase() === ADMIN_USERNAME;
+  return VERIFIED_BADGE + _esc(isAdmin && useAdminLabel ? 'Admin' : (displayName || username));
 }
 
 function getTimeAgo(timestamp) {
