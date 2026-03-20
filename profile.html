@@ -583,45 +583,35 @@ async function saveEditProfile() {
   } catch(e) { nameMsg.textContent = 'Could not save.'; nameMsg.style.color='#ff6b6b'; }
 }
 
-// ── BANNER UPLOAD — uses Supabase Storage ──
+// ── BANNER UPLOAD ──
 function handleBannerUpload(event, type) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async e => {
-    openBannerCrop(e.target.result, 960, 200, async (dataUrl) => {
+    openBannerCrop(e.target.result, 960, 200, async (croppedDataUrl) => {
       const session = getSession();
       if (!session) return;
-      const bmsg = document.getElementById('ep-banner-msg');
-      // Show immediately while uploading
-      const bannerImg = document.getElementById('profile-banner-img');
-      if (bannerImg) { bannerImg.src = dataUrl; bannerImg.style.display = 'block'; }
-      const _bn = document.querySelector('.banner-noise'); if (_bn) _bn.style.display = 'none';
-      const _bg = document.querySelector('.banner-glow'); if (_bg) _bg.style.display = 'none';
-      if (bmsg) { bmsg.textContent = 'Uploading…'; bmsg.style.color = '#8a8a9a'; }
-      try {
-        // Convert dataUrl to blob
-        const res = await fetch(dataUrl);
-        const blob = await res.blob();
-        const path = 'profile-banners/' + session.username + '.jpg';
-        // Upload to Supabase Storage
-        const upRes = await fetch(
-          SUPABASE_URL + '/storage/v1/object/' + path,
-          { method: 'POST', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'image/jpeg', 'x-upsert': 'true' }, body: blob }
-        );
-        if (!upRes.ok) throw new Error('Upload failed: ' + await upRes.text());
-        // Build public URL
-        const publicUrl = SUPABASE_URL + '/storage/v1/object/public/' + path + '?t=' + Date.now();
-        // Save URL to users table
-        const patchRes = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ avatar_banner: publicUrl }) });
-        if (!patchRes.ok) throw new Error('DB save failed: ' + await patchRes.text());
-        // Update displayed image to use storage URL (cache-busted)
-        if (bannerImg) bannerImg.src = publicUrl;
-        if (bmsg) { bmsg.textContent = 'Banner saved!'; bmsg.style.color = '#4caf64'; setTimeout(() => bmsg.textContent = '', 2000); }
-      } catch(err) {
-        if (bmsg) { bmsg.textContent = 'Save failed: ' + err.message; bmsg.style.color = '#ff6b6b'; }
-        console.error(err);
-      }
+      // Compress to max 640x133 before saving — keeps base64 under ~30KB
+      const img = new Image();
+      img.onload = async () => {
+        const W = 640, H = 133;
+        const canvas = document.createElement('canvas');
+        canvas.width = W; canvas.height = H;
+        canvas.getContext('2d').drawImage(img, 0, 0, W, H);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+        const bannerImg = document.getElementById('profile-banner-img');
+        if (bannerImg) { bannerImg.src = dataUrl; bannerImg.style.display = 'block'; }
+        const _bn = document.querySelector('.banner-noise'); if (_bn) _bn.style.display = 'none';
+        const _bg = document.querySelector('.banner-glow'); if (_bg) _bg.style.display = 'none';
+        try {
+          const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({avatar_banner:dataUrl}) });
+          if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
+          const bmsg = document.getElementById('ep-banner-msg');
+          if (bmsg) { bmsg.textContent = 'Banner saved!'; bmsg.style.color='#4caf64'; setTimeout(() => bmsg.textContent='', 2000); }
+        } catch(err) { const bmsg = document.getElementById('ep-banner-msg'); if (bmsg) { bmsg.textContent = 'Save failed: ' + err.message; bmsg.style.color='#ff6b6b'; } console.error(err); }
+      };
+      img.src = croppedDataUrl;
     });
   };
   reader.readAsDataURL(file);

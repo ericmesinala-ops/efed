@@ -1221,45 +1221,35 @@ function openOnHub(url) {
   window.location.href = 'index.html?play=' + encodeURIComponent(url);
 }
 
-// ── EFED BANNER UPLOAD — uses Supabase Storage ──
+// ── EFED BANNER UPLOAD ──
 function handleEfedBannerUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async e => {
-    openBannerCrop(e.target.result, 960, 240, async (dataUrl) => {
+    openBannerCrop(e.target.result, 960, 240, async (croppedDataUrl) => {
       const session = getSession();
       if (!session) return;
-      const bmsg = document.getElementById('efed-banner-msg');
-      // Show immediately
-      const bannerImg = document.getElementById('efed-banner-img');
-      if (bannerImg) { bannerImg.src = dataUrl; bannerImg.style.display = 'block'; }
-      document.querySelector('.efed-banner-noise').style.display = 'none';
-      document.querySelector('.efed-banner-glow').style.display = 'none';
-      if (bmsg) { bmsg.textContent = 'Uploading…'; bmsg.style.color = '#8a8a9a'; }
-      try {
-        // Convert dataUrl to blob
-        const res = await fetch(dataUrl);
-        const blob = await res.blob();
-        const path = 'efed-banners/' + session.username + '.jpg';
-        // Upload to Supabase Storage
-        const upRes = await fetch(
-          SUPABASE_URL + '/storage/v1/object/' + path,
-          { method: 'POST', headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'image/jpeg', 'x-upsert': 'true' }, body: blob }
-        );
-        if (!upRes.ok) throw new Error('Upload failed: ' + await upRes.text());
-        // Build public URL
-        const publicUrl = SUPABASE_URL + '/storage/v1/object/public/' + path + '?t=' + Date.now();
-        // Save URL to users table
-        const patchRes = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ promo_banner: publicUrl }) });
-        if (!patchRes.ok) throw new Error('DB save failed: ' + await patchRes.text());
-        // Update displayed image to storage URL
-        if (bannerImg) bannerImg.src = publicUrl;
-        if (bmsg) { bmsg.textContent = 'Banner saved!'; bmsg.style.color = '#4caf64'; setTimeout(() => bmsg.textContent = '', 2000); }
-      } catch(err) {
-        if (bmsg) { bmsg.textContent = 'Save failed: ' + err.message; bmsg.style.color = '#ff6b6b'; }
-        console.error('Banner save failed', err);
-      }
+      // Compress to max 640x160 before saving — keeps base64 under ~30KB
+      const img = new Image();
+      img.onload = async () => {
+        const W = 640, H = 160;
+        const canvas = document.createElement('canvas');
+        canvas.width = W; canvas.height = H;
+        canvas.getContext('2d').drawImage(img, 0, 0, W, H);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+        const bannerImg = document.getElementById('efed-banner-img');
+        if (bannerImg) { bannerImg.src = dataUrl; bannerImg.style.display = 'block'; }
+        document.querySelector('.efed-banner-noise').style.display = 'none';
+        document.querySelector('.efed-banner-glow').style.display = 'none';
+        try {
+          const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({promo_banner:dataUrl}) });
+          if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
+          const bmsg = document.getElementById('efed-banner-msg');
+          if (bmsg) { bmsg.textContent = 'Banner saved!'; bmsg.style.color='#4caf64'; setTimeout(() => bmsg.textContent='', 2000); }
+        } catch(err) { const bmsg = document.getElementById('efed-banner-msg'); if (bmsg) { bmsg.textContent = 'Save failed: ' + err.message; bmsg.style.color='#ff6b6b'; } console.error('Banner save failed', err); }
+      };
+      img.src = croppedDataUrl;
     });
   };
   reader.readAsDataURL(file);
