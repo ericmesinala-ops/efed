@@ -724,14 +724,22 @@ async function loadPage() {
   const initEl = document.getElementById('efed-logo-initials');
   if (initEl) initEl.textContent = FSW_EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,4).toUpperCase();
 
-  // Owner — query by promo_name first, fall back to session username (mirrors profile.html pattern)
+  // Owner load — profile pattern: try promo_name, then write it on first save so it always sticks
   try {
     const SELECT = 'username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,promo_banner,yt_channel,ig_handle,x_handle,promo_website';
     let owners = await sbGet('users', `promo_name=eq.${encodeURIComponent(FSW_EFED_NAME)}&select=${SELECT}`);
-    // If promo_name not set on the row yet, fall back to session username — same as profile does
+    // Fallback: if promo_name not yet written (first visit), use session username and stamp promo_name now
     if (!owners.length) {
       const _sess = getSession();
-      if (_sess) owners = await sbGet('users', `username=eq.${encodeURIComponent(_sess.username)}&select=${SELECT}`);
+      if (_sess) {
+        owners = await sbGet('users', `username=eq.${encodeURIComponent(_sess.username)}&select=${SELECT}`);
+        // Stamp promo_name so every future load works by promo_name — same as profile saving its fields on first edit
+        if (owners.length) {
+          fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(_sess.username), {
+            method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ promo_name: FSW_EFED_NAME })
+          }).catch(() => {});
+        }
+      }
     }
     const owner = owners.find(u => u.is_efed_owner) || owners.find(u => u.role === 'owner') || owners[0];
     if (owner) {
