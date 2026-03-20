@@ -653,36 +653,45 @@ document.getElementById('nav-search-input').addEventListener('keydown', e => {
 
 async function initNav() {
   const session = getSession();
-  if (!session) return;
   const signInBtn = document.getElementById('nav-sign-in-btn');
   const userBtn = document.getElementById('nav-user-btn');
-  if (signInBtn) signInBtn.classList.add('hidden');
-  if (userBtn) userBtn.style.display = 'flex';
-  const initial = (session.displayName || session.username || '?')[0].toUpperCase();
-  document.getElementById('nav-initials').textContent = initial;
+  const initialsEl = document.getElementById('nav-initials');
   const ddName = document.getElementById('dd-name');
   const ddEmail = document.getElementById('dd-email');
-  if (ddName) {
-    const _dname = session.displayName || session.username || '';
-    if (session.username.toLowerCase() === ADMIN_USERNAME) {
-      ddName.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;">${_dname}<svg style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.15)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
-    } else {
-      ddName.textContent = session.displayName || session.username;
-    }
+
+  if (!session) {
+    if (userBtn) userBtn.style.display = 'none';
+    return;
   }
-  if (ddEmail) ddEmail.textContent = '@' + session.username;
+
+  // Show avatar, hide sign in
+  if (signInBtn) signInBtn.style.display = 'none';
+  if (userBtn) userBtn.style.display = 'flex';
+
+  // Set initials from session immediately
+  const displayName = session.displayName || session.username || '?';
+  if (initialsEl) initialsEl.textContent = displayName[0].toUpperCase();
+
+  // Set avatar if available
   if (session.avatarUrl) {
     const img = document.getElementById('nav-avatar-img');
-    if (img) { img.src = session.avatarUrl; img.style.display = 'block'; document.getElementById('nav-initials').style.display = 'none'; }
+    if (img) { img.src = session.avatarUrl; img.style.display = 'block'; if (initialsEl) initialsEl.style.display = 'none'; }
   }
+
+  // Dropdown header
+  if (ddName) ddName.innerHTML = withVerified(displayName, session.username, false);
+  if (ddEmail) ddEmail.textContent = '@' + session.username;
+
+  // My Profile — all users
+  const myProfileBtn = document.getElementById('my-profile-btn');
+  if (myProfileBtn) myProfileBtn.style.display = 'flex';
+
+  // Admin panel — admin only
   if (session.username.toLowerCase() === ADMIN_USERNAME) {
     const adminBtn = document.getElementById('admin-panel-btn');
     if (adminBtn) adminBtn.style.display = 'flex';
-    const myProfileBtn = document.getElementById('my-profile-btn');
-    if (myProfileBtn) myProfileBtn.style.display = 'flex';
-    const myEfedBtnAdmin = document.getElementById('my-efed-btn');
-    if (myEfedBtnAdmin) myEfedBtnAdmin.style.display = 'flex';
   }
+
   // Members count — admin only
   if (session.username.toLowerCase() === ADMIN_USERNAME) {
     try {
@@ -694,35 +703,44 @@ async function initNav() {
       if (counter) counter.style.display = 'flex';
     } catch(e) {}
   }
+
   // Unread notifs
   try {
     const notifs = await sbGet('notifications', `username=eq.${encodeURIComponent(session.username)}&read=eq.false`);
-    if (notifs.length) document.getElementById('bnav-notif-dot').classList.add('visible');
+    const dot = document.getElementById('bnav-notif-dot');
+    if (notifs.length && dot) dot.classList.add('visible');
   } catch(e) {}
-  // Show My eFed if owner
+
+  // Sync from DB — update display name, avatar, owner status
   try {
-    const udata = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
-    const u = udata[0];
-    const ddEmail = document.getElementById('dd-email');
-    if (u && (u.is_efed_owner || u.role === 'owner') && u.promo_name) {
-      if (ddEmail) { ddEmail.textContent = 'Owner of ' + u.promo_name; ddEmail.style.color = '#c8a84b'; }
-      if (session.username.toLowerCase() === ADMIN_USERNAME) {
-        const btn = document.getElementById('my-efed-btn');
-        if (btn) {
-          btn.style.display = 'flex';
-          btn.onclick = () => { toggleDropdown(true); window.location.href = 'efed.html?e=' + encodeURIComponent(u.promo_name); };
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,is_efed_owner,role,promo_name`);
+    if (users.length) {
+      const user = users[0];
+      // Update display name if changed
+      if (user.display_name && user.display_name !== session.displayName) {
+        session.displayName = user.display_name;
+        localStorage.setItem('efed_session', JSON.stringify(session));
+        if (initialsEl) initialsEl.textContent = user.display_name[0].toUpperCase();
+        if (ddName) ddName.innerHTML = withVerified(user.display_name, session.username, false);
+      }
+      // Update avatar if set
+      if (user.avatar_url) {
+        session.avatarUrl = user.avatar_url;
+        localStorage.setItem('efed_session', JSON.stringify(session));
+        const img = document.getElementById('nav-avatar-img');
+        if (img) { img.src = user.avatar_url; img.style.display = 'block'; if (initialsEl) initialsEl.style.display = 'none'; }
+      }
+      // My eFed — all efed owners
+      if ((user.is_efed_owner || user.role === 'owner') && user.promo_name) {
+        if (ddEmail) { ddEmail.textContent = 'Owner of ' + user.promo_name; ddEmail.style.color = '#c8a84b'; }
+        const myEfedBtn = document.getElementById('my-efed-btn');
+        if (myEfedBtn) {
+          myEfedBtn.style.display = 'flex';
+          myEfedBtn.onclick = () => { toggleDropdown(true); window.location.href = 'efed.html?e=' + encodeURIComponent(user.promo_name); };
         }
       }
-    } else {
-      if (ddEmail) { ddEmail.textContent = '@' + session.username; ddEmail.style.color = ''; }
     }
   } catch(e) {}
-  // Show Admin Panel for admin user
-  if (session.username.toLowerCase() === ADMIN_USERNAME) {
-    const adminBtn = document.getElementById('admin-panel-btn');
-    if (adminBtn) adminBtn.style.display = 'flex';
-    // online counter shown for all users above
-  }
 }
 
 async function loadPage() {
@@ -736,7 +754,8 @@ async function loadPage() {
   // Owner — find user whose promo_name matches this eFed
   try {
     const owners = await sbGet('users', `promo_name=eq.${encodeURIComponent(FSW_EFED_NAME)}&select=username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,promo_banner,yt_channel,ig_handle,x_handle,promo_website`);
-    const owner = owners[0];
+    // If multiple results, prefer is_efed_owner=true, then role=owner
+    const owner = owners.find(u => u.is_efed_owner) || owners.find(u => u.role === 'owner') || owners[0];
     if (owner) {
       FSW_OWNER = owner.username;
       const name = owner.display_name || owner.username;
@@ -885,7 +904,7 @@ async function loadPage() {
     const rosterEntries = await sbGet('roster', `efed=eq.${encodeURIComponent(FSW_EFED_NAME)}&order=joined_at.asc`);
     if (rosterEntries.length) {
       const unames = rosterEntries.map(r => r.username);
-      const users = await sbGet('users', `username=in.(${unames.map(u => encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url`);
+      const users = await sbGet('users', `username=in.(${unames.join(',')})&select=username,display_name,avatar_url`);
       rosterRows = unames.map(u => users.find(x => x.username === u)).filter(Boolean);
     }
   } catch(e) {}
@@ -1120,8 +1139,8 @@ async function handleLogoFile(event) {
           headers: SB_HEADERS,
           body: JSON.stringify({ promo_logo: dataUrl })
         });
-        if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
-      } catch(err) { console.error('Logo save failed', err); alert('Logo save failed: ' + err.message); }
+        if (!r.ok) throw new Error("HTTP " + r.status + ": " + await r.text());
+      } catch(err) { console.error("Logo save failed", err); alert("Logo save failed: " + err.message); }
     };
     img.src = e.target.result;
   };
@@ -1159,7 +1178,7 @@ async function removeLogo() {
   const session = getSession();
   if (!session) return;
   try {
-    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
       method: 'PATCH',
       headers: SB_HEADERS,
       body: JSON.stringify({ promo_logo: null })
@@ -1313,11 +1332,12 @@ async function saveLinks() {
   try {
     const updates = { yt_channel: yt, ig_handle: ig, x_handle: x, promo_website: web };
     if (efedname) updates.promo_name = efedname;
-    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
       method: 'PATCH',
       headers: SB_HEADERS,
       body: JSON.stringify(updates)
     });
+    if (!r.ok) throw new Error("HTTP " + r.status);
     if (efedname) { FSW_EFED_NAME = efedname; document.getElementById('efed-name').textContent = efedname; }
     renderLinks({ yt, ig, x, web });
     msg.textContent = 'Saved!';
