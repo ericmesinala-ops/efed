@@ -501,8 +501,12 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 
       </div>
       <div>
-        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">Banner</div>
-
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">eFed Logo</div>
+        <button onclick="document.getElementById('logo-file-input').click()" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.05)'">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Upload Logo
+        </button>
+        <div id="efed-logo-msg" style="font-size:.68rem;margin-top:4px;min-height:14px;color:#4caf64;"></div>
       </div>
       <div>
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">YouTube</div>
@@ -709,10 +713,12 @@ async function loadPage() {
   const initEl = document.getElementById('efed-logo-initials');
   if (initEl) initEl.textContent = FSW_EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,4).toUpperCase();
 
-  // Owner — find user whose promo_name matches this eFed
+  // Owner — load by username like profile, cache in localStorage
   try {
-    const owners = await sbGet('users', `promo_name=eq.${encodeURIComponent(FSW_EFED_NAME)}&select=username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website`);
-    const owner = owners.find(u => u.is_efed_owner) || owners.find(u => u.role === 'owner') || owners[0];
+    const session = getSession();
+    if (!session) throw new Error('no session');
+    const owners = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website`);
+    const owner = owners[0];
     if (owner) {
       FSW_OWNER = owner.username;
       const name = owner.display_name || owner.username;
@@ -725,13 +731,17 @@ async function loadPage() {
       }
       window._ownerAvatarUrl = owner.avatar_url || null;
       document.getElementById('owner-badge').style.display = owner.username.toLowerCase() === ADMIN_USERNAME ? '' : 'none';
-      if (owner.promo_logo) setLogoImage(owner.promo_logo);
-      renderLinks({
-        yt:  (owner.yt_channel    || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
-        ig:  (owner.ig_handle     || '').replace('@',''),
-        x:   (owner.x_handle      || '').replace('@',''),
-        web: (owner.promo_website || '').replace(/^https?:\/\//,'')
-      });
+      const logo = owner.promo_logo || session.efedLogo || null;
+      if (logo) { setLogoImage(logo); session.efedLogo = logo; }
+      const links = {
+        yt:  (owner.yt_channel    || (session.efedLinks && session.efedLinks.yt)  || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
+        ig:  (owner.ig_handle     || (session.efedLinks && session.efedLinks.ig)  || '').replace('@',''),
+        x:   (owner.x_handle      || (session.efedLinks && session.efedLinks.x)   || '').replace('@',''),
+        web: (owner.promo_website || (session.efedLinks && session.efedLinks.web) || '').replace(/^https?:\/\//,'')
+      };
+      renderLinks(links);
+      session.efedLinks = links;
+      localStorage.setItem('efed_session', JSON.stringify(session));
     } else {
       document.getElementById('owner-name').textContent = 'Unknown';
     }
@@ -744,6 +754,8 @@ async function loadPage() {
       const ownerAvEl = document.getElementById('owner-av');
       if (ownerAvEl && fallback) ownerAvEl.textContent = fallback[0].toUpperCase();
       FSW_OWNER = session.username;
+      if (session.efedLogo) setLogoImage(session.efedLogo);
+      if (session.efedLinks) renderLinks(session.efedLinks);
     } else {
       document.getElementById('owner-name').textContent = FSW_EFED_NAME;
     }
@@ -1088,7 +1100,15 @@ async function handleLogoFile(event) {
           body: JSON.stringify({ promo_logo: dataUrl })
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-      } catch(err) { console.error('Logo save failed', err); alert('Logo save failed: ' + err.message); }
+        session.efedLogo = dataUrl;
+        localStorage.setItem('efed_session', JSON.stringify(session));
+        const lmsg = document.getElementById('efed-logo-msg');
+        if (lmsg) { lmsg.textContent = 'Logo saved!'; lmsg.style.color='#4caf64'; setTimeout(() => lmsg.textContent='', 2000); }
+      } catch(err) {
+        console.error('Logo save failed', err);
+        const lmsg = document.getElementById('efed-logo-msg');
+        if (lmsg) { lmsg.textContent = 'Save failed: ' + err.message; lmsg.style.color='#ff6b6b'; }
+      }
     };
     img.src = e.target.result;
   };
@@ -1131,6 +1151,8 @@ async function removeLogo() {
       headers: SB_HEADERS,
       body: JSON.stringify({ promo_logo: null })
     });
+    session.efedLogo = null;
+    localStorage.setItem('efed_session', JSON.stringify(session));
   } catch(err) { console.warn('Logo remove failed', err); }
 }
 
@@ -1261,6 +1283,8 @@ async function saveLinks() {
       body: JSON.stringify(updates)
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
+    session.efedLinks = { yt, ig, x, web };
+    localStorage.setItem('efed_session', JSON.stringify(session));
     renderLinks({ yt, ig, x, web });
     msg.textContent = 'Saved!';
     msg.style.color = '#4caf64';
