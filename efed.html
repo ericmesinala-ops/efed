@@ -35,7 +35,7 @@
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
   --bg: #07070a; --surface: #111114; --surface2: #1a1a1f;
-  --accent: #c0000e; --gold: #c8a84b; --text: #e8e8e7;
+  --accent: #c0000e; --gold: #c8a84b; --text: #e8e8e8;
   --muted: #8a8a9a; --border: rgba(255,255,255,.07);
 }
 body { background: #000; color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; }
@@ -348,7 +348,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   </a>
 
   <div class="nav-right">
-    <div id="online-counter" style="display:flex;align-items:center;gap:5px;font-size:.62rem;letter-spacing:1.5px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-weight:500;white-space:nowrap;">
+    <div id="online-counter" style="display:none;align-items:center;gap:5px;font-size:.62rem;letter-spacing:1.5px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-weight:500;white-space:nowrap;">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       <span id="total-users-label">— members</span>
     </div>
@@ -724,40 +724,43 @@ async function loadPage() {
   const initEl = document.getElementById('efed-logo-initials');
   if (initEl) initEl.textContent = FSW_EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,4).toUpperCase();
 
-  // Owner load — exactly like profile: query by username directly, never by promo_name
+  // Owner — load by username directly, exactly like profile.html
   try {
-    const SELECT = 'username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,promo_banner,yt_channel,ig_handle,x_handle,promo_website';
     const _sess = getSession();
-    if (!_sess) return;
-    const users = await sbGet('users', `username=eq.${encodeURIComponent(_sess.username)}&select=${SELECT}`);
-    if (!users.length) return;
-    const owner = users[0];
-    FSW_OWNER = owner.username;
-    const name = owner.display_name || owner.username;
-    document.getElementById('owner-name').textContent = name;
-    const ownerAvEl = document.getElementById('owner-av');
-    if (owner.avatar_url) {
-      ownerAvEl.innerHTML = `<img src="${owner.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;">`;
+    if (!_sess) throw new Error('no session');
+    const owners = await sbGet('users', `username=eq.${encodeURIComponent(_sess.username)}&select=username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,promo_banner,yt_channel,ig_handle,x_handle,promo_website`);
+    const owner = owners[0];
+    if (owner) {
+      FSW_OWNER = owner.username;
+      const name = owner.display_name || owner.username;
+      document.getElementById('owner-name').textContent = name;
+      const ownerAvEl = document.getElementById('owner-av');
+      if (owner.avatar_url) {
+        ownerAvEl.innerHTML = `<img src="${owner.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;">`;
+      } else {
+        ownerAvEl.textContent = name[0].toUpperCase();
+      }
+      window._ownerAvatarUrl = owner.avatar_url || null;
+      document.getElementById('owner-badge').style.display = owner.username.toLowerCase() === ADMIN_USERNAME ? '' : 'none';
+      if (owner.promo_logo) setLogoImage(owner.promo_logo);
+      if (owner.promo_banner) {
+        const bannerImg = document.getElementById('efed-banner-img');
+        if (bannerImg) { bannerImg.src = owner.promo_banner; bannerImg.style.display = 'block'; }
+        const noise = document.querySelector('.efed-banner-noise');
+        const glow = document.querySelector('.efed-banner-glow');
+        if (noise) noise.style.display = 'none';
+        if (glow) glow.style.display = 'none';
+      }
+
+      renderLinks({
+        yt:  (owner.yt_channel    || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
+        ig:  (owner.ig_handle     || '').replace('@',''),
+        x:   (owner.x_handle      || '').replace('@',''),
+        web: (owner.promo_website || '').replace(/^https?:\/\//,'')
+      });
     } else {
-      ownerAvEl.textContent = name[0].toUpperCase();
+      document.getElementById('owner-name').textContent = 'Unknown';
     }
-    window._ownerAvatarUrl = owner.avatar_url || null;
-    document.getElementById('owner-badge').style.display = owner.username.toLowerCase() === ADMIN_USERNAME ? '' : 'none';
-    if (owner.promo_logo) setLogoImage(owner.promo_logo);
-    if (owner.promo_banner) {
-      const bannerImg = document.getElementById('efed-banner-img');
-      if (bannerImg) { bannerImg.src = owner.promo_banner; bannerImg.style.display = 'block'; }
-      const noise = document.querySelector('.efed-banner-noise');
-      const glow = document.querySelector('.efed-banner-glow');
-      if (noise) noise.style.display = 'none';
-      if (glow) glow.style.display = 'none';
-    }
-    renderLinks({
-      yt:  (owner.yt_channel    || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
-      ig:  (owner.ig_handle     || '').replace('@',''),
-      x:   (owner.x_handle      || '').replace('@',''),
-      web: (owner.promo_website || '').replace(/^https?:\/\//,'')
-    });
   } catch(e) {
     console.error('Owner fetch failed:', e);
     const session = getSession();
@@ -1326,21 +1329,7 @@ async function saveLinks() {
   }
 }
 
-
-async function loadMemberCount() {
-  try {
-    const ur = await fetch(SUPABASE_URL + '/rest/v1/users?select=username', {
-      headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' }
-    });
-    const userCount = parseInt(ur.headers.get('Content-Range')?.split('/')[1] || '0', 10);
-    const totalEl = document.getElementById('total-users-label');
-    if (totalEl) totalEl.textContent = userCount + (userCount === 1 ? ' member' : ' members');
-    const wrap = document.getElementById('online-counter');
-    if (wrap) wrap.style.display = 'flex';
-  } catch(e) {}
-}
 initNav();
-loadMemberCount();
 initLogoEdit();
 loadPage();
 
