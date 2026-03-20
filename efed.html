@@ -1,0 +1,1625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#c0000e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="EFED Hub">
+<title>First Strike Wrestling — EFED Hub</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+<script>
+  const SUPABASE_URL = 'https://osbarvhklizidsffytye.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
+  const ADMIN_USERNAME = 'derrick_maximus';
+  const SB_HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+  const VERIFIED_BADGE = `<svg style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.15)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  function _esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  const _verifiedUsers = new Set([ADMIN_USERNAME]);
+  function withVerified(displayName, username, useAdminLabel = true) {
+    if (!username || !_verifiedUsers.has(username.toLowerCase())) return _esc(displayName || username);
+    const isAdmin = username.toLowerCase() === ADMIN_USERNAME;
+    const name = _esc(isAdmin && useAdminLabel ? 'Admin' : (displayName || username));
+    return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE}</span>`;
+  }
+  function getSession() { try { return JSON.parse(localStorage.getItem('efed_session')); } catch { return null; } }
+  async function sbGet(table, filters='') {
+    const r = await fetch(SUPABASE_URL+'/rest/v1/'+table+'?'+filters, { headers: SB_HEADERS });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+  // eFed pages are public — no auth redirect
+</script>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #07070a; --surface: #111114; --surface2: #1a1a1f;
+  --accent: #c0000e; --gold: #c8a84b; --text: #e8e8e8;
+  --muted: #8a8a9a; --border: rgba(255,255,255,.07);
+}
+body { background: #000; color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; }
+
+/* ── FLOATING CARD ── */
+.page-card {
+  max-width: 960px; margin: 0 auto;
+  background: var(--bg);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.05), 0 32px 80px rgba(0,0,0,.9), 0 8px 32px rgba(0,0,0,.6);
+  min-height: 100vh;
+  position: relative;
+}
+
+/* ── NAV (identical to index.html) ── */
+nav {
+  position: sticky; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px;
+  background: rgba(7,7,10,.97);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+nav.scrolled { background: rgba(7,7,10,.99); }
+.logo { display: flex; flex-direction: column; line-height: 1; text-decoration: none; }
+.logo-eyebrow { display: none; }
+.logo-main { font-family: 'Bebas Neue', sans-serif; font-size: 1.1rem; letter-spacing: 3px; color: #fff; white-space: nowrap; }
+.logo-main em { color: var(--gold); font-style: normal; }
+.nav-right { display: flex; align-items: center; gap: 16px; }
+.nav-invite-btn {
+  display: none; align-items: center; gap: 6px;
+  background: linear-gradient(135deg, #ff6a00, #e05000);
+  border: none; color: #fff; font-family: 'DM Sans', sans-serif;
+  font-size: .62rem; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+  padding: 7px 16px; border-radius: 40px; cursor: pointer;
+  box-shadow: 0 2px 16px rgba(255,106,0,.45), inset 0 1px 0 rgba(255,255,255,.2);
+  transition: box-shadow .2s, transform .15s; white-space: nowrap;
+}
+.nav-invite-btn.visible { display: flex; }
+.nav-invite-btn:hover { box-shadow: 0 4px 24px rgba(255,106,0,.65); transform: translateY(-1px); }
+.nav-search-wrap { display: flex; align-items: center; position: relative; }
+.nav-search-btn { background: none; border: none; cursor: pointer; color: rgba(255,255,255,.55); padding: 6px; display: flex; align-items: center; justify-content: center; transition: color .2s; }
+.nav-search-btn:hover { color: #fff; }
+.nav-search-input {
+  position: fixed; left: 0; right: 0; top: 56px;
+  width: 100% !important; border-radius: 0;
+  border: none; border-bottom: 1px solid rgba(255,255,255,.1);
+  background: rgba(7,7,10,.97) !important; backdrop-filter: blur(20px);
+  color: #fff; font-family: 'DM Sans', sans-serif; font-size: .88rem;
+  padding: 0 !important; height: 0; overflow: hidden; outline: none;
+  transition: height .25s ease, padding .25s ease; z-index: 200;
+}
+.nav-search-input::placeholder { color: rgba(255,255,255,.3); }
+.nav-search-wrap.open .nav-search-input { height: 50px !important; padding: 0 24px !important; }
+.nav-auth-btn {
+  display: flex; align-items: center; gap: 7px; background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.18); color: rgba(255,255,255,.9);
+  font-family: 'DM Sans', sans-serif; font-size: .62rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  padding: 6px 14px; border-radius: 40px; cursor: pointer; white-space: nowrap;
+}
+.nav-auth-btn:hover { background: rgba(255,255,255,.14); color: #fff; }
+.nav-auth-btn.hidden { display: none; }
+.nav-icon-btn { background: none; border: none; cursor: pointer; color: rgba(255,255,255,.6); padding: 6px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: color .2s, background .2s; width: 36px; height: 36px; }
+.nav-icon-btn:hover { color: #fff; background: rgba(255,255,255,.08); }
+.nav-avatar-initials { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(200,168,75,.4); background: rgba(200,168,75,.12); color: var(--gold); font-size: .62rem; font-weight: 700; letter-spacing: 1px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; min-width: 32px; overflow: hidden; }
+.nav-icon-btn .nav-avatar-initials { width: 28px; height: 28px; min-width: 28px; font-size: .55rem; }
+.nav-user-wrap { position: relative; }
+.user-dropdown { position: absolute; top: calc(100% + 10px); right: 0; background: rgba(13,13,16,.98); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; min-width: 200px; padding: 6px 0; opacity: 0; pointer-events: none; transform: translateY(-6px); transition: opacity .2s, transform .2s; box-shadow: 0 20px 48px rgba(0,0,0,.7); z-index: 400; }
+.user-dropdown.open { opacity: 1; pointer-events: all; transform: translateY(0); }
+.dropdown-header { padding: 12px 16px 8px; border-bottom: 1px solid rgba(255,255,255,.06); margin-bottom: 4px; }
+.dropdown-name { font-size: .85rem; font-weight: 600; color: #fff; margin-bottom: 2px; display: flex; align-items: center; gap: 5px; }
+.dropdown-email { font-size: .7rem; color: var(--muted); }
+.dropdown-item { display: flex; align-items: center; gap: 10px; padding: 9px 16px; font-size: .78rem; color: rgba(255,255,255,.55); cursor: pointer; transition: background .15s, color .15s; background: none; border: none; width: 100%; text-align: left; font-family: 'DM Sans', sans-serif; }
+.dropdown-item:hover { background: rgba(255,255,255,.05); color: rgba(255,255,255,.85); }
+.dropdown-item.danger { color: rgba(255,80,80,.6); }
+.dropdown-item.danger:hover { background: rgba(192,0,14,.08); color: #ff6b6b; }
+.bnav-notif-dot { display: none; position: absolute; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); border: 1.5px solid var(--bg); }
+.bnav-notif-dot.visible { display: block; }
+
+/* ── PAGE CONTENT ── */
+.page-wrap { max-width: 680px; margin: 0 auto; padding: 0 20px; }
+
+/* ── BANNER ── */
+.efed-banner {
+  height: 240px; position: relative; overflow: hidden;
+  display: flex; align-items: flex-end;
+  background: linear-gradient(135deg, #1a0005 0%, #0d0d12 50%, #07070a 100%);
+  margin-top: 0;
+}
+.efed-banner-noise { position: absolute; inset: 0; opacity: .04; background-image: repeating-linear-gradient(45deg, #fff 0, #fff 1px, transparent 0, transparent 50%); background-size: 20px 20px; }
+.efed-banner-glow { position: absolute; inset: 0; background: radial-gradient(ellipse 80% 100% at 30% 60%, rgba(192,0,14,.25) 0%, transparent 70%); }
+.efed-banner-inner { padding: 0 28px 24px; position: relative; z-index: 2; display: flex; align-items: flex-end; gap: 18px; width: 100%; }
+.efed-logo-box { width: 80px; height: 80px; border-radius: 14px; background: rgba(192,0,14,.12); border: 2px solid rgba(192,0,14,.35); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-family: 'Bebas Neue', sans-serif; font-size: 1.6rem; letter-spacing: 2px; color: var(--accent); }
+.efed-name { font-family: 'Bebas Neue', sans-serif; font-size: 1.7rem; letter-spacing: 3px; color: #fff; line-height: 1; margin-bottom: 5px; }
+.efed-meta { font-size: .6rem; color: rgba(255,255,255,.35); letter-spacing: 2px; text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+.efed-meta span { display: flex; align-items: center; gap: 4px; }
+
+/* ── STATS BAR ── */
+.stats-bar { display: flex; background: #0c0c0f; border-bottom: 1px solid var(--border); }
+.stat-pill { flex: 1; padding: 14px 0; text-align: center; border-right: 1px solid rgba(255,255,255,.05); }
+.stat-pill:last-child { border-right: none; }
+.stat-num { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; letter-spacing: 1px; color: #fff; line-height: 1; }
+.stat-lbl { font-size: .5rem; color: #5a5a6a; letter-spacing: 2px; text-transform: uppercase; margin-top: 3px; }
+
+/* ── OWNER ROW ── */
+.owner-row { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.owner-av { width: 38px; height: 38px; border-radius: 50%; background: rgba(200,168,75,.1); border: 2px solid rgba(200,168,75,.3); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .9rem; color: var(--gold); flex-shrink: 0; font-family: 'Bebas Neue', sans-serif; overflow: hidden; }
+.owner-lbl { font-size: .55rem; color: #5a5a6a; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 2px; }
+.owner-name { font-size: .85rem; font-weight: 600; color: #fff; }
+.owner-badge { margin-left: auto; font-size: .5rem; letter-spacing: 1px; color: var(--gold); background: rgba(200,168,75,.08); border: 1px solid rgba(200,168,75,.2); padding: 4px 10px; border-radius: 20px; text-transform: uppercase; }
+
+/* ── LINKS ROW ── */
+.links-row { display: flex; gap: 8px; padding: 14px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.link-chip { display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 20px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.04); font-size: .65rem; color: rgba(255,255,255,.55); letter-spacing: 1px; text-transform: uppercase; cursor: pointer; text-decoration: none; transition: background .2s, border-color .2s; }
+.link-chip:hover { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.2); color: #fff; }
+.link-chip.yt { border-color: rgba(192,0,14,.3); color: #ff6b6b; }
+.link-chip.yt:hover { background: rgba(192,0,14,.1); }
+.link-chip.web { border-color: rgba(200,168,75,.25); color: var(--gold); }
+.link-chip.web:hover { background: rgba(200,168,75,.08); }
+
+/* ── SECTIONS ── */
+.section { padding: 22px 20px; border-bottom: 1px solid var(--border); }
+.section:last-child { border-bottom: none; }
+.sec-title { font-size: .58rem; letter-spacing: 3px; text-transform: uppercase; color: var(--gold); font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.sec-title::after { content: ''; flex: 1; height: 1px; background: rgba(200,168,75,.12); }
+
+/* ── UPCOMING ── */
+.upcoming-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; gap: 14px; align-items: center; }
+.upcoming-thumb { width: 88px; height: 50px; border-radius: 6px; background: var(--surface2); flex-shrink: 0; overflow: hidden; }
+.upcoming-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.upcoming-title { font-size: .82rem; font-weight: 600; color: #fff; margin-bottom: 3px; line-height: 1.3; }
+.upcoming-date { font-size: .62rem; color: var(--muted); }
+.upcoming-badge { margin-left: auto; font-size: .5rem; letter-spacing: 1.5px; text-transform: uppercase; padding: 4px 10px; border-radius: 4px; background: rgba(200,168,75,.1); color: var(--gold); border: 1px solid rgba(200,168,75,.2); flex-shrink: 0; }
+.no-upcoming { font-size: .78rem; color: var(--muted); text-align: center; padding: 16px 0; }
+
+/* ── VIDEOS GRID ── */
+.videos-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.vid-card { cursor: pointer; }
+.vid-thumb { width: 100%; aspect-ratio: 16/9; border-radius: 8px; background: var(--surface2); overflow: hidden; position: relative; margin-bottom: 8px; transition: transform .2s; }
+.vid-card:hover .vid-thumb { transform: scale(1.02); }
+.vid-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vid-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .2s; }
+.vid-card:hover .vid-overlay { opacity: 1; }
+.play-dot { width: 30px; height: 30px; border-radius: 50%; background: rgba(192,0,14,.9); display: flex; align-items: center; justify-content: center; }
+.vid-title { font-size: .74rem; font-weight: 600; color: var(--text); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vid-date { font-size: .6rem; color: var(--muted); margin-top: 2px; }
+.no-videos { font-size: .78rem; color: var(--muted); text-align: center; padding: 24px 0; grid-column: span 2; }
+
+/* ── ROSTER ── */
+.roster-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+@media (min-width: 480px) { .roster-grid { grid-template-columns: repeat(4, 1fr); } }
+.roster-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 10px; text-align: center; transition: border-color .2s; }
+.roster-card:hover { border-color: rgba(255,255,255,.15); }
+.roster-av { width: 44px; height: 44px; border-radius: 50%; background: rgba(192,0,14,.12); border: 2px solid rgba(192,0,14,.22); display: flex; align-items: center; justify-content: center; font-family: 'Bebas Neue', sans-serif; font-weight: 700; font-size: 1.1rem; color: var(--accent); margin: 0 auto 8px; overflow: hidden; }
+.roster-av.owner-av-card { background: rgba(200,168,75,.1); border-color: rgba(200,168,75,.3); color: var(--gold); }
+.roster-name { font-size: .7rem; font-weight: 600; color: var(--text); line-height: 1.2; }
+.roster-role { font-size: .55rem; color: #5a5a6a; letter-spacing: 1px; margin-top: 3px; }
+.roster-owner-tag { font-size: .5rem; color: var(--gold); letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
+.no-roster { font-size: .78rem; color: var(--muted); text-align: center; padding: 24px 0; }
+
+/* ── LOADING ── */
+.loading { text-align: center; padding: 40px 0; color: var(--muted); font-size: .78rem; }
+
+/* ── LOGO UPLOAD ── */
+.efed-logo-box {
+  position: relative; cursor: pointer; overflow: visible !important;
+  transition: border-color .2s;
+}
+.efed-logo-box:hover { border-color: rgba(255,255,255,.4); }
+.logo-hover-overlay {
+  position: absolute; inset: 0; border-radius: 12px;
+  background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .18s;
+  pointer-events: none;
+}
+
+
+/* ── SCROLL ARROWS ── */
+.vid-arr-col {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 6px; flex-shrink: 0; padding: 0 4px;
+}
+.vid-pill-arr {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.15);
+  color: rgba(255,255,255,.6); font-size: .9rem;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; backdrop-filter: blur(10px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+  transition: background .2s, color .2s, box-shadow .2s;
+}
+.vid-pill-arr:hover { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 0 12px rgba(192,0,14,.4); }
+.vid-pill-arr.hidden { opacity: 0.15; pointer-events: none; }
+.vid-jump-btn {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.15);
+  color: rgba(255,255,255,.5); font-size: .6rem;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; backdrop-filter: blur(10px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+  transition: background .2s, color .2s; letter-spacing: -1px;
+  font-family: 'DM Sans', sans-serif;
+}
+.vid-jump-btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 0 12px rgba(192,0,14,.4); }
+.vid-jump-btn.hidden { opacity: 0.15; pointer-events: none; }
+@media (max-width: 768px) { .vid-arr-col { display: none; } }
+
+/* ── SUBMIT FAB (episodes row) ── */
+.vid-submit-fab {
+  flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+  background: var(--accent); border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 14px rgba(192,0,14,.45);
+  transition: transform .2s, box-shadow .2s;
+  align-self: center;
+}
+.vid-submit-fab:hover { transform: scale(1.1); box-shadow: 0 4px 20px rgba(192,0,14,.65); }
+.vid-submit-fab:active { transform: scale(.95); }
+
+/* ── MOBILE ── */
+
+.nav-back-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 40px;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.5); font-family: 'DM Sans', sans-serif;
+  font-size: .68rem; font-weight: 600; letter-spacing: 1px;
+  cursor: pointer; text-decoration: none; text-transform: uppercase;
+  transition: background .2s, color .2s, border-color .2s; flex-shrink: 0;
+}
+.nav-back-btn:hover { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.2); }
+@keyframes hub-scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.hub-back-bar {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 13px 0; position: relative; overflow: hidden;
+  background: transparent;
+  border: none;
+  text-decoration: none; cursor: pointer;
+  transition: background .2s;
+}
+.hub-back-bar::after {
+  content: '';
+  position: absolute; top: 0; left: 0;
+  width: 25%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+  animation: hub-scan 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.hub-back-bar:hover { background: rgba(255,255,255,.04); }
+.hub-back-bar:hover .hub-back-circle { background: rgba(255,255,255,.15); border-color: rgba(255,255,255,.25); }
+.hub-back-circle {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.05);
+  display: flex; align-items: center; justify-content: center;
+  transition: background .2s, border-color .2s; flex-shrink: 0;
+}
+.hub-back-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: .58rem; font-weight: 600; letter-spacing: 2px;
+  color: rgba(255,255,255,.25); text-transform: uppercase;
+  transition: color .2s;
+}
+.hub-back-bar:hover .hub-back-label { color: rgba(255,255,255,.6); }
+
+.banner-upload-overlay {
+  position: absolute; inset: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.45);
+  opacity: 0; transition: opacity .2s; cursor: pointer;
+}
+.efed-banner:hover .banner-upload-overlay { opacity: 1; }
+.banner-upload-hint {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.2);
+  border-radius: 20px; padding: 8px 16px;
+  font-size: .68rem; letter-spacing: 1px; color: rgba(255,255,255,.85);
+  font-family: 'DM Sans', sans-serif; text-transform: uppercase;
+}
+@media (max-width: 600px) {
+  #online-counter { display: none !important; }
+  .nav-right { gap: 8px; }
+  .efed-banner { height: 190px; }
+  .efed-name { font-size: 1.2rem; }
+  .efed-logo-box { width: 60px; height: 60px; font-size: 1.1rem; }
+}
+
+  #post-fab {
+    position: fixed; bottom: 28px; right: 24px; z-index: 400;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: #c0000e; border: none; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+    box-shadow: 0 4px 20px rgba(192,0,14,.5);
+    transition: transform .2s, box-shadow .2s;
+  }
+  #post-fab.visible { display: flex; }
+  #post-fab:hover { transform: scale(1.08); box-shadow: 0 6px 28px rgba(192,0,14,.7); }
+  #post-fab:active { transform: scale(.95); }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <a href="index.html" class="logo">
+    <span class="logo-eyebrow">The Official</span>
+    <span class="logo-main"><em>EFED</em> Streaming Hub</span>
+  </a>
+
+  <div class="nav-right">
+    <div id="online-counter" style="display:none;align-items:center;gap:5px;font-size:.62rem;letter-spacing:1.5px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-weight:500;white-space:nowrap;">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span id="total-users-label">— members</span>
+    </div>
+    <div class="nav-search-wrap" id="nav-search-wrap">
+      <input class="nav-search-input" id="nav-search-input" type="text" placeholder="Search shows, eFeds…" autocomplete="off">
+      <button class="nav-icon-btn" id="nav-search-btn" aria-label="Search">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </button>
+    </div>
+    <button class="nav-icon-btn" id="notif-btn" style="position:relative;" onclick="window.location.href='index.html#notifications'">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      <div class="bnav-notif-dot" id="bnav-notif-dot" style="top:2px;right:2px;"></div>
+    </button>
+    <div class="nav-user-wrap" id="nav-user-wrap">
+      <button class="nav-icon-btn" id="nav-user-btn" onclick="toggleDropdown()" style="display:none;">
+        <div class="nav-avatar-initials" id="nav-avatar-wrap">
+          <img id="nav-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:none;" onerror="this.style.display='none';document.getElementById('nav-initials').style.display=''">
+          <span id="nav-initials">??</span>
+        </div>
+      </button>
+      <div class="user-dropdown" id="user-dropdown">
+        <div class="dropdown-header">
+          <div class="dropdown-name" id="dd-name"></div>
+          <div class="dropdown-email" id="dd-email"></div>
+        </div>
+        <button class="dropdown-item" id="my-profile-btn" style="display:none;" onclick="toggleDropdown(true); goToProfile()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          My Profile
+        </button>
+        <button class="dropdown-item" id="my-efed-btn" onclick="toggleDropdown(true); window.location.href='efed.html'" style="display:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          My eFed
+        </button>
+        <button class="dropdown-item" onclick="toggleDropdown(true); openSettings()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </button>
+        <button class="dropdown-item" id="admin-panel-btn" onclick="toggleDropdown(true); openAdminPanel()" style="display:none;color:#c8a84b;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Admin Panel
+        </button>
+        <button class="dropdown-item danger" onclick="handleSignOut()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Sign Out
+        </button>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<div class="page-card" id="page-card">
+
+<!-- ── BANNER ── -->
+<div class="efed-banner" id="efed-banner">
+  <div class="efed-banner-noise"></div>
+  <div class="efed-banner-glow"></div>
+  <img id="efed-banner-img" src="" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;z-index:1;">
+  <input type="file" id="efed-banner-file" accept="image/*" style="display:none;" onchange="handleEfedBannerUpload(event)">
+  <div class="efed-banner-inner" style="position:relative;">
+    <button id="efed-edit-pencil" onclick="openLinksModal()" title="Edit eFed" style="display:none;position:absolute;top:8px;right:8px;z-index:10;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.15);padding:7px;color:rgba(255,255,255,.4);cursor:pointer;border-radius:8px;transition:color .2s,background .2s;backdrop-filter:blur(4px);" onmouseover="this.style.color='rgba(255,255,255,.9)';this.style.background='rgba(0,0,0,.7)'" onmouseout="this.style.color='rgba(255,255,255,.4)';this.style.background='rgba(0,0,0,.45)'">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    </button>
+    <div class="efed-logo-box" id="efed-logo-box">
+      <span id="efed-logo-initials">FSW</span>
+      <img id="efed-logo-img" src="" alt="" style="display:none;width:100%;height:100%;object-fit:cover;border-radius:12px;">
+
+      <input type="file" id="logo-file-input" accept="image/*" style="display:none;" onchange="handleLogoFile(event)">
+    </div>
+    <!-- Logo context menu -->
+    <div id="logo-ctx-menu" style="display:none;position:absolute;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:6px 0;z-index:50;min-width:150px;box-shadow:0 12px 32px rgba(0,0,0,.7);">
+      <button onclick="document.getElementById('logo-file-input').click();closeLogoMenu()" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;background:none;border:none;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;text-align:left;" onmouseover="this.style.background='rgba(255,255,255,.06)'" onmouseout="this.style.background='none'">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Replace image
+      </button>
+      <button onclick="removeLogo()" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;background:none;border:none;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;text-align:left;" onmouseover="this.style.background='rgba(192,0,14,.08)'" onmouseout="this.style.background='none'">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        Remove image
+      </button>
+    </div>
+    <div>
+      <div class="efed-name" id="efed-name">FIRST STRIKE WRESTLING</div>
+      <div class="efed-meta">
+        <span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          YouTube eFed
+        </span>
+        <span style="opacity:.3">·</span>
+        <span id="efed-est">Est. 2021</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── STATS ── -->
+<div class="stats-bar">
+  <div class="stat-pill">
+    <div class="stat-num" id="stat-episodes">—</div>
+    <div class="stat-lbl">Episodes</div>
+  </div>
+  <div class="stat-pill">
+    <div class="stat-num" id="stat-roster">—</div>
+    <div class="stat-lbl">Roster</div>
+  </div>
+  <div class="stat-pill">
+    <div class="stat-num" id="stat-supporters">—</div>
+    <div class="stat-lbl">Supporters</div>
+  </div>
+</div>
+
+<a href="index.html" class="hub-back-bar">
+  <div class="hub-back-circle">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="2.5" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+  </div>
+  <span class="hub-back-label">Back to Hub</span>
+</a>
+
+<!-- ── OWNER ── -->
+<div class="owner-row" id="owner-row">
+  <div class="owner-av" id="owner-av">D</div>
+  <div>
+    <div class="owner-lbl">Promotion Owner</div>
+    <div class="owner-name" id="owner-name">Loading…</div>
+  </div>
+  <div class="owner-badge" id="owner-badge" style="display:none;">Admin</div>
+</div>
+
+<!-- ── LINKS ── -->
+<div class="links-row" id="links-row">
+  <a class="link-chip yt" id="link-yt" href="#" target="_blank" rel="noopener" style="display:none;">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M23 7s-.3-2-1.2-2.8c-1.1-1.2-2.4-1.2-3-1.3C16.2 2.8 12 2.8 12 2.8s-4.2 0-6.8.2c-.6.1-1.9.1-3 1.3C1.3 5 1 7 1 7S.7 9.1.7 11.3v2c0 2.1.3 4.2.3 4.2s.3 2 1.2 2.8c1.1 1.2 2.6 1.1 3.3 1.2C7.4 21.6 12 21.7 12 21.7s4.2 0 6.8-.3c.6-.1 1.9-.1 3-1.3.9-.8 1.2-2.8 1.2-2.8s.3-2.1.3-4.2v-2C23.3 9.1 23 7 23 7zM9.7 15.5V8.4l8.1 3.6-8.1 3.5z"/></svg>
+    YouTube
+  </a>
+  <a class="link-chip" id="link-ig" href="#" target="_blank" rel="noopener" style="display:none;">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>
+    Instagram
+  </a>
+  <a class="link-chip" id="link-x" href="#" target="_blank" rel="noopener" style="display:none;">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.737-8.835L1.254 2.25H8.08l4.257 5.629 5.907-5.629Zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+    X
+  </a>
+  <a class="link-chip web" id="link-web" href="#" target="_blank" rel="noopener" style="display:none;">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+    Website
+  </a>
+  <!-- Owner-only edit pencil -->
+  <button id="links-edit-btn" onclick="openLinksModal()" title="Edit links" style="display:none;margin-left:auto;background:none;border:none;padding:6px;color:rgba(255,255,255,.2);cursor:pointer;border-radius:6px;transition:color .2s;" onmouseover="this.style.color='rgba(255,255,255,.55)'" onmouseout="this.style.color='rgba(255,255,255,.2)'">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+  </button>
+</div>
+
+<!-- ── LINKS EDIT MODAL (owner only) ── -->
+<div id="links-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeLinksModal()">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:400px;padding:28px 24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Edit Links</div>
+      <button onclick="closeLinksModal()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;padding:4px;">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">eFed / Promotion Name</div>
+        <input id="links-input-efedname" type="text" placeholder="Your promotion name" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;outline:none;">
+      </div>
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">Banner</div>
+        <button onclick="document.getElementById('efed-banner-file').click()" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.05)'">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Upload Banner
+        </button>
+        <div id="efed-banner-msg" style="font-size:.68rem;margin-top:4px;min-height:14px;color:#4caf64;"></div>
+      </div>
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">YouTube</div>
+        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 10px 10px 12px;font-size:.72rem;color:#5a5a6a;white-space:nowrap;border-right:1px solid rgba(255,255,255,.08);">youtube.com/</span>
+          <input id="links-input-yt" type="text" placeholder="@yourchannel" style="flex:1;background:none;border:none;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;outline:none;">
+        </div>
+      </div>
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">Instagram</div>
+        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 10px 10px 12px;font-size:.72rem;color:#5a5a6a;border-right:1px solid rgba(255,255,255,.08);">@</span>
+          <input id="links-input-ig" type="text" placeholder="yourhandle" style="flex:1;background:none;border:none;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;outline:none;">
+        </div>
+      </div>
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">X / Twitter</div>
+        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 10px 10px 12px;font-size:.72rem;color:#5a5a6a;border-right:1px solid rgba(255,255,255,.08);">@</span>
+          <input id="links-input-x" type="text" placeholder="yourhandle" style="flex:1;background:none;border:none;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;outline:none;">
+        </div>
+      </div>
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">Website</div>
+        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 10px 10px 12px;font-size:.72rem;color:#5a5a6a;white-space:nowrap;border-right:1px solid rgba(255,255,255,.08);">https://</span>
+          <input id="links-input-web" type="text" placeholder="yoursite.com" style="flex:1;background:none;border:none;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;outline:none;">
+        </div>
+      </div>
+    </div>
+    <div id="links-save-msg" style="font-size:.7rem;margin-top:12px;min-height:18px;"></div>
+    <button onclick="saveLinks()" style="margin-top:16px;width:100%;padding:12px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Links</button>
+  </div>
+</div>
+
+<!-- ── UPCOMING SHOW ── -->
+<div class="section" id="section-upcoming">
+  <div class="sec-title">Upcoming Show</div>
+  <div id="upcoming-content"><div class="loading">Loading…</div></div>
+</div>
+
+<!-- ── VIDEOS ── -->
+<div class="section" id="section-videos" style="padding-bottom:8px;">
+  <div class="sec-title">Episodes</div>
+  <div style="display:flex;align-items:center;gap:0;">
+    <!-- Left arrows -->
+    <div class="vid-arr-col left">
+      <button class="vid-pill-arr hidden" id="vid-arr-left" onclick="scrollVids(-1)">&#8249;</button>
+      <button class="vid-jump-btn hidden" id="vid-jump-left" onclick="jumpVids('start')" title="Jump to first">&#171;&#171;</button>
+    </div>
+    <!-- Scroll row -->
+    <div id="videos-row" style="display:flex;gap:10px;overflow-x:auto;overflow-y:visible;padding:4px 4px 20px;scroll-behavior:smooth;scrollbar-width:none;-ms-overflow-style:none;flex:1;" onscroll="updateVidArrows()">
+      <div class="loading">Loading…</div>
+    </div>
+    <!-- Right col: arrows + submit FAB -->
+    <div class="vid-arr-col right" style="justify-content:center;gap:8px;">
+      <button class="vid-pill-arr hidden" id="vid-arr-right" onclick="scrollVids(1)">&#8250;</button>
+      <button class="vid-jump-btn hidden" id="vid-jump-right" onclick="jumpVids('end')" title="Jump to last">&#187;&#187;</button>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── ROSTER ── -->
+<div class="section" id="section-roster" style="padding-bottom:100px;">
+  <div class="sec-title" style="justify-content:space-between;">
+    <span style="display:flex;align-items:center;gap:8px;">Roster<span style="flex:0;width:auto;height:1px;background:rgba(200,168,75,.12);display:inline-block;min-width:40px;"></span></span>
+    <button id="roster-join-btn" onclick="toggleRosterJoin()" style="display:none;background:none;border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:5px 12px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.6rem;letter-spacing:1px;cursor:pointer;transition:all .2s;white-space:nowrap;" onmouseover="this.style.borderColor='rgba(192,0,14,.4)';this.style.color='#ff6b6b'" onmouseout="this.style.borderColor='rgba(255,255,255,.12)';this.style.color='rgba(255,255,255,.4)'">
+      + Join Roster
+    </button>
+  </div>
+  <div class="roster-grid" id="roster-grid"><div class="loading" style="grid-column:span 3;">Loading…</div></div>
+</div>
+
+<!-- ── ROSTER JOIN CONFIRM ── -->
+<div id="roster-join-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeRosterModal()">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:360px;padding:28px 24px;">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;margin-bottom:8px;">Join the Roster</div>
+    <div style="font-size:.78rem;color:#8a8a9a;line-height:1.6;margin-bottom:20px;">Add yourself to the <span id="roster-modal-efed-name" style="color:#fff;font-weight:600;">this eFed</span> roster. This publicly shows you as talent in this promotion.</div>
+    <div id="roster-join-msg" style="font-size:.7rem;margin-bottom:12px;min-height:16px;"></div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="closeRosterModal()" style="flex:1;padding:11px;border-radius:40px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Cancel</button>
+      <button id="roster-join-confirm-btn" onclick="joinRoster()" style="flex:1;padding:11px;border-radius:40px;background:#c0000e;border:none;color:#fff;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Join</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── DYNAMIC eFED PAGE — driven by ?e= URL param ──
+const _params = new URLSearchParams(window.location.search);
+let FSW_EFED_NAME = decodeURIComponent(_params.get('e') || 'First Strike Wrestling');
+// FSW hardcoded videos — only injected when viewing FSW
+const FSW_VIDEOS = FSW_EFED_NAME === 'First Strike Wrestling' ? [
+  { url: "https://youtu.be/SGQqbCUJvME", show: 'FSW 52: Maximum — “Choices”', date: "Feb 12, 2026", thumb: "https://i.imgur.com/vUWtsKv.png" },
+] : [];
+const FSW_UPCOMING = [];
+let FSW_OWNER = ''; // set dynamically after DB lookup by promo_name
+
+function extractId(url) {
+  if (!url) return '';
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : '';
+}
+
+function toggleDropdown(force) {
+  const dd = document.getElementById('user-dropdown');
+  if (force === true) { dd.classList.remove('open'); return; }
+  dd.classList.toggle('open');
+}
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('nav-user-wrap');
+  if (wrap && !wrap.contains(e.target)) document.getElementById('user-dropdown').classList.remove('open');
+});
+
+function handleSignOut() {
+  localStorage.removeItem('efed_session');
+  window.location.replace('auth.html');
+}
+function goToProfile() {
+  const session = getSession();
+  if (session) window.location.href = 'profile.html?u=' + encodeURIComponent(session.username);
+}
+
+// Nav scroll effect
+window.addEventListener('scroll', () => {
+  document.getElementById('nav').classList.toggle('scrolled', window.scrollY > 20);
+}, { passive: true });
+
+// Search toggle
+document.getElementById('nav-search-btn').addEventListener('click', () => {
+  const wrap = document.getElementById('nav-search-wrap');
+  wrap.classList.toggle('open');
+  if (wrap.classList.contains('open')) document.getElementById('nav-search-input').focus();
+});
+document.getElementById('nav-search-input').addEventListener('keydown', e => {
+  if (e.key === 'Escape') { document.getElementById('nav-search-wrap').classList.remove('open'); }
+  if (e.key === 'Enter') {
+    const q = e.target.value.trim();
+    if (q) window.location.href = 'index.html?q=' + encodeURIComponent(q);
+  }
+});
+
+async function initNav() {
+  const session = getSession();
+  const userBtn = document.getElementById('nav-user-btn');
+  const initialsEl = document.getElementById('nav-initials');
+  const ddName = document.getElementById('dd-name');
+  const ddEmail = document.getElementById('dd-email');
+  if (!session) { if (userBtn) userBtn.style.display = 'none'; return; }
+  if (userBtn) userBtn.style.display = 'flex';
+  const displayName = session.displayName || session.username || '?';
+  if (initialsEl) initialsEl.textContent = displayName[0].toUpperCase();
+  if (session.avatarUrl) {
+    const img = document.getElementById('nav-avatar-img');
+    if (img) { img.src = session.avatarUrl; img.style.display = 'block'; if (initialsEl) initialsEl.style.display = 'none'; }
+  }
+  if (ddName) ddName.innerHTML = withVerified(displayName, session.username, false);
+  if (ddEmail) ddEmail.textContent = 'EFED Member';
+  const myProfileBtn = document.getElementById('my-profile-btn');
+  if (myProfileBtn) myProfileBtn.style.display = 'flex';
+  if (session.username.toLowerCase() === ADMIN_USERNAME) {
+    const adminBtn = document.getElementById('admin-panel-btn');
+    if (adminBtn) adminBtn.style.display = 'flex';
+  }
+  try {
+    const notifs = await sbGet('notifications', `username=eq.${encodeURIComponent(session.username)}&read=eq.false`);
+    const dot = document.getElementById('bnav-notif-dot');
+    if (notifs.length && dot) dot.classList.add('visible');
+  } catch(e) {}
+  try {
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+    if (users.length) {
+      const user = users[0];
+      if (user.display_name) {
+        session.displayName = user.display_name;
+        localStorage.setItem('efed_session', JSON.stringify(session));
+        if (initialsEl) initialsEl.textContent = user.display_name[0].toUpperCase();
+        if (ddName) ddName.innerHTML = withVerified(user.display_name, session.username, false);
+      }
+      if (user.avatar_url) {
+        session.avatarUrl = user.avatar_url;
+        localStorage.setItem('efed_session', JSON.stringify(session));
+        const img = document.getElementById('nav-avatar-img');
+        if (img) { img.src = user.avatar_url; img.style.display = 'block'; if (initialsEl) initialsEl.style.display = 'none'; }
+      }
+      if ((user.is_efed_owner || user.role === 'owner') && user.promo_name) {
+        if (ddEmail) { ddEmail.textContent = 'Owner of ' + user.promo_name; ddEmail.style.color = '#c8a84b'; }
+        const myEfedBtn = document.getElementById('my-efed-btn');
+        if (myEfedBtn) { myEfedBtn.style.display = 'flex'; myEfedBtn.onclick = () => { toggleDropdown(true); window.location.href = 'efed.html?e=' + encodeURIComponent(user.promo_name); }; }
+      } else {
+        if (ddEmail) { ddEmail.textContent = 'EFED Member'; ddEmail.style.color = ''; }
+        const myEfedBtn = document.getElementById('my-efed-btn');
+        if (myEfedBtn) myEfedBtn.style.display = 'none';
+      }
+    }
+  } catch(e) {}
+}
+
+async function loadPage() {
+  // Set page title and banner name from URL param
+  document.title = FSW_EFED_NAME + ' — EFED Hub';
+  const nameEl = document.getElementById('efed-name');
+  if (nameEl) nameEl.textContent = FSW_EFED_NAME;
+  const initEl = document.getElementById('efed-logo-initials');
+  if (initEl) initEl.textContent = FSW_EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,4).toUpperCase();
+
+  // Owner — find user whose promo_name matches this eFed
+  try {
+    const owners = await sbGet('users', `promo_name=eq.${encodeURIComponent(FSW_EFED_NAME)}&select=username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,promo_banner,yt_channel,ig_handle,x_handle,promo_website`);
+    const owner = owners.find(u => u.is_efed_owner) || owners.find(u => u.role === 'owner') || owners[0];
+    if (owner) {
+      FSW_OWNER = owner.username;
+      const name = owner.display_name || owner.username;
+      document.getElementById('owner-name').textContent = name;
+      const ownerAvEl = document.getElementById('owner-av');
+      if (owner.avatar_url) {
+        ownerAvEl.innerHTML = `<img src="${owner.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;">`;
+      } else {
+        ownerAvEl.textContent = name[0].toUpperCase();
+      }
+      window._ownerAvatarUrl = owner.avatar_url || null;
+      document.getElementById('owner-badge').style.display = owner.username.toLowerCase() === ADMIN_USERNAME ? '' : 'none';
+      if (owner.promo_logo) setLogoImage(owner.promo_logo);
+      if (owner.promo_banner) {
+        const bannerImg = document.getElementById('efed-banner-img');
+        if (bannerImg) { bannerImg.src = owner.promo_banner; bannerImg.style.display = 'block'; }
+        const noise = document.querySelector('.efed-banner-noise');
+        const glow = document.querySelector('.efed-banner-glow');
+        if (noise) noise.style.display = 'none';
+        if (glow) glow.style.display = 'none';
+      }
+
+      renderLinks({
+        yt:  (owner.yt_channel    || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
+        ig:  (owner.ig_handle     || '').replace('@',''),
+        x:   (owner.x_handle      || '').replace('@',''),
+        web: (owner.promo_website || '').replace(/^https?:\/\//,'')
+      });
+    } else {
+      document.getElementById('owner-name').textContent = 'Unknown';
+    }
+  } catch(e) {
+    console.error('Owner fetch failed:', e);
+    const session = getSession();
+    if (session) {
+      const fallback = session.displayName || session.username || '';
+      document.getElementById('owner-name').textContent = fallback;
+      const ownerAvEl = document.getElementById('owner-av');
+      if (ownerAvEl && fallback) ownerAvEl.textContent = fallback[0].toUpperCase();
+      FSW_OWNER = session.username;
+    } else {
+      document.getElementById('owner-name').textContent = FSW_EFED_NAME;
+    }
+  }
+
+  // Links rendered in owner block above
+
+  // Upcoming
+  const upEl = document.getElementById('upcoming-content');
+  if (FSW_UPCOMING.length) {
+    const u = FSW_UPCOMING[0];
+    const id = extractId(u.url);
+    const thumb = u.thumb || (id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '');
+    upEl.innerHTML = `
+      <div class="upcoming-card">
+        <div class="upcoming-thumb">${thumb ? `<img src="${thumb}" alt="">` : ''}</div>
+        <div style="flex:1;">
+          <div class="upcoming-title">${_esc(u.show)}</div>
+          <div class="upcoming-date">${_esc(u.date)}</div>
+        </div>
+        <div class="upcoming-badge">Upcoming</div>
+      </div>`;
+  } else {
+    // Try DB upcoming
+    try {
+      const rows = await sbGet('submissions', `efed=eq.${encodeURIComponent(FSW_EFED_NAME)}&status=eq.upcoming&order=date_ms.asc&limit=1`);
+      if (rows.length) {
+        const u = rows[0];
+        const id = extractId(u.url);
+        const thumb = id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '';
+        upEl.innerHTML = `
+          <div class="upcoming-card">
+            <div class="upcoming-thumb">${thumb ? `<img src="${thumb}" alt="">` : ''}</div>
+            <div style="flex:1;">
+              <div class="upcoming-title">${_esc(u.show_name)}</div>
+              <div class="upcoming-date">${_esc(u.date || '')}</div>
+            </div>
+            <div class="upcoming-badge">Upcoming</div>
+          </div>`;
+      } else {
+        upEl.innerHTML = `<div class="no-upcoming">No upcoming shows scheduled.</div>`;
+      }
+    } catch(e) {
+      upEl.innerHTML = `<div class="no-upcoming">No upcoming shows scheduled.</div>`;
+    }
+  }
+
+  // Videos — hardcoded + DB approved
+  // videos rendered into #videos-row
+  let allVideos = [...FSW_VIDEOS];
+  try {
+    const dbRows = await sbGet('submissions', `efed=eq.${encodeURIComponent(FSW_EFED_NAME)}&status=eq.approved&order=date_ms.desc`);
+    const existingUrls = new Set(allVideos.map(v => v.url));
+    dbRows.forEach(r => {
+      if (!existingUrls.has(r.url)) {
+        allVideos.push({ url: r.url, show: r.show_name || '', date: r.date || '', thumb: r.thumb_url || null, dateMs: r.date_ms || r.submitted_at || 0 });
+      }
+    });
+  } catch(e) {}
+
+  document.getElementById('stat-episodes').textContent = allVideos.length;
+
+  const row = document.getElementById('videos-row');
+  if (!allVideos.length) {
+    row.innerHTML = `<div style="font-size:.78rem;color:var(--muted);padding:16px 0;">No episodes yet.</div>`;
+  } else {
+    // Parse date strings for hardcoded videos that lack dateMs
+    allVideos.forEach(v => {
+      if (!v.dateMs && v.date) v.dateMs = Date.parse(v.date) || 0;
+    });
+    allVideos.sort((a,b) => (b.dateMs||0) - (a.dateMs||0));
+    row.innerHTML = allVideos.map(v => {
+      const id = extractId(v.url);
+      const thumb = v.thumb || (id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '');
+      return `
+        <div style="flex-shrink:0;width:160px;cursor:pointer;" onclick="openOnHub('${v.url}')">
+          <div style="width:160px;height:90px;border-radius:6px;overflow:hidden;background:var(--surface2);position:relative;margin-bottom:7px;transition:transform .2s;">
+            ${thumb ? `<img src="${thumb}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" onerror="this.style.display='none'">` : ''}
+            <div style="position:absolute;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0">
+              <div style="width:26px;height:26px;border-radius:50%;background:rgba(192,0,14,.9);display:flex;align-items:center;justify-content:center;">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="white" style="margin-left:2px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              </div>
+            </div>
+          </div>
+          <div style="font-size:.72rem;font-weight:600;color:#fff;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${_esc(v.show)}</div>
+          <div style="font-size:.58rem;color:var(--muted);margin-top:2px;">${_esc(v.date)}</div>
+        </div>`;
+    }).join('');
+    // Update arrows after render
+    setTimeout(updateVidArrows, 100);
+  }
+
+  // Roster — owner always first, then DB roster table (once built), then placeholder
+  const rosterGrid = document.getElementById('roster-grid');
+  const session = getSession(); // may be null for logged-out users
+  const ownerName = document.getElementById('owner-name').textContent;
+
+  // Show edit pencil for owner
+  if (session && FSW_OWNER && session.username.toLowerCase() === FSW_OWNER.toLowerCase()) {
+    const pencil = document.getElementById('efed-edit-pencil');
+    if (pencil) pencil.style.display = 'block';
+  }
+
+  let rosterRows = [];
+  try {
+    const rosterEntries = await sbGet('roster', `efed=eq.${encodeURIComponent(FSW_EFED_NAME)}&order=joined_at.asc`);
+    if (rosterEntries.length) {
+      const unames = rosterEntries.map(r => r.username);
+      const users = await sbGet('users', `username=in.(${unames.join(',')})&select=username,display_name,avatar_url`);
+      rosterRows = unames.map(u => users.find(x => x.username === u)).filter(Boolean);
+    }
+  } catch(e) {}
+
+  document.getElementById('stat-roster').textContent = rosterRows.length + 1; // +1 for owner
+
+  const ownerAvHtml = window._ownerAvatarUrl
+    ? `<div class="roster-av owner-av-card"><img src="${window._ownerAvatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;"></div>`
+    : `<div class="roster-av owner-av-card">${ownerName[0] || 'D'}</div>`;
+  const ownerUsername = FSW_OWNER || '';
+  let rosterHtml = `
+    <div class="roster-card" onclick="window.location.href='profile.html?u=${encodeURIComponent(ownerUsername)}'" style="cursor:pointer;">
+      ${ownerAvHtml}
+      <div class="roster-name">${_esc(ownerName)}</div>
+      <div class="roster-owner-tag">Owner</div>
+    </div>`;
+
+  rosterRows.filter(u => !FSW_OWNER || u.username !== FSW_OWNER).forEach(u => {
+    const name = u.display_name || u.username;
+    const isSelf = session && u.username === session.username;
+    const memAvHtml = u.avatar_url
+      ? `<div class="roster-av"><img src="${u.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;"></div>`
+      : `<div class="roster-av">${name[0].toUpperCase()}</div>`;
+    const canRemove = isSelf || isOwner;
+    rosterHtml += `
+      <div class="roster-card" ${isSelf ? 'id="roster-self-card"' : ''} style="cursor:pointer;position:relative;" onclick="if(!event.target.closest('.roster-remove-btn'))window.location.href='profile.html?u=${encodeURIComponent(u.username)}'">
+        ${canRemove ? `<button class="roster-remove-btn" title="Remove from roster" onclick="event.stopPropagation();removeFromRoster('${u.username}')" style="position:absolute;top:6px;right:6px;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.25);border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:rgba(255,100,100,.7);font-size:.7rem;line-height:1;transition:background .2s;" onmouseover="this.style.background='rgba(192,0,14,.4)';this.style.color='#fff'" onmouseout="this.style.background='rgba(192,0,14,.15)';this.style.color='rgba(255,100,100,.7)'">✕</button>` : ''}
+        ${memAvHtml}
+        <div class="roster-name">${_esc(name)}</div>
+        <div class="roster-role">Talent</div>
+      </div>`;
+  });
+
+  rosterGrid.innerHTML = rosterHtml;
+
+  // Declare these BEFORE using them
+  const currentUser = session ? session.username : null;
+  const isOwner = currentUser && FSW_OWNER && currentUser.toLowerCase() === FSW_OWNER.toLowerCase();
+  const alreadyOnRoster = rosterRows.some(u => u.username === currentUser);
+
+  // If current user already on roster, show "✓ On Roster" state
+  if (session && alreadyOnRoster && !isOwner) {
+    const joinBtn = document.getElementById('roster-join-btn');
+    if (joinBtn) {
+      joinBtn.style.display = 'flex';
+      joinBtn.textContent = '✓ On Roster';
+      joinBtn.style.color = '#4caf64';
+      joinBtn.style.borderColor = 'rgba(76,175,100,.3)';
+      joinBtn.onclick = leaveRoster;
+      joinBtn.onmouseover = () => { joinBtn.style.color='#ff6b6b'; joinBtn.style.borderColor='rgba(192,0,14,.3)'; joinBtn.textContent='Leave Roster'; };
+      joinBtn.onmouseout  = () => { joinBtn.style.color='#4caf64'; joinBtn.style.borderColor='rgba(76,175,100,.3)'; joinBtn.textContent='✓ On Roster'; };
+    }
+  }
+
+  // Show join button for non-owners who aren't already on roster
+  if (currentUser && !isOwner && !alreadyOnRoster) {
+    document.getElementById('roster-join-btn').style.display = 'flex';
+  }
+
+  // Supporters count
+  try {
+    const r = await fetch(SUPABASE_URL+'/rest/v1/supports?efed=eq.'+encodeURIComponent(FSW_EFED_NAME), { headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' } });
+    const count = parseInt(r.headers.get('Content-Range')?.split('/')[1] || '0', 10);
+    document.getElementById('stat-supporters').textContent = count;
+  } catch(e) { document.getElementById('stat-supporters').textContent = '0'; }
+}
+
+// ── ROSTER TABLE ──
+// Uses a `roster` table: id, efed, username, joined_at
+// Falls back gracefully if table doesn't exist yet
+
+function toggleRosterJoin() {
+  // Fill eFed name dynamically
+  const nameEl = document.getElementById('roster-modal-efed-name');
+  if (nameEl) nameEl.textContent = FSW_EFED_NAME;
+  document.getElementById('roster-join-msg').textContent = '';
+  document.getElementById('roster-join-modal-bg').style.display = 'flex';
+}
+
+function closeRosterModal() {
+  document.getElementById('roster-join-modal-bg').style.display = 'none';
+}
+
+async function joinRoster() {
+  const session = getSession();
+  if (!session) return;
+  const btn = document.getElementById('roster-join-confirm-btn');
+  const msg = document.getElementById('roster-join-msg');
+  btn.disabled = true;
+  btn.textContent = 'Joining…';
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/roster', {
+      method: 'POST',
+      headers: { ...SB_HEADERS, 'Prefer': 'resolution=ignore-duplicates' },
+      body: JSON.stringify({ efed: FSW_EFED_NAME, username: session.username, joined_at: Date.now() })
+    });
+    closeRosterModal();
+    // Update join btn to "Leave Roster"
+    const joinBtn = document.getElementById('roster-join-btn');
+    joinBtn.textContent = '✓ On Roster';
+    joinBtn.style.color = '#4caf64';
+    joinBtn.style.borderColor = 'rgba(76,175,100,.3)';
+    joinBtn.onclick = leaveRoster;
+    joinBtn.onmouseover = () => { joinBtn.style.color='#ff6b6b'; joinBtn.style.borderColor='rgba(192,0,14,.3)'; joinBtn.textContent='Leave Roster'; };
+    joinBtn.onmouseout  = () => { joinBtn.style.color='#4caf64'; joinBtn.style.borderColor='rgba(76,175,100,.3)'; joinBtn.textContent='✓ On Roster'; };
+    // Add to grid
+    const name = session.displayName || session.username;
+    const grid = document.getElementById('roster-grid');
+    const card = document.createElement('div');
+    card.className = 'roster-card';
+    card.id = 'roster-self-card';
+    card.innerHTML = `<div class="roster-av">${name[0].toUpperCase()}</div><div class="roster-name">${_esc(name)}</div><div class="roster-role">Talent</div>`;
+    grid.appendChild(card);
+    // Update count
+    const statEl = document.getElementById('stat-roster');
+    statEl.textContent = parseInt(statEl.textContent||'0') + 1;
+  } catch(e) {
+    msg.textContent = 'Could not join. Try again.';
+    msg.style.color = '#ff6b6b';
+    btn.disabled = false;
+    btn.textContent = 'Join';
+  }
+}
+
+async function removeFromRoster(username) {
+  const session = getSession();
+  if (!session) return;
+  const isOwner = FSW_OWNER && session.username.toLowerCase() === FSW_OWNER.toLowerCase();
+  const isSelf = session.username.toLowerCase() === username.toLowerCase();
+  if (!isOwner && !isSelf) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/roster?efed=eq.' + encodeURIComponent(FSW_EFED_NAME) + '&username=eq.' + encodeURIComponent(username), {
+      method: 'DELETE', headers: SB_HEADERS
+    });
+    // Remove card from DOM
+    const grid = document.getElementById('roster-grid');
+    if (grid) {
+      const cards = grid.querySelectorAll('.roster-card');
+      cards.forEach(card => {
+        const nameEl = card.querySelector('.roster-name');
+        if (nameEl && card.querySelector('.roster-remove-btn[onclick*="' + username + '"]')) card.remove();
+      });
+    }
+    // If removed self, reset join button
+    if (isSelf) {
+      const joinBtn = document.getElementById('roster-join-btn');
+      if (joinBtn) {
+        joinBtn.textContent = '+ Join Roster';
+        joinBtn.style.color = 'rgba(255,255,255,.4)';
+        joinBtn.style.borderColor = 'rgba(255,255,255,.12)';
+        joinBtn.onclick = toggleRosterJoin;
+        joinBtn.onmouseover = () => { joinBtn.style.borderColor='rgba(192,0,14,.4)'; joinBtn.style.color='#ff6b6b'; };
+        joinBtn.onmouseout = () => { joinBtn.style.borderColor='rgba(255,255,255,.12)'; joinBtn.style.color='rgba(255,255,255,.4)'; };
+      }
+    }
+  } catch(e) { console.warn('Remove roster failed', e); }
+}
+
+async function leaveRoster() {
+  const session = getSession();
+  if (!session) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/roster?efed=eq.' + encodeURIComponent(FSW_EFED_NAME) + '&username=eq.' + encodeURIComponent(session.username), {
+      method: 'DELETE', headers: SB_HEADERS
+    });
+    const joinBtn = document.getElementById('roster-join-btn');
+    joinBtn.textContent = '+ Join Roster';
+    joinBtn.style.color = 'rgba(255,255,255,.4)';
+    joinBtn.style.borderColor = 'rgba(255,255,255,.12)';
+    joinBtn.onclick = toggleRosterJoin;
+    joinBtn.onmouseover = () => { joinBtn.style.borderColor='rgba(192,0,14,.4)'; joinBtn.style.color='#ff6b6b'; };
+    joinBtn.onmouseout  = () => { joinBtn.style.borderColor='rgba(255,255,255,.12)'; joinBtn.style.color='rgba(255,255,255,.4)'; };
+    const selfCard = document.getElementById('roster-self-card');
+    if (selfCard) selfCard.remove();
+    const statEl = document.getElementById('stat-roster');
+    statEl.textContent = Math.max(0, parseInt(statEl.textContent||'1') - 1);
+  } catch(e) { alert('Could not leave roster.'); }
+}
+
+// ── LOGO UPLOAD LOGIC ──
+let _logoHasImage = false;
+
+function handleLogoClick() {
+  if (_logoHasImage) {
+    // Show context menu
+    const menu = document.getElementById('logo-ctx-menu');
+    const box = document.getElementById('efed-logo-box');
+    const rect = box.getBoundingClientRect();
+    const cardRect = box.closest('.efed-banner-inner').getBoundingClientRect();
+    menu.style.display = 'block';
+    menu.style.left = (rect.left - cardRect.left) + 'px';
+    menu.style.top = (rect.bottom - cardRect.top + 6) + 'px';
+  } else {
+    document.getElementById('logo-file-input').click();
+  }
+}
+
+function closeLogoMenu() {
+  document.getElementById('logo-ctx-menu').style.display = 'none';
+}
+
+document.addEventListener('click', e => {
+  const box = document.getElementById('efed-logo-box');
+  const menu = document.getElementById('logo-ctx-menu');
+  if (!box.contains(e.target) && !menu.contains(e.target)) closeLogoMenu();
+});
+
+async function handleLogoFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  closeLogoMenu();
+
+  // Convert to base64 data URL for preview immediately
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    // Resize to max 200x200 before saving to keep base64 small enough for Supabase
+    const img = new Image();
+    img.onload = async () => {
+      const MAX = 200;
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(MAX / img.width, MAX / img.height, 1);
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+      setLogoImage(dataUrl);
+      const session = getSession();
+      if (!session) return;
+      try {
+        await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+          method: 'PATCH',
+          headers: SB_HEADERS,
+          body: JSON.stringify({ promo_logo: dataUrl })
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+      } catch(err) { console.error('Logo save failed', err); alert('Logo save failed: ' + err.message); }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  // Reset input so same file can be re-selected
+  event.target.value = '';
+}
+
+function setLogoImage(src) {
+  const img = document.getElementById('efed-logo-img');
+  const initials = document.getElementById('efed-logo-initials');
+  const addIcon = document.getElementById('logo-hover-icon-add');
+  const editIcon = document.getElementById('logo-hover-icon-edit');
+  img.src = src;
+  img.style.display = 'block';
+  initials.style.display = 'none';
+  addIcon.style.display = 'none';
+  editIcon.style.display = 'flex';
+  _logoHasImage = true;
+}
+
+async function removeLogo() {
+  closeLogoMenu();
+  const img = document.getElementById('efed-logo-img');
+  const initials = document.getElementById('efed-logo-initials');
+  const addIcon = document.getElementById('logo-hover-icon-add');
+  const editIcon = document.getElementById('logo-hover-icon-edit');
+  img.src = '';
+  img.style.display = 'none';
+  initials.style.display = '';
+  addIcon.style.display = 'flex';
+  editIcon.style.display = 'none';
+  _logoHasImage = false;
+
+  const session = getSession();
+  if (!session) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH',
+      headers: SB_HEADERS,
+      body: JSON.stringify({ promo_logo: null })
+    });
+  } catch(err) { console.warn('Logo remove failed', err); }
+}
+
+// ── ONLY SHOW LOGO EDIT TO OWNER ──
+function initLogoEdit() {
+  const session = getSession();
+  if (!session) return;
+  const isOwner = session.username.toLowerCase() === FSW_OWNER.toLowerCase();
+  const box = document.getElementById('efed-logo-box');
+  if (isOwner) {
+    const editBtn = document.getElementById('links-edit-btn');
+    if (editBtn) editBtn.style.display = 'flex';
+  } else {
+    // Non-owners: no hover overlay, no click
+    box.style.cursor = 'default';
+    box.onclick = null;
+    const overlay = document.getElementById('logo-hover-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+}
+
+// ── VIDEO ROW SCROLL ──
+function scrollVids(dir) {
+  const row = document.getElementById('videos-row');
+  if (!row) return;
+  row.scrollBy({ left: dir * 500, behavior: 'smooth' });
+  setTimeout(updateVidArrows, 350);
+}
+
+function jumpVids(pos) {
+  const row = document.getElementById('videos-row');
+  if (!row) return;
+  row.scrollTo({ left: pos === 'start' ? 0 : row.scrollWidth, behavior: 'smooth' });
+  setTimeout(updateVidArrows, 350);
+}
+
+function updateVidArrows() {
+  if (window.innerWidth <= 768) return;
+  const row = document.getElementById('videos-row');
+  const arrL = document.getElementById('vid-arr-left');
+  const arrR = document.getElementById('vid-arr-right');
+  const jmpL = document.getElementById('vid-jump-left');
+  const jmpR = document.getElementById('vid-jump-right');
+  if (!row) return;
+  const atStart = row.scrollLeft <= 0;
+  const atEnd   = row.scrollLeft + row.clientWidth >= row.scrollWidth - 4;
+  const noScroll = row.scrollWidth <= row.clientWidth + 4;
+  if (arrL) arrL.classList.toggle('hidden', atStart || noScroll);
+  if (arrR) arrR.classList.toggle('hidden', atEnd   || noScroll);
+  if (jmpL) jmpL.classList.toggle('hidden', atStart || noScroll);
+  if (jmpR) jmpR.classList.toggle('hidden', atEnd   || noScroll);
+}
+
+function openEfedSubmit() {
+  // Redirect to hub with submit modal open — owner submits from there
+  window.location.href = 'index.html#submit';
+}
+
+// Store link values so openLinksModal can read them back cleanly
+let _linkData = { yt: '', ig: '', x: '', web: '' };
+
+function openOnHub(url) {
+  // Go to hub with video pre-selected so expand panel opens automatically
+  window.location.href = 'index.html?play=' + encodeURIComponent(url);
+}
+
+// ── EFED BANNER UPLOAD ──
+function handleEfedBannerUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async e => {
+    openBannerCrop(e.target.result, 960, 240, async (dataUrl) => {
+      const session = getSession();
+      if (!session) return;
+      const bannerImg = document.getElementById('efed-banner-img');
+      if (bannerImg) { bannerImg.src = dataUrl; bannerImg.style.display = 'block'; }
+      document.querySelector('.efed-banner-noise').style.display = 'none';
+      document.querySelector('.efed-banner-glow').style.display = 'none';
+      try {
+        const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({promo_banner:dataUrl}) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const bmsg = document.getElementById('efed-banner-msg');
+        if (bmsg) { bmsg.textContent = 'Banner saved!'; bmsg.style.color='#4caf64'; setTimeout(() => bmsg.textContent='', 2000); }
+      } catch(err) { const bmsg = document.getElementById('efed-banner-msg'); if (bmsg) { bmsg.textContent = 'Save failed: ' + err.message; bmsg.style.color='#ff6b6b'; } console.error('Banner save failed', err); }
+    });
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+function renderLinks(data) {
+  _linkData = { ...data };
+  const ytEl  = document.getElementById('link-yt');
+  const igEl  = document.getElementById('link-ig');
+  const xEl   = document.getElementById('link-x');
+  const webEl = document.getElementById('link-web');
+  // YouTube — data.yt is the handle/path, build full URL
+  const ytUrl = data.yt ? (data.yt.startsWith('http') ? data.yt : 'https://youtube.com/' + data.yt) : '';
+  if (ytUrl) { ytEl.href = ytUrl; ytEl.style.display = 'flex'; } else { ytEl.style.display = 'none'; }
+  // Instagram — data.ig is handle without @
+  if (data.ig) { igEl.href = 'https://instagram.com/' + data.ig.replace('@',''); igEl.style.display = 'flex'; } else { igEl.style.display = 'none'; }
+  // X — data.x is handle without @
+  if (data.x) { xEl.href = 'https://x.com/' + data.x.replace('@',''); xEl.style.display = 'flex'; } else { xEl.style.display = 'none'; }
+  // Website — data.web is domain without https://
+  const webUrl = data.web ? (data.web.startsWith('http') ? data.web : 'https://' + data.web) : '';
+  if (webUrl) { webEl.href = webUrl; webEl.style.display = 'flex'; } else { webEl.style.display = 'none'; }
+}
+
+function openLinksModal() {
+  // Pre-fill eFed name
+  (async () => {
+    try {
+      const session = getSession();
+      if (session) {
+        const u = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name`);
+        if (u[0]) document.getElementById('links-input-efedname').value = u[0].promo_name || FSW_EFED_NAME;
+      }
+    } catch(e) {}
+  })();
+  // Strip youtube.com/ prefix for input display
+  const ytVal = _linkData.yt ? _linkData.yt.replace(/^https?:\/\/(www\.)?youtube\.com\//,'') : '';
+  document.getElementById('links-input-yt').value  = ytVal;
+  document.getElementById('links-input-ig').value  = (_linkData.ig || '').replace('@','');
+  document.getElementById('links-input-x').value   = (_linkData.x  || '').replace('@','');
+  // Strip https:// for website input
+  document.getElementById('links-input-web').value = (_linkData.web || '').replace(/^https?:\/\//,'');
+  document.getElementById('links-save-msg').textContent = '';
+  document.getElementById('links-modal-bg').style.display = 'flex';
+}
+
+function closeLinksModal() {
+  document.getElementById('links-modal-bg').style.display = 'none';
+}
+
+async function saveLinks() {
+  const session = getSession();
+  if (!session) return;
+  const yt  = document.getElementById('links-input-yt').value.trim();
+  const ig  = document.getElementById('links-input-ig').value.trim().replace('@','');
+  const x   = document.getElementById('links-input-x').value.trim().replace('@','');
+  const web = document.getElementById('links-input-web').value.trim().replace(/^https?:\/\//,'');
+  const msg = document.getElementById('links-save-msg');
+  msg.textContent = 'Saving…';
+  msg.style.color = '#8a8a9a';
+  try {
+    const updates = { yt_channel: yt, ig_handle: ig, x_handle: x, promo_website: web };
+    const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH',
+      headers: SB_HEADERS,
+      body: JSON.stringify(updates)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    renderLinks({ yt, ig, x, web });
+    msg.textContent = 'Saved!';
+    msg.style.color = '#4caf64';
+    setTimeout(closeLinksModal, 800);
+  } catch(e) {
+    msg.textContent = 'Could not save. Try again.';
+    msg.style.color = '#ff6b6b';
+  }
+}
+
+initNav();
+initLogoEdit();
+loadPage();
+
+// ── BANNER CROP LOGIC ──
+let _cropState = { img: null, x: 0, y: 0, scale: 1, dragging: false, startX: 0, startY: 0, imgX: 0, imgY: 0, W: 960, H: 200, onSave: null };
+
+function openBannerCrop(dataUrl, W, H, onSave) {
+  _cropState.W = W; _cropState.H = H; _cropState.onSave = onSave;
+  const bg = document.getElementById('banner-crop-bg');
+  const img = document.getElementById('crop-img');
+  const vp = document.getElementById('crop-viewport');
+  bg.style.display = 'flex';
+  img.src = dataUrl;
+  img.onload = () => {
+    const vpW = vp.clientWidth, vpH = vp.clientHeight;
+    const scale = Math.max(vpW / img.naturalWidth, vpH / img.naturalHeight) * 1.0;
+    _cropState.scale = scale;
+    _cropState.x = (vpW - img.naturalWidth * scale) / 2;
+    _cropState.y = (vpH - img.naturalHeight * scale) / 2;
+    _cropState.img = img;
+    applyTransform();
+  };
+}
+
+function applyTransform() {
+  const img = _cropState.img; if (!img) return;
+  img.style.transform = `translate(${_cropState.x}px, ${_cropState.y}px) scale(${_cropState.scale})`;
+  img.style.transformOrigin = '0 0';
+  img.style.width = _cropState.img.naturalWidth + 'px';
+  img.style.height = _cropState.img.naturalHeight + 'px';
+}
+
+function clampPosition() {
+  const vp = document.getElementById('crop-viewport');
+  const vpW = vp.clientWidth, vpH = vp.clientHeight;
+  const iW = _cropState.img.naturalWidth * _cropState.scale;
+  const iH = _cropState.img.naturalHeight * _cropState.scale;
+  _cropState.x = Math.min(0, Math.max(vpW - iW, _cropState.x));
+  _cropState.y = Math.min(0, Math.max(vpH - iH, _cropState.y));
+}
+
+const cropVp = () => document.getElementById('crop-viewport');
+function initCropEvents() {
+  const vp = cropVp(); if (!vp || vp._cropInited) return; vp._cropInited = true;
+  vp.addEventListener('mousedown', e => {
+    _cropState.dragging = true; _cropState.startX = e.clientX; _cropState.startY = e.clientY;
+    _cropState.imgX = _cropState.x; _cropState.imgY = _cropState.y;
+    vp.style.cursor = 'grabbing'; e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!_cropState.dragging) return;
+    _cropState.x = _cropState.imgX + (e.clientX - _cropState.startX);
+    _cropState.y = _cropState.imgY + (e.clientY - _cropState.startY);
+    clampPosition(); applyTransform();
+  });
+  window.addEventListener('mouseup', () => { _cropState.dragging = false; vp.style.cursor = 'grab'; });
+  // Touch
+  vp.addEventListener('touchstart', e => {
+    const t = e.touches[0]; _cropState.dragging = true;
+    _cropState.startX = t.clientX; _cropState.startY = t.clientY;
+    _cropState.imgX = _cropState.x; _cropState.imgY = _cropState.y; e.preventDefault();
+  }, { passive: false });
+  window.addEventListener('touchmove', e => {
+    if (!_cropState.dragging) return;
+    const t = e.touches[0];
+    _cropState.x = _cropState.imgX + (t.clientX - _cropState.startX);
+    _cropState.y = _cropState.imgY + (t.clientY - _cropState.startY);
+    clampPosition(); applyTransform();
+  }, { passive: false });
+  window.addEventListener('touchend', () => { _cropState.dragging = false; });
+  // Scroll to zoom
+  vp.addEventListener('wheel', e => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const newScale = Math.max(
+      Math.max(vp.clientWidth / _cropState.img.naturalWidth, vp.clientHeight / _cropState.img.naturalHeight),
+      Math.min(4, _cropState.scale * delta)
+    );
+    // Zoom toward cursor
+    const rect = vp.getBoundingClientRect();
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    _cropState.x = cx - (cx - _cropState.x) * (newScale / _cropState.scale);
+    _cropState.y = cy - (cy - _cropState.y) * (newScale / _cropState.scale);
+    _cropState.scale = newScale;
+    clampPosition(); applyTransform();
+  }, { passive: false });
+}
+
+function cancelBannerCrop() {
+  document.getElementById('banner-crop-bg').style.display = 'none';
+}
+
+function confirmBannerCrop() {
+  const vp = document.getElementById('crop-viewport');
+  const vpW = vp.clientWidth, vpH = vp.clientHeight;
+  // Render at target resolution
+  const canvas = document.createElement('canvas');
+  canvas.width = _cropState.W; canvas.height = _cropState.H;
+  const ctx = canvas.getContext('2d');
+  const scaleToTarget = _cropState.W / vpW;
+  ctx.drawImage(
+    _cropState.img,
+    (-_cropState.x / _cropState.scale),
+    (-_cropState.y / _cropState.scale),
+    vpW / _cropState.scale,
+    vpH / _cropState.scale,
+    0, 0, _cropState.W, _cropState.H
+  );
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.87);
+  document.getElementById('banner-crop-bg').style.display = 'none';
+  if (_cropState.onSave) _cropState.onSave(dataUrl);
+}
+
+// Init events when modal first becomes visible
+const _cropObserver = new MutationObserver(() => { if (document.getElementById('banner-crop-bg')?.style.display !== 'none') initCropEvents(); });
+document.addEventListener('DOMContentLoaded', () => {
+  const bg = document.getElementById('banner-crop-bg');
+  if (bg) _cropObserver.observe(bg, { attributes: true, attributeFilter: ['style'] });
+});
+
+</script>
+
+<!-- ── SUBMIT VIDEO MODAL ── -->
+<div id="efed-submit-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeEfedSubmit()">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:400px;padding:28px 24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Submit Video</div>
+      <button onclick="closeEfedSubmit()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;">✕</button>
+    </div>
+    <div style="font-size:.72rem;color:#8a8a9a;margin-bottom:16px;line-height:1.6;">Paste a YouTube link to add it to the episodes list.</div>
+    <input id="efed-submit-url" type="url" placeholder="https://youtube.com/watch?v=..." style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:11px 14px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;margin-bottom:12px;">
+    <div id="efed-submit-msg" style="font-size:.72rem;min-height:18px;margin-bottom:12px;"></div>
+    <button id="efed-submit-btn" onclick="submitEfedVideo()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Submit</button>
+  </div>
+</div>
+
+</div><!-- /page-card -->
+
+<!-- ── BANNER CROP MODAL ── -->
+<div id="banner-crop-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.92);backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:700px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.8);">
+    <div style="padding:18px 22px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Position Banner</div>
+      <div style="font-size:.65rem;color:#5a5a6a;letter-spacing:1px;">Drag to reposition</div>
+    </div>
+    <!-- Crop viewport — fixed 960x200 ratio -->
+    <div style="padding:16px 22px;">
+      <div id="crop-viewport" style="width:100%;aspect-ratio:960/200;overflow:hidden;border-radius:8px;position:relative;cursor:grab;user-select:none;background:#1a1a1f;">
+        <img id="crop-img" src="" alt="" style="position:absolute;transform-origin:top left;pointer-events:none;max-width:none;">
+      </div>
+      <div style="font-size:.6rem;color:#5a5a6a;text-align:center;margin-top:8px;letter-spacing:1px;">DRAG TO REPOSITION · SCROLL TO ZOOM</div>
+    </div>
+    <div style="padding:0 22px 20px;display:flex;gap:10px;">
+      <button onclick="cancelBannerCrop()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
+      <button onclick="confirmBannerCrop()" style="flex:2;padding:12px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Banner</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── SETTINGS MODAL ── -->
+<div id="settings-bg" style="position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.7);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s;padding:20px;" onclick="handleSettingsBgClick(event)">
+  <div id="settings-modal" style="width:100%;max-width:360px;background:#111115;border:1px solid rgba(255,255,255,.09);border-radius:16px;overflow:hidden;transform:scale(.96) translateY(6px);transition:transform .25s cubic-bezier(.16,1,.3,1);box-shadow:0 32px 80px rgba(0,0,0,.7);position:relative;max-height:90vh;display:flex;flex-direction:column;">
+    <div style="padding:20px 22px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;">
+      <span id="settings-title" style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:3px;color:#fff;">Settings</span>
+      <button onclick="closeSettings()" style="background:none;border:none;color:rgba(255,255,255,.5);cursor:pointer;padding:4px;font-size:.9rem;">✕</button>
+    </div>
+    <div style="padding:20px 22px 24px;overflow-y:auto;flex:1;">
+      <div id="settings-menu">
+        <div onclick="settingsNav('password')" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:36px;height:36px;border-radius:10px;background:rgba(255,255,255,.06);display:flex;align-items:center;justify-content:center;font-size:1rem;">🔒</div>
+            <div>
+              <div style="font-size:.82rem;font-weight:600;color:#fff;">Change Password</div>
+              <div style="font-size:.68rem;color:#8a8a9a;">Update your password</div>
+            </div>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+        <div onclick="settingsNav('removal')" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:36px;height:36px;border-radius:10px;background:rgba(255,255,255,.06);display:flex;align-items:center;justify-content:center;font-size:1rem;">🗑</div>
+            <div>
+              <div style="font-size:.82rem;font-weight:600;color:#ff6b6b;">Request Removal</div>
+              <div style="font-size:.68rem;color:#8a8a9a;">Ask us to remove a video</div>
+            </div>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+      <div id="settings-panel-password" style="display:none;">
+        <div id="settings-pass-section"></div>
+      </div>
+      <div id="settings-panel-removal" style="display:none;">
+        <div style="font-size:.72rem;color:#8a8a9a;margin-bottom:12px;line-height:1.6;">Paste the video URL and select a reason. We'll review and handle it.</div>
+        <input id="removal-url" type="url" placeholder="YouTube URL of the video" style="width:100%;padding:10px 13px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;margin-bottom:8px;box-sizing:border-box;">
+        <select id="removal-reason" style="width:100%;padding:10px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;margin-bottom:8px;-webkit-appearance:none;appearance:none;">
+          <option value="" disabled selected style="background:#111;">— Select a reason —</option>
+          <option value="This is my content and I want it removed" style="background:#111;">This is my content</option>
+          <option value="Copyright / intellectual property violation" style="background:#111;">Copyright violation</option>
+          <option value="Promotion has been shut down" style="background:#111;">Promotion shut down</option>
+          <option value="Incorrect information on the video" style="background:#111;">Incorrect information</option>
+          <option value="Other" style="background:#111;">Other</option>
+        </select>
+        <div id="removal-msg" style="display:none;font-size:.72rem;margin-bottom:8px;padding:7px 10px;border-radius:6px;"></div>
+        <button onclick="submitRemovalRequest()" style="width:100%;padding:11px;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.3);border-radius:40px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;">Submit Request</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function openSettings() {
+  const bg = document.getElementById('settings-bg');
+  const modal = document.getElementById('settings-modal');
+  settingsBack();
+  bg.style.opacity = '1';
+  bg.style.pointerEvents = 'all';
+  modal.style.transform = 'scale(1) translateY(0)';
+  document.body.style.overflow = 'hidden';
+}
+function closeSettings() {
+  const bg = document.getElementById('settings-bg');
+  const modal = document.getElementById('settings-modal');
+  bg.style.opacity = '0';
+  bg.style.pointerEvents = 'none';
+  modal.style.transform = 'scale(.96) translateY(6px)';
+  document.body.style.overflow = '';
+}
+function handleSettingsBgClick(e) {
+  if (e.target === document.getElementById('settings-bg')) closeSettings();
+}
+function settingsNav(panel) {
+  document.getElementById('settings-menu').style.display = 'none';
+  document.getElementById('settings-title').textContent = panel === 'password' ? 'Change Password' : 'Request Removal';
+  ['password','removal'].forEach(p => {
+    document.getElementById('settings-panel-' + p).style.display = p === panel ? 'block' : 'none';
+  });
+  if (panel === 'password') {
+    document.getElementById('settings-pass-section').innerHTML = `
+      <label style="display:block;font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#8a8a9a;font-weight:700;margin-bottom:8px;">Change Password</label>
+      <input id="settings-cur-pass" type="password" placeholder="Current password" style="width:100%;padding:10px 13px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;outline:none;margin-bottom:8px;box-sizing:border-box;" autocomplete="off">
+      <input id="settings-new-pass" type="password" placeholder="New password (min 6 chars)" style="width:100%;padding:10px 13px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;outline:none;margin-bottom:8px;box-sizing:border-box;" autocomplete="off">
+      <div id="settings-pass-msg" style="display:none;font-size:.72rem;margin-bottom:8px;padding:7px 10px;border-radius:6px;"></div>
+      <button onclick="savePassword()" style="width:100%;padding:11px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-radius:40px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;cursor:pointer;">Update Password</button>`;
+  }
+}
+function settingsBack() {
+  ['password','removal'].forEach(p => {
+    document.getElementById('settings-panel-' + p).style.display = 'none';
+  });
+  document.getElementById('settings-menu').style.display = 'block';
+  document.getElementById('settings-title').textContent = 'Settings';
+}
+async function savePassword() {
+  const session = getSession();
+  if (!session) return;
+  const curPass = document.getElementById('settings-cur-pass').value;
+  const newPass = document.getElementById('settings-new-pass').value;
+  const msg = document.getElementById('settings-pass-msg');
+  if (!curPass || !newPass) { showSettingsMsg('settings-pass-msg','Fill in both fields.','error'); return; }
+  if (newPass.length < 6) { showSettingsMsg('settings-pass-msg','New password must be at least 6 characters.','error'); return; }
+  async function hash(str) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+  try {
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+    if (!users.length) throw new Error('User not found');
+    if (users[0].password_hash !== await hash(curPass)) { showSettingsMsg('settings-pass-msg','Current password is incorrect.','error'); return; }
+    await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({ password_hash: await hash(newPass) }) });
+    document.getElementById('settings-cur-pass').value = '';
+    document.getElementById('settings-new-pass').value = '';
+    showSettingsMsg('settings-pass-msg','Password updated!','success');
+  } catch(e) { showSettingsMsg('settings-pass-msg','Could not save. Try again.','error'); }
+}
+async function submitRemovalRequest() {
+  const session = getSession();
+  if (!session) return;
+  const url = document.getElementById('removal-url').value.trim();
+  const reason = document.getElementById('removal-reason').value;
+  if (!url) { showSettingsMsg('removal-msg','Please enter a YouTube URL.','error'); return; }
+  if (!reason) { showSettingsMsg('removal-msg','Please select a reason.','error'); return; }
+  try {
+    await fetch(SUPABASE_URL+'/rest/v1/notifications', { method:'POST', headers:SB_HEADERS, body:JSON.stringify({ username:'derrick_maximus', type:'removal', message:`🗑 Removal request from @${session.username}\n📎 ${url}\n📝 ${reason}`, video_url:url, read:false, created_at:Date.now() }) });
+    showSettingsMsg('removal-msg','✅ Request sent. We\'ll review it shortly.','success');
+    document.getElementById('removal-url').value = '';
+    document.getElementById('removal-reason').value = '';
+  } catch(e) { showSettingsMsg('removal-msg','Could not send. Try again.','error'); }
+}
+function showSettingsMsg(id, msg, type) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.style.background = type === 'error' ? 'rgba(192,0,14,.1)' : 'rgba(200,168,75,.08)';
+  el.style.color = type === 'error' ? '#ff6b6b' : '#c8a84b';
+  el.style.border = type === 'error' ? '1px solid rgba(192,0,14,.3)' : '1px solid rgba(200,168,75,.25)';
+}
+</script>
+
+</body>
+</html>
