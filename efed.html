@@ -724,54 +724,40 @@ async function loadPage() {
   const initEl = document.getElementById('efed-logo-initials');
   if (initEl) initEl.textContent = FSW_EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,4).toUpperCase();
 
-  // Owner load — profile pattern: try promo_name, then write it on first save so it always sticks
+  // Owner load — exactly like profile: query by username directly, never by promo_name
   try {
     const SELECT = 'username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,promo_banner,yt_channel,ig_handle,x_handle,promo_website';
-    let owners = await sbGet('users', `promo_name=eq.${encodeURIComponent(FSW_EFED_NAME)}&select=${SELECT}`);
-    // Fallback: if promo_name not yet written (first visit), use session username and stamp promo_name now
-    if (!owners.length) {
-      const _sess = getSession();
-      if (_sess) {
-        owners = await sbGet('users', `username=eq.${encodeURIComponent(_sess.username)}&select=${SELECT}`);
-        // Stamp promo_name so every future load works by promo_name — same as profile saving its fields on first edit
-        if (owners.length) {
-          fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(_sess.username), {
-            method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ promo_name: FSW_EFED_NAME })
-          }).catch(() => {});
-        }
-      }
-    }
-    const owner = owners.find(u => u.is_efed_owner) || owners.find(u => u.role === 'owner') || owners[0];
-    if (owner) {
-      FSW_OWNER = owner.username;
-      const name = owner.display_name || owner.username;
-      document.getElementById('owner-name').textContent = name;
-      const ownerAvEl = document.getElementById('owner-av');
-      if (owner.avatar_url) {
-        ownerAvEl.innerHTML = `<img src="${owner.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;">`;
-      } else {
-        ownerAvEl.textContent = name[0].toUpperCase();
-      }
-      window._ownerAvatarUrl = owner.avatar_url || null;
-      document.getElementById('owner-badge').style.display = owner.username.toLowerCase() === ADMIN_USERNAME ? '' : 'none';
-      if (owner.promo_logo) setLogoImage(owner.promo_logo);
-      if (owner.promo_banner) {
-        const bannerImg = document.getElementById('efed-banner-img');
-        if (bannerImg) { bannerImg.src = owner.promo_banner; bannerImg.style.display = 'block'; }
-        const noise = document.querySelector('.efed-banner-noise');
-        const glow = document.querySelector('.efed-banner-glow');
-        if (noise) noise.style.display = 'none';
-        if (glow) glow.style.display = 'none';
-      }
-      renderLinks({
-        yt:  (owner.yt_channel    || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
-        ig:  (owner.ig_handle     || '').replace('@',''),
-        x:   (owner.x_handle      || '').replace('@',''),
-        web: (owner.promo_website || '').replace(/^https?:\/\//,'')
-      });
+    const _sess = getSession();
+    if (!_sess) return;
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(_sess.username)}&select=${SELECT}`);
+    if (!users.length) return;
+    const owner = users[0];
+    FSW_OWNER = owner.username;
+    const name = owner.display_name || owner.username;
+    document.getElementById('owner-name').textContent = name;
+    const ownerAvEl = document.getElementById('owner-av');
+    if (owner.avatar_url) {
+      ownerAvEl.innerHTML = `<img src="${owner.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;">`;
     } else {
-      document.getElementById('owner-name').textContent = 'Unknown';
+      ownerAvEl.textContent = name[0].toUpperCase();
     }
+    window._ownerAvatarUrl = owner.avatar_url || null;
+    document.getElementById('owner-badge').style.display = owner.username.toLowerCase() === ADMIN_USERNAME ? '' : 'none';
+    if (owner.promo_logo) setLogoImage(owner.promo_logo);
+    if (owner.promo_banner) {
+      const bannerImg = document.getElementById('efed-banner-img');
+      if (bannerImg) { bannerImg.src = owner.promo_banner; bannerImg.style.display = 'block'; }
+      const noise = document.querySelector('.efed-banner-noise');
+      const glow = document.querySelector('.efed-banner-glow');
+      if (noise) noise.style.display = 'none';
+      if (glow) glow.style.display = 'none';
+    }
+    renderLinks({
+      yt:  (owner.yt_channel    || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
+      ig:  (owner.ig_handle     || '').replace('@',''),
+      x:   (owner.x_handle      || '').replace('@',''),
+      web: (owner.promo_website || '').replace(/^https?:\/\//,'')
+    });
   } catch(e) {
     console.error('Owner fetch failed:', e);
     const session = getSession();
