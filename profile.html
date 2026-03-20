@@ -265,7 +265,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   </a>
 
   <div class="nav-right">
-    <div id="online-counter" style="display:none;align-items:center;gap:5px;font-size:.62rem;letter-spacing:1.5px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-weight:500;white-space:nowrap;">
+    <div id="online-counter" style="display:flex;align-items:center;gap:5px;font-size:.62rem;letter-spacing:1.5px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-weight:500;white-space:nowrap;">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       <span id="total-users-label">— members</span>
     </div>
@@ -333,6 +333,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
     <div style="flex:1;min-width:0;">
       <div class="profile-name" id="profile-name">—</div>
       <div class="profile-handle" id="profile-handle">@—</div>
+      <div id="profile-social-links" style="display:none;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap;"></div>
     </div>
     <button class="edit-pencil" id="edit-pencil" style="display:none;" onclick="openEditModal()" title="Edit profile">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -497,6 +498,11 @@ async function openEditModal() {
 
   // Clear msgs
   ['ep-av-msg','ep-name-msg'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = ''; });
+  // Pre-fill social inputs
+  const _igInput = document.getElementById('ep-ig-input');
+  const _xInput  = document.getElementById('ep-x-input');
+  if (_igInput) _igInput.value = (session.igHandle || '').replace('@','');
+  if (_xInput)  _xInput.value  = (session.xHandle  || '').replace('@','');
   document.getElementById('edit-modal-bg').style.display = 'flex';
 }
 
@@ -566,8 +572,21 @@ async function saveEditProfile() {
   if (!name) { nameMsg.textContent = 'Name cannot be empty.'; nameMsg.style.color='#ff6b6b'; return; }
   if (name.length > 24) { nameMsg.textContent = 'Max 24 characters.'; nameMsg.style.color='#ff6b6b'; return; }
   try {
-    const updates = { display_name: name };
+    const ig = (document.getElementById('ep-ig-input')?.value.trim() || '').replace('@','');
+    const x  = (document.getElementById('ep-x-input')?.value.trim()  || '').replace('@','');
+    const updates = { display_name: name, ig_handle: ig, x_handle: x };
     await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(updates) });
+    // Update session + re-render social links
+    session.igHandle = ig; session.xHandle = x;
+    localStorage.setItem('efed_session', JSON.stringify(session));
+    const socialWrap = document.getElementById('profile-social-links');
+    if (socialWrap) {
+      socialWrap.innerHTML = [
+        ig ? `<a href="https://instagram.com/${ig}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:5px;color:rgba(255,255,255,.45);font-size:.62rem;letter-spacing:1px;text-decoration:none;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.45)'"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>@${ig}</a>` : '',
+        x  ? `<a href="https://x.com/${x}"  target="_blank" rel="noopener" style="display:flex;align-items:center;gap:5px;color:rgba(255,255,255,.45);font-size:.62rem;letter-spacing:1px;text-decoration:none;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.45)'"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.737-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@${x}</a>` : ''
+      ].filter(Boolean).join('<span style="color:rgba(255,255,255,.15);">·</span>');
+      socialWrap.style.display = (ig || x) ? 'flex' : 'none';
+    }
 
     // Update session + UI
     session.displayName = name;
@@ -838,7 +857,7 @@ async function loadProfile() {
 
   // User data
   try {
-    const users = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=username,display_name,avatar_url,avatar_banner,is_verified,role,promo_name`);
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=username,display_name,avatar_url,avatar_banner,is_verified,role,promo_name,ig_handle,x_handle`);
     if (!users.length) { document.getElementById('profile-name').textContent = 'User not found'; return; }
     const user = users[0];
     const name = user.display_name || user.username;
@@ -855,6 +874,17 @@ async function loadProfile() {
       const glowEl = document.querySelector('.banner-glow');
       if (noiseEl) noiseEl.style.display = 'none';
       if (glowEl) glowEl.style.display = 'none';
+    }
+    // Social links
+    const socialWrap = document.getElementById('profile-social-links');
+    if (socialWrap) {
+      const ig = (user.ig_handle || '').replace('@','');
+      const x  = (user.x_handle  || '').replace('@','');
+      socialWrap.innerHTML = [
+        ig ? `<a href="https://instagram.com/${ig}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:5px;color:rgba(255,255,255,.45);font-size:.62rem;letter-spacing:1px;text-decoration:none;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.45)'"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>@${ig}</a>` : '',
+        x  ? `<a href="https://x.com/${x}"  target="_blank" rel="noopener" style="display:flex;align-items:center;gap:5px;color:rgba(255,255,255,.45);font-size:.62rem;letter-spacing:1px;text-decoration:none;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.45)'"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.737-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@${x}</a>` : ''
+      ].filter(Boolean).join('<span style="color:rgba(255,255,255,.15);">·</span>');
+      socialWrap.style.display = (ig || x) ? 'flex' : 'none';
     }
 
   } catch(e) {
@@ -892,11 +922,11 @@ async function loadProfile() {
   // likes: unique video_ids only (like/unlike/relike still = 1 row max in DB per video)
   const uniqueLikedVideos = new Set(likesData.map(l => l.video_id)).size;
   const inviteCount = invitesData.length;
-  const allInviteBonus = inviteCount >= 5 ? 20 : 0;
+  const allInviteBonus = inviteCount >= 5 ? 25 : 0;
   const points =
-    (subsData.length     * 5)  +
-    (ratingsData.length  * 3)  +
-    (supportsData.length * 2)  +
+    (subsData.length     * 10) +
+    (ratingsData.length  * 5)  +
+    (supportsData.length * 3)  +
     (inviteCount         * 10) +
     (uniqueLikedVideos   * 1)  +
     allInviteBonus;
@@ -983,7 +1013,21 @@ async function loadProfile() {
   } catch(e) { bmRow.innerHTML = '<div class="empty">Could not load.</div>'; }
 }
 
+
+async function loadMemberCount() {
+  try {
+    const ur = await fetch(SUPABASE_URL + '/rest/v1/users?select=username', {
+      headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' }
+    });
+    const userCount = parseInt(ur.headers.get('Content-Range')?.split('/')[1] || '0', 10);
+    const totalEl = document.getElementById('total-users-label');
+    if (totalEl) totalEl.textContent = userCount + (userCount === 1 ? ' member' : ' members');
+    const wrap = document.getElementById('online-counter');
+    if (wrap) wrap.style.display = 'flex';
+  } catch(e) {}
+}
 initNav();
+loadMemberCount();
 loadProfile();
 
 // ── BANNER CROP LOGIC ──
@@ -1146,6 +1190,24 @@ document.addEventListener('DOMContentLoaded', () => {
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Display Name</div>
         <input id="ep-name-input" type="text" placeholder="Your display name" maxlength="24" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
         <div id="ep-name-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
+      </div>
+
+      <!-- Instagram -->
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Instagram</div>
+        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.82rem;">@</span>
+          <input id="ep-ig-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+        </div>
+      </div>
+
+      <!-- X / Twitter -->
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">X (Twitter)</div>
+        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.82rem;">@</span>
+          <input id="ep-x-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+        </div>
       </div>
 
     </div>

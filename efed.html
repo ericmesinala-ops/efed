@@ -724,9 +724,15 @@ async function loadPage() {
   const initEl = document.getElementById('efed-logo-initials');
   if (initEl) initEl.textContent = FSW_EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,4).toUpperCase();
 
-  // Owner — find user whose promo_name matches this eFed
+  // Owner — query by promo_name first, fall back to session username (mirrors profile.html pattern)
   try {
-    const owners = await sbGet('users', `promo_name=eq.${encodeURIComponent(FSW_EFED_NAME)}&select=username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,promo_banner,yt_channel,ig_handle,x_handle,promo_website`);
+    const SELECT = 'username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,promo_banner,yt_channel,ig_handle,x_handle,promo_website';
+    let owners = await sbGet('users', `promo_name=eq.${encodeURIComponent(FSW_EFED_NAME)}&select=${SELECT}`);
+    // If promo_name not set on the row yet, fall back to session username — same as profile does
+    if (!owners.length) {
+      const _sess = getSession();
+      if (_sess) owners = await sbGet('users', `username=eq.${encodeURIComponent(_sess.username)}&select=${SELECT}`);
+    }
     const owner = owners.find(u => u.is_efed_owner) || owners.find(u => u.role === 'owner') || owners[0];
     if (owner) {
       FSW_OWNER = owner.username;
@@ -749,7 +755,6 @@ async function loadPage() {
         if (noise) noise.style.display = 'none';
         if (glow) glow.style.display = 'none';
       }
-
       renderLinks({
         yt:  (owner.yt_channel    || '').replace(/^https?:\/\/(www\.)?youtube\.com\//,''),
         ig:  (owner.ig_handle     || '').replace('@',''),
@@ -1109,7 +1114,7 @@ async function handleLogoFile(event) {
         const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
           method: 'PATCH',
           headers: SB_HEADERS,
-          body: JSON.stringify({ promo_logo: dataUrl })
+          body: JSON.stringify({ promo_logo: dataUrl, promo_name: FSW_EFED_NAME })
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
       } catch(err) { console.error('Logo save failed', err); alert('Logo save failed: ' + err.message); }
@@ -1153,7 +1158,7 @@ async function removeLogo() {
     await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
       method: 'PATCH',
       headers: SB_HEADERS,
-      body: JSON.stringify({ promo_logo: null })
+      body: JSON.stringify({ promo_logo: null, promo_name: FSW_EFED_NAME })
     });
   } catch(err) { console.warn('Logo remove failed', err); }
 }
@@ -1310,7 +1315,7 @@ async function saveLinks() {
   msg.textContent = 'Saving…';
   msg.style.color = '#8a8a9a';
   try {
-    const updates = { yt_channel: yt, ig_handle: ig, x_handle: x, promo_website: web };
+    const updates = { yt_channel: yt, ig_handle: ig, x_handle: x, promo_website: web, promo_name: FSW_EFED_NAME };
     const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
       method: 'PATCH',
       headers: SB_HEADERS,
@@ -1327,7 +1332,21 @@ async function saveLinks() {
   }
 }
 
+
+async function loadMemberCount() {
+  try {
+    const ur = await fetch(SUPABASE_URL + '/rest/v1/users?select=username', {
+      headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' }
+    });
+    const userCount = parseInt(ur.headers.get('Content-Range')?.split('/')[1] || '0', 10);
+    const totalEl = document.getElementById('total-users-label');
+    if (totalEl) totalEl.textContent = userCount + (userCount === 1 ? ' member' : ' members');
+    const wrap = document.getElementById('online-counter');
+    if (wrap) wrap.style.display = 'flex';
+  } catch(e) {}
+}
 initNav();
+loadMemberCount();
 initLogoEdit();
 loadPage();
 
