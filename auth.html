@@ -618,6 +618,10 @@ async function doRegister() {
     if (existing.length) return showErr('reg-err2', 'Username already taken. Try another.');
     const existingEmail = await sbGet('users', `email=eq.${encodeURIComponent(email)}`);
     if (existingEmail.length) return showErr('reg-err2', 'Email already registered.');
+    if (isEfedOwner && promoName) {
+      const existingPromo = await sbGet('users', `promo_name=eq.${encodeURIComponent(promoName)}`);
+      if (existingPromo.length) return showErr('reg-err2', 'That promotion name is already registered.');
+    }
 
     await sbInsert('users', {
       username: user,
@@ -657,23 +661,7 @@ async function doRegister() {
     }
     if (newCodes.length > 0) await sbInsert('invites', newCodes);
 
-    // If eFed owner with YouTube channel — retroactively assign matching videos to their eFed
-    if (isEfedOwner && promoName && ytChannel) {
-      try {
-        const ytHandle = ytChannel.replace(/^https?:\/\/(www\.)?youtube\.com\/@?/,'').toLowerCase().replace(/\//g,'').replace(/[^a-z0-9]/g,'');
-        if (ytHandle) {
-          // Find submissions where the submitted_by user's channel matches OR url contains the handle
-          const allSubs = await sbGet('submissions', `efed=eq.Community&select=id,url,submitted_by`);
-          const matchingIds = allSubs.filter(s => s.url && s.url.toLowerCase().replace(/[^a-z0-9]/g,'').includes(ytHandle)).map(s => s.id);
-          // Update each matching submission to this eFed
-          for (const id of matchingIds) {
-            try { await sbUpdate('submissions', { efed: promoName, community: true }, `id=eq.${id}`); } catch(e) {}
-          }
-        }
-      } catch(e) { console.warn('Retroactive eFed assign failed:', e); }
-    }
-
-    setSession({ username: user, displayName: cawName, promoName: promoName || null });
+    setSession({ username: user, displayName: cawName });
     showOk('reg-ok', 'Account created! Welcome to the Hub.');
     setTimeout(() => window.location.replace('index.html'), 800);
   } catch(e) {
