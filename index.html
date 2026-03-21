@@ -3178,7 +3178,7 @@ if (_grid) _grid.addEventListener('scroll', updateRowArrows);
       await fetch(SUPABASE_URL + '/rest/v1/presence', {
         method: 'POST',
         headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates' },
-        body: JSON.stringify({ id: visitorId, last_seen: Date.now() })
+        body: JSON.stringify({ id: visitorId, last_seen: Date.now(), username: (typeof getSession === 'function' && getSession()) ? getSession().username : null })
       });
       // Clean up stale rows older than TTL
       const cutoff = Date.now() - PRESENCE_TTL;
@@ -5451,7 +5451,8 @@ document.addEventListener('keydown', e => {
 
       <!-- Tabs -->
       <div style="display:flex;gap:8px;margin-bottom:20px;">
-        <button id="admin-tab-pending" onclick="switchAdminTab('pending')" style="padding:8px 16px;border-radius:40px;border:1px solid rgba(192,0,14,.4);background:rgba(192,0,14,.15);color:#fff;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;letter-spacing:1px;">Pending</button>
+        <button id="admin-tab-online" onclick="switchAdminTab('online')" style="padding:8px 16px;border-radius:40px;border:1px solid rgba(76,175,100,.4);background:rgba(76,175,100,.15);color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;letter-spacing:1px;">🟢 Online</button>
+        <button id="admin-tab-pending" onclick="switchAdminTab('pending')" style="padding:8px 16px;border-radius:40px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:#8a8a9a;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;letter-spacing:1px;">Pending</button>
         <button id="admin-tab-flagged" onclick="switchAdminTab('flagged')" style="padding:8px 16px;border-radius:40px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:#8a8a9a;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;letter-spacing:1px;">Flagged Comments</button>
         <button id="admin-tab-users" onclick="switchAdminTab('users')" style="padding:8px 16px;border-radius:40px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:#8a8a9a;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;letter-spacing:1px;">Users</button>
         <button id="admin-tab-broadcast" onclick="switchAdminTab('broadcast')" style="padding:8px 16px;border-radius:40px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);color:#8a8a9a;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;letter-spacing:1px;">📢 Broadcast</button>
@@ -5461,6 +5462,7 @@ document.addEventListener('keydown', e => {
       <div id="admin-flagged-list" style="display:none;"></div>
       <div id="admin-users-list" style="display:none;"></div>
       <div id="admin-broadcast-list" style="display:none;"></div>
+      <div id="admin-online-list" style="display:none;"></div>
     </div>
   </div>
 </div>
@@ -5505,11 +5507,11 @@ function openAdminPanel() {
   if (!session || session.username.toLowerCase() !== ADMIN_USERNAME) return;
   document.getElementById('admin-panel-bg').style.display = 'block';
   document.body.style.overflow = 'hidden';
-  switchAdminTab('pending');
+  switchAdminTab('online');
 }
 
 function switchAdminTab(tab) {
-  ['pending','flagged','users','broadcast'].forEach(t => {
+  ['pending','flagged','users','broadcast','online'].forEach(t => {
     document.getElementById('admin-' + t + '-list').style.display = t === tab ? 'block' : 'none';
     const btn = document.getElementById('admin-tab-' + t);
     if (t === tab) {
@@ -5526,7 +5528,36 @@ function switchAdminTab(tab) {
   if (tab === 'flagged') loadAdminFlagged();
   if (tab === 'users') loadAdminUsers();
   if (tab === 'broadcast') loadAdminBroadcast();
+  if (tab === 'online') loadAdminOnline();
 }
+async function loadAdminOnline() {
+  const list = document.getElementById('admin-online-list');
+  list.innerHTML = '<div style="font-size:.75rem;color:#8a8a9a;padding:12px 0;">Loading…</div>';
+  try {
+    const cutoff = Date.now() - 120000;
+    const rows = await sbGet('presence', `last_seen=gt.${cutoff}&select=username,last_seen&order=last_seen.desc`);
+    if (!rows.length) {
+      list.innerHTML = '<div style="font-size:.75rem;color:#8a8a9a;padding:12px 0;">No one online right now.</div>';
+      return;
+    }
+    list.innerHTML = '<div style="font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:#8a8a9a;font-weight:600;margin-bottom:12px;">' + rows.length + ' online now</div>';
+    rows.forEach(r => {
+      const div = document.createElement('div');
+      div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);';
+      const ago = Math.floor((Date.now() - r.last_seen) / 1000);
+      div.innerHTML = `
+        <div style="width:8px;height:8px;border-radius:50%;background:#4caf64;box-shadow:0 0 6px rgba(76,175,100,.7);flex-shrink:0;"></div>
+        <div style="flex:1;">
+          <div style="font-size:.82rem;font-weight:600;color:#e8e8e8;">${r.username ? '@' + r.username : 'Guest'}</div>
+          <div style="font-size:.62rem;color:#8a8a9a;">Active ${ago < 60 ? ago + 's ago' : Math.floor(ago/60) + 'm ago'}</div>
+        </div>`;
+      list.appendChild(div);
+    });
+  } catch(e) {
+    list.innerHTML = '<div style="font-size:.75rem;color:#ff6b6b;">Could not load. Make sure presence table has a username column.</div>';
+  }
+}
+
 function closeAdminPanel() {
   document.getElementById('admin-panel-bg').style.display = 'none';
   document.body.style.overflow = '';
