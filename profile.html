@@ -410,6 +410,12 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   <span class="hub-back-label">Back to Hub</span>
 </a>
 
+<!-- ── BIO ── -->
+<div id="bio-section" style="display:none;padding:16px 16px 0;">
+  <div id="profile-bio" style="font-size:.8rem;color:rgba(255,255,255,.65);line-height:1.7;white-space:pre-wrap;word-break:break-word;"></div>
+  <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
+</div>
+
 <!-- ── OPEN FOR SIGNINGS ── -->
 <div id="signings-section" style="display:none;padding:16px 16px 0;">
   <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -845,6 +851,15 @@ async function openEditModal() {
   ['ep-av-msg','ep-name-msg'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = ''; });
   const _igIn = document.getElementById('ep-ig-input'); if (_igIn) _igIn.value = (session.igHandle || '').replace('@','');
   const _xIn  = document.getElementById('ep-x-input');  if (_xIn)  _xIn.value  = (session.xHandle  || '').replace('@','');
+  // Prefill bio
+  try {
+    const udata = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=bio`);
+    const bioVal = udata[0]?.bio || '';
+    const bioInput = document.getElementById('ep-bio-input');
+    const bioCount = document.getElementById('ep-bio-count');
+    if (bioInput) { bioInput.value = bioVal; }
+    if (bioCount) bioCount.textContent = bioVal.length + ' / 160';
+  } catch(e) {}
   document.getElementById('edit-modal-bg').style.display = 'flex';
 }
 
@@ -924,11 +939,11 @@ async function saveEditProfile() {
   if (name.length > 24) { nameMsg.textContent = 'Max 24 characters.'; nameMsg.style.color='#ff6b6b'; return; }
   const ig = (document.getElementById('ep-ig-input')?.value.trim() || '').replace('@','');
   const x  = (document.getElementById('ep-x-input')?.value.trim()  || '').replace('@','');
+  const bio = (document.getElementById('ep-bio-input')?.value || '').slice(0, 160);
   try {
-    const updates = { display_name: name, ig_handle: ig, x_handle: x };
+    const updates = { display_name: name, ig_handle: ig, x_handle: x, bio: bio || null };
     await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(updates) });
 
-    // Cache to localStorage — same as display_name
     session.displayName = name; session.igHandle = ig; session.xHandle = x;
     localStorage.setItem('efed_session', JSON.stringify(session));
     document.getElementById('profile-name').textContent = name;
@@ -936,6 +951,11 @@ async function saveEditProfile() {
     const navImg = document.getElementById('nav-avatar-img');
     if (!navImg || navImg.style.display === 'none') document.getElementById('nav-initials').textContent = name[0].toUpperCase();
     renderSocialLinks(ig, x);
+    // Update bio on page
+    const bioEl = document.getElementById('profile-bio');
+    const bioSec = document.getElementById('bio-section');
+    if (bioEl) bioEl.textContent = bio;
+    if (bioSec) bioSec.style.display = bio ? 'block' : 'none';
     nameMsg.textContent = 'Saved!'; nameMsg.style.color = '#4caf64';
     setTimeout(closeEditModal, 800);
   } catch(e) { nameMsg.textContent = 'Could not save.'; nameMsg.style.color='#ff6b6b'; }
@@ -1213,7 +1233,7 @@ async function loadProfile() {
     if (session.igHandle || session.xHandle) renderSocialLinks(session.igHandle || '', session.xHandle || '');
   }
   try {
-    const users = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=username,display_name,avatar_url,avatar_banner,is_verified,role,promo_name,ig_handle,x_handle,caw_image_1,caw_image_2,caw_image_3,caw_image_4,open_for_signings`);
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=username,display_name,avatar_url,avatar_banner,is_verified,role,promo_name,ig_handle,x_handle,caw_image_1,caw_image_2,caw_image_3,caw_image_4,open_for_signings,bio`);
     if (!users.length) { document.getElementById('profile-name').textContent = 'User not found'; return; }
     const user = users[0];
     const name = user.display_name || user.username;
@@ -1238,6 +1258,11 @@ async function loadProfile() {
     localStorage.setItem('efed_session', JSON.stringify(session));
     renderSocialLinks(ig, x);
     loadCawImages(user);
+
+    // Bio
+    const bioEl = document.getElementById('profile-bio');
+    const bioSec = document.getElementById('bio-section');
+    if (bioEl && user.bio) { bioEl.textContent = user.bio; if (bioSec) bioSec.style.display = 'block'; }
 
     // Signings — show for everyone, toggle disabled for visitors
     const sec = document.getElementById('signings-section');
@@ -1595,6 +1620,15 @@ function triggerInstall() {
           <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.82rem;">@</span>
           <input id="ep-x-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
         </div>
+      </div>
+
+      <!-- Bio -->
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;">Bio</div>
+          <div id="ep-bio-count" style="font-size:.6rem;color:#5a5a6a;">0 / 160</div>
+        </div>
+        <textarea id="ep-bio-input" maxlength="160" rows="4" placeholder="Tell the community about yourself…" oninput="document.getElementById('ep-bio-count').textContent=this.value.length+' / 160'" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;resize:none;line-height:1.6;box-sizing:border-box;"></textarea>
       </div>
 
     </div>

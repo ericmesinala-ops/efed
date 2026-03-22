@@ -413,6 +413,12 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 </a>
 
 
+<!-- ── BIO ── -->
+<div id="bio-section" style="display:none;padding:16px 20px 0;">
+  <div id="profile-bio" style="font-size:.8rem;color:rgba(255,255,255,.65);line-height:1.7;white-space:pre-wrap;word-break:break-word;"></div>
+  <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
+</div>
+
 <!-- ── OPEN FOR SIGNINGS ── -->
 <div id="signings-section" style="display:none;padding:16px 20px 0;">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
@@ -756,7 +762,7 @@ async function openEditModal() {
   }
   // Pre-fill fields from DB
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=yt_channel,ig_handle,x_handle,promo_website,efed_signings_link`);
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=yt_channel,ig_handle,x_handle,promo_website,efed_signings_link,bio`);
     if (rows[0]) {
       const u = rows[0];
       document.getElementById('ep-yt-input').value = u.yt_channel || '';
@@ -764,6 +770,11 @@ async function openEditModal() {
       document.getElementById('ep-x-input').value = (u.x_handle || '').replace('@','');
       document.getElementById('ep-web-input').value = u.promo_website || '';
       document.getElementById('ep-apply-input').value = u.efed_signings_link || '';
+      const bioVal = u.bio || '';
+      const bioInput = document.getElementById('ep-bio-input');
+      const bioCount = document.getElementById('ep-bio-count');
+      if (bioInput) bioInput.value = bioVal;
+      if (bioCount) bioCount.textContent = bioVal.length + ' / 160';
     }
   } catch(e) {}
   document.getElementById('ep-name-msg').textContent = '';
@@ -829,12 +840,18 @@ async function saveEditProfile() {
   const x   = (document.getElementById('ep-x-input').value.trim()).replace('@','');
   const web = document.getElementById('ep-web-input').value.trim();
   const apply = document.getElementById('ep-apply-input').value.trim();
+  const bio = (document.getElementById('ep-bio-input')?.value || '').slice(0,160);
   try {
     const _sr = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
       method:'PATCH', headers:SB_HEADERS,
-      body:JSON.stringify({yt_channel:yt||null, ig_handle:ig||null, x_handle:x||null, promo_website:web||null, efed_signings_link:apply||null})
+      body:JSON.stringify({yt_channel:yt||null, ig_handle:ig||null, x_handle:x||null, promo_website:web||null, efed_signings_link:apply||null, bio:bio||null})
     });
     if (!_sr.ok) throw new Error('HTTP '+_sr.status+': '+await _sr.text());
+    // Update bio on page
+    const bioEl = document.getElementById('profile-bio');
+    const bioSec = document.getElementById('bio-section');
+    if (bioEl) bioEl.textContent = bio;
+    if (bioSec) bioSec.style.display = bio ? 'block' : 'none';
     // Update Apply Now button
     const applyBtn = document.getElementById('signings-apply-btn');
     if (applyBtn && apply && _signingsOn) { applyBtn.href=apply; applyBtn.style.display='block'; }
@@ -1161,7 +1178,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,bio&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) { document.getElementById('efed-name').textContent = EFED_NAME; loadEfedStats(); return; }
     const user = users[0];
@@ -1195,6 +1212,14 @@ async function loadProfile() {
     const x   = (user.x_handle  || '').replace('@','');
     const web = user.promo_website || '';
     renderSocialLinks(yt, ig, x, web);
+
+    // Bio
+    if (user.bio) {
+      const bioEl = document.getElementById('profile-bio');
+      const bioSec = document.getElementById('bio-section');
+      if (bioEl) bioEl.textContent = user.bio;
+      if (bioSec) bioSec.style.display = 'block';
+    }
 
     // Banner
     if (user.efed_banner) {
@@ -1697,15 +1722,18 @@ function updateEpArrows() {
   if (jR) jR.classList.toggle('hidden', atEnd   || noScroll);
 }
 
-function notifAcceptRoster(rosterRowId, requesterUsername, requesterName, notifId, notifEl) {
+function notifAcceptRoster(rosterRowId, requesterUsername, requesterName, efedName, notifId, notifEl) {
   document.getElementById('nra-name').textContent = requesterName;
-  document.getElementById('nra-efed').textContent = EFED_NAME;
+  document.getElementById('nra-efed').textContent = efedName || EFED_NAME;
   document.getElementById('nra-modal-bg').style.display = 'flex';
   document.getElementById('nra-confirm-btn').onclick = async () => {
     document.getElementById('nra-modal-bg').style.display = 'none';
     try {
-      // Approve roster row
-      await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+rosterRowId, {
+      // Approve roster row — use id if available, otherwise fallback to efed+username
+      const patchUrl = rosterRowId
+        ? SUPABASE_URL+'/rest/v1/roster?id=eq.'+rosterRowId
+        : SUPABASE_URL+'/rest/v1/roster?username=eq.'+encodeURIComponent(requesterUsername)+'&status=eq.pending';
+      await fetch(patchUrl, {
         method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({status:'approved'})
       });
       // Notify user
@@ -1714,7 +1742,7 @@ function notifAcceptRoster(rosterRowId, requesterUsername, requesterName, notifI
         body:JSON.stringify({
           username: requesterUsername,
           type: 'roster_approved',
-          message: `✅ You have been approved as a member of the <strong>${_esc(EFED_NAME)}</strong> roster!`,
+          message: `✅ You have been approved as a member of the <strong>${_esc(efedName || EFED_NAME)}</strong> roster!`,
           read: false,
           created_at: Date.now()
         })
@@ -1732,22 +1760,25 @@ function notifAcceptRoster(rosterRowId, requesterUsername, requesterName, notifI
   };
 }
 
-function notifDenyRoster(rosterRowId, requesterUsername, requesterName, notifId, notifEl) {
+function notifDenyRoster(rosterRowId, requesterUsername, requesterName, efedName, notifId, notifEl) {
   document.getElementById('nrd-name').textContent = requesterName;
-  document.getElementById('nrd-efed').textContent = EFED_NAME;
+  document.getElementById('nrd-efed').textContent = efedName || EFED_NAME;
   document.getElementById('nrd-modal-bg').style.display = 'flex';
   document.getElementById('nrd-confirm-btn').onclick = async () => {
     document.getElementById('nrd-modal-bg').style.display = 'none';
     try {
-      // Delete roster row
-      await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+rosterRowId, { method:'DELETE', headers:SB_HEADERS });
+      // Delete roster row — use id if available, otherwise fallback to efed+username
+      const deleteUrl = rosterRowId
+        ? SUPABASE_URL+'/rest/v1/roster?id=eq.'+rosterRowId
+        : SUPABASE_URL+'/rest/v1/roster?username=eq.'+encodeURIComponent(requesterUsername)+'&status=eq.pending';
+      await fetch(deleteUrl, { method:'DELETE', headers:SB_HEADERS });
       // Notify user
       await fetch(SUPABASE_URL+'/rest/v1/notifications', {
         method:'POST', headers:SB_HEADERS,
         body:JSON.stringify({
           username: requesterUsername,
           type: 'roster_denied',
-          message: `❌ Your request to join the <strong>${_esc(EFED_NAME)}</strong> roster was not approved at this time.`,
+          message: `❌ Your request to join the <strong>${_esc(efedName || EFED_NAME)}</strong> roster was not approved at this time.`,
           read: false,
           created_at: Date.now()
         })
@@ -2001,6 +2032,15 @@ function triggerInstall() {
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Application Link</div>
         <input id="ep-apply-input" type="url" placeholder="https://forms.gle/..." style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:5px;">
         <div style="font-size:.62rem;color:#5a5a6a;line-height:1.5;">This link only shows when you are open for signings.</div>
+      </div>
+
+      <!-- Bio -->
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;">About this eFed</div>
+          <div id="ep-bio-count" style="font-size:.6rem;color:#5a5a6a;">0 / 160</div>
+        </div>
+        <textarea id="ep-bio-input" maxlength="160" rows="4" placeholder="Tell the community about your eFed…" oninput="document.getElementById('ep-bio-count').textContent=this.value.length+' / 160'" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;resize:none;line-height:1.6;box-sizing:border-box;"></textarea>
       </div>
 
       <div id="ep-name-msg" style="font-size:.68rem;margin-top:-8px;min-height:14px;"></div>
@@ -2376,14 +2416,14 @@ async function loadNotifications() {
 
       if (n.type === 'roster_join' && n.video_url) {
         // Parse roster data from video_url JSON
-        let rosterRowId = '', requesterUsername = '', requesterName = '';
+        let rosterRowId = '', requesterUsername = '', requesterName = '', parsedEfedName = EFED_NAME;
         try {
           const parsed = JSON.parse(n.video_url);
           rosterRowId = parsed.rosterRowId || '';
           requesterUsername = parsed.requesterUsername || '';
           requesterName = parsed.requesterName || requesterUsername;
+          parsedEfedName = parsed.efedName || EFED_NAME;
         } catch(e) {
-          // Legacy: plain roster row id
           rosterRowId = n.video_url;
         }
         div.innerHTML = `
@@ -2392,8 +2432,8 @@ async function loadNotifications() {
             <div class="notif-msg">${n.message}</div>
             <div class="notif-time">${timeAgo}</div>
             <div style="display:flex;gap:8px;margin-top:10px;">
-              <button onclick="notifDenyRoster('${rosterRowId}','${_esc(requesterUsername)}','${_esc(requesterName)}',${n.id},this.closest('.notif-item'))" style="flex:1;padding:7px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">Deny</button>
-              <button onclick="notifAcceptRoster('${rosterRowId}','${_esc(requesterUsername)}','${_esc(requesterName)}',${n.id},this.closest('.notif-item'))" style="flex:2;padding:7px 0;background:rgba(76,175,100,.12);border:1px solid rgba(76,175,100,.3);border-radius:8px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">✓ Accept</button>
+              <button onclick="notifDenyRoster('${rosterRowId}','${_esc(requesterUsername)}','${_esc(requesterName)}','${_esc(parsedEfedName)}',${n.id},this.closest('.notif-item'))" style="flex:1;padding:7px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">Deny</button>
+              <button onclick="notifAcceptRoster('${rosterRowId}','${_esc(requesterUsername)}','${_esc(requesterName)}','${_esc(parsedEfedName)}',${n.id},this.closest('.notif-item'))" style="flex:2;padding:7px 0;background:rgba(76,175,100,.12);border:1px solid rgba(76,175,100,.3);border-radius:8px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">✓ Accept</button>
             </div>
           </div>
 `;  addSwipeToDelete(div, n.id);
@@ -2652,7 +2692,8 @@ async function submitJoinRoster() {
       const notifPayload = JSON.stringify({
         rosterRowId: String(newRosterRowId || ''),
         requesterUsername: session.username,
-        requesterName: session.displayName || session.username
+        requesterName: session.displayName || session.username,
+        efedName: EFED_NAME
       });
       await fetch(SUPABASE_URL+'/rest/v1/notifications', {
         method: 'POST', headers: SB_HEADERS,
