@@ -136,8 +136,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .section:last-child { border-bottom: none; padding-bottom: 100px; }
 .sec-title { font-size: .58rem; letter-spacing: 3px; text-transform: uppercase; color: var(--gold); font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 .sec-title::after { content: ''; flex: 1; height: 1px; background: rgba(200,168,75,.12); }
-#caw-slot-1:hover #caw-hover-1, #caw-slot-2:hover #caw-hover-2, #caw-slot-3:hover #caw-hover-3, #caw-slot-4:hover #caw-hover-4 { display: flex !important; }
-#caw-slot-1:hover #caw-plus-1, #caw-slot-2:hover #caw-plus-2, #caw-slot-3:hover #caw-plus-3, #caw-slot-4:hover #caw-plus-4 { opacity: .7; }
+
 .caw-slot { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); cursor: pointer; }
 .caw-plus { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: .3; transition: opacity .2s; }
 .caw-hover { position: absolute; top: 7px; right: 7px; display: none; z-index: 2; }
@@ -145,6 +144,8 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .caw-action-btn:hover { background: rgba(255,255,255,.15); }
 .caw-slot:hover .caw-hover { display: flex; }
 .caw-slot:hover .caw-plus { opacity: .6; }
+.caw-slot.empty:hover .caw-hover { display: none; }
+.caw-slot.empty:hover .caw-plus { opacity: .7; }
 
 /* ── EFED LIST ── */
 .efed-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); cursor: pointer; transition: opacity .15s; }
@@ -400,7 +401,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 <!-- ── MY EFEDS (Part of / Roster) ── -->
 <div class="section" id="caw-images-section">
   <div class="sec-title">Gallery</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;">
 
     <!-- Slot 1 -->
     <div id="caw-slot-1" class="caw-slot" onclick="cawSlotClick(1)">
@@ -495,6 +496,13 @@ function extractId(url) {
 // ── CAW IMAGES ──
 let _cawSlot = 1;
 
+function setCawSlotFilled(slot, filled) {
+  const el = document.getElementById('caw-slot-' + slot);
+  if (!el) return;
+  if (filled) el.classList.remove('empty');
+  else el.classList.add('empty');
+}
+
 function triggerCawUpload(slot) {
   const session = getSession();
   const targetUser = new URLSearchParams(location.search).get('u');
@@ -534,6 +542,7 @@ function handleCawFile(event) {
         const plusEl = document.getElementById('caw-plus-' + _cawSlot);
         if (imgEl) { imgEl.src = dataUrl; imgEl.style.display = 'block'; }
         if (plusEl) plusEl.style.display = 'none';
+        setCawSlotFilled(_cawSlot, true);
         const field = 'caw_image_' + _cawSlot;
         const body = {}; body[field] = dataUrl;
         try {
@@ -564,7 +573,10 @@ function loadCawImages(user) {
     if (val && imgEl) {
       imgEl.src = val; imgEl.style.display = 'block';
       if (plusEl) plusEl.style.display = 'none';
+      setCawSlotFilled(slot, true);
       hasAny = true;
+    } else {
+      setCawSlotFilled(slot, false);
     }
     if (!isOwn && slotEl) slotEl.style.cursor = 'default';
   });
@@ -632,6 +644,7 @@ async function deleteCawImage(slot) {
   const plusEl = document.getElementById('caw-plus-' + slot);
   if (imgEl) { imgEl.src = ''; imgEl.style.display = 'none'; }
   if (plusEl) plusEl.style.display = 'flex';
+  setCawSlotFilled(slot, false);
   const field = 'caw_image_' + slot;
   const body = {}; body[field] = null;
   try {
@@ -1295,9 +1308,17 @@ function openBannerCrop(dataUrl, W, H, onSave) {
   const bg = document.getElementById('banner-crop-bg');
   const img = document.getElementById('crop-img');
   const vp = document.getElementById('crop-viewport');
+  // Update viewport aspect ratio and title based on crop type
+  vp.style.aspectRatio = W + '/' + H;
+  const title = document.getElementById('banner-crop-title');
+  if (title) title.textContent = W === H ? 'POSITION IMAGE' : 'POSITION BANNER';
+  const saveBtn = document.getElementById('banner-crop-save-btn');
+  if (saveBtn) saveBtn.textContent = W === H ? 'Save Image' : 'Save Banner';
   bg.style.display = 'flex';
   img.src = dataUrl;
   img.onload = () => {
+    // Let browser reflow so viewport has correct square dimensions
+    requestAnimationFrame(() => {
     const vpW = vp.clientWidth, vpH = vp.clientHeight;
     const scale = Math.max(vpW / img.naturalWidth, vpH / img.naturalHeight) * 1.0;
     _cropState.scale = scale;
@@ -1305,6 +1326,7 @@ function openBannerCrop(dataUrl, W, H, onSave) {
     _cropState.y = (vpH - img.naturalHeight * scale) / 2;
     _cropState.img = img;
     applyTransform();
+    }); // end requestAnimationFrame
   };
 }
 
@@ -1400,6 +1422,7 @@ function confirmBannerCrop() {
 // Init events when modal first becomes visible
 const _cropObserver = new MutationObserver(() => { if (document.getElementById('banner-crop-bg')?.style.display !== 'none') initCropEvents(); });
 document.addEventListener('DOMContentLoaded', () => {
+  [1,2,3,4].forEach(s => setCawSlotFilled(s, false));
   const bg = document.getElementById('banner-crop-bg');
   if (bg) _cropObserver.observe(bg, { attributes: true, attributeFilter: ['style'] });
 });
@@ -1480,7 +1503,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <div id="banner-crop-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.92);backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;">
   <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:700px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.8);">
     <div style="padding:18px 22px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Position Banner</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;" id="banner-crop-title">Position Banner</div>
       <div style="font-size:.65rem;color:#5a5a6a;letter-spacing:1px;">Drag to reposition</div>
     </div>
     <!-- Crop viewport — fixed 960x200 ratio -->
@@ -1492,7 +1515,7 @@ document.addEventListener('DOMContentLoaded', () => {
     </div>
     <div style="padding:0 22px 20px;display:flex;gap:10px;">
       <button onclick="cancelBannerCrop()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
-      <button onclick="confirmBannerCrop()" style="flex:2;padding:12px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Banner</button>
+      <button id="banner-crop-save-btn" onclick="confirmBannerCrop()" style="flex:2;padding:12px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Banner</button>
     </div>
   </div>
 </div>
