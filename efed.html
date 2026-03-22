@@ -1133,11 +1133,26 @@ function makeVidCard(url, showName, date, thumbUrl) {
 async function loadProfile() {
   const session = getSession();
   const params = new URLSearchParams(window.location.search);
-  EFED_NAME = decodeURIComponent(params.get('e') || session?.promo_name || '');
+  EFED_NAME = decodeURIComponent(params.get('e') || '');
+
+  // If no ?e= param, fetch promo_name from DB (owner visiting their own page)
+  if (!EFED_NAME && session) {
+    try {
+      const me = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
+      if (me[0]?.promo_name && (me[0].is_efed_owner || me[0].role === 'owner')) {
+        EFED_NAME = me[0].promo_name;
+      }
+    } catch(e) {}
+  }
 
   if (!EFED_NAME) { document.getElementById('efed-name').textContent = 'eFed Not Found'; return; }
 
-  // Show edit pencil only for owner
+  // Instant render — show name + initials before DB responds
+  document.getElementById('efed-name').textContent = EFED_NAME;
+  const _initEl = document.getElementById('profile-av-initial');
+  if (_initEl) _initEl.textContent = EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,4).toUpperCase();
+
+  // Ownership check
   if (session) {
     try {
       const me = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
@@ -1168,9 +1183,6 @@ async function loadProfile() {
     // Logo
     if (user.promo_logo) {
       setAvatar(user.promo_logo);
-    } else {
-      const init = document.getElementById('profile-av-initial');
-      if (init) init.textContent = EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,4).toUpperCase();
     }
 
     // Social links — YT, IG, X, Website
