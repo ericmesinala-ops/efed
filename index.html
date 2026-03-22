@@ -4495,7 +4495,7 @@ async function savePassword() {
   <div style="background:#111114;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:90%;max-width:480px;padding:36px 32px;position:relative;box-shadow:0 40px 80px rgba(0,0,0,.6);box-sizing:border-box;overflow:hidden;">
     <button onclick="closeSubmitModal()" style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;">✕</button>
     <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:3px;color:#fff;margin-bottom:4px;">Post a Show</div>
-    <p style="font-size:.75rem;color:rgba(255,255,255,.6);margin-bottom:24px;line-height:1.7;">Have an eFed show the community needs to see? Submit a YouTube link below and we'll handle the rest. Share your own show or a favorite. Just paste the link and we'll pull everything automatically.</p>
+    <p style="font-size:.75rem;color:rgba(255,255,255,.6);margin-bottom:24px;line-height:1.7;">Our filter system screens submissions for eFed content. If a show is incorrectly flagged, use Request Review to notify the admin.</p>
 
     <div id="submit-err" style="display:none;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;font-size:.75rem;padding:10px 14px;border-radius:8px;margin-bottom:16px;"></div>
     <div id="submit-ok" style="display:none;background:rgba(76,175,100,.12);border:1px solid rgba(76,175,100,.3);color:#4caf64;font-size:.75rem;padding:10px 14px;border-radius:8px;margin-bottom:16px;"></div>
@@ -4516,15 +4516,6 @@ async function savePassword() {
     </div>
 
     <!-- Event date input (shown after preview loads) -->
-    <div id="submit-date-wrap" style="display:none;margin-bottom:16px;">
-      <label style="display:block;font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.5);font-weight:600;margin-bottom:6px;">Date of Event</label>
-      <input id="submit-event-date" type="date" autocomplete="off"
-        style="width:100%;max-width:100%;box-sizing:border-box;padding:11px 14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:16px;outline:none;color-scheme:dark;"
-        onchange="checkSubmitDateReady()"
-        />
-      <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-top:5px;">When did this event take place? Pick a future date to add it to Upcoming Shows.</div>
-    </div>
-
     <!-- Screening result -->
     <div id="submit-screening" style="display:none;font-size:.72rem;padding:10px 14px;border-radius:8px;margin-bottom:12px;"></div>
     <button id="submit-override-btn" onclick="overrideAndSubmit()" style="display:none;width:100%;padding:10px;margin-bottom:12px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.35);border-radius:8px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:1px;cursor:pointer;">⚡ Admin Override — Post Anyway</button>
@@ -4571,8 +4562,8 @@ function handleSubmitBgClick(e) {
 
 function clearSubmitPreview() {
   document.getElementById('submit-preview').style.display = 'none';
-  document.getElementById('submit-date-wrap').style.display = 'none';
-  document.getElementById('submit-event-date').value = '';
+  
+  
   document.getElementById('submit-screening').style.display = 'none';
   document.getElementById('submit-err').style.display = 'none';
   document.getElementById('submit-ok').style.display = 'none';
@@ -4664,39 +4655,30 @@ async function fetchSubmitPreview() {
       return;
     }
 
-    // Try to get YouTube upload date
+    // Get upload date via YouTube Data API v3
     let uploadDate = '';
     let uploadDateMs = null;
-    const proxies = [
-      `https://api.allorigins.win/raw?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + vidId)}`,
-      `https://corsproxy.io/?https://www.youtube.com/watch?v=${vidId}`,
-      `https://api.codetabs.com/v1/proxy?quest=https://www.youtube.com/watch?v=${vidId}`
-    ];
-    for (const proxyUrl of proxies) {
-      try {
-        const ytRes = await fetch(proxyUrl, { signal: AbortSignal.timeout(5000) });
-        if (!ytRes.ok) continue;
-        const ytHtml = await ytRes.text();
-        const dateMatch = ytHtml.match(/"datePublished":"([^"]+)"/) ||
-                          ytHtml.match(/"publishDate":"([^"]+)"/) ||
-                          ytHtml.match(/"uploadDate":"([^"]+)"/);
-        if (dateMatch) {
-          const parsed = new Date(dateMatch[1]);
+    try {
+      const ytApiRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${vidId}&key=${YT_API_KEY}`);
+      if (ytApiRes.ok) {
+        const ytApiData = await ytApiRes.json();
+        const publishedAt = ytApiData.items?.[0]?.snippet?.publishedAt;
+        if (publishedAt) {
+          const parsed = new Date(publishedAt);
           if (!isNaN(parsed)) {
             uploadDateMs = parsed.getTime();
             uploadDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-            break;
           }
         }
-      } catch(e) { continue; }
-    }
+      }
+    } catch(e) { console.warn('YT API date fetch failed', e); }
 
     _fetchedMeta = { title: oData.title || '', channel: oData.author_name || '', vidId, uploadDate, uploadDateMs };
 
     document.getElementById('submit-preview-title').textContent = _fetchedMeta.title;
     document.getElementById('submit-preview-channel').textContent = _fetchedMeta.channel + (_fetchedMeta.uploadDate ? '  ·  ' + _fetchedMeta.uploadDate : '');
     document.getElementById('submit-preview').style.display = 'block';
-    document.getElementById('submit-date-wrap').style.display = 'block';
+    
 
     // ── SCREENING — keyword-based (swap screenVideo() for API call when key is available) ──
     btn.textContent = 'Checking…';
@@ -4737,17 +4719,10 @@ async function fetchSubmitPreview() {
     btn.disabled = true;
     btn.style.opacity = '.4';
     btn.style.cursor = 'not-allowed';
-    btn.textContent = 'Pick a date to submit';
+    btn.textContent = 'Submit to Hub'; btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer';
 
     // Pre-fill date if available
-    if (uploadDateMs) {
-      const d = new Date(uploadDateMs);
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth()+1).padStart(2,'0');
-      const dd = String(d.getDate()).padStart(2,'0');
-      document.getElementById('submit-event-date').value = yyyy + '-' + mm + '-' + dd;
-      checkSubmitDateReady();
-    }
+    // uploadDate stored in _fetchedMeta for submission
   } catch(e) {
     console.warn('Preview fetch failed', e);
     btn.textContent = 'Submit to Hub';
@@ -4815,10 +4790,7 @@ async function overrideAndSubmit() {
   // Enable button and post directly
   const btn = document.getElementById('submit-post-btn');
   btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = '';
-  checkSubmitDateReady();
-  // Only post if date is already set, otherwise wait for user to pick date
-  const _dv = document.getElementById('submit-event-date').value;
-  if (_dv) doSubmitPost();
+  doSubmitPost();
 }
 
 function doSubmitPost() {
@@ -4864,20 +4836,10 @@ function doSubmitPost() {
         return;
       }
 
-      // Validate event date
-      const eventDateVal = document.getElementById('submit-event-date').value;
-      if (!eventDateVal) {
-        showSubmitErr('Please enter a valid event date before posting.');
-        btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Submit to Hub';
-        return;
-      }
-      const eventParsed = new Date(eventDateVal + 'T00:00:00');
-      const today = new Date(); today.setHours(0,0,0,0);
-      const isFuture = eventParsed > today;
-
-      const dateStr = new Date(eventDateVal + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      const dateMs = new Date(eventDateVal + 'T00:00:00').getTime();
-      const submitStatus = isFuture ? 'upcoming' : 'approved';
+      // Use upload date from YouTube API
+      const dateStr = _fetchedMeta.uploadDate || '';
+      const dateMs = _fetchedMeta.uploadDateMs || Date.now();
+      const submitStatus = 'approved';
 
       const thumbUrl = 'https://i.ytimg.com/vi/' + _fetchedMeta.vidId + '/mqdefault.jpg';
 
@@ -4904,27 +4866,7 @@ function doSubmitPost() {
         if (uRows[0]?.display_name) posterDisplayName = uRows[0].display_name;
       } catch(e) {}
 
-      if (isFuture) {
-        // Add to upcoming row, not main grid
-        const uv = {
-          url,
-          show: _fetchedMeta.title,
-          efed: assignedEfed,
-          date: dateStr,
-          dateMs,
-          submittedBy: session.username,
-          community: true,
-          status: 'upcoming',
-          thumb: thumbUrl,
-          dbId: inserted?.[0]?.id || null
-        };
-        upcomingVideos.push(uv);
-        loadUpcomingRow();
-
-        document.getElementById('submit-ok').style.display = 'block';
-        document.getElementById('submit-ok').textContent = '📅 Added to Upcoming Shows! It\'ll move to Latest Videos when it goes live.';
-      } else {
-        videos.push({
+      videos.push({
           url,
           show: _fetchedMeta.title,
           efed: assignedEfed,
@@ -4951,7 +4893,6 @@ function doSubmitPost() {
 
         document.getElementById('submit-ok').style.display = 'block';
         document.getElementById('submit-ok').textContent = '🎉 Your show is now live on the Hub!';
-      }
 
       btn.textContent = 'Posted!';
       btn.disabled = true;
@@ -4971,22 +4912,15 @@ function doSubmitPost() {
 
 function validateSubmitDate() {}
 function checkSubmitDateReady() {
-  const dateVal = document.getElementById('submit-event-date').value;
+  // Date is auto-fetched, just enable the button if screening passed
   const btn = document.getElementById('submit-post-btn');
   const screenEl = document.getElementById('submit-screening');
-  // Only enable if screening passed (green) and date is filled
   const screeningPassed = screenEl && screenEl.style.color === 'rgb(76, 175, 138)';
-  const overrideActive = screenEl && screenEl.textContent.includes('override');
-  if (dateVal && (screeningPassed || overrideActive)) {
+  if (screeningPassed) {
     btn.disabled = false;
-    btn.style.opacity = '';
-    btn.style.cursor = '';
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
     btn.textContent = 'Submit to Hub';
-  } else if (!dateVal && (screeningPassed || overrideActive)) {
-    btn.disabled = true;
-    btn.style.opacity = '.4';
-    btn.style.cursor = 'not-allowed';
-    btn.textContent = 'Pick a date to submit';
   }
 }
 
