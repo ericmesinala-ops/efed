@@ -1740,8 +1740,8 @@ function notifAcceptRoster(rosterRowId, requesterUsername, requesterName, efedNa
   document.getElementById('nra-confirm-btn').onclick = async () => {
     document.getElementById('nra-modal-bg').style.display = 'none';
     try {
-      // Always fetch the roster row fresh at accept time
       const targetEfed = efedName || EFED_NAME;
+      const displayMessage_accept = `✅ ${requesterName} was accepted to the ${targetEfed} roster.`;
       const rows = await sbGet('roster', `username=eq.${encodeURIComponent(requesterUsername)}&efed=eq.${encodeURIComponent(targetEfed)}&status=eq.pending&limit=1`);
       if (!rows.length) {
         // Maybe already approved
@@ -1764,7 +1764,11 @@ function notifAcceptRoster(rosterRowId, requesterUsername, requesterName, efedNa
         })
       });
       // Mark notif as read and swap buttons with confirmed label
-      markNotifRead(notifId);
+      // Mark notif read and strip ROSTER marker so buttons don't reappear on reload
+      await fetch(SUPABASE_URL+'/rest/v1/notifications?id=eq.'+notifId, {
+        method:'PATCH', headers:SB_HEADERS,
+        body:JSON.stringify({ read:true, message: displayMessage_accept })
+      });
       if (notifEl) {
         notifEl.classList.remove('unread');
         const btnRow = notifEl.querySelector('div[style*="gap:8px"]');
@@ -1785,6 +1789,7 @@ function notifDenyRoster(rosterRowId, requesterUsername, requesterName, efedName
     try {
       // Always fetch the roster row fresh at deny time
       const targetEfed = efedName || EFED_NAME;
+      const displayMessage_deny = `❌ ${requesterName}'s roster request for ${targetEfed} was denied.`;
       const rows = await sbGet('roster', `username=eq.${encodeURIComponent(requesterUsername)}&efed=eq.${encodeURIComponent(targetEfed)}&status=eq.pending&limit=1`);
       const rowId = rows[0]?.id;
       const deleteUrl = rowId
@@ -1803,7 +1808,10 @@ function notifDenyRoster(rosterRowId, requesterUsername, requesterName, efedName
         })
       });
       // Mark notif as read and swap buttons
-      markNotifRead(notifId);
+      await fetch(SUPABASE_URL+'/rest/v1/notifications?id=eq.'+notifId, {
+        method:'PATCH', headers:SB_HEADERS,
+        body:JSON.stringify({ read:true, message: displayMessage_deny })
+      });
       if (notifEl) {
         notifEl.classList.remove('unread');
         const btnRow = notifEl.querySelector('div[style*="gap:8px"]');
@@ -2438,7 +2446,7 @@ async function loadNotifications() {
       let displayMessage = n.message || '';
 
       // Extract hidden roster metadata from message
-      const rosterMarker = n.message && n.message.match(/\|\|ROSTER:(.*?)\|\|$/);
+      const rosterMarker = n.message && n.message.match(/\|\|ROSTER:([\s\S]*?)\|\|/);
       if (rosterMarker) {
         try {
           const meta = JSON.parse(rosterMarker[1]);
@@ -2447,7 +2455,7 @@ async function loadNotifications() {
           requesterUsername = meta.requesterUsername || '';
           requesterName = meta.requesterName || requesterUsername;
           parsedEfedName = meta.efedName || EFED_NAME;
-          displayMessage = n.message.replace(/\|\|ROSTER:.*?\|\|$/, '').trim();
+          displayMessage = n.message.replace(/\|\|ROSTER:[\s\S]*?\|\|/, '').trim();
         } catch(e) {}
       }
       // Also check video_url as legacy fallback
