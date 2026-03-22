@@ -1221,6 +1221,12 @@ async function loadProfile() {
     loadCawImages(user);
     if (!_isOwnProfile) {
       document.querySelectorAll('.caw-slot').forEach(s => { s.onclick = null; s.style.cursor = 'default'; });
+      // Show join roster button for non-owners
+      const session = getSession();
+      if (session) {
+        const joinBtn = document.getElementById('join-roster-btn');
+        if (joinBtn) joinBtn.style.display = 'inline-flex';
+      }
     }
 
   } catch(e) {
@@ -1244,13 +1250,10 @@ function updateSigningsUI(on) {
   if (!toggle) return;
 
   if (!_isOwnProfile) {
-    // Visitor — only show section when open, hide label entirely
+    // Visitor — only show section when open, hide toggle and label entirely
     if (section) section.style.display = on ? 'block' : 'none';
+    toggle.style.display = 'none';
     if (label) label.style.display = 'none';
-    if (on) {
-      toggle.style.background = 'rgba(76,175,100,.5)'; toggle.style.borderColor = 'rgba(76,175,100,.6)';
-      knob.style.transform = 'translateX(20px)'; knob.style.opacity = '1';
-    }
     return;
   }
 
@@ -1664,7 +1667,10 @@ function triggerInstall() {
 
 <!-- ── ROSTER ── -->
 <div class="section" id="roster-section">
-  <div class="sec-title">Roster</div>
+  <div class="sec-title" style="justify-content:space-between;">
+    <span style="display:flex;align-items:center;gap:8px;">Roster <span style="flex:1;height:1px;background:rgba(200,168,75,.12);display:inline-block;width:60px;"></span></span>
+    <button id="join-roster-btn" onclick="openJoinRosterModal()" style="display:none;padding:5px 12px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);border-radius:20px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:background .2s;">+ Join Roster</button>
+  </div>
   <div id="roster-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
     <div style="font-size:.78rem;color:var(--muted);grid-column:span 3;">No roster members yet.</div>
   </div>
@@ -1979,5 +1985,127 @@ async function markAllNotifsRead() {
   } catch(e) {}
 }
 </script>
+<!-- ── JOIN ROSTER MODAL ── -->
+<div id="join-roster-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeJoinRosterModal()">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:400px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.8);">
+    <div style="padding:20px 22px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Join Roster</div>
+      <button onclick="closeJoinRosterModal()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;">✕</button>
+    </div>
+    <div style="padding:20px 22px;">
+
+      <!-- Efed info -->
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);border-radius:10px;margin-bottom:18px;">
+        <div id="jr-efed-logo" style="width:40px;height:40px;border-radius:8px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.9rem;color:var(--accent);flex-shrink:0;overflow:hidden;"></div>
+        <div>
+          <div style="font-size:.85rem;font-weight:600;color:#fff;" id="jr-efed-name"></div>
+          <div style="font-size:.62rem;color:#8a8a9a;margin-top:2px;">You are requesting to join this eFed's roster.</div>
+        </div>
+      </div>
+
+      <!-- What this means -->
+      <div style="font-size:.72rem;color:#8a8a9a;line-height:1.8;margin-bottom:18px;">
+        <div style="color:rgba(255,255,255,.5);font-size:.6rem;letter-spacing:2px;text-transform:uppercase;font-weight:700;margin-bottom:8px;">What happens next</div>
+        Your profile will appear on this eFed's roster page. The promotion owner will be notified. You can leave the roster at any time from your profile page.
+      </div>
+
+      <!-- CAW name input -->
+      <div style="margin-bottom:6px;">
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:8px;font-weight:700;">Your CAW Name <span style="color:#5a5a6a;font-size:.55rem;">(optional)</span></div>
+        <input id="jr-caw-name" type="text" placeholder="e.g. Kendrick Montana" maxlength="60" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+      <div style="font-size:.62rem;color:#5a5a6a;margin-bottom:18px;">Leave blank to use your display name.</div>
+
+      <div id="jr-msg" style="font-size:.7rem;min-height:16px;margin-bottom:10px;"></div>
+      <button id="jr-submit-btn" onclick="submitJoinRoster()" style="width:100%;padding:13px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:10px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:background .2s;">Request to Join</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function openJoinRosterModal() {
+  const modal = document.getElementById('join-roster-modal-bg');
+  const nameEl = document.getElementById('jr-efed-name');
+  const logoEl = document.getElementById('jr-efed-logo');
+  if (nameEl) nameEl.textContent = EFED_NAME;
+  // Mirror efed logo
+  const pageLogoImg = document.getElementById('profile-av-img');
+  if (pageLogoImg && pageLogoImg.src && pageLogoImg.style.display !== 'none') {
+    logoEl.innerHTML = `<img src="${pageLogoImg.src}" style="width:100%;height:100%;object-fit:cover;border-radius:7px;">`;
+  } else {
+    logoEl.textContent = EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,3).toUpperCase();
+  }
+  document.getElementById('jr-caw-name').value = '';
+  document.getElementById('jr-msg').textContent = '';
+  const btn = document.getElementById('jr-submit-btn');
+  btn.disabled = false; btn.textContent = 'Request to Join';
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeJoinRosterModal() {
+  document.getElementById('join-roster-modal-bg').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+async function submitJoinRoster() {
+  const session = getSession(); if (!session) return;
+  const btn = document.getElementById('jr-submit-btn');
+  const msg = document.getElementById('jr-msg');
+  const cawName = document.getElementById('jr-caw-name').value.trim();
+
+  btn.disabled = true; btn.textContent = 'Sending…'; msg.textContent = '';
+
+  try {
+    // Check if already on roster
+    const existing = await sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&username=eq.${encodeURIComponent(session.username)}`);
+    if (existing.length) {
+      msg.textContent = 'You are already on this roster.';
+      msg.style.color = '#ff6b6b';
+      btn.disabled = false; btn.textContent = 'Request to Join';
+      return;
+    }
+
+    // Add to roster table
+    await fetch(SUPABASE_URL+'/rest/v1/roster', {
+      method: 'POST',
+      headers: {...SB_HEADERS, 'Prefer': 'return=representation'},
+      body: JSON.stringify({
+        efed: EFED_NAME,
+        username: session.username,
+        caw_name: cawName || (session.displayName || session.username),
+        joined_at: Date.now()
+      })
+    });
+
+    // Notify the eFed owner
+    if (EFED_OWNER) {
+      await fetch(SUPABASE_URL+'/rest/v1/notifications', {
+        method: 'POST', headers: SB_HEADERS,
+        body: JSON.stringify({
+          username: EFED_OWNER,
+          type: 'roster_join',
+          message: `🤼 ${session.displayName || session.username} has joined your ${EFED_NAME} roster${cawName ? ' as ' + cawName : ''}.`,
+          read: false,
+          created_at: Date.now()
+        })
+      });
+    }
+
+    msg.textContent = '✓ You joined the roster!';
+    msg.style.color = '#4caf64';
+    btn.textContent = 'Joined!';
+    loadRoster(); loadEfedStats();
+    setTimeout(closeJoinRosterModal, 1400);
+
+  } catch(e) {
+    console.error('Join roster failed:', e);
+    msg.textContent = 'Could not join. Try again.';
+    msg.style.color = '#ff6b6b';
+    btn.disabled = false; btn.textContent = 'Request to Join';
+  }
+}
+</script>
+
 </body>
 </html>
