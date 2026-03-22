@@ -113,7 +113,10 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   .notif-x-btn:hover { color:#ff6b6b !important; }
   .notif-item.unread { background: rgba(200,168,75,.04); }
   .notif-item.unread::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--gold); border-radius: 0 2px 2px 0; }
-  .notif-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; background: rgba(255,255,255,.06); }
+  .notif-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; background: rgba(255,255,255,.06); cursor: pointer; transition: background .15s, color .15s; position: relative; user-select: none; }
+  .notif-icon::after { content: '✕'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .85rem; opacity: 0; transition: opacity .15s; color: #ff6b6b; font-style: normal; }
+  .notif-item-wrap:hover .notif-icon::after { opacity: 1; }
+  .notif-item-wrap:hover .notif-icon { background: rgba(192,0,14,.15); font-size: 0; }
   .notif-body { flex: 1; min-width: 0; }
   .notif-msg { font-size: .78rem; color: rgba(255,255,255,.85); line-height: 1.5; }
   .notif-time { font-size: .62rem; color: #5a5a6a; margin-top: 3px; }
@@ -246,6 +249,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   transition: color .2s;
 }
 .hub-back-bar:hover .hub-back-label { color: rgba(255,255,255,.85); }
+@media (max-width: 600px) { .hub-back-label { font-size: .75rem; color: rgba(255,255,255,.7); } }
 
 .prof-arr-col { display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;flex-shrink:0;padding:0 4px; }
 .prof-pill-arr { width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.6);font-size:.9rem;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .2s,color .2s; }
@@ -2423,7 +2427,23 @@ async function loadNotifications() {
 
       let rosterRowId = '', requesterUsername = '', requesterName = '', parsedEfedName = EFED_NAME;
       let isRosterJoin = false;
-      if (n.video_url) {
+      let displayMessage = n.message || '';
+
+      // Extract hidden roster metadata from message
+      const rosterMarker = n.message && n.message.match(/\|\|ROSTER:(.*?)\|\|$/);
+      if (rosterMarker) {
+        try {
+          const meta = JSON.parse(rosterMarker[1]);
+          isRosterJoin = true;
+          rosterRowId = meta.rosterRowId || '';
+          requesterUsername = meta.requesterUsername || '';
+          requesterName = meta.requesterName || requesterUsername;
+          parsedEfedName = meta.efedName || EFED_NAME;
+          displayMessage = n.message.replace(/\|\|ROSTER:.*?\|\|$/, '').trim();
+        } catch(e) {}
+      }
+      // Also check video_url as legacy fallback
+      if (!isRosterJoin && n.video_url) {
         try {
           const parsed = JSON.parse(n.video_url);
           if (parsed.rosterRowId !== undefined) {
@@ -2435,24 +2455,22 @@ async function loadNotifications() {
           }
         } catch(e) {}
       }
-      if ((n.type === 'roster_join' || isRosterJoin) && n.video_url) {
+      if (isRosterJoin) {
         div.innerHTML = `
-          <div class="notif-icon">🤼</div>
+          <div class="notif-icon" onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))">🤼</div>
           <div class="notif-body" style="flex:1;">
-            <div class="notif-msg">${n.message}</div>
+            <div class="notif-msg">${displayMessage}</div>
             <div class="notif-time">${timeAgo}</div>
             <div style="display:flex;gap:8px;margin-top:10px;">
               <button onclick="notifDenyRoster('${rosterRowId}','${_esc(requesterUsername)}','${_esc(requesterName)}','${_esc(parsedEfedName)}',${n.id},this.closest('.notif-item'))" style="flex:1;padding:7px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">Deny</button>
               <button onclick="notifAcceptRoster('${rosterRowId}','${_esc(requesterUsername)}','${_esc(requesterName)}','${_esc(parsedEfedName)}',${n.id},this.closest('.notif-item'))" style="flex:2;padding:7px 0;background:rgba(76,175,100,.12);border:1px solid rgba(76,175,100,.3);border-radius:8px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">✓ Accept</button>
             </div>
           </div>
-          <button onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))" style="background:none;border:none;color:rgba(255,255,255,.2);cursor:pointer;font-size:.75rem;padding:4px;flex-shrink:0;align-self:flex-start;transition:color .15s;" onmouseover="this.style.color='#ff6b6b'" onmouseout="this.style.color='rgba(255,255,255,.2)'">✕</button>
 `;
       } else {
         div.innerHTML = `
-          <div class="notif-icon">🔔</div>
-          <div class="notif-body" style="flex:1;"><div class="notif-msg">${n.message}</div><div class="notif-time">${timeAgo}</div></div>
-          <button onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))" style="background:none;border:none;color:rgba(255,255,255,.2);cursor:pointer;font-size:.75rem;padding:4px;flex-shrink:0;align-self:flex-start;transition:color .15s;" onmouseover="this.style.color='#ff6b6b'" onmouseout="this.style.color='rgba(255,255,255,.2)'">✕</button>
+          <div class="notif-icon" onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))">🔔</div>
+          <div class="notif-body" style="flex:1;"><div class="notif-msg">${displayMessage}</div><div class="notif-time">${timeAgo}</div></div>
 `;
         div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
       }
@@ -2701,7 +2719,7 @@ async function submitJoinRoster() {
     }
 
     if (efedOwnerUsername) {
-      const notifPayload = JSON.stringify({
+      const rosterMeta = JSON.stringify({
         rosterRowId: String(newRosterRowId || ''),
         requesterUsername: session.username,
         requesterName: session.displayName || session.username,
@@ -2712,8 +2730,7 @@ async function submitJoinRoster() {
         body: JSON.stringify({
           username: efedOwnerUsername,
           type: 'roster_join',
-          message: `🤼 <strong>${_esc(session.displayName || session.username)}</strong> says they are part of your <strong>${_esc(EFED_NAME)}</strong> roster.`,
-          video_url: notifPayload,
+          message: `🤼 <strong>${_esc(session.displayName || session.username)}</strong> says they are part of your <strong>${_esc(EFED_NAME)}</strong> roster.||ROSTER:${rosterMeta}||`,
           read: false,
           created_at: Date.now()
         })

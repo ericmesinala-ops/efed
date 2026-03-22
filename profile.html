@@ -105,7 +105,10 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   .notif-item:hover { background: rgba(255,255,255,.03); }
   .notif-item.unread { background: rgba(200,168,75,.04); }
   .notif-item.unread::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--gold); border-radius: 0 2px 2px 0; }
-  .notif-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; background: rgba(255,255,255,.06); }
+  .notif-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; background: rgba(255,255,255,.06); cursor: pointer; transition: background .15s; position: relative; user-select: none; }
+  .notif-icon::after { content: '✕'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .85rem; opacity: 0; transition: opacity .15s; color: #ff6b6b; }
+  .notif-item-wrap:hover .notif-icon::after { opacity: 1; }
+  .notif-item-wrap:hover .notif-icon { background: rgba(192,0,14,.15); font-size: 0; }
   .notif-body { flex: 1; min-width: 0; }
   .notif-msg { font-size: .78rem; color: rgba(255,255,255,.85); line-height: 1.5; }
   .notif-time { font-size: .62rem; color: #5a5a6a; margin-top: 3px; }
@@ -232,11 +235,12 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 }
 .hub-back-label {
   font-family: 'DM Sans', sans-serif;
-  font-size: .58rem; font-weight: 600; letter-spacing: 2px;
-  color: rgba(255,255,255,.25); text-transform: uppercase;
+  font-size: .65rem; font-weight: 600; letter-spacing: 2px;
+  color: rgba(255,255,255,.5); text-transform: uppercase;
   transition: color .2s;
 }
-.hub-back-bar:hover .hub-back-label { color: rgba(255,255,255,.6); }
+.hub-back-bar:hover .hub-back-label { color: rgba(255,255,255,.85); }
+@media (max-width: 600px) { .hub-back-label { font-size: .75rem; color: rgba(255,255,255,.7); } }
 
 .prof-arr-col { display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;flex-shrink:0;padding:0 4px; }
 .prof-pill-arr { width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.6);font-size:.9rem;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .2s,color .2s; }
@@ -1922,12 +1926,25 @@ async function loadNotifications() {
       const timeAgo = getTimeAgo(n.created_at);
       const div = document.createElement('div');
       div.className = 'notif-item' + (n.read ? '' : ' unread');
-      div.innerHTML = `<div class="notif-icon">🔔</div><div class="notif-body"><div class="notif-msg">${n.message}</div><div class="notif-time">${timeAgo}</div></div>`;
+      div.innerHTML = `<div class="notif-icon" onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))">🔔</div><div class="notif-body"><div class="notif-msg">${n.message}</div><div class="notif-time">${timeAgo}</div></div>`;
       div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
-      list.appendChild(div);
+      const wrap = document.createElement('div');
+      wrap.className = 'notif-item-wrap';
+      wrap.appendChild(div);
+      list.appendChild(wrap);
     });
     const dot = document.getElementById('bnav-notif-dot'); if (dot) dot.classList.remove('visible');
   } catch(e) { list.innerHTML = '<div class="notif-empty">Could not load notifications.</div>'; }
+}
+async function deleteNotif(id, wrapEl) {
+  try {
+    await fetch(SUPABASE_URL+'/rest/v1/notifications?id=eq.'+id, { method:'DELETE', headers:SB_HEADERS });
+    if (wrapEl) wrapEl.remove();
+    const list = document.getElementById('notif-list');
+    if (list && !list.querySelector('.notif-item-wrap')) {
+      list.innerHTML = '<div class="notif-empty"><span style="font-size:1.5rem;">🔔</span>No notifications yet</div>';
+    }
+  } catch(e) {}
 }
 async function markNotifRead(id) { try { await fetch(SUPABASE_URL+'/rest/v1/notifications?id=eq.'+id, { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({read:true}) }); } catch(e) {} }
 async function markAllNotifsRead() {

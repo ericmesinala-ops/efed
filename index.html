@@ -1314,8 +1314,12 @@
   .notif-icon {
     width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    font-size: 1rem;
+    font-size: 1rem; cursor: pointer; transition: background .15s;
+    position: relative; user-select: none; background: rgba(255,255,255,.06);
   }
+  .notif-icon::after { content: '✕'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .85rem; opacity: 0; transition: opacity .15s; color: #ff6b6b; }
+  .notif-item-wrap:hover .notif-icon::after { opacity: 1; }
+  .notif-item-wrap:hover .notif-icon { background: rgba(192,0,14,.15); font-size: 0; }
   .notif-icon.type-comment { background: rgba(100,149,237,.15); }
   .notif-icon.type-like { background: rgba(192,0,14,.15); }
   .notif-icon.type-rating { background: rgba(200,168,75,.15); }
@@ -1675,11 +1679,12 @@
 }
 .hub-back-label {
   font-family: 'DM Sans', sans-serif;
-  font-size: .58rem; font-weight: 600; letter-spacing: 2px;
-  color: rgba(255,255,255,.25); text-transform: uppercase;
+  font-size: .65rem; font-weight: 600; letter-spacing: 2px;
+  color: rgba(255,255,255,.5); text-transform: uppercase;
   transition: color .2s;
 }
-.hub-back-bar:hover .hub-back-label { color: rgba(255,255,255,.6); }
+.hub-back-bar:hover .hub-back-label { color: rgba(255,255,255,.85); }
+@media (max-width: 600px) { .hub-back-label { font-size: .75rem; color: rgba(255,255,255,.7); } }
   #expand-close-btn.hub-back-bar {
     border-top: none;
     border-bottom: none;
@@ -6907,7 +6912,7 @@ async function loadNotifications() {
       const div = document.createElement('div');
       div.className = 'notif-item' + (n.read ? '' : ' unread');
       div.innerHTML = `
-        <div class="notif-icon ${icon.cls}">${icon.emoji}</div>
+        <div class="notif-icon ${icon.cls}" onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))">${icon.emoji}</div>
         <div class="notif-body">
           <div class="notif-msg">${n.message}</div>
           <div class="notif-time">${timeAgo}</div>
@@ -6923,7 +6928,10 @@ async function loadNotifications() {
       } else {
         div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
       }
-      list.appendChild(div);
+      const nWrap = document.createElement('div');
+      nWrap.className = 'notif-item-wrap';
+      nWrap.appendChild(div);
+      list.appendChild(nWrap);
     });
 
     // Mark dot as cleared
@@ -6933,6 +6941,16 @@ async function loadNotifications() {
   }
 }
 
+async function deleteNotif(id, wrapEl) {
+  try {
+    await fetch(SUPABASE_URL+'/rest/v1/notifications?id=eq.'+id, { method:'DELETE', headers:SB_HEADERS });
+    if (wrapEl) wrapEl.remove();
+    const list = document.getElementById('notif-list');
+    if (list && !list.querySelector('.notif-item-wrap')) {
+      list.innerHTML = '<div class="notif-empty"><span style="font-size:1.5rem;">🔔</span>No notifications yet</div>';
+    }
+  } catch(e) {}
+}
 async function markNotifRead(id) {
   try {
     await sbUpdate('notifications', { read: true }, `id=eq.${id}`);
@@ -7767,11 +7785,9 @@ function appendChatMessage(m, animate = true) {
       <div class="chat-msg-meta">
         <span class="chat-msg-user${isAdminUser ? ' is-admin' : ''}"><a href="profile.html?u=${encodeURIComponent(m.username)}" style="color:inherit;text-decoration:none;">${withVerified(m.display_name || m.username, m.username)}</a></span>
         <span class="chat-msg-time">${time}</span>
-        <button class="chat-react-btn" onclick="toggleReactionPicker(event,${m.id})" title="React">😊</button>
         ${(isAdmin || isMine) ? `<button class="chat-msg-delete" data-msgid="${m.id}" onclick="deleteChatMessage(this.dataset.msgid,this)">✕</button>` : ''}
       </div>
       <div class="chat-msg-text">${renderChatMessage(m.message)}</div>
-      <div class="chat-msg-reactions" id="reactions-${m.id}"></div>
     </div>`;
 
   // Wrap in swipe container for mobile delete
