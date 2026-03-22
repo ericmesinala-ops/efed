@@ -2375,10 +2375,17 @@ async function loadNotifications() {
       div.className = 'notif-item' + (n.read ? '' : ' unread');
 
       if (n.type === 'roster_join' && n.video_url) {
-        // Actionable roster request — show Accept/Deny buttons
-        const rosterRowId = n.video_url;
-        const requesterUsername = n.requester_username || '';
-        const requesterName = n.requester_name || requesterUsername;
+        // Parse roster data from video_url JSON
+        let rosterRowId = '', requesterUsername = '', requesterName = '';
+        try {
+          const parsed = JSON.parse(n.video_url);
+          rosterRowId = parsed.rosterRowId || '';
+          requesterUsername = parsed.requesterUsername || '';
+          requesterName = parsed.requesterName || requesterUsername;
+        } catch(e) {
+          // Legacy: plain roster row id
+          rosterRowId = n.video_url;
+        }
         div.innerHTML = `
           <div class="notif-icon">🤼</div>
           <div class="notif-body" style="flex:1;">
@@ -2642,17 +2649,20 @@ async function submitJoinRoster() {
     }
 
     if (efedOwnerUsername) {
+      const notifPayload = JSON.stringify({
+        rosterRowId: String(newRosterRowId || ''),
+        requesterUsername: session.username,
+        requesterName: session.displayName || session.username
+      });
       await fetch(SUPABASE_URL+'/rest/v1/notifications', {
         method: 'POST', headers: SB_HEADERS,
         body: JSON.stringify({
           username: efedOwnerUsername,
           type: 'roster_join',
           message: `🤼 <strong>${_esc(session.displayName || session.username)}</strong> says they are part of your <strong>${_esc(EFED_NAME)}</strong> roster.`,
-          video_url: String(newRosterRowId || ''),
+          video_url: notifPayload,
           read: false,
-          created_at: Date.now(),
-          requester_username: session.username,
-          requester_name: session.displayName || session.username
+          created_at: Date.now()
         })
       });
     }
