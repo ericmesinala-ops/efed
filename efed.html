@@ -2418,18 +2418,21 @@ async function loadNotifications() {
       const div = document.createElement('div');
       div.className = 'notif-item' + (n.read ? '' : ' unread');
 
-      if (n.type === 'roster_join' && n.video_url) {
-        // Parse roster data from video_url JSON
-        let rosterRowId = '', requesterUsername = '', requesterName = '', parsedEfedName = EFED_NAME;
+      let rosterRowId = '', requesterUsername = '', requesterName = '', parsedEfedName = EFED_NAME;
+      let isRosterJoin = false;
+      if (n.video_url) {
         try {
           const parsed = JSON.parse(n.video_url);
-          rosterRowId = parsed.rosterRowId || '';
-          requesterUsername = parsed.requesterUsername || '';
-          requesterName = parsed.requesterName || requesterUsername;
-          parsedEfedName = parsed.efedName || EFED_NAME;
-        } catch(e) {
-          rosterRowId = n.video_url;
-        }
+          if (parsed.rosterRowId !== undefined) {
+            isRosterJoin = true;
+            rosterRowId = parsed.rosterRowId || '';
+            requesterUsername = parsed.requesterUsername || '';
+            requesterName = parsed.requesterName || requesterUsername;
+            parsedEfedName = parsed.efedName || EFED_NAME;
+          }
+        } catch(e) {}
+      }
+      if ((n.type === 'roster_join' || isRosterJoin) && n.video_url) {
         div.innerHTML = `
           <div class="notif-icon">🤼</div>
           <div class="notif-body" style="flex:1;">
@@ -2440,19 +2443,21 @@ async function loadNotifications() {
               <button onclick="notifAcceptRoster('${rosterRowId}','${_esc(requesterUsername)}','${_esc(requesterName)}','${_esc(parsedEfedName)}',${n.id},this.closest('.notif-item'))" style="flex:2;padding:7px 0;background:rgba(76,175,100,.12);border:1px solid rgba(76,175,100,.3);border-radius:8px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">✓ Accept</button>
             </div>
           </div>
-`;  addSwipeToDelete(div, n.id);
+          <button onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))" style="background:none;border:none;color:rgba(255,255,255,.2);cursor:pointer;font-size:.75rem;padding:4px;flex-shrink:0;align-self:flex-start;transition:color .15s;" onmouseover="this.style.color='#ff6b6b'" onmouseout="this.style.color='rgba(255,255,255,.2)'">✕</button>
+`;
       } else {
         div.innerHTML = `
           <div class="notif-icon">🔔</div>
           <div class="notif-body" style="flex:1;"><div class="notif-msg">${n.message}</div><div class="notif-time">${timeAgo}</div></div>
+          <button onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))" style="background:none;border:none;color:rgba(255,255,255,.2);cursor:pointer;font-size:.75rem;padding:4px;flex-shrink:0;align-self:flex-start;transition:color .15s;" onmouseover="this.style.color='#ff6b6b'" onmouseout="this.style.color='rgba(255,255,255,.2)'">✕</button>
 `;
         div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
-        addSwipeToDelete(div, n.id);
       }
       const wrap = document.createElement('div');
       wrap.className = 'notif-item-wrap';
       wrap.appendChild(div);
       list.appendChild(wrap);
+      addSwipeToDelete(div, n.id);
     });
     const dot = document.getElementById('bnav-notif-dot'); if (dot) dot.classList.remove('visible');
   } catch(e) { list.innerHTML = '<div class="notif-empty">Could not load notifications.</div>'; }
