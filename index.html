@@ -3092,17 +3092,64 @@ function makeCard(v) {
 
   thumbDiv.appendChild(cardOver);
 
-  // 3-dot button — opens a fixed modal popup (no positioning issues)
+  // Direct action icons on card — no dropdown needed
   if (session) {
-    const dotBtn = document.createElement('button');
-    dotBtn.style.cssText = 'position:absolute;top:7px;right:7px;z-index:50;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.75);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;';
-    dotBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="pointer-events:none"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
-    dotBtn.onclick = function(e) {
-      e.stopPropagation();
-      e.preventDefault();
-      openCardActionModal(v, isAdmin, isOwner, el);
-    };
-    thumbDiv.appendChild(dotBtn);
+    const btnBase = 'position:absolute;z-index:50;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.75);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;backdrop-filter:blur(4px);';
+
+    if (isAdmin) {
+      // Date icon (top-right) + Delete icon (below it)
+      const dateBtn = document.createElement('button');
+      dateBtn.style.cssText = btnBase + 'top:7px;right:7px;';
+      dateBtn.title = 'Edit Date';
+      dateBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="pointer-events:none"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+      dateBtn.onclick = e => { e.stopPropagation(); openEditDateModal && openEditDateModal(v); };
+
+      const delBtn = document.createElement('button');
+      delBtn.style.cssText = btnBase + 'top:41px;right:7px;color:#ff6b6b;';
+      delBtn.title = 'Delete Video';
+      delBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="pointer-events:none"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>';
+      delBtn.onclick = async e => {
+        e.stopPropagation();
+        if (!confirm('Delete from Hub?')) return;
+        try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast('Deleted.'); }
+        catch(err) { showToast('Could not delete.'); }
+      };
+
+      thumbDiv.appendChild(dateBtn);
+      thumbDiv.appendChild(delBtn);
+
+    } else if (isOwner) {
+      // Date icon + delete icon for uploader
+      const dateBtn = document.createElement('button');
+      dateBtn.style.cssText = btnBase + 'top:7px;right:7px;';
+      dateBtn.title = 'Edit Date';
+      dateBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="pointer-events:none"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+      dateBtn.onclick = e => { e.stopPropagation(); openEditDateModal && openEditDateModal(v); };
+
+      const delBtn = document.createElement('button');
+      delBtn.style.cssText = btnBase + 'top:41px;right:7px;color:#ff6b6b;';
+      delBtn.title = 'Remove Video';
+      delBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="pointer-events:none"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>';
+      delBtn.onclick = async e => {
+        e.stopPropagation();
+        if (!confirm('Remove this video?')) return;
+        try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast('Removed.'); }
+        catch(err) { showToast('Could not remove.'); }
+      };
+
+      thumbDiv.appendChild(dateBtn);
+      thumbDiv.appendChild(delBtn);
+
+    } else {
+      // Flag icon for everyone else
+      const flagBtn = document.createElement('button');
+      flagBtn.style.cssText = btnBase + 'top:7px;right:7px;';
+      flagBtn.title = 'Flag Video';
+      flagBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="pointer-events:none"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>';
+      flagBtn.onclick = e => { e.stopPropagation(); openReportModal && openReportModal(v); };
+
+      thumbDiv.appendChild(flagBtn);
+    }
   }
 
   el.appendChild(thumbDiv);
@@ -4133,20 +4180,26 @@ function closeClaimModal() {
 
 async function confirmClaim() {
   const session = getSession();
-  if (!session || !_claimVideo || !session.promo_name) return;
+  if (!session || !_claimVideo) return;
   closeClaimModal();
   try {
+    // Get promo_name from DB if not in session
+    let promoName = session.promo_name;
+    if (!promoName) {
+      const urows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name`);
+      promoName = urows[0]?.promo_name || '';
+    }
+    if (!promoName) { showToast('No eFed found for your account.'); return; }
+
     const rows = await sbGet('submissions', `url=eq.${encodeURIComponent(_claimVideo.url)}&status=eq.approved`);
     if (rows.length) {
       await fetch(`${SUPABASE_URL}/rest/v1/submissions?id=eq.${rows[0].id}`, {
         method: 'PATCH', headers: SB_HEADERS,
-        body: JSON.stringify({ efed: session.promo_name })
+        body: JSON.stringify({ efed: promoName })
       });
-      // Hide the + button on the card
       const card = document.querySelector(`.card[data-url="${CSS.escape(_claimVideo.url)}"]`);
       if (card) { const btn = card.querySelector('.card-claim-btn'); if (btn) btn.remove(); }
-      // Also update video object so re-renders don't show it
-      _claimVideo.efed = session.promo_name;
+      _claimVideo.efed = promoName;
       showToast('✅ Added to your eFed episodes!');
     } else {
       showToast('Could not find this video in the database.');
@@ -7262,7 +7315,7 @@ setTimeout(checkUnreadNotifications, 2000);
 </div>
 
 <!-- ── CLAIM MODAL ── -->
-<div id="claim-modal-bg" style="display:none;position:fixed;inset:0;z-index:9800;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeClaimModal()">
+<div id="claim-post-modal-bg" style="display:none;position:fixed;inset:0;z-index:9800;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeClaimModal()">
   <div style="background:#111114;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:90%;max-width:420px;padding:28px 24px;position:relative;">
     <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:3px;color:#fff;margin-bottom:4px;">Claim This Post</div>
     <p style="font-size:.72rem;color:#8a8a9a;margin-bottom:16px;line-height:1.7;" id="claim-modal-desc"></p>
@@ -8614,7 +8667,7 @@ function pickCommentReactionDirect(emoji, commentId) {
 </script>
 
 <!-- ── CARD ACTION MODAL ── -->
-<div id="card-action-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);align-items:flex-end;justify-content:center;padding-bottom:24px;" onclick="if(event.target===this)closeCardActionModal()">
+<div id="card-action-modal-bg" style="display:none;position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);align-items:flex-end;justify-content:center;padding-bottom:24px;" onclick="if(event.target===this)closeCardActionModal()">
   <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:360px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.9);">
     <div id="cam-title" style="padding:14px 18px 10px;font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:3px;color:rgba(255,255,255,.4);border-bottom:1px solid rgba(255,255,255,.06);"></div>
     <div id="cam-buttons"></div>
