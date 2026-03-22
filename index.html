@@ -3092,6 +3092,49 @@ function makeCard(v) {
 
   thumbDiv.appendChild(cardOver);
 
+  // 3-dot menu sits inside thumbDiv above card-over
+  if (canDelete) {
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'card-menu-btn';
+    menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
+    const drop = document.createElement('div');
+    drop.className = 'card-menu-dropdown';
+    menuBtn.onclick = function(e) {
+      e.stopPropagation();
+      document.querySelectorAll('.card-menu-dropdown.open').forEach(m => { if (m !== drop) m.classList.remove('open'); });
+      drop.classList.toggle('open');
+    };
+    if (isAdmin) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'card-menu-item';
+      delBtn.style.color = '#ff6b6b';
+      delBtn.textContent = '🗑 Delete';
+      delBtn.onclick = async function(e) {
+        e.stopPropagation();
+        drop.classList.remove('open');
+        if (!confirm('Delete this video from the Hub?')) return;
+        try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast('Deleted.'); }
+        catch(err) { showToast('Could not delete.'); }
+      };
+      drop.appendChild(delBtn);
+    }
+    if (isOwner && !isAdmin) {
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'card-menu-item';
+      removeBtn.textContent = '✕ Remove';
+      removeBtn.onclick = async function(e) {
+        e.stopPropagation();
+        drop.classList.remove('open');
+        if (!confirm('Remove this video?')) return;
+        try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast('Removed.'); }
+        catch(err) { showToast('Could not remove.'); }
+      };
+      drop.appendChild(removeBtn);
+    }
+    thumbDiv.appendChild(menuBtn);
+    el.appendChild(drop);
+  }
+
   el.appendChild(thumbDiv);
 
   // info
@@ -3121,60 +3164,6 @@ function makeCard(v) {
   }
 
   el.appendChild(infoDiv);
-
-  // 3-dot menu for admin/owner
-  if (canDelete) {
-    const menuBtn = document.createElement('button');
-    menuBtn.className = 'card-menu-btn';
-    menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
-
-    const drop = document.createElement('div');
-    drop.className = 'card-menu-dropdown';
-
-    menuBtn.onclick = function(e) {
-      e.stopPropagation();
-      document.querySelectorAll('.card-menu-dropdown.open').forEach(m => { if (m !== drop) m.classList.remove('open'); });
-      drop.classList.toggle('open');
-    };
-
-    if (isAdmin) {
-      const delBtn = document.createElement('button');
-      delBtn.className = 'card-menu-item';
-      delBtn.style.color = '#ff6b6b';
-      delBtn.textContent = '🗑 Delete';
-      delBtn.onclick = async function(e) {
-        e.stopPropagation();
-        drop.classList.remove('open');
-        if (!confirm('Delete this video from the Hub?')) return;
-        try {
-          await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url));
-          el.remove();
-          showToast('Deleted.');
-        } catch(err) { showToast('Could not delete.'); }
-      };
-      drop.appendChild(delBtn);
-    }
-
-    if (isOwner && !isAdmin) {
-      const removeBtn = document.createElement('button');
-      removeBtn.className = 'card-menu-item';
-      removeBtn.textContent = '✕ Remove';
-      removeBtn.onclick = async function(e) {
-        e.stopPropagation();
-        drop.classList.remove('open');
-        if (!confirm('Remove this video?')) return;
-        try {
-          await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url));
-          el.remove();
-          showToast('Removed.');
-        } catch(err) { showToast('Could not remove.'); }
-      };
-      drop.appendChild(removeBtn);
-    }
-
-    el.appendChild(menuBtn);
-    el.appendChild(drop);
-  }
 
   // + button for eFed owners — show claimed state if already claimed by this owner
   if (session && (session.is_efed_owner || session.role === 'owner') && session.promo_name) {
@@ -8048,17 +8037,20 @@ function scrollChatToBottom() {
 // Prevent chat scroll from bubbling to main page
 document.addEventListener('DOMContentLoaded', () => {
   const chatPanel = document.getElementById('chat-panel');
+  const chatMessages = document.getElementById('chat-messages');
+  if (chatMessages) {
+    chatMessages.addEventListener('wheel', e => {
+      e.stopPropagation();
+      const atTop = chatMessages.scrollTop === 0 && e.deltaY < 0;
+      const atBottom = chatMessages.scrollTop + chatMessages.clientHeight >= chatMessages.scrollHeight - 1 && e.deltaY > 0;
+      if (!atTop && !atBottom) e.preventDefault();
+      chatMessages.scrollTop += e.deltaY;
+    }, { passive: false });
+  }
   if (chatPanel) {
     chatPanel.addEventListener('wheel', e => {
-      const box = document.getElementById('chat-messages');
-      if (!box) return;
-      const atTop = box.scrollTop === 0;
-      const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 1;
-      if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) return;
       e.stopPropagation();
-      e.preventDefault();
-      box.scrollTop += e.deltaY;
-    }, { passive: false });
+    }, { passive: true });
   }
 });
 
