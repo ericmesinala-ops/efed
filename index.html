@@ -6895,50 +6895,30 @@ async function loadNotifications() {
   if (!session) return;
   const list = document.getElementById('notif-list');
   list.innerHTML = '<div style="padding:20px;font-size:.75rem;color:#8a8a9a;">Loading…</div>';
-
   try {
-    const notifs = await sbGet('notifications',
-      `username=eq.${encodeURIComponent(session.username)}&order=created_at.desc&limit=50`);
-
-    if (!notifs.length) {
-      list.innerHTML = '<div class="notif-empty"><span style="font-size:1.5rem;">🔔</span>No notifications yet</div>';
-      return;
-    }
-
+    const notifs = await sbGet('notifications', `username=eq.${encodeURIComponent(session.username)}&order=created_at.desc&limit=50`);
+    if (!notifs.length) { list.innerHTML = '<div class="notif-empty"><span style="font-size:1.5rem;">🔔</span>No notifications yet</div>'; return; }
     list.innerHTML = '';
     notifs.forEach(n => {
-      const icon = NOTIF_ICONS[n.type] || { emoji: '🔔', cls: 'type-admin' };
       const timeAgo = getTimeAgo(n.created_at);
       const div = document.createElement('div');
       div.className = 'notif-item' + (n.read ? '' : ' unread');
-      div.innerHTML = `
-        <div class="notif-icon ${icon.cls}" onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))">${icon.emoji}</div>
-        <div class="notif-body">
-          <div class="notif-msg">${n.message}</div>
-          <div class="notif-time">${timeAgo}</div>
-        </div>`;
-      if (n.video_url) {
-        div.onclick = () => {
-          markNotifRead(n.id);
-          div.classList.remove('unread');
-          closeNotifPanel();
-          const v = videos.find(v => v.url === n.video_url);
-          if (v) openExpand(v);
-        };
-      } else {
-        div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
-      }
-      const nWrap = document.createElement('div');
-      nWrap.className = 'notif-item-wrap';
-      nWrap.appendChild(div);
-      list.appendChild(nWrap);
-    });
 
-    // Mark dot as cleared
-    updateNotifDot(false);
-  } catch(e) {
-    list.innerHTML = '<div class="notif-empty">Could not load notifications.</div>';
-  }
+      // Strip hidden roster marker from display
+      let displayMessage = (n.message || '').replace(/\|\|ROSTER:.*?\|\|$/, '').trim();
+
+      div.innerHTML = `
+        <div class="notif-icon" onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))">🔔</div>
+        <div class="notif-body" style="flex:1;"><div class="notif-msg">${displayMessage}</div><div class="notif-time">${timeAgo}</div></div>`;
+      div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
+
+      const wrap = document.createElement('div');
+      wrap.className = 'notif-item-wrap';
+      wrap.appendChild(div);
+      list.appendChild(wrap);
+    });
+    const dot = document.getElementById('bnav-notif-dot'); if (dot) dot.classList.remove('visible');
+  } catch(e) { list.innerHTML = '<div class="notif-empty"><span style="font-size:1.5rem;">🔔</span>Could not load notifications.</div>'; }
 }
 
 async function deleteNotif(id, wrapEl) {
