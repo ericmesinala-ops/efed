@@ -1221,11 +1221,17 @@ async function loadProfile() {
     loadCawImages(user);
     if (!_isOwnProfile) {
       document.querySelectorAll('.caw-slot').forEach(s => { s.onclick = null; s.style.cursor = 'default'; });
-      // Show join roster button for non-owners
+      // Show join roster button for non-owners, check if already joined
       const session = getSession();
       if (session) {
         const joinBtn = document.getElementById('join-roster-btn');
-        if (joinBtn) joinBtn.style.display = 'inline-flex';
+        if (joinBtn) {
+          joinBtn.style.display = 'inline-flex';
+          // Check if already on roster
+          sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&username=eq.${encodeURIComponent(session.username)}`).then(rows => {
+            if (rows.length) setJoinedState();
+          }).catch(() => {});
+        }
       }
     }
 
@@ -1304,97 +1310,324 @@ async function loadEpisodes() {
   try {
     const rows = await sbGet('submissions', `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&order=date_ms.desc`);
     if (!rows.length) { row.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;">No episodes yet.</div>'; return; }
-    row.innerHTML = rows.map(r => {
-      const id = r.url?.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/)?.[1] || '';
-      const thumb = r.thumb_url || (id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '');
-      const editBtn = _isOwnProfile ? `
-        <div class="ep-edit-wrap" style="position:absolute;top:5px;right:5px;z-index:10;display:none;">
-          <button class="ep-edit-btn" onclick="event.stopPropagation();openEpMenu(event,${r.id},'${encodeURIComponent(r.url||'')}','${encodeURIComponent(r.show_name||'')}')" style="width:24px;height:24px;border-radius:6px;background:rgba(0,0,0,.72);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.75);font-size:.7rem;display:flex;align-items:center;justify-content:center;cursor:pointer;">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-        </div>` : '';
-      return `<div style="flex-shrink:0;width:150px;cursor:pointer;position:relative;" onclick="window.location.href='index.html?play='+encodeURIComponent('${r.url}')" onmouseenter="this.querySelector('.ep-edit-wrap')&&(this.querySelector('.ep-edit-wrap').style.display='block')" onmouseleave="this.querySelector('.ep-edit-wrap')&&(this.querySelector('.ep-edit-wrap').style.display='none')">
-        ${editBtn}
+
+    row.innerHTML = '';
+    rows.forEach(r => {
+      const vid = r.url?.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/)?.[1] || '';
+      const thumb = r.thumb_url || (vid ? `https://i.ytimg.com/vi/${vid}/mqdefault.jpg` : '');
+
+      const card = document.createElement('div');
+      card.style.cssText = 'flex-shrink:0;width:150px;cursor:pointer;position:relative;user-select:none;';
+
+      card.innerHTML = `
         <div style="width:150px;height:85px;border-radius:8px;overflow:hidden;background:#1a1a1f;position:relative;margin-bottom:7px;">
-          ${thumb?`<img src="${thumb}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : ''}
+          ${thumb ? `<img src="${thumb}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : ''}
         </div>
         <div style="font-size:.72rem;font-weight:600;color:#fff;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${(r.show_name||'').replace(/</g,'&lt;')}</div>
-        <div style="font-size:.58rem;color:#5a5a6a;margin-top:2px;">${r.date||''}</div>
-      </div>`;
-    }).join('');
+        <div style="font-size:.58rem;color:#5a5a6a;margin-top:2px;">${r.date||''}</div>`;
+
+      card.addEventListener('click', () => {
+        if (!card._wasDragging) window.location.href = 'index.html?play=' + encodeURIComponent(r.url);
+        card._wasDragging = false;
+      });
+
+      if (_isOwnProfile) {
+        // Desktop: pencil on hover
+        const editWrap = document.createElement('div');
+        editWrap.style.cssText = 'position:absolute;top:5px;right:5px;z-index:10;display:none;';
+        editWrap.innerHTML = `<button style="width:24px;height:24px;border-radius:6px;background:rgba(0,0,0,.72);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.75);display:flex;align-items:center;justify-content:center;cursor:pointer;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`;
+        editWrap.querySelector('button').onclick = (e) => { e.stopPropagation(); openEpMenu(e, r.id, r.show_name); };
+        card.appendChild(editWrap);
+        card.addEventListener('mouseenter', () => editWrap.style.display = 'block');
+        card.addEventListener('mouseleave', () => editWrap.style.display = 'none');
+
+        // Mobile: long-press drag to two zones
+        let holdTimer = null, dragActive = false, clone = null;
+
+        card.addEventListener('touchstart', (e) => {
+          holdTimer = setTimeout(() => {
+            dragActive = true;
+            card._wasDragging = true;
+            const rect = card.getBoundingClientRect();
+            document.getElementById('ep-zone-remove').style.transform = 'translateY(0)';
+            document.getElementById('ep-zone-delete').style.transform = 'translateY(0)';
+            clone = card.cloneNode(true);
+            clone.style.cssText = `position:fixed;width:${rect.width}px;opacity:.85;pointer-events:none;z-index:9999;border-radius:8px;background:#111114;left:${rect.left}px;top:${rect.top}px;`;
+            document.body.appendChild(clone);
+            card.style.opacity = '.3';
+          }, 500);
+        }, { passive: true });
+
+        card.addEventListener('touchmove', (e) => {
+          clearTimeout(holdTimer);
+          if (!dragActive || !clone) return;
+          e.preventDefault();
+          const t = e.touches[0];
+          clone.style.left = (t.clientX - 75) + 'px';
+          clone.style.top  = (t.clientY - 50) + 'px';
+          ['ep-zone-remove','ep-zone-delete'].forEach(zid => {
+            const z = document.getElementById(zid);
+            const zr = z.getBoundingClientRect();
+            const over = t.clientX > zr.left && t.clientX < zr.right && t.clientY > zr.top && t.clientY < zr.bottom;
+            z.style.transform = over ? 'translateY(0) scale(1.1)' : 'translateY(0) scale(1)';
+            z.style.opacity = over ? '1' : '0.65';
+          });
+        }, { passive: false });
+
+        card.addEventListener('touchend', (e) => {
+          clearTimeout(holdTimer);
+          if (!dragActive) return;
+          dragActive = false;
+          const t = e.changedTouches[0];
+          const zr = document.getElementById('ep-zone-remove').getBoundingClientRect();
+          const zd = document.getElementById('ep-zone-delete').getBoundingClientRect();
+          const overRemove = t.clientX > zr.left && t.clientX < zr.right && t.clientY > zr.top && t.clientY < zr.bottom;
+          const overDelete = t.clientX > zd.left && t.clientX < zd.right && t.clientY > zd.top && t.clientY < zd.bottom;
+          ['ep-zone-remove','ep-zone-delete'].forEach(zid => {
+            const z = document.getElementById(zid);
+            z.style.transform = 'translateY(100%)';
+            z.style.opacity = '1';
+          });
+          if (clone) { clone.remove(); clone = null; }
+          card.style.opacity = '1';
+          if (overRemove) confirmRemoveEpisode(r.id, r.show_name);
+          else if (overDelete) confirmDeleteEpisode(r.id, r.show_name);
+        });
+
+        card.addEventListener('touchcancel', () => {
+          clearTimeout(holdTimer);
+          dragActive = false;
+          ['ep-zone-remove','ep-zone-delete'].forEach(zid => {
+            const z = document.getElementById(zid);
+            if (z) { z.style.transform = 'translateY(100%)'; z.style.opacity = '1'; }
+          });
+          if (clone) { clone.remove(); clone = null; }
+          card.style.opacity = '1';
+        });
+      }
+
+      row.appendChild(card);
+    });
   } catch(e) { row.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;">Could not load episodes.</div>'; }
 }
 
-// ── EPISODE CONTEXT MENU ──
-let _epMenuId = null, _epMenuUrl = null, _epMenuName = null;
-function openEpMenu(e, id, encodedUrl, encodedName) {
+// ── EPISODE DESKTOP MENU ──
+let _epMenuId = null, _epMenuName = null;
+function openEpMenu(e, id, name) {
   e.stopPropagation();
-  _epMenuId = id;
-  _epMenuUrl = decodeURIComponent(encodedUrl);
-  _epMenuName = decodeURIComponent(encodedName);
+  _epMenuId = id; _epMenuName = name;
   const menu = document.getElementById('ep-ctx-menu');
   menu.style.display = 'block';
-  const x = Math.min(e.clientX, window.innerWidth - 180);
-  const y = Math.min(e.clientY, window.innerHeight - 100);
-  menu.style.left = x + 'px';
-  menu.style.top = y + 'px';
+  menu.style.left = Math.min(e.clientX, window.innerWidth - 185) + 'px';
+  menu.style.top  = Math.min(e.clientY + 4, window.innerHeight - 110) + 'px';
   setTimeout(() => document.addEventListener('click', closeEpMenu, { once: true }), 50);
 }
-function closeEpMenu() {
-  const menu = document.getElementById('ep-ctx-menu');
-  if (menu) menu.style.display = 'none';
-}
+function closeEpMenu() { const m = document.getElementById('ep-ctx-menu'); if (m) m.style.display = 'none'; }
 
-async function removeEpisode(id) {
+function confirmRemoveEpisode(id, name) {
   closeEpMenu();
-  const session = getSession(); if (!session) return;
+  document.getElementById('ep-remove-name').textContent = name || 'this episode';
+  document.getElementById('ep-remove-modal-bg').style.display = 'flex';
+  document.getElementById('ep-remove-confirm-btn').onclick = () => doRemoveEpisode(id);
+}
+function confirmDeleteEpisode(id, name) {
+  closeEpMenu();
+  document.getElementById('ep-delete-name').textContent = name || 'this episode';
+  document.getElementById('ep-delete-modal-bg').style.display = 'flex';
+  document.getElementById('ep-delete-confirm-btn').onclick = () => doDeleteEpisode(id);
+}
+async function doRemoveEpisode(id) {
+  document.getElementById('ep-remove-modal-bg').style.display = 'none';
   try {
     await fetch(SUPABASE_URL+'/rest/v1/submissions?id=eq.'+id, { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({efed:null}) });
     loadEpisodes(); loadEfedStats();
-  } catch(e) { showToast('Could not remove episode.'); }
+    showToast('Removed from your eFed list.');
+  } catch(e) { showToast('Could not remove.'); }
 }
-
-function confirmDeleteFromHub(id, name) {
-  closeEpMenu();
-  document.getElementById('del-hub-name').textContent = name || 'this episode';
-  document.getElementById('del-hub-modal-bg').style.display = 'flex';
-  document.getElementById('del-hub-confirm-btn').onclick = () => deleteFromHub(id);
-}
-
-async function deleteFromHub(id) {
-  document.getElementById('del-hub-modal-bg').style.display = 'none';
-  const session = getSession(); if (!session) return;
+async function doDeleteEpisode(id) {
+  document.getElementById('ep-delete-modal-bg').style.display = 'none';
   try {
     await fetch(SUPABASE_URL+'/rest/v1/submissions?id=eq.'+id, { method:'DELETE', headers:SB_HEADERS });
     loadEpisodes(); loadEfedStats();
     showToast('Episode deleted from the Hub.');
-  } catch(e) { showToast('Could not delete episode.'); }
+  } catch(e) { showToast('Could not delete.'); }
 }
-
 async function loadRoster() {
   const grid = document.getElementById('roster-grid'); if (!grid) return;
+  const session = getSession();
   try {
     const rosterRows = await sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&order=joined_at.asc`);
     const ownerRows = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url`);
     const owner = ownerRows[0];
-    const cards = [];
-    if (owner) {
-      const av = owner.avatar_url ? `<img src="${owner.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">` : (owner.display_name||owner.username||'?')[0].toUpperCase();
-      cards.push(`<div style="background:#111114;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px 10px;text-align:center;"><div style="width:44px;height:44px;border-radius:50%;background:rgba(200,168,75,.1);border:2px solid rgba(200,168,75,.3);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#c8a84b;margin:0 auto 8px;overflow:hidden;">${av}</div><div style="font-size:.7rem;font-weight:600;color:#fff;">${(owner.display_name||owner.username||'').replace(/</g,'&lt;')}</div><div style="font-size:.55rem;color:#5a5a6a;letter-spacing:1px;margin-top:3px;">OWNER</div></div>`);
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px;';
+
+    function makeCard(u, role, rosterRowId) {
+      const isOwnerCard = role === 'OWNER';
+      const isMe = session && u.username === session.username;
+      // Can remove: owner can remove anyone (except themselves), member can remove themselves
+      const canRemove = !isOwnerCard && (_isOwnProfile || isMe);
+
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#111114;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px 10px;text-align:center;position:relative;user-select:none;cursor:pointer;transition:border-color .2s;';
+      card.dataset.username = u.username;
+      card.dataset.rosterid = rosterRowId || '';
+      card.dataset.name = u.display_name || u.username || '';
+      card.onclick = () => { window.location.href = 'profile.html?u=' + encodeURIComponent(u.username); };
+      card.onmouseenter = () => card.style.borderColor = 'rgba(255,255,255,.18)';
+      card.onmouseleave = () => card.style.borderColor = 'rgba(255,255,255,.07)';
+
+      const avColor = isOwnerCard ? 'rgba(200,168,75,.1)' : 'rgba(192,0,14,.1)';
+      const avBorder = isOwnerCard ? '2px solid rgba(200,168,75,.3)' : '2px solid rgba(192,0,14,.2)';
+      const avTextColor = isOwnerCard ? '#c8a84b' : '#c0000e';
+      const avInner = u.avatar_url
+        ? `<img src="${u.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
+        : (u.display_name||u.username||'?')[0].toUpperCase();
+
+      card.innerHTML = `
+        <div style="width:44px;height:44px;border-radius:50%;background:${avColor};border:${avBorder};display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:${avTextColor};margin:0 auto 8px;overflow:hidden;">${avInner}</div>
+        <div style="font-size:.7rem;font-weight:600;color:#fff;">${(u.display_name||u.username||'').replace(/</g,'&lt;')}</div>
+        <div style="font-size:.55rem;color:#5a5a6a;letter-spacing:1px;margin-top:3px;">${role}</div>
+      `;
+
+      if (canRemove) {
+        // Desktop: X button on hover
+        const xBtn = document.createElement('button');
+        xBtn.innerHTML = '✕';
+        xBtn.style.cssText = 'position:absolute;top:5px;right:5px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.6);font-size:.6rem;display:none;align-items:center;justify-content:center;cursor:pointer;line-height:1;padding:0;';
+        xBtn.onclick = (e) => { e.stopPropagation(); openRemoveRosterConfirm(u.username, u.display_name||u.username, rosterRowId); };
+        card.appendChild(xBtn);
+        card.addEventListener('mouseenter', () => xBtn.style.display = 'flex');
+        card.addEventListener('mouseleave', () => xBtn.style.display = 'none');
+
+        // Mobile: long-press drag to trash
+        let dragActive = false, startY = 0, holdTimer = null;
+        let clone = null;
+
+        card.addEventListener('touchstart', (e) => {
+          holdTimer = setTimeout(() => {
+            dragActive = true;
+            startY = e.touches[0].clientY;
+            // Show trash zone
+            document.getElementById('roster-trash-zone').style.transform = 'translateY(0)';
+            // Create floating clone
+            clone = card.cloneNode(true);
+            clone.style.cssText = `position:fixed;width:${card.offsetWidth}px;opacity:.85;pointer-events:none;z-index:9999;border-radius:10px;background:#111114;border:1px solid rgba(255,80,80,.4);left:${card.getBoundingClientRect().left}px;top:${card.getBoundingClientRect().top}px;transition:none;`;
+            document.body.appendChild(clone);
+            card.style.opacity = '.3';
+          }, 500);
+        }, { passive: true });
+
+        card.addEventListener('touchmove', (e) => {
+          clearTimeout(holdTimer);
+          if (!dragActive || !clone) return;
+          e.preventDefault();
+          const t = e.touches[0];
+          clone.style.left = (t.clientX - card.offsetWidth/2) + 'px';
+          clone.style.top = (t.clientY - card.offsetHeight/2) + 'px';
+          // Highlight trash if over it
+          const trash = document.getElementById('roster-trash-zone');
+          const tr = trash.getBoundingClientRect();
+          const over = t.clientY > tr.top && t.clientX > tr.left && t.clientX < tr.right;
+          trash.style.background = over ? 'rgba(192,0,14,.35)' : 'rgba(192,0,14,.15)';
+          trash.style.borderColor = over ? 'rgba(192,0,14,.7)' : 'rgba(192,0,14,.35)';
+        }, { passive: false });
+
+        card.addEventListener('touchend', (e) => {
+          clearTimeout(holdTimer);
+          if (!dragActive) return;
+          dragActive = false;
+          const trash = document.getElementById('roster-trash-zone');
+          const t = e.changedTouches[0];
+          const tr = trash.getBoundingClientRect();
+          const droppedOnTrash = t.clientY > tr.top && t.clientX > tr.left && t.clientX < tr.right;
+          // Hide trash zone
+          trash.style.transform = 'translateY(100%)';
+          trash.style.background = 'rgba(192,0,14,.15)';
+          trash.style.borderColor = 'rgba(192,0,14,.35)';
+          if (clone) { clone.remove(); clone = null; }
+          card.style.opacity = '1';
+          if (droppedOnTrash) {
+            openRemoveRosterConfirm(u.username, u.display_name||u.username, rosterRowId);
+          }
+        });
+
+        card.addEventListener('touchcancel', () => {
+          clearTimeout(holdTimer);
+          dragActive = false;
+          if (clone) { clone.remove(); clone = null; }
+          card.style.opacity = '1';
+          const trash = document.getElementById('roster-trash-zone');
+          if (trash) { trash.style.transform = 'translateY(100%)'; }
+        });
+      }
+
+      return card;
     }
+
+    let cardCount = 0;
+    if (owner) {
+      wrap.appendChild(makeCard(owner, 'OWNER', null));
+      cardCount++;
+    }
+
     if (rosterRows.length) {
       const unames = rosterRows.map(r=>r.username).filter(u=>u!==EFED_OWNER);
       if (unames.length) {
         const uRows = await sbGet('users', `username=in.(${unames.map(u=>encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url`);
-        uRows.forEach(u => {
-          const av = u.avatar_url ? `<img src="${u.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">` : (u.display_name||u.username||'?')[0].toUpperCase();
-          cards.push(`<div style="background:#111114;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px 10px;text-align:center;"><div style="width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.2);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#c0000e;margin:0 auto 8px;overflow:hidden;">${av}</div><div style="font-size:.7rem;font-weight:600;color:#fff;">${(u.display_name||u.username||'').replace(/</g,'&lt;')}</div><div style="font-size:.55rem;color:#5a5a6a;letter-spacing:1px;margin-top:3px;">Member</div></div>`);
+        unames.forEach(uname => {
+          const u = uRows.find(r=>r.username===uname);
+          if (!u) return;
+          const rosterRow = rosterRows.find(r=>r.username===uname);
+          wrap.appendChild(makeCard(u, 'Member', rosterRow?.id));
+          cardCount++;
         });
       }
     }
-    document.getElementById('stat-roster').textContent = cards.length;
-    grid.innerHTML = cards.length ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">` + cards.join('') + '</div>' : '<div style="font-size:.78rem;color:#5a5a6a;">No roster members yet.</div>';
-  } catch(e) { grid.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;">Could not load roster.</div>'; }
+
+    document.getElementById('stat-roster').textContent = cardCount;
+    if (cardCount > 0) {
+      grid.innerHTML = '';
+      grid.appendChild(wrap);
+    } else {
+      grid.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;">No roster members yet.</div>';
+    }
+  } catch(e) { console.error('loadRoster error:', e); grid.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;">Could not load roster.</div>'; }
+}
+
+function openRemoveRosterConfirm(username, displayName, rosterRowId) {
+  document.getElementById('rmr-name').textContent = displayName;
+  const efedNameEl = document.getElementById('rmr-efed-name');
+  if (efedNameEl) efedNameEl.textContent = EFED_NAME;
+  document.getElementById('rmr-modal-bg').style.display = 'flex';
+  document.getElementById('rmr-confirm-btn').onclick = () => removeFromRoster(username, rosterRowId);
+}
+
+async function removeFromRoster(username, rosterRowId) {
+  document.getElementById('rmr-modal-bg').style.display = 'none';
+  try {
+    if (rosterRowId) {
+      await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+rosterRowId, { method:'DELETE', headers:SB_HEADERS });
+    } else {
+      await fetch(SUPABASE_URL+'/rest/v1/roster?efed=eq.'+encodeURIComponent(EFED_NAME)+'&username=eq.'+encodeURIComponent(username), { method:'DELETE', headers:SB_HEADERS });
+    }
+    // If user removed themselves, flip join button back
+    const session = getSession();
+    if (session && session.username === username) {
+      const btn = document.getElementById('join-roster-btn');
+      if (btn) {
+        btn.innerHTML = '+ Join Roster';
+        btn.style.background = 'rgba(200,168,75,.15)';
+        btn.style.borderColor = 'rgba(200,168,75,.35)';
+        btn.style.color = 'var(--gold)';
+        btn.style.cursor = 'pointer';
+        btn.onclick = openJoinRosterModal;
+      }
+    }
+    loadRoster(); loadEfedStats();
+    showToast('Removed from roster.');
+  } catch(e) { showToast('Could not remove.'); }
 }
 
 function showToast(msg, duration = 2800) {
@@ -1667,9 +1900,9 @@ function triggerInstall() {
 
 <!-- ── ROSTER ── -->
 <div class="section" id="roster-section">
-  <div class="sec-title" style="justify-content:space-between;">
-    <span style="display:flex;align-items:center;gap:8px;">Roster <span style="flex:1;height:1px;background:rgba(200,168,75,.12);display:inline-block;width:60px;"></span></span>
-    <button id="join-roster-btn" onclick="openJoinRosterModal()" style="display:none;padding:5px 12px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);border-radius:20px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:background .2s;">+ Join Roster</button>
+  <div class="sec-title">
+    Roster
+    <button id="join-roster-btn" onclick="openJoinRosterModal()" style="display:none;padding:6px 14px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:20px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;letter-spacing:1px;cursor:pointer;white-space:nowrap;margin-left:auto;">+ Join Roster</button>
   </div>
   <div id="roster-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
     <div style="font-size:.78rem;color:var(--muted);grid-column:span 3;">No roster members yet.</div>
@@ -1678,20 +1911,55 @@ function triggerInstall() {
 
 </div><!-- /page-card -->
 
-<!-- ── EPISODE CONTEXT MENU ── -->
-<div id="ep-ctx-menu" style="display:none;position:fixed;z-index:99999;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:6px 0;min-width:170px;box-shadow:0 12px 32px rgba(0,0,0,.7);">
-  <button onclick="removeEpisode(_epMenuId)" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;background:none;border:none;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;" onmouseover="this.style.background='rgba(255,255,255,.06)'" onmouseout="this.style.background='none'">
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/><line x1="9" y1="9" x2="15" y2="9"/></svg>
+<!-- ── EPISODE DESKTOP CONTEXT MENU ── -->
+<div id="ep-ctx-menu" style="display:none;position:fixed;z-index:99999;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:6px 0;min-width:185px;box-shadow:0 12px 32px rgba(0,0,0,.7);">
+  <button onclick="confirmRemoveEpisode(_epMenuId,_epMenuName)" style="display:flex;align-items:center;gap:9px;width:100%;padding:10px 14px;background:none;border:none;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;" onmouseover="this.style.background='rgba(255,255,255,.06)'" onmouseout="this.style.background='none'">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     Remove from my eFed
   </button>
-  <button onclick="confirmDeleteFromHub(_epMenuId, _epMenuName)" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;background:none;border:none;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;" onmouseover="this.style.background='rgba(192,0,14,.08)'" onmouseout="this.style.background='none'">
+  <div style="height:1px;background:rgba(255,255,255,.06);margin:3px 0;"></div>
+  <button onclick="confirmDeleteEpisode(_epMenuId,_epMenuName)" style="display:flex;align-items:center;gap:9px;width:100%;padding:10px 14px;background:none;border:none;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;" onmouseover="this.style.background='rgba(192,0,14,.08)'" onmouseout="this.style.background='none'">
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
     Delete from Hub
   </button>
 </div>
 
-<!-- ── DELETE FROM HUB WARNING MODAL ── -->
-<div id="del-hub-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)this.style.display='none'">
+<!-- ── MOBILE EPISODE DROP ZONES ── -->
+<div style="position:fixed;bottom:24px;left:0;right:0;z-index:9998;display:flex;justify-content:center;gap:28px;pointer-events:none;">
+  <div id="ep-zone-remove" style="width:90px;height:90px;border-radius:50%;background:rgba(100,140,255,.15);border:2px solid rgba(100,140,255,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;transform:translateY(100%);transition:transform .28s cubic-bezier(.16,1,.3,1),opacity .2s,transform .15s;pointer-events:all;">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7aa2ff" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+    <span style="font-size:.48rem;letter-spacing:1px;color:#7aa2ff;text-transform:uppercase;font-family:'DM Sans',sans-serif;text-align:center;line-height:1.3;">Remove<br>from List</span>
+  </div>
+  <div id="ep-zone-delete" style="width:90px;height:90px;border-radius:50%;background:rgba(192,0,14,.15);border:2px solid rgba(192,0,14,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;transform:translateY(100%);transition:transform .28s cubic-bezier(.16,1,.3,1),opacity .2s,transform .15s;pointer-events:all;">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+    <span style="font-size:.48rem;letter-spacing:1px;color:#ff6b6b;text-transform:uppercase;font-family:'DM Sans',sans-serif;text-align:center;line-height:1.3;">Delete<br>from Hub</span>
+  </div>
+</div>
+
+<!-- ── REMOVE FROM LIST CONFIRM MODAL ── -->
+<div id="ep-remove-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#111114;border:1px solid rgba(100,140,255,.2);border-radius:16px;width:100%;max-width:380px;padding:28px 24px;box-shadow:0 32px 80px rgba(0,0,0,.8);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:rgba(100,140,255,.12);border:1px solid rgba(100,140,255,.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7aa2ff" stroke-width="2.5" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#7aa2ff;">Remove from List</div>
+    </div>
+    <div style="font-size:.78rem;color:rgba(255,255,255,.7);line-height:1.7;margin-bottom:8px;">
+      <strong id="ep-remove-name" style="color:#fff;"></strong> will be removed from your eFed page.
+    </div>
+    <div style="font-size:.72rem;color:#8a8a9a;line-height:1.7;margin-bottom:22px;">
+      The episode stays on the Hub — it won't disappear for other users. You can re-add it to your eFed at any time by submitting the link again.
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="document.getElementById('ep-remove-modal-bg').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
+      <button id="ep-remove-confirm-btn" style="flex:1;padding:12px;background:rgba(100,140,255,.15);border:1px solid rgba(100,140,255,.35);border-radius:10px;color:#7aa2ff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Remove from List</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── DELETE FROM HUB CONFIRM MODAL ── -->
+<div id="ep-delete-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)this.style.display='none'">
   <div style="background:#111114;border:1px solid rgba(255,80,80,.2);border-radius:16px;width:100%;max-width:380px;padding:28px 24px;box-shadow:0 32px 80px rgba(0,0,0,.8);">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
       <div style="width:36px;height:36px;border-radius:50%;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
@@ -1700,14 +1968,14 @@ function triggerInstall() {
       <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#ff6b6b;">Delete from Hub</div>
     </div>
     <div style="font-size:.78rem;color:rgba(255,255,255,.7);line-height:1.7;margin-bottom:8px;">
-      You are about to permanently delete <strong id="del-hub-name" style="color:#fff;"></strong> from the EFED Streaming Hub.
+      You are about to permanently delete <strong id="ep-delete-name" style="color:#fff;"></strong> from the entire EFED Streaming Hub.
     </div>
     <div style="font-size:.72rem;color:#8a8a9a;line-height:1.7;margin-bottom:22px;">
-      This removes the video entirely — it will no longer appear on the Hub or your eFed page. The <strong style="color:rgba(255,255,255,.5);">+</strong> button on the video page will become active again so it can be re-submitted in the future. This does <strong style="color:rgba(255,255,255,.5);">not</strong> delete the video from YouTube.
+      This removes the video for <strong style="color:rgba(255,255,255,.5);">everyone</strong> — it will no longer appear anywhere on the Hub. The <strong style="color:rgba(255,255,255,.5);">+</strong> button becomes active again so it can be re-submitted in the future. This does <strong style="color:rgba(255,255,255,.5);">not</strong> delete the video from YouTube.
     </div>
     <div style="display:flex;gap:10px;">
-      <button onclick="document.getElementById('del-hub-modal-bg').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
-      <button id="del-hub-confirm-btn" style="flex:1;padding:12px;background:rgba(192,0,14,.2);border:1px solid rgba(192,0,14,.4);border-radius:10px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:.5px;cursor:pointer;">Delete Permanently</button>
+      <button onclick="document.getElementById('ep-delete-modal-bg').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
+      <button id="ep-delete-confirm-btn" style="flex:1;padding:12px;background:rgba(192,0,14,.2);border:1px solid rgba(192,0,14,.4);border-radius:10px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Delete Permanently</button>
     </div>
   </div>
 </div>
@@ -1985,6 +2253,34 @@ async function markAllNotifsRead() {
   } catch(e) {}
 }
 </script>
+<!-- ── ROSTER TRASH DROP ZONE (mobile drag) ── -->
+<div id="roster-trash-zone" style="position:fixed;bottom:0;left:50%;transform:translateX(-50%) translateY(100%);z-index:9998;width:80px;height:80px;border-radius:50%;background:rgba(192,0,14,.15);border:2px solid rgba(192,0,14,.35);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;transition:transform .25s cubic-bezier(.16,1,.3,1),background .15s,border-color .15s;margin-bottom:24px;">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+  <span style="font-size:.5rem;letter-spacing:1px;color:#ff6b6b;text-transform:uppercase;font-family:'DM Sans',sans-serif;">Remove</span>
+</div>
+
+<!-- ── REMOVE FROM ROSTER CONFIRM MODAL ── -->
+<div id="rmr-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:360px;padding:28px 24px;box-shadow:0 32px 80px rgba(0,0,0,.8);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" stroke-width="2.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+      </div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#ff6b6b;">Remove from Roster</div>
+    </div>
+    <div style="font-size:.78rem;color:rgba(255,255,255,.7);line-height:1.7;margin-bottom:8px;">
+      You are about to remove <strong id="rmr-name" style="color:#fff;"></strong> from the <strong style="color:#fff;" id="rmr-efed-name"></strong> roster.
+    </div>
+    <div style="font-size:.72rem;color:#8a8a9a;line-height:1.7;margin-bottom:22px;">
+      They will no longer appear on this eFed's roster page. They can rejoin at any time.
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="document.getElementById('rmr-modal-bg').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
+      <button id="rmr-confirm-btn" style="flex:1;padding:12px;background:rgba(192,0,14,.2);border:1px solid rgba(192,0,14,.4);border-radius:10px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Remove</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── JOIN ROSTER MODAL ── -->
 <div id="join-roster-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeJoinRosterModal()">
   <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:400px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.8);">
@@ -2009,12 +2305,6 @@ async function markAllNotifsRead() {
         Your profile will appear on this eFed's roster page. The promotion owner will be notified. You can leave the roster at any time from your profile page.
       </div>
 
-      <!-- CAW name input -->
-      <div style="margin-bottom:6px;">
-        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:8px;font-weight:700;">Your CAW Name <span style="color:#5a5a6a;font-size:.55rem;">(optional)</span></div>
-        <input id="jr-caw-name" type="text" placeholder="e.g. Kendrick Montana" maxlength="60" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
-      </div>
-      <div style="font-size:.62rem;color:#5a5a6a;margin-bottom:18px;">Leave blank to use your display name.</div>
 
       <div id="jr-msg" style="font-size:.7rem;min-height:16px;margin-bottom:10px;"></div>
       <button id="jr-submit-btn" onclick="submitJoinRoster()" style="width:100%;padding:13px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:10px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:background .2s;">Request to Join</button>
@@ -2035,7 +2325,6 @@ function openJoinRosterModal() {
   } else {
     logoEl.textContent = EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,3).toUpperCase();
   }
-  document.getElementById('jr-caw-name').value = '';
   document.getElementById('jr-msg').textContent = '';
   const btn = document.getElementById('jr-submit-btn');
   btn.disabled = false; btn.textContent = 'Request to Join';
@@ -2048,12 +2337,21 @@ function closeJoinRosterModal() {
   document.body.style.overflow = '';
 }
 
+function setJoinedState() {
+  const btn = document.getElementById('join-roster-btn');
+  if (!btn) return;
+  btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> On Roster`;
+  btn.style.background = 'rgba(76,175,100,.12)';
+  btn.style.borderColor = 'rgba(76,175,100,.35)';
+  btn.style.color = '#4caf64';
+  btn.style.cursor = 'default';
+  btn.onclick = null;
+}
+
 async function submitJoinRoster() {
   const session = getSession(); if (!session) return;
   const btn = document.getElementById('jr-submit-btn');
   const msg = document.getElementById('jr-msg');
-  const cawName = document.getElementById('jr-caw-name').value.trim();
-
   btn.disabled = true; btn.textContent = 'Sending…'; msg.textContent = '';
 
   try {
@@ -2073,7 +2371,7 @@ async function submitJoinRoster() {
       body: JSON.stringify({
         efed: EFED_NAME,
         username: session.username,
-        caw_name: cawName || (session.displayName || session.username),
+        caw_name: session.displayName || session.username,
         joined_at: Date.now()
       })
     });
@@ -2085,7 +2383,7 @@ async function submitJoinRoster() {
         body: JSON.stringify({
           username: EFED_OWNER,
           type: 'roster_join',
-          message: `🤼 ${session.displayName || session.username} has joined your ${EFED_NAME} roster${cawName ? ' as ' + cawName : ''}.`,
+          message: `🤼 ${session.displayName || session.username} has joined your ${EFED_NAME} roster.`,
           read: false,
           created_at: Date.now()
         })
@@ -2095,6 +2393,7 @@ async function submitJoinRoster() {
     msg.textContent = '✓ You joined the roster!';
     msg.style.color = '#4caf64';
     btn.textContent = 'Joined!';
+    setJoinedState();
     loadRoster(); loadEfedStats();
     setTimeout(closeJoinRosterModal, 1400);
 
