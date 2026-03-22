@@ -1146,17 +1146,25 @@ async function loadProfile() {
   }
 
   if (!EFED_NAME) { document.getElementById('efed-name').textContent = 'eFed Not Found'; return; }
+  console.log('[efed] EFED_NAME resolved to:', EFED_NAME);
 
   // Instant render — show name + initials before DB responds
   document.getElementById('efed-name').textContent = EFED_NAME;
   const _initEl = document.getElementById('profile-av-initial');
   if (_initEl) _initEl.textContent = EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,4).toUpperCase();
 
-  // Ownership check
-  if (session) {
-    try {
-      const me = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
-      const isOwner = me[0] && me[0].promo_name?.toLowerCase() === EFED_NAME.toLowerCase() && (me[0].is_efed_owner || me[0].role === 'owner');
+  // Single DB call — load efed data + check ownership in one shot
+  try {
+    const users = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website,efed_open_signings,efed_signings_link&limit=1`);
+    console.log('[efed] users query result:', users);
+    if (!users.length) { document.getElementById('efed-name').textContent = EFED_NAME; loadEfedStats(); return; }
+    const user = users[0];
+    EFED_OWNER = user.username;
+    document.title = EFED_NAME + ' — EFED Hub';
+
+    // Ownership — check if logged-in user is this efed's owner
+    if (session) {
+      const isOwner = user.username === session.username && (user.is_efed_owner || user.role === 'owner');
       _isOwnProfile = isOwner;
       if (isOwner) {
         document.getElementById('edit-pencil').style.display = 'flex';
@@ -1165,16 +1173,7 @@ async function loadProfile() {
         const fab = document.getElementById('post-fab');
         if (fab) fab.classList.add('visible');
       }
-    } catch(e) {}
-  }
-
-  // Load owner data by promo_name
-  try {
-    const users = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website,efed_open_signings,efed_signings_link&limit=1`);
-    if (!users.length) { document.getElementById('efed-name').textContent = EFED_NAME; loadEfedStats(); return; }
-    const user = users[0];
-    EFED_OWNER = user.username;
-    document.title = EFED_NAME + ' — EFED Hub';
+    }
 
     // Name + meta
     document.getElementById('efed-name').textContent = EFED_NAME;
