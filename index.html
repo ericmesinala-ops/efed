@@ -7358,6 +7358,10 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; }
 .chat-msg-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 .chat-msg-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 @keyframes chatIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
+.chat-msg-wrap { position: relative; overflow: hidden; }
+.chat-msg-swipe-del { position: absolute; right: 0; top: 0; bottom: 0; width: 70px; background: #c0000e; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; transform: translateX(70px); transition: transform .2s cubic-bezier(.25,.46,.45,.94); cursor: pointer; }
+.chat-msg-swipe-del svg, .chat-msg-swipe-del span { pointer-events: none; }
+.chat-msg-swipe-del span { font-size: .48rem; letter-spacing: 1px; text-transform: uppercase; color: rgba(255,255,255,.8); font-family: 'DM Sans',sans-serif; }
 .chat-msg-meta { display: flex; align-items: center; gap: 8px; }
 .chat-msg-user { font-size: .78rem; font-weight: 700; color: var(--gold); font-family: 'DM Sans',sans-serif; letter-spacing: .2px; display: flex; align-items: center; gap: 5px; }
 .chat-msg-user.is-admin { color: #fff; }
@@ -7366,8 +7370,7 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; }
 .chat-msg-delete { background: none; border: none; color: rgba(255,255,255,.2); cursor: pointer; font-size: .55rem; padding: 0 0 0 4px; transition: color .15s; display: none; }
 .chat-msg:hover .chat-msg-delete { display: inline; }
 .chat-msg-delete:hover { color: #ff6b6b; }
-.chat-react-btn { position: absolute; right: 0; top: 0; background: none; border: none; color: rgba(255,255,255,.15); cursor: pointer; padding: 2px 4px; border-radius: 6px; display: none; transition: color .15s, background .15s; }
-.chat-msg:hover .chat-react-btn { display: flex; align-items: center; }
+.chat-react-btn { position: absolute; right: 0; top: 0; background: none; border: none; color: rgba(255,255,255,.15); cursor: pointer; padding: 2px 4px; border-radius: 6px; display: flex; align-items: center; transition: color .15s, background .15s; }
 .chat-react-btn:hover { color: rgba(255,255,255,.6); background: rgba(255,255,255,.06); }
 .chat-msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .chat-reaction-pill { display: flex; align-items: center; gap: 3px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); border-radius: 20px; padding: 2px 7px; font-size: .78rem; cursor: pointer; transition: background .15s, border-color .15s; user-select: none; }
@@ -7534,6 +7537,10 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; }
     <button class="pill-arr right" id="chat-rooms-arr-right" onclick="scrollChatRooms(1)" style="display:flex;">&#8250;</button>
   </div>
   <div id="chat-pinned" style="display:none;padding:8px 14px;background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.06);font-size:.68rem;color:rgba(255,255,255,.45);line-height:1.5;font-style:italic;"></div>
+  <div id="chat-say-hi" style="padding:8px 14px;background:rgba(192,0,14,.07);border-bottom:1px solid rgba(192,0,14,.12);display:flex;align-items:center;gap:8px;flex-shrink:0;">
+    <span style="font-size:.95rem;">👋</span>
+    <span style="font-size:.72rem;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-style:italic;">Say hi to the community!</span>
+  </div>
   <div id="chat-messages"><div class="chat-loading">Loading…</div></div>
   <div id="chat-pickers-wrap" style="display:none;">
     <div id="chat-emoji-picker" style="display:none;">
@@ -7761,7 +7768,57 @@ function appendChatMessage(m, animate = true) {
       </button>
     </div>`;
 
-  box.appendChild(div);
+  // Wrap in swipe container for mobile delete
+  const canDelete = isAdmin || isMine;
+  if (canDelete) {
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-msg-wrap';
+    wrap.appendChild(div);
+
+    const delBtn = document.createElement('div');
+    delBtn.className = 'chat-msg-swipe-del';
+    delBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg><span>Delete</span>`;
+    delBtn.onclick = () => deleteChatMessage(m.id, div);
+    wrap.appendChild(delBtn);
+
+    let startX = 0, revealed = false;
+    div.addEventListener('touchstart', e => { startX = e.touches[0].clientX; }, { passive: true });
+    div.addEventListener('touchmove', e => {
+      const dx = e.touches[0].clientX - startX;
+      if (dx > 0 && !revealed) return;
+      const offset = Math.max(-70, Math.min(0, revealed ? dx : dx));
+      div.style.transition = 'none';
+      delBtn.style.transition = 'none';
+      div.style.transform = `translateX(${offset}px)`;
+      delBtn.style.transform = `translateX(${70 + offset}px)`;
+    }, { passive: true });
+    div.addEventListener('touchend', e => {
+      const dx = e.changedTouches[0].clientX - startX;
+      div.style.transition = 'transform .2s cubic-bezier(.25,.46,.45,.94)';
+      delBtn.style.transition = 'transform .2s cubic-bezier(.25,.46,.45,.94)';
+      if (!revealed && dx < -50) {
+        div.style.transform = 'translateX(-70px)';
+        delBtn.style.transform = 'translateX(0px)';
+        revealed = true;
+      } else {
+        div.style.transform = 'translateX(0)';
+        delBtn.style.transform = 'translateX(70px)';
+        revealed = false;
+      }
+    });
+    div.addEventListener('click', () => {
+      if (!revealed) return;
+      div.style.transition = 'transform .2s cubic-bezier(.25,.46,.45,.94)';
+      delBtn.style.transition = 'transform .2s cubic-bezier(.25,.46,.45,.94)';
+      div.style.transform = 'translateX(0)';
+      delBtn.style.transform = 'translateX(70px)';
+      revealed = false;
+    });
+
+    box.appendChild(wrap);
+  } else {
+    box.appendChild(div);
+  }
   if (_chatAtBottom) scrollChatToBottom();
   if (!_chatOpen) {
     _chatUnread++;
@@ -7945,17 +8002,18 @@ async function loadAllReactions(msgIds) {
 }
 
 async function deleteChatMessage(id, btn) {
-  const el = btn.closest('.chat-msg');
-  if (el) el.style.opacity = '0.4';
+  const el = (btn && btn.closest) ? btn.closest('.chat-msg') : btn;
+  const wrap = el && el.parentElement && el.parentElement.classList.contains('chat-msg-wrap') ? el.parentElement : el;
+  if (wrap) wrap.style.opacity = '0.4';
   try {
     if (String(id).startsWith('_pending_')) {
-      if (el) el.remove();
+      if (wrap) wrap.remove();
       return;
     }
     await sbDelete('chat_messages', `id=eq.${id}`);
-    if (el) el.remove();
+    if (wrap) wrap.remove();
   } catch(e) {
-    if (el) el.style.opacity = '1';
+    if (wrap) wrap.style.opacity = '1';
     console.error('Delete failed:', e);
   }
 }
