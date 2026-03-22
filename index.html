@@ -1750,6 +1750,10 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           Back to Hub
         </button>
+        <button class="dropdown-item" id="dd-install-btn" style="display:none;" onclick="toggleDropdown(true); triggerInstall();">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download App
+        </button>
         <button class="dropdown-item danger" onclick="handleSignOut()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
           Sign Out
@@ -2056,7 +2060,25 @@
     <div class="empty-state" id="empty-state">No videos match that filter yet.</div>
   </section>
 
-  <!-- ── UPCOMING SHOWS ── -->
+  <!-- ── MOST VIEWED ── -->
+  <section class="section" id="section-most-viewed" style="display:none;">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar" style="background:#c0000e;"></div>
+        <div class="sec-title">Most Viewed</div>
+        <span class="sec-count" id="most-viewed-count"></span>
+      </div>
+    </div>
+    <div class="row-wrap">
+      <div class="arr-col left">
+        <button class="pill-arr left hidden" id="most-viewed-arr-left" onclick="scrollNamedRow('most-viewed',-1)">&#8249;</button>
+      </div>
+      <div class="card-grid" id="row-most-viewed"></div>
+      <div class="arr-col right">
+        <button class="pill-arr right" id="most-viewed-arr-right" onclick="scrollNamedRow('most-viewed',1)">&#8250;</button>
+      </div>
+    </div>
+  </section>
   <section class="section" id="section-upcoming" style="display:none;">
     <div class="sec-head">
       <div class="sec-title-wrap">
@@ -3081,6 +3103,63 @@ function sbGetWithTimeout(table, filters, ms = 5000) {
   ]);
 }
 
+async function loadMostViewed(allVideos) {
+  try {
+    // Get all approved video IDs
+    const toFetch = allVideos.filter(v => v.url);
+    if (!toFetch.length) return;
+
+    // Extract YouTube video IDs
+    const idMap = {};
+    toFetch.forEach(v => {
+      const id = (v.url || '').match(/(?:v=|youtu\.be\/)([^&?/]+)/)?.[1];
+      if (id) idMap[id] = v;
+    });
+    const ids = Object.keys(idMap);
+    if (!ids.length) return;
+
+    // Batch fetch — YouTube allows up to 50 per call
+    const batches = [];
+    for (let i = 0; i < ids.length; i += 50) batches.push(ids.slice(i, i + 50));
+
+    const viewData = {};
+    for (const batch of batches) {
+      const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${batch.join(',')}&key=${YT_API_KEY}`);
+      const data = await res.json();
+      (data.items || []).forEach(item => {
+        viewData[item.id] = parseInt(item.statistics?.viewCount || 0);
+      });
+    }
+
+    // Sort by views descending, take top 20
+    const sorted = ids
+      .filter(id => viewData[id] !== undefined)
+      .sort((a, b) => viewData[b] - viewData[a])
+      .slice(0, 20)
+      .map(id => idMap[id]);
+
+    if (!sorted.length) return;
+
+    const grid = document.getElementById('row-most-viewed');
+    const section = document.getElementById('section-most-viewed');
+    const count = document.getElementById('most-viewed-count');
+    if (!grid || !section) return;
+
+    grid.innerHTML = '';
+    sorted.forEach(v => grid.appendChild(makeCard(v)));
+    if (count) count.textContent = sorted.length + ' videos';
+    section.style.display = 'block';
+
+    // Arrow visibility
+    setTimeout(() => {
+      const left = document.getElementById('most-viewed-arr-left');
+      const right = document.getElementById('most-viewed-arr-right');
+      if (left) left.classList.toggle('hidden', grid.scrollLeft <= 0);
+      if (right) right.classList.toggle('hidden', grid.scrollWidth <= grid.clientWidth);
+    }, 100);
+  } catch(e) { console.error('Most Viewed failed:', e); }
+}
+
 async function initHub() {
   showSkeletons(8);
   buildPills();
@@ -3154,6 +3233,7 @@ async function initHub() {
   loadEfedOwnerRow();
   buildHeroDots();
   loadSlide();
+  loadMostViewed(videos);
   // ?play= param handled before initHub for instant open
 }
 
@@ -6639,7 +6719,10 @@ document.addEventListener('DOMContentLoaded', () => {
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault();
   _deferredInstallPrompt = e;
-  // Only show if not dismissed before
+  // Show download button in dropdown
+  const installBtn = document.getElementById('dd-install-btn');
+  if (installBtn) installBtn.style.display = 'flex';
+  // Only show banner if not dismissed before
   if (!localStorage.getItem('efed_install_dismissed')) {
     document.getElementById('install-banner').classList.add('visible');
   }
@@ -6651,10 +6734,12 @@ function triggerInstall() {
     _deferredInstallPrompt.userChoice.then(() => {
       _deferredInstallPrompt = null;
       dismissInstallBanner();
+      const installBtn = document.getElementById('dd-install-btn');
+      if (installBtn) installBtn.style.display = 'none';
     });
   } else {
     // iOS fallback
-    alert('To install: tap the Share button below, then "Add to Home Screen"');
+    alert('To install: tap the Share button, then "Add to Home Screen"');
   }
 }
 
