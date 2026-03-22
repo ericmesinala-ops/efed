@@ -788,13 +788,14 @@ async function epHandleAvatar(event) {
       avPrev.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">`;
       document.getElementById('ep-av-remove').style.display = 'block';
       try {
-        await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({promo_logo:dataUrl}) });
+        const _r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({promo_logo:dataUrl}) });
+        if (!_r.ok) throw new Error('HTTP '+_r.status+': '+await _r.text());
         // Update logo on page
         const logoImg = document.getElementById('profile-av-box').querySelector('img') || (() => { const i=document.createElement('img'); document.getElementById('profile-av-box').appendChild(i); return i; })();
         logoImg.src = dataUrl; logoImg.style.display='block';
         const initials = document.getElementById('profile-av-initial'); if(initials) initials.style.display='none';
         msg.textContent = 'Logo saved!'; msg.style.color = '#4caf64';
-      } catch(err) { msg.textContent = 'Save failed.'; msg.style.color = '#ff6b6b'; }
+      } catch(err) { console.error('Logo save error:', err); msg.textContent = 'Save failed: '+err.message; msg.style.color = '#ff6b6b'; }
     };
     img.src = e.target.result;
   };
@@ -824,10 +825,11 @@ async function saveEditProfile() {
   const web = document.getElementById('ep-web-input').value.trim();
   const apply = document.getElementById('ep-apply-input').value.trim();
   try {
-    await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
+    const _sr = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
       method:'PATCH', headers:SB_HEADERS,
       body:JSON.stringify({yt_channel:yt||null, ig_handle:ig||null, x_handle:x||null, promo_website:web||null, efed_signings_link:apply||null})
     });
+    if (!_sr.ok) throw new Error('HTTP '+_sr.status+': '+await _sr.text());
     // Update Apply Now button
     const applyBtn = document.getElementById('signings-apply-btn');
     if (applyBtn && apply && _signingsOn) { applyBtn.href=apply; applyBtn.style.display='block'; }
@@ -836,7 +838,7 @@ async function saveEditProfile() {
     renderSocialLinks(yt, ig, x, web);
     msg.textContent = 'Saved!'; msg.style.color = '#4caf64';
     setTimeout(closeEditModal, 800);
-  } catch(e) { msg.textContent = 'Could not save.'; msg.style.color='#ff6b6b'; }
+  } catch(e) { console.error('saveEditProfile error:', e); msg.textContent = 'Could not save: '+e.message; msg.style.color='#ff6b6b'; }
 }
 
 
@@ -1021,7 +1023,7 @@ async function initNav() {
     if ((u.is_efed_owner || u.role === 'owner') && u.promo_name) {
       if (ddEmail) { ddEmail.textContent = 'Owner of ' + u.promo_name; ddEmail.style.color = '#c8a84b'; }
       const myEfedBtn = document.getElementById('my-efed-btn');
-      if (myEfedBtn) { myEfedBtn.style.display = 'flex'; myEfedBtn.onclick = () => { toggleDropdown(true); window.location.href = 'efed.html?e=' + encodeURIComponent(u.promo_name); }; }
+      if (myEfedBtn) myEfedBtn.style.display = 'none'; // already on efed page
     } else {
       if (ddEmail) { ddEmail.textContent = '@' + session.username; ddEmail.style.color = ''; }
       const myEfedBtn = document.getElementById('my-efed-btn');
@@ -1158,7 +1160,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website,efed_open_signings,efed_signings_link&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website,efed_open_signings,efed_signings_link&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) { document.getElementById('efed-name').textContent = EFED_NAME; loadEfedStats(); return; }
     const user = users[0];
