@@ -413,6 +413,9 @@
   .card-claim-btn { position: absolute; top: 6px; left: 6px; width: 24px; height: 24px; border-radius: 50%; background: rgba(0,0,0,.7); border: 1px solid rgba(255,255,255,.25); color: rgba(255,255,255,.7); display: none; align-items: center; justify-content: center; cursor: pointer; z-index: 10; transition: background .15s, color .15s; }
   .card:hover .card-claim-btn { display: flex; }
   .card-claim-btn:hover { background: var(--gold); border-color: var(--gold); color: #000; }
+  .card-claimed-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.5); border-radius: 8px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .2s; z-index: 10; pointer-events: none; }
+  .card:hover .card-claimed-overlay { opacity: 1; }
+  .card-claimed-label { font-size: .6rem; font-weight: 700; color: var(--gold); letter-spacing: 1px; text-align: center; padding: 6px 10px; background: rgba(0,0,0,.7); border-radius: 6px; text-transform: uppercase; }
 
   /* Pending card styles */
   .card.pending { pointer-events: none; }
@@ -3037,8 +3040,7 @@ function makeCard(v) {
     openExpand(v);
   };
   el._videoUrl = v.url;
-
-  // thumb
+  el.dataset.url = v.url;
   const thumbDiv = document.createElement('div');
   thumbDiv.className = 'card-thumb';
 
@@ -3109,11 +3111,28 @@ function makeCard(v) {
   }
 
   el.appendChild(infoDiv);
+
+  // + button for eFed owners — show claimed state if already claimed by this owner
+  if (session && (session.is_efed_owner || session.role === 'owner') && session.promo_name) {
+    const alreadyClaimed = v.efed && v.efed.toLowerCase() === session.promo_name.toLowerCase();
+    if (alreadyClaimed) {
+      // Gray overlay with "You claimed this show" on hover
+      const claimedOverlay = document.createElement('div');
+      claimedOverlay.className = 'card-claimed-overlay';
+      claimedOverlay.innerHTML = '<span class="card-claimed-label">You claimed this show</span>';
+      el.appendChild(claimedOverlay);
+    } else {
+      const claimBtn = document.createElement('button');
+      claimBtn.className = 'card-claim-btn';
+      claimBtn.title = 'Add to my eFed';
+      claimBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+      claimBtn.onclick = (e) => { e.stopPropagation(); openClaimModal(v); };
+      el.appendChild(claimBtn);
+    }
+  }
+
   return el;
-}
-
-
-// ── COMMUNITY VIDEOS ──
+}// ── COMMUNITY VIDEOS ──
 function sbGetWithTimeout(table, filters, ms = 5000) {
   return Promise.race([
     sbGet(table, filters),
@@ -4094,13 +4113,17 @@ async function confirmClaim() {
   if (!session || !_claimVideo || !session.promo_name) return;
   closeClaimModal();
   try {
-    // Update the submission's efed field to this owner's promo name
     const rows = await sbGet('submissions', `url=eq.${encodeURIComponent(_claimVideo.url)}&status=eq.approved`);
     if (rows.length) {
       await fetch(`${SUPABASE_URL}/rest/v1/submissions?id=eq.${rows[0].id}`, {
         method: 'PATCH', headers: SB_HEADERS,
         body: JSON.stringify({ efed: session.promo_name })
       });
+      // Hide the + button on the card
+      const card = document.querySelector(`.card[data-url="${CSS.escape(_claimVideo.url)}"]`);
+      if (card) { const btn = card.querySelector('.card-claim-btn'); if (btn) btn.remove(); }
+      // Also update video object so re-renders don't show it
+      _claimVideo.efed = session.promo_name;
       showToast('✅ Added to your eFed episodes!');
     } else {
       showToast('Could not find this video in the database.');
