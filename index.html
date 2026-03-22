@@ -1321,6 +1321,9 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
   .notif-icon::after { content: '✕'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: .85rem; opacity: 0; transition: opacity .15s; color: #ff6b6b; }
   .notif-item-wrap:hover .notif-icon::after { opacity: 1; }
   .notif-item-wrap:hover .notif-icon { background: rgba(192,0,14,.15); font-size: 0; }
+  .notif-item-wrap { position: relative; overflow: hidden; border-bottom: 1px solid rgba(255,255,255,.04); }
+  .notif-delete-btn { position: absolute; right: 0; top: 0; bottom: 0; width: 70px; background: #c0000e; display: flex; align-items: center; justify-content: center; cursor: pointer; transform: translateX(70px); transition: transform .2s cubic-bezier(.25,.46,.45,.94); }
+  .notif-delete-btn svg { pointer-events: none; }
   .notif-icon.type-comment { background: rgba(100,149,237,.15); }
   .notif-icon.type-like { background: rgba(192,0,14,.15); }
   .notif-icon.type-rating { background: rgba(200,168,75,.15); }
@@ -7116,6 +7119,16 @@ async function markNotifRead(id) {
   } catch(e) {}
 }
 
+async function deleteNotif(id, el) {
+  try {
+    await fetch(SUPABASE_URL+'/rest/v1/notifications?id=eq.'+id, { method:'DELETE', headers:SB_HEADERS });
+    if (el) el.remove();
+    const list = document.getElementById('notif-list');
+    if (list && !list.querySelector('.notif-item')) {
+      list.innerHTML = '<div class="notif-empty"><span style="font-size:1.5rem;">🔔</span>No notifications yet</div>';
+    }
+  } catch(e) {}
+}
 async function markAllNotifsRead() {
   const session = getSession();
   if (!session) return;
@@ -7349,60 +7362,7 @@ function closeClaimModal() {
   _claimData = null;
 }
 
-async function confirmClaim() {
-  if (!_claimData) return;
-  const { submission, claimerUsername } = _claimData;
-  const session = getSession();
-  if (!session) return;
 
-  try {
-    // Transfer the post to the creator
-    await sbUpdate('submissions', {
-      submitted_by: claimerUsername,
-      claimed_by: claimerUsername,
-      originally_posted_by: submission.submitted_by
-    }, `id=eq.${submission.id}`);
-
-    // Increment supported_count for the original poster
-    const origUsers = await sbGet('users', `username=eq.${encodeURIComponent(submission.submitted_by)}`);
-    if (origUsers.length) {
-      const newSupported = (origUsers[0].supported_count || 0) + 1;
-      await sbUpdate('users', { supported_count: newSupported }, `username=eq.${encodeURIComponent(submission.submitted_by)}`);
-    }
-
-    // Send notification to original poster
-    await sbInsert('notifications', {
-      username: submission.submitted_by,
-      type: 'claim',
-      message: '🎉 @' + claimerUsername + ' appreciated your post of "' + (submission.show_name || 'a show') + '" and claimed it as the official upload. Thanks for supporting the community!',
-      video_url: submission.url,
-      read: false,
-      created_at: Date.now()
-    });
-
-    // Update local videos array
-    const v = videos.find(v => v.url === submission.url);
-    if (v) {
-      v.submittedBy = claimerUsername;
-      v.originallyPostedBy = submission.submitted_by;
-    }
-    buildPills();
-    renderGrid();
-
-    closeClaimModal();
-
-    // Show success toast
-    const toast = document.createElement('div');
-    toast.textContent = '✅ Show claimed successfully!';
-    toast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(18,18,18,.97);border:1px solid rgba(76,175,100,.3);color:#4caf64;font-family:DM Sans,sans-serif;font-size:.75rem;padding:10px 20px;border-radius:40px;z-index:9999;white-space:nowrap;pointer-events:none;';
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2500);
-
-  } catch(e) {
-    alert('Could not claim. Try again.');
-    console.error(e);
-  }
-}
 </script>
 
 
