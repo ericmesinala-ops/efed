@@ -246,7 +246,7 @@ nav { position:fixed; top:0; left:0; right:0; z-index:9998; display:flex; align-
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           My Profile
         </button>
-        <button class="dropdown-item" id="my-efed-btn" onclick="toggleDropdown(true); window.location.href='efed.html'" style="display:none;">
+        <button class="dropdown-item" id="my-efed-btn" onclick="goToMyEfed()" style="display:none;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           My eFed
         </button>
@@ -533,31 +533,40 @@ async function loadPage() {
       .catch(()=>{});
   }
 
-  // Find the eFed owner by promo_name
-  if (!EFED_NAME) {
-    // If no ?e= param, try to use logged-in user's own eFed
-    if (session?.promo_name) EFED_NAME = session.promo_name;
-    else { document.getElementById('efed-name').textContent = 'eFed Not Found'; return; }
-  }
+  // Try session for EFED_NAME if not in URL
+  if (!EFED_NAME) EFED_NAME = session?.promo_name || session?.promoName || '';
 
   // Load owner data
+  const SELECT = 'username,display_name,avatar_url,efed_banner,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website,efed_open_signings,efed_signings_link';
   try {
-    const owners = await sbGet('users',
-      `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,avatar_banner,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website,efed_open_signings,efed_signings_link&limit=1`);
-    const owner = owners[0];
-    if (!owner) { document.getElementById('efed-name').textContent = EFED_NAME; loadStats(); return; }
+    let owner = null;
+
+    // Try by promo_name first
+    if (EFED_NAME) {
+      const rows = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=${SELECT}&limit=1`);
+      if (rows.length) owner = rows[0];
+    }
+
+    // Fallback: load logged-in user's own data (covers case where promo_name doesn't match exactly)
+    if (!owner && session?.username) {
+      const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=${SELECT}&limit=1`);
+      if (rows.length) { owner = rows[0]; if (owner.promo_name) EFED_NAME = owner.promo_name; }
+    }
+
+    if (!owner) { document.getElementById('efed-name').textContent = EFED_NAME || 'eFed Not Found'; loadStats(); return; }
     _ownerData = owner;
     EFED_OWNER_USERNAME = owner.username;
-    _isOwner = session && session.username?.toLowerCase() === owner.username?.toLowerCase();
+    _isOwner = !!(session && session.username?.toLowerCase() === owner.username?.toLowerCase());
+    if (owner.promo_name) EFED_NAME = owner.promo_name; // always use the exact DB value
 
     // Page title
     document.title = EFED_NAME + ' — EFED Hub';
     document.getElementById('efed-name').textContent = EFED_NAME;
 
     // Banner
-    if (owner.avatar_banner) {
+    if (owner.efed_banner) {
       const bi = document.getElementById('efed-banner-img');
-      bi.src = owner.avatar_banner; bi.style.display = 'block';
+      bi.src = owner.efed_banner; bi.style.display = 'block';
     }
     if (_isOwner) {
       const overlay = document.getElementById('efed-banner-overlay');
@@ -784,7 +793,7 @@ function handleEfedBannerFile(event) {
       const url = canvas.toDataURL('image/jpeg',.78);
       document.getElementById('efed-banner-img').src = url;
       document.getElementById('efed-banner-img').style.display = 'block';
-      await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(session.username)}`,{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({avatar_banner:url})});
+      await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(session.username)}`,{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_banner:url})});
     };
     img.src = dataUrl;
   });
@@ -889,6 +898,7 @@ document.addEventListener('click',e=>{
 });
 function handleSignOut(){localStorage.removeItem('efed_session');window.location.href='auth.html';}
 function goToProfile(){const s=getSession();if(s)window.location.href='profile.html?u='+encodeURIComponent(s.username);}
+function goToMyEfed(){toggleDropdown(true);const s=getSession();const n=s?.promo_name||s?.promoName||'';window.location.href=n?'efed.html?e='+encodeURIComponent(n):'efed.html';}
 
 // ── SETTINGS ──
 function openSettings(){
