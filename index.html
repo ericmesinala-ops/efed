@@ -5523,20 +5523,27 @@ async function loadExpandComments(url) {
         <div class="expand-comment-body" style="flex:1;">
           <div class="expand-comment-user"><a href="profile.html?u=${encodeURIComponent(c.username)}" style="color:inherit;text-decoration:none;" onclick="event.stopPropagation()">${withVerified(c.username, c.username)}</a> ${c.is_creator ? '<span style="color:#c8a84b;font-size:.55rem;letter-spacing:1px;">🎬</span>' : ''}</div>
           <div class="expand-comment-text">${c.text}</div>
-          <div style="display:flex;align-items:center;gap:10px;margin-top:6px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap;">
             <div class="expand-comment-time">${new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div>
             <button id="clike-${c.id}" onclick="toggleCommentLike(${c.id},this)" style="display:flex;align-items:center;gap:3px;background:none;border:none;cursor:pointer;color:#8a8a9a;font-size:.72rem;padding:0;transition:color .15s;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
               <span id="clike-count-${c.id}">0</span>
             </button>
+            <button onclick="toggleCommentReactPicker(event,${c.id})" style="display:flex;align-items:center;gap:3px;background:none;border:1px solid rgba(255,255,255,.1);border-radius:20px;cursor:pointer;color:rgba(255,255,255,.35);font-size:.68rem;padding:2px 7px;transition:color .15s,background .15s;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+              React
+            </button>
             ${session && session.username !== c.username ? `<button onclick="openFlagModal(${c.id},this)" style="background:none;border:none;color:#8a8a9a;font-size:.6rem;cursor:pointer;padding:0;letter-spacing:.5px;text-transform:uppercase;">⚑ Report</button>` : ''}
             ${session && (session.username === c.username || session.username.toLowerCase() === ADMIN_USERNAME) ? `<button onclick="deleteComment(${c.id},this)" style="background:none;border:none;color:#8a8a9a;font-size:.6rem;cursor:pointer;padding:0;letter-spacing:.5px;text-transform:uppercase;transition:color .15s;" onmouseover="this.style.color='#ff6b6b'" onmouseout="this.style.color='#8a8a9a'">✕ Delete</button>` : ''}
           </div>
+          <div class="comment-reactions" id="creactions-${c.id}" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;"></div>
         </div>`;
       list.appendChild(div);
     });
     // Load like counts for all comments
     loadCommentLikes(rows.map(c => c.id), session);
+    // Load reactions for all comments
+    loadAllCommentReactions(rows.map(c => c.id), session?.username);
   } catch(e) {
     list.innerHTML = '<div style="font-size:.72rem;color:#8a8a9a;">Could not load comments.</div>';
   }
@@ -7352,7 +7359,7 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; }
 }
 #chat-messages::-webkit-scrollbar { width: 3px; }
 #chat-messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 2px; }
-.chat-msg { display: flex; gap: 8px; animation: chatIn .15s ease-out; padding: 2px 0; position: relative; align-items: flex-start; }
+.chat-msg { display: flex; gap: 10px; animation: chatIn .15s ease-out; padding: 6px 0; position: relative; align-items: flex-start; }
 .chat-msg-avatar { width: 26px; height: 26px; border-radius: 50%; background: rgba(200,168,75,.12); border: 1px solid rgba(200,168,75,.25); color: var(--gold); font-family: 'Bebas Neue',sans-serif; font-size: .75rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; cursor: pointer; transition: opacity .15s; margin-top: 2px; text-decoration: none; }
 .chat-msg-avatar:hover { opacity: .75; }
 .chat-msg-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
@@ -7370,13 +7377,13 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; }
 .chat-msg-delete { background: none; border: none; color: rgba(255,255,255,.2); cursor: pointer; font-size: .55rem; padding: 0 0 0 4px; transition: color .15s; display: none; }
 .chat-msg:hover .chat-msg-delete { display: inline; }
 .chat-msg-delete:hover { color: #ff6b6b; }
-.chat-react-btn { background: none; border: 1px solid rgba(255,255,255,.1); color: rgba(255,255,255,.35); cursor: pointer; padding: 2px 7px; border-radius: 20px; display: inline-flex; align-items: center; gap: 4px; font-size: .68rem; transition: color .15s, background .15s, border-color .15s; margin-top: 4px; }
-.chat-react-btn:hover { color: rgba(255,255,255,.7); background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.2); }
-.chat-msg-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-.chat-reaction-pill { display: flex; align-items: center; gap: 3px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); border-radius: 20px; padding: 2px 7px; font-size: .78rem; cursor: pointer; transition: background .15s, border-color .15s; user-select: none; }
-.chat-reaction-pill:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); }
-.chat-reaction-pill.mine { background: rgba(200,168,75,.15); border-color: rgba(200,168,75,.4); }
-.chat-reaction-pill .r-count { font-size: .65rem; color: rgba(255,255,255,.6); font-family: 'DM Sans',sans-serif; }
+.chat-react-btn { background: none; border: 1px solid rgba(255,255,255,.12); color: rgba(255,255,255,.45); cursor: pointer; padding: 4px 10px; border-radius: 20px; display: inline-flex; align-items: center; gap: 5px; font-size: .72rem; transition: color .15s, background .15s, border-color .15s; margin-top: 6px; }
+.chat-react-btn:hover { color: rgba(255,255,255,.8); background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.2); }
+.chat-msg-reactions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chat-reaction-pill { display: flex; align-items: center; gap: 5px; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); border-radius: 20px; padding: 4px 10px; font-size: .9rem; cursor: pointer; transition: background .15s, border-color .15s; user-select: none; }
+.chat-reaction-pill:hover { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.25); }
+.chat-reaction-pill.mine { background: rgba(200,168,75,.18); border-color: rgba(200,168,75,.45); }
+.chat-reaction-pill .r-count { font-size: .72rem; color: rgba(255,255,255,.7); font-family: 'DM Sans',sans-serif; font-weight: 600; }
 #chat-reaction-picker { position: fixed; z-index: 99999; background: #1a1a1f; border: 1px solid rgba(255,255,255,.12); border-radius: 12px; padding: 8px; display: none; gap: 4px; flex-wrap: wrap; width: 176px; box-shadow: 0 12px 32px rgba(0,0,0,.7); }
 #chat-reaction-picker button { background: none; border: none; font-size: 1.2rem; cursor: pointer; padding: 4px 6px; border-radius: 8px; transition: background .15s; }
 #chat-reaction-picker button:hover { background: rgba(255,255,255,.1); }
@@ -8341,5 +8348,109 @@ async function sendGif(url, title) {
       if (el) el.dataset.id = result[0].id;
     }
   } catch(e) { console.error('GIF send failed:', e); }
+}
+
+// ── COMMENT REACTIONS ──
+const COMMENT_REACT_EMOJIS = ['👍','❤️','🔥','😂','😮','💯','👏','🏆','💪','🙏'];
+let _cReactPickerMsgId = null;
+
+// Picker element (created once)
+(function() {
+  const p = document.createElement('div');
+  p.id = 'comment-react-picker';
+  p.style.cssText = 'position:fixed;z-index:99999;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:8px;display:none;gap:4px;flex-wrap:wrap;width:196px;box-shadow:0 12px 32px rgba(0,0,0,.7);';
+  COMMENT_REACT_EMOJIS.forEach(emoji => {
+    const btn = document.createElement('button');
+    btn.textContent = emoji;
+    btn.style.cssText = 'background:none;border:none;font-size:1.2rem;cursor:pointer;padding:4px 6px;border-radius:8px;transition:background .15s;';
+    btn.onmouseover = () => btn.style.background = 'rgba(255,255,255,.1)';
+    btn.onmouseout  = () => btn.style.background = 'none';
+    btn.onclick = () => pickCommentReaction(emoji);
+    p.appendChild(btn);
+  });
+  document.body.appendChild(p);
+})();
+
+function toggleCommentReactPicker(e, commentId) {
+  e.stopPropagation();
+  const picker = document.getElementById('comment-react-picker');
+  if (_cReactPickerMsgId === commentId && picker.style.display === 'flex') {
+    picker.style.display = 'none'; _cReactPickerMsgId = null; return;
+  }
+  _cReactPickerMsgId = commentId;
+  const rect = e.currentTarget.getBoundingClientRect();
+  picker.style.display = 'flex';
+  const spaceAbove = rect.top - 8;
+  picker.style.left = Math.min(rect.left, window.innerWidth - 210) + 'px';
+  picker.style.top = (spaceAbove >= 60 ? rect.top - 60 - 8 : rect.bottom + 8) + 'px';
+  setTimeout(() => document.addEventListener('click', closeCommentPicker, { once: true }), 50);
+}
+function closeCommentPicker() {
+  const p = document.getElementById('comment-react-picker');
+  if (p) p.style.display = 'none';
+  _cReactPickerMsgId = null;
+}
+
+async function pickCommentReaction(emoji) {
+  closeCommentPicker();
+  const session = getSession();
+  if (!session || !_cReactPickerMsgId) return;
+  const commentId = _cReactPickerMsgId;
+  try {
+    const existing = await sbGet('comment_reactions', `comment_id=eq.${commentId}&username=eq.${encodeURIComponent(session.username)}&emoji=eq.${encodeURIComponent(emoji)}`);
+    if (existing.length) {
+      await fetch(`${SUPABASE_URL}/rest/v1/comment_reactions?comment_id=eq.${commentId}&username=eq.${encodeURIComponent(session.username)}&emoji=eq.${encodeURIComponent(emoji)}`, { method:'DELETE', headers:SB_HEADERS });
+    } else {
+      await sbInsert('comment_reactions', { comment_id: commentId, username: session.username, emoji });
+    }
+    await loadCommentReactionsFor(commentId, session.username);
+  } catch(e) { console.error('Comment reaction failed', e); }
+}
+
+async function loadCommentReactionsFor(commentId, currentUser) {
+  try {
+    const rows = await sbGet('comment_reactions', `comment_id=eq.${commentId}`);
+    const el = document.getElementById('creactions-' + commentId);
+    if (!el) return;
+    const grouped = {};
+    rows.forEach(r => {
+      if (!grouped[r.emoji]) grouped[r.emoji] = { count:0, mine:false };
+      grouped[r.emoji].count++;
+      if (r.username === currentUser) grouped[r.emoji].mine = true;
+    });
+    el.innerHTML = Object.entries(grouped).map(([emoji, data]) =>
+      `<button class="chat-reaction-pill${data.mine?' mine':''}" onclick="pickCommentReactionDirect('${emoji}',${commentId})" style="font-size:.75rem;">
+        <span>${emoji}</span><span class="r-count">${data.count}</span>
+      </button>`
+    ).join('');
+  } catch(e) {}
+}
+
+async function loadAllCommentReactions(commentIds, currentUser) {
+  if (!commentIds.length) return;
+  try {
+    const rows = await sbGet('comment_reactions', `comment_id=in.(${commentIds.join(',')})`);
+    const grouped = {};
+    rows.forEach(r => {
+      if (!grouped[r.comment_id]) grouped[r.comment_id] = {};
+      if (!grouped[r.comment_id][r.emoji]) grouped[r.comment_id][r.emoji] = { count:0, mine:false };
+      grouped[r.comment_id][r.emoji].count++;
+      if (r.username === currentUser) grouped[r.comment_id][r.emoji].mine = true;
+    });
+    Object.entries(grouped).forEach(([commentId, emojis]) => {
+      const el = document.getElementById('creactions-' + commentId);
+      if (!el) return;
+      el.innerHTML = Object.entries(emojis).map(([emoji, data]) =>
+        `<button class="chat-reaction-pill${data.mine?' mine':''}" onclick="pickCommentReactionDirect('${emoji}',${commentId})" style="font-size:.75rem;">
+          <span>${emoji}</span><span class="r-count">${data.count}</span>
+        </button>`
+      ).join('');
+    });
+  } catch(e) {}
+}
+
+function pickCommentReactionDirect(emoji, commentId) {
+  _cReactPickerMsgId = commentId;
+  pickCommentReaction(emoji);
 }
 </script>

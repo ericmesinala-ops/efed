@@ -411,9 +411,9 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 </a>
 
 <!-- ── BIO ── -->
-<div id="bio-section" style="display:none;padding:16px 16px 0;">
-  <div id="profile-bio" style="font-size:.8rem;color:rgba(255,255,255,.65);line-height:1.7;white-space:pre-wrap;word-break:break-word;"></div>
-  <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
+<div id="bio-section" style="display:none;" class="section">
+  <div class="sec-title">Bio</div>
+  <div id="profile-bio" style="font-size:.82rem;color:rgba(255,255,255,.7);line-height:1.7;white-space:pre-wrap;word-break:break-word;"></div>
 </div>
 
 <!-- ── OPEN FOR SIGNINGS ── -->
@@ -790,14 +790,18 @@ function goToProfile() {
   if (session) window.location.href = 'profile.html?u=' + encodeURIComponent(session.username);
 }
 
-document.getElementById('nav-search-btn').addEventListener('click', () => {
-  const wrap = document.getElementById('nav-search-wrap');
-  wrap.classList.toggle('open');
-  if (wrap.classList.contains('open')) document.getElementById('nav-search-input').focus();
-});
-document.getElementById('nav-search-input').addEventListener('keydown', e => {
-  if (e.key === 'Escape') document.getElementById('nav-search-wrap').classList.remove('open');
-  if (e.key === 'Enter') { const q = e.target.value.trim(); if (q) window.location.href = 'index.html?q=' + encodeURIComponent(q); }
+document.addEventListener('DOMContentLoaded', () => {
+  const searchBtn = document.getElementById('nav-search-btn');
+  const searchInput = document.getElementById('nav-search-input');
+  const searchWrap = document.getElementById('nav-search-wrap');
+  if (searchBtn) searchBtn.addEventListener('click', () => {
+    searchWrap.classList.toggle('open');
+    if (searchWrap.classList.contains('open')) searchInput.focus();
+  });
+  if (searchInput) searchInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') searchWrap.classList.remove('open');
+    if (e.key === 'Enter') { const q = e.target.value.trim(); if (q) window.location.href = 'index.html?q=' + encodeURIComponent(q); }
+  });
 });
 
 function scrollSubRow(dir) {
@@ -1361,17 +1365,40 @@ async function loadProfile() {
         : `<div class="efed-av" style="${style}">${(name||'?')[0].toUpperCase()}</div>`;
     };
 
-    // My eFeds — roster
-    if (!rosterRows.length) {
-      myEfedList.innerHTML = '<div class="empty">Not part of any eFed yet.</div>';
-    } else {
-      myEfedList.innerHTML = rosterRows.map(r => `
+    // My eFeds — roster (+ owner's own eFed prepended)
+    // Check if viewing user owns an eFed
+    let ownerEfedName = null;
+    try {
+      const ownerCheck = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=promo_name,is_efed_owner,role`);
+      const oc = ownerCheck[0];
+      if (oc?.promo_name && (oc.is_efed_owner || oc.role === 'owner')) {
+        ownerEfedName = oc.promo_name;
+        // Add owner's efed logo to logoMap
+        if (!logoMap[ownerEfedName]) {
+          const logoCheck = await sbGet('users', `promo_name=eq.${encodeURIComponent(ownerEfedName)}&select=promo_name,promo_logo`).catch(()=>[]);
+          if (logoCheck[0]?.promo_logo) logoMap[ownerEfedName] = logoCheck[0].promo_logo;
+        }
+      }
+    } catch(e) {}
+
+    const ownerItem = ownerEfedName ? `
+      <div class="efed-item" onclick="window.location.href='efed.html?e=${encodeURIComponent(ownerEfedName)}'">
+        ${efedAvHtml(ownerEfedName, 'background:rgba(192,0,14,.12);border-color:rgba(192,0,14,.3);color:var(--accent);')}
+        <div><div class="efed-name-txt">${_esc(ownerEfedName)}</div><div class="efed-role-txt">Owner</div></div>
+        <svg style="margin-left:auto;opacity:.25;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>` : '';
+
+    const rosterItems = rosterRows
+      .filter(r => r.efed !== ownerEfedName) // don't duplicate owner's efed
+      .map(r => `
         <div class="efed-item" onclick="window.location.href='efed.html?e=${encodeURIComponent(r.efed)}'">
           ${efedAvHtml(r.efed)}
           <div><div class="efed-name-txt">${_esc(r.efed)}</div></div>
           <svg style="margin-left:auto;opacity:.25;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
         </div>`).join('');
-    }
+
+    const combined = ownerItem + rosterItems;
+    myEfedList.innerHTML = combined || '<div class="empty">Not part of any eFed yet.</div>';
     // Supporting eFeds — fan (exclude ones already in roster)
     const rosterEfeds = new Set(rosterRows.map(r => r.efed));
     const fanRows = supportRows.filter(s => !rosterEfeds.has(s.efed));
