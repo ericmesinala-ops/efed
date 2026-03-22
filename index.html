@@ -3092,55 +3092,17 @@ function makeCard(v) {
 
   thumbDiv.appendChild(cardOver);
 
-  // 3-dot menu — always rendered for logged-in users, items shown based on role
+  // 3-dot button — opens a fixed modal popup (no positioning issues)
   if (session) {
-    const menuBtn = document.createElement('button');
-    menuBtn.className = 'card-menu-btn';
-    menuBtn.style.cssText = 'position:absolute;top:7px;right:7px;z-index:50;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.75);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;';
-    menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
-
-    const drop = document.createElement('div');
-    drop.style.cssText = 'display:none;position:absolute;top:38px;right:7px;z-index:9999;background:#1a1a20;border:1px solid rgba(255,255,255,.12);border-radius:8px;overflow:hidden;min-width:140px;box-shadow:0 8px 24px rgba(0,0,0,.8);';
-
-    menuBtn.onclick = function(e) {
+    const dotBtn = document.createElement('button');
+    dotBtn.style.cssText = 'position:absolute;top:7px;right:7px;z-index:50;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.75);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;';
+    dotBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="pointer-events:none"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
+    dotBtn.onclick = function(e) {
       e.stopPropagation();
       e.preventDefault();
-      // Close all other open drops
-      document.querySelectorAll('[data-card-drop="open"]').forEach(d => { if (d !== drop) { d.style.display='none'; delete d.dataset.cardDrop; } });
-      if (drop.style.display === 'block') { drop.style.display='none'; delete drop.dataset.cardDrop; }
-      else { drop.style.display='block'; drop.dataset.cardDrop='open'; }
+      openCardActionModal(v, isAdmin, isOwner, el);
     };
-
-    // Report — always visible
-    const reportBtn = document.createElement('button');
-    reportBtn.style.cssText = 'width:100%;padding:10px 14px;background:none;border:none;color:#e8e8e8;font-family:DM Sans,sans-serif;font-size:.78rem;text-align:left;cursor:pointer;display:block;';
-    reportBtn.textContent = '⚑ Report';
-    reportBtn.onmouseover = () => reportBtn.style.background = 'rgba(255,255,255,.06)';
-    reportBtn.onmouseout = () => reportBtn.style.background = 'none';
-    reportBtn.onclick = (e) => { e.stopPropagation(); drop.style.display='none'; openReportModal && openReportModal(v); };
-    drop.appendChild(reportBtn);
-
-    if (isAdmin || isOwner) {
-      const delBtn = document.createElement('button');
-      delBtn.style.cssText = 'width:100%;padding:10px 14px;background:none;border:none;color:#ff6b6b;font-family:DM Sans,sans-serif;font-size:.78rem;text-align:left;cursor:pointer;display:block;';
-      delBtn.textContent = isAdmin ? '🗑 Delete' : '✕ Remove';
-      delBtn.onmouseover = () => delBtn.style.background = 'rgba(192,0,14,.12)';
-      delBtn.onmouseout = () => delBtn.style.background = 'none';
-      delBtn.onclick = async function(e) {
-        e.stopPropagation();
-        drop.style.display='none';
-        if (!confirm(isAdmin ? 'Delete from Hub?' : 'Remove this video?')) return;
-        try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast(isAdmin ? 'Deleted.' : 'Removed.'); }
-        catch(err) { showToast('Could not delete.'); }
-      };
-      drop.appendChild(delBtn);
-    }
-
-    thumbDiv.appendChild(menuBtn);
-    thumbDiv.appendChild(drop);
-
-    // Close on outside click
-    document.addEventListener('click', function() { drop.style.display='none'; delete drop.dataset.cardDrop; }, { once: false, capture: false });
+    thumbDiv.appendChild(dotBtn);
   }
 
   el.appendChild(thumbDiv);
@@ -8648,5 +8610,56 @@ async function loadAllCommentReactions(commentIds, currentUser) {
 function pickCommentReactionDirect(emoji, commentId) {
   _cReactPickerMsgId = commentId;
   pickCommentReaction(emoji);
+}
+</script>
+
+<!-- ── CARD ACTION MODAL ── -->
+<div id="card-action-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);align-items:flex-end;justify-content:center;padding-bottom:24px;" onclick="if(event.target===this)closeCardActionModal()">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:360px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.9);">
+    <div id="cam-title" style="padding:14px 18px 10px;font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:3px;color:rgba(255,255,255,.4);border-bottom:1px solid rgba(255,255,255,.06);"></div>
+    <div id="cam-buttons"></div>
+    <button onclick="closeCardActionModal()" style="width:100%;padding:14px;background:none;border:none;border-top:1px solid rgba(255,255,255,.06);color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.82rem;cursor:pointer;">Cancel</button>
+  </div>
+</div>
+<script>
+function closeCardActionModal() {
+  document.getElementById('card-action-modal-bg').style.display = 'none';
+}
+function openCardActionModal(v, isAdmin, isOwner, el) {
+  const bg = document.getElementById('card-action-modal-bg');
+  const title = document.getElementById('cam-title');
+  const btns = document.getElementById('cam-buttons');
+  title.textContent = v.show || 'Video';
+  btns.innerHTML = '';
+
+  const makeBtn = (label, color, fn) => {
+    const b = document.createElement('button');
+    b.style.cssText = `width:100%;padding:14px 18px;background:none;border:none;border-bottom:1px solid rgba(255,255,255,.05);color:${color};font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;text-align:left;cursor:pointer;`;
+    b.textContent = label;
+    b.onmouseover = () => b.style.background = 'rgba(255,255,255,.04)';
+    b.onmouseout = () => b.style.background = 'none';
+    b.onclick = () => { closeCardActionModal(); fn(); };
+    btns.appendChild(b);
+  };
+
+  if (isAdmin) {
+    makeBtn('📅 Edit Date', '#c8a84b', () => openEditDateModal && openEditDateModal(v));
+    makeBtn('🗑 Delete Video', '#ff6b6b', async () => {
+      if (!confirm('Delete this video from the Hub?')) return;
+      try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast('Deleted.'); }
+      catch(e) { showToast('Could not delete.'); }
+    });
+  } else if (isOwner) {
+    makeBtn('📅 Edit Date', '#c8a84b', () => openEditDateModal && openEditDateModal(v));
+    makeBtn('✕ Remove Video', '#ff6b6b', async () => {
+      if (!confirm('Remove this video?')) return;
+      try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast('Removed.'); }
+      catch(e) { showToast('Could not remove.'); }
+    });
+  } else {
+    makeBtn('⚑ Flag Video', '#e8e8e8', () => openReportModal && openReportModal(v));
+  }
+
+  bg.style.display = 'flex';
 }
 </script>
