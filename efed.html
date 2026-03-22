@@ -1460,15 +1460,10 @@ async function loadRoster() {
   const grid = document.getElementById('roster-grid'); if (!grid) return;
   const session = getSession();
   try {
-    // Owner sees all rows; member sees approved + their own pending; others see approved only
-    let filter;
-    if (_isOwnProfile) {
-      filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&order=joined_at.asc`;
-    } else if (session) {
-      filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&or=(status.eq.approved,and(status.eq.pending,username.eq.${encodeURIComponent(session.username)}))&order=joined_at.asc`;
-    } else {
-      filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&order=joined_at.asc`;
-    }
+    // Owner sees all rows (including pending); everyone else only sees approved
+    const filter = _isOwnProfile
+      ? `efed=eq.${encodeURIComponent(EFED_NAME)}&order=joined_at.asc`
+      : `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&order=joined_at.asc`;
     const rosterRows = await sbGet('roster', filter);
     const ownerRows  = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url`);
     const owner = ownerRows[0];
@@ -1695,6 +1690,74 @@ function updateEpArrows() {
   if (aR) aR.classList.toggle('hidden', atEnd   || noScroll);
   if (jL) jL.classList.toggle('hidden', atStart || noScroll);
   if (jR) jR.classList.toggle('hidden', atEnd   || noScroll);
+}
+
+function notifAcceptRoster(rosterRowId, requesterUsername, requesterName, notifId, notifEl) {
+  document.getElementById('nra-name').textContent = requesterName;
+  document.getElementById('nra-efed').textContent = EFED_NAME;
+  document.getElementById('nra-modal-bg').style.display = 'flex';
+  document.getElementById('nra-confirm-btn').onclick = async () => {
+    document.getElementById('nra-modal-bg').style.display = 'none';
+    try {
+      // Approve roster row
+      await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+rosterRowId, {
+        method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({status:'approved'})
+      });
+      // Notify user
+      await fetch(SUPABASE_URL+'/rest/v1/notifications', {
+        method:'POST', headers:SB_HEADERS,
+        body:JSON.stringify({
+          username: requesterUsername,
+          type: 'roster_approved',
+          message: `✅ You have been approved as a member of the <strong>${_esc(EFED_NAME)}</strong> roster!`,
+          read: false,
+          created_at: Date.now()
+        })
+      });
+      // Mark notif as read and swap buttons with confirmed label
+      markNotifRead(notifId);
+      if (notifEl) {
+        notifEl.classList.remove('unread');
+        const btnRow = notifEl.querySelector('div[style*="gap:8px"]');
+        if (btnRow) btnRow.innerHTML = '<span style="font-size:.68rem;color:#4caf64;font-weight:700;">✓ Accepted</span>';
+      }
+      loadRoster(); loadEfedStats();
+      showToast(requesterName + ' approved!');
+    } catch(e) { showToast('Could not approve.'); }
+  };
+}
+
+function notifDenyRoster(rosterRowId, requesterUsername, requesterName, notifId, notifEl) {
+  document.getElementById('nrd-name').textContent = requesterName;
+  document.getElementById('nrd-efed').textContent = EFED_NAME;
+  document.getElementById('nrd-modal-bg').style.display = 'flex';
+  document.getElementById('nrd-confirm-btn').onclick = async () => {
+    document.getElementById('nrd-modal-bg').style.display = 'none';
+    try {
+      // Delete roster row
+      await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+rosterRowId, { method:'DELETE', headers:SB_HEADERS });
+      // Notify user
+      await fetch(SUPABASE_URL+'/rest/v1/notifications', {
+        method:'POST', headers:SB_HEADERS,
+        body:JSON.stringify({
+          username: requesterUsername,
+          type: 'roster_denied',
+          message: `❌ Your request to join the <strong>${_esc(EFED_NAME)}</strong> roster was not approved at this time.`,
+          read: false,
+          created_at: Date.now()
+        })
+      });
+      // Mark notif as read and swap buttons
+      markNotifRead(notifId);
+      if (notifEl) {
+        notifEl.classList.remove('unread');
+        const btnRow = notifEl.querySelector('div[style*="gap:8px"]');
+        if (btnRow) btnRow.innerHTML = '<span style="font-size:.68rem;color:#ff6b6b;font-weight:700;">✕ Denied</span>';
+      }
+      loadRoster(); loadEfedStats();
+      showToast(requesterName + ' denied.');
+    } catch(e) { showToast('Could not deny.'); }
+  };
 }
 
 function getTimeAgo(ts) {
@@ -2305,8 +2368,26 @@ async function loadNotifications() {
       const timeAgo = getTimeAgo(n.created_at);
       const div = document.createElement('div');
       div.className = 'notif-item' + (n.read ? '' : ' unread');
-      div.innerHTML = `<div class="notif-icon">🔔</div><div class="notif-body"><div class="notif-msg">${n.message}</div><div class="notif-time">${timeAgo}</div></div>`;
-      div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
+
+      if (n.type === 'roster_join' && n.video_url) {
+        // Actionable roster request — show Accept/Deny buttons
+        const rosterRowId = n.video_url;
+        const requesterUsername = n.requester_username || '';
+        const requesterName = n.requester_name || requesterUsername;
+        div.innerHTML = `
+          <div class="notif-icon">🤼</div>
+          <div class="notif-body" style="flex:1;">
+            <div class="notif-msg">${n.message}</div>
+            <div class="notif-time">${timeAgo}</div>
+            <div style="display:flex;gap:8px;margin-top:10px;">
+              <button onclick="notifDenyRoster('${rosterRowId}','${_esc(requesterUsername)}','${_esc(requesterName)}',${n.id},this.closest('.notif-item'))" style="flex:1;padding:7px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">Deny</button>
+              <button onclick="notifAcceptRoster('${rosterRowId}','${_esc(requesterUsername)}','${_esc(requesterName)}',${n.id},this.closest('.notif-item'))" style="flex:2;padding:7px 0;background:rgba(76,175,100,.12);border:1px solid rgba(76,175,100,.3);border-radius:8px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">✓ Accept</button>
+            </div>
+          </div>`;
+      } else {
+        div.innerHTML = `<div class="notif-icon">🔔</div><div class="notif-body"><div class="notif-msg">${n.message}</div><div class="notif-time">${timeAgo}</div></div>`;
+        div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
+      }
       list.appendChild(div);
     });
     const dot = document.getElementById('bnav-notif-dot'); if (dot) dot.classList.remove('visible');
@@ -2474,16 +2555,24 @@ async function submitJoinRoster() {
       })
     });
 
-    // Notify the eFed owner
+    // Notify the eFed owner — store roster row id in video_url for accept/deny actions
+    const rosterInsertResult = await sbGet('roster',
+      `efed=eq.${encodeURIComponent(EFED_NAME)}&username=eq.${encodeURIComponent(session.username)}&status=eq.pending&order=joined_at.desc&limit=1`
+    ).catch(()=>[]);
+    const newRosterRowId = rosterInsertResult[0]?.id || null;
+
     if (EFED_OWNER) {
       await fetch(SUPABASE_URL+'/rest/v1/notifications', {
         method: 'POST', headers: SB_HEADERS,
         body: JSON.stringify({
           username: EFED_OWNER,
           type: 'roster_join',
-          message: `🤼 ${session.displayName || session.username} has joined your ${EFED_NAME} roster.`,
+          message: `🤼 <strong>${_esc(session.displayName || session.username)}</strong> says they are part of your <strong>${_esc(EFED_NAME)}</strong> roster.`,
+          video_url: String(newRosterRowId || ''),
           read: false,
-          created_at: Date.now()
+          created_at: Date.now(),
+          requester_username: session.username,
+          requester_name: session.displayName || session.username
         })
       });
     }
@@ -2665,6 +2754,50 @@ async function doLeaveRoster(username, rosterRowId) {
   } catch(e) { showToast('Could not leave roster.'); }
 }
 </script>
+
+<!-- ── NOTIF ACCEPT ROSTER CONFIRM ── -->
+<div id="nra-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#111114;border:1px solid rgba(76,175,100,.2);border-radius:16px;width:100%;max-width:360px;padding:28px 24px;box-shadow:0 32px 80px rgba(0,0,0,.8);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:rgba(76,175,100,.12);border:1px solid rgba(76,175,100,.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4caf64" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#4caf64;">Accept Request</div>
+    </div>
+    <div style="font-size:.76rem;color:rgba(255,255,255,.7);line-height:1.7;margin-bottom:8px;">
+      Accept <strong id="nra-name" style="color:#fff;"></strong> as a member of <strong id="nra-efed" style="color:#fff;"></strong>?
+    </div>
+    <div style="font-size:.72rem;color:#8a8a9a;line-height:1.7;margin-bottom:22px;">
+      Their profile will appear on the roster page and they will be notified.
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="document.getElementById('nra-modal-bg').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
+      <button id="nra-confirm-btn" style="flex:2;padding:12px;background:rgba(76,175,100,.15);border:1px solid rgba(76,175,100,.35);border-radius:10px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">✓ Accept</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── NOTIF DENY ROSTER CONFIRM ── -->
+<div id="nrd-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#111114;border:1px solid rgba(255,80,80,.2);border-radius:16px;width:100%;max-width:360px;padding:28px 24px;box-shadow:0 32px 80px rgba(0,0,0,.8);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#ff6b6b;">Deny Request</div>
+    </div>
+    <div style="font-size:.76rem;color:rgba(255,255,255,.7);line-height:1.7;margin-bottom:8px;">
+      Deny <strong id="nrd-name" style="color:#fff;"></strong>'s request to join <strong id="nrd-efed" style="color:#fff;"></strong>?
+    </div>
+    <div style="font-size:.72rem;color:#8a8a9a;line-height:1.7;margin-bottom:22px;">
+      Their request will be removed and they will be notified that their request was not approved.
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="document.getElementById('nrd-modal-bg').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
+      <button id="nrd-confirm-btn" style="flex:1;padding:12px;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.35);border-radius:10px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Deny</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
