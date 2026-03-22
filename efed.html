@@ -1228,7 +1228,12 @@ async function loadProfile() {
         if (joinRow) joinRow.style.display = 'flex';
         // Check if already on roster
         sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&username=eq.${encodeURIComponent(session.username)}`).then(rows => {
-          if (rows.length) setJoinedState();
+          if (!rows.length) return;
+          if (rows[0].status === 'approved') {
+            setApprovedState();
+          } else {
+            setJoinedState(); // pending
+          }
         }).catch(() => {});
       }
     }
@@ -1406,6 +1411,7 @@ async function loadEpisodes() {
 
       row.appendChild(card);
     });
+    updateEpArrows();
   } catch(e) { row.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;">Could not load episodes.</div>'; }
 }
 
@@ -1454,85 +1460,106 @@ async function loadRoster() {
   const grid = document.getElementById('roster-grid'); if (!grid) return;
   const session = getSession();
   try {
-    const rosterRows = await sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&order=joined_at.asc`);
-    const ownerRows = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url`);
+    // Owner sees all rows; member sees approved + their own pending; others see approved only
+    let filter;
+    if (_isOwnProfile) {
+      filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&order=joined_at.asc`;
+    } else if (session) {
+      filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&or=(status.eq.approved,and(status.eq.pending,username.eq.${encodeURIComponent(session.username)}))&order=joined_at.asc`;
+    } else {
+      filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&order=joined_at.asc`;
+    }
+    const rosterRows = await sbGet('roster', filter);
+    const ownerRows  = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url`);
     const owner = ownerRows[0];
     const ownerUsername = owner?.username || EFED_OWNER || '';
 
     const wrap = document.createElement('div');
     wrap.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px;';
 
-    function makeCard(u, role, rosterRowId) {
+    function makeCard(u, role, rosterRowId, status) {
       const isOwnerCard = role === 'OWNER';
-      const isMe = session && u.username === session.username;
-      // Can remove: owner can remove anyone (except themselves), member can remove themselves
-      const canRemove = !isOwnerCard && (_isOwnProfile || isMe);
+      const isPending   = status === 'pending';
+      const isMe        = session && u.username === session.username;
+      const canLeave    = !isOwnerCard && isMe && !isPending;
+      const canModerate = !isOwnerCard && _isOwnProfile && !isOwnerCard;
 
       const card = document.createElement('div');
-      card.style.cssText = 'background:#111114;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px 10px;text-align:center;position:relative;user-select:none;cursor:pointer;transition:border-color .2s;';
+      card.style.cssText = `background:#111114;border:1px solid ${isPending ? 'rgba(200,168,75,.2)' : 'rgba(255,255,255,.07)'};border-radius:10px;padding:14px 10px;text-align:center;position:relative;user-select:none;cursor:pointer;transition:border-color .2s,opacity .2s;${isPending ? 'opacity:.35;' : ''}`;
       card.dataset.username = u.username;
       card.dataset.rosterid = rosterRowId || '';
       card.dataset.name = u.display_name || u.username || '';
-      card.onclick = () => { window.location.href = 'profile.html?u=' + encodeURIComponent(u.username); };
-      card.onmouseenter = () => card.style.borderColor = 'rgba(255,255,255,.18)';
-      card.onmouseleave = () => card.style.borderColor = 'rgba(255,255,255,.07)';
 
-      const avColor = isOwnerCard ? 'rgba(200,168,75,.1)' : 'rgba(192,0,14,.1)';
-      const avBorder = isOwnerCard ? '2px solid rgba(200,168,75,.3)' : '2px solid rgba(192,0,14,.2)';
+      // Clicking a pending card (owner only) opens approve/deny
+      if (isPending && _isOwnProfile) {
+        card.onclick = (e) => { if (!e._pencilClick) openRosterModerateModal(u.username, u.display_name||u.username, rosterRowId); };
+      } else if (!isPending) {
+        card.onclick = () => window.location.href = 'profile.html?u=' + encodeURIComponent(u.username);
+      }
+      // pending + not owner = inert (user sees their own ghost, unclickable)
+      if (isPending && !_isOwnProfile) card.style.cursor = 'default';
+      card.onmouseenter = () => { if (!isPending) card.style.borderColor = 'rgba(255,255,255,.18)'; };
+      card.onmouseleave = () => card.style.borderColor = isPending ? 'rgba(200,168,75,.2)' : 'rgba(255,255,255,.07)';
+
+      const avColor     = isOwnerCard ? 'rgba(200,168,75,.1)' : 'rgba(192,0,14,.1)';
+      const avBorder    = isOwnerCard ? '2px solid rgba(200,168,75,.3)' : '2px solid rgba(192,0,14,.2)';
       const avTextColor = isOwnerCard ? '#c8a84b' : '#c0000e';
-      const avInner = u.avatar_url
+      const avInner     = u.avatar_url
         ? `<img src="${u.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
         : (u.display_name||u.username||'?')[0].toUpperCase();
+
+      const pendingBadge = isPending ? `<div style="font-size:.45rem;letter-spacing:1px;text-transform:uppercase;color:#c8a84b;margin-top:4px;font-weight:700;">Pending</div>` : '';
 
       card.innerHTML = `
         <div style="width:44px;height:44px;border-radius:50%;background:${avColor};border:${avBorder};display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:${avTextColor};margin:0 auto 8px;overflow:hidden;">${avInner}</div>
         <div style="font-size:.7rem;font-weight:600;color:#fff;">${(u.display_name||u.username||'').replace(/</g,'&lt;')}</div>
         <div style="font-size:.55rem;color:#5a5a6a;letter-spacing:1px;margin-top:3px;">${role}</div>
-      `;
+        ${pendingBadge}`;
 
-      if (canRemove) {
-        // Desktop: X button on hover
-        const xBtn = document.createElement('button');
-        xBtn.innerHTML = '✕';
-        xBtn.style.cssText = 'position:absolute;top:5px;right:5px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.6);font-size:.6rem;display:none;align-items:center;justify-content:center;cursor:pointer;line-height:1;padding:0;';
-        xBtn.onclick = (e) => { e.stopPropagation(); openRemoveRosterConfirm(u.username, u.display_name||u.username, rosterRowId); };
-        card.appendChild(xBtn);
-        card.addEventListener('mouseenter', () => xBtn.style.display = 'flex');
-        card.addEventListener('mouseleave', () => xBtn.style.display = 'none');
+      // ── EDIT PENCIL (PC hover) ──
+      if (canModerate || canLeave) {
+        const pencil = document.createElement('button');
+        pencil.style.cssText = 'position:absolute;top:5px;right:5px;width:20px;height:20px;border-radius:5px;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.7);display:none;align-items:center;justify-content:center;cursor:pointer;padding:0;';
+        pencil.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+        pencil.onclick = (e) => {
+          e.stopPropagation();
+          e._pencilClick = true;
+          if (isPending && canModerate) openRosterModerateModal(u.username, u.display_name||u.username, rosterRowId);
+          else if (canModerate) openRosterOwnerMenu(e, u.username, u.display_name||u.username, rosterRowId);
+          else if (canLeave) openLeaveRosterConfirm(u.username, u.display_name||u.username, rosterRowId);
+        };
+        card.appendChild(pencil);
+        card.addEventListener('mouseenter', () => pencil.style.display = 'flex');
+        card.addEventListener('mouseleave', () => pencil.style.display = 'none');
+      }
 
-        // Mobile: long-press drag to trash
-        let dragActive = false, startY = 0, holdTimer = null;
-        let clone = null;
-
+      // ── MOBILE: long-press → trash (approved members only) ──
+      if (!isPending && (canModerate || canLeave)) {
+        let holdTimer = null, dragActive = false, clone = null;
         card.addEventListener('touchstart', (e) => {
           holdTimer = setTimeout(() => {
             dragActive = true;
-            startY = e.touches[0].clientY;
-            // Show trash zone
-            document.getElementById('roster-trash-zone').style.transform = 'translateY(0)';
-            // Create floating clone
+            const rect = card.getBoundingClientRect();
+            document.getElementById('roster-trash-zone').style.transform = 'translateX(-50%) translateY(0)';
             clone = card.cloneNode(true);
-            clone.style.cssText = `position:fixed;width:${card.offsetWidth}px;opacity:.85;pointer-events:none;z-index:9999;border-radius:10px;background:#111114;border:1px solid rgba(255,80,80,.4);left:${card.getBoundingClientRect().left}px;top:${card.getBoundingClientRect().top}px;transition:none;`;
+            clone.style.cssText = `position:fixed;width:${rect.width}px;opacity:.85;pointer-events:none;z-index:9999;border-radius:10px;background:#111114;border:1px solid rgba(255,80,80,.4);left:${rect.left}px;top:${rect.top}px;`;
             document.body.appendChild(clone);
             card.style.opacity = '.3';
           }, 500);
         }, { passive: true });
-
         card.addEventListener('touchmove', (e) => {
           clearTimeout(holdTimer);
           if (!dragActive || !clone) return;
           e.preventDefault();
           const t = e.touches[0];
           clone.style.left = (t.clientX - card.offsetWidth/2) + 'px';
-          clone.style.top = (t.clientY - card.offsetHeight/2) + 'px';
-          // Highlight trash if over it
+          clone.style.top  = (t.clientY - card.offsetHeight/2) + 'px';
           const trash = document.getElementById('roster-trash-zone');
           const tr = trash.getBoundingClientRect();
-          const over = t.clientY > tr.top && t.clientX > tr.left && t.clientX < tr.right;
-          trash.style.background = over ? 'rgba(192,0,14,.35)' : 'rgba(192,0,14,.15)';
-          trash.style.borderColor = over ? 'rgba(192,0,14,.7)' : 'rgba(192,0,14,.35)';
+          const over = t.clientX > tr.left && t.clientX < tr.right && t.clientY > tr.top;
+          trash.style.background   = over ? 'rgba(192,0,14,.35)' : 'rgba(192,0,14,.15)';
+          trash.style.borderColor  = over ? 'rgba(192,0,14,.7)'  : 'rgba(192,0,14,.35)';
         }, { passive: false });
-
         card.addEventListener('touchend', (e) => {
           clearTimeout(holdTimer);
           if (!dragActive) return;
@@ -1540,25 +1567,31 @@ async function loadRoster() {
           const trash = document.getElementById('roster-trash-zone');
           const t = e.changedTouches[0];
           const tr = trash.getBoundingClientRect();
-          const droppedOnTrash = t.clientY > tr.top && t.clientX > tr.left && t.clientX < tr.right;
-          // Hide trash zone
+          const dropped = t.clientX > tr.left && t.clientX < tr.right && t.clientY > tr.top;
           trash.style.transform = 'translateX(-50%) translateY(140px)';
           trash.style.background = 'rgba(192,0,14,.15)';
           trash.style.borderColor = 'rgba(192,0,14,.35)';
           if (clone) { clone.remove(); clone = null; }
           card.style.opacity = '1';
-          if (droppedOnTrash) {
-            openRemoveRosterConfirm(u.username, u.display_name||u.username, rosterRowId);
+          if (dropped) {
+            if (canLeave) openLeaveRosterConfirm(u.username, u.display_name||u.username, rosterRowId);
+            else openRemoveRosterConfirm(u.username, u.display_name||u.username, rosterRowId);
           }
         });
-
         card.addEventListener('touchcancel', () => {
-          clearTimeout(holdTimer);
-          dragActive = false;
+          clearTimeout(holdTimer); dragActive = false;
           if (clone) { clone.remove(); clone = null; }
           card.style.opacity = '1';
           const trash = document.getElementById('roster-trash-zone');
-          if (trash) { trash.style.transform = 'translateX(-50%) translateY(140px)'; }
+          if (trash) trash.style.transform = 'translateX(-50%) translateY(140px)';
+        });
+      }
+
+      // ── MOBILE: tap pending card → approve/deny sheet ──
+      if (isPending && _isOwnProfile) {
+        let tapped = false;
+        card.addEventListener('touchend', (e) => {
+          if (!tapped) { tapped = true; setTimeout(() => tapped = false, 300); openRosterModerateModal(u.username, u.display_name||u.username, rosterRowId); }
         });
       }
 
@@ -1566,10 +1599,7 @@ async function loadRoster() {
     }
 
     let cardCount = 0;
-    if (owner) {
-      wrap.appendChild(makeCard(owner, 'OWNER', null));
-      cardCount++;
-    }
+    if (owner) { wrap.appendChild(makeCard(owner, 'OWNER', null, 'approved')); cardCount++; }
 
     if (rosterRows.length) {
       const unames = rosterRows.map(r=>r.username).filter(u=>u!==ownerUsername);
@@ -1579,21 +1609,19 @@ async function loadRoster() {
           const u = uRows.find(r=>r.username===uname);
           if (!u) return;
           const rosterRow = rosterRows.find(r=>r.username===uname);
-          wrap.appendChild(makeCard(u, 'Member', rosterRow?.id));
-          cardCount++;
+          wrap.appendChild(makeCard(u, 'Member', rosterRow?.id, rosterRow?.status || 'approved'));
+          if (rosterRow?.status === 'approved') cardCount++;
         });
       }
     }
 
     document.getElementById('stat-roster').textContent = cardCount;
-    if (cardCount > 0) {
-      grid.innerHTML = '';
-      grid.appendChild(wrap);
-    } else {
-      grid.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;">No roster members yet.</div>';
-    }
+    if (wrap.children.length > 0) { grid.innerHTML = ''; grid.appendChild(wrap); }
+    else { grid.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;">No roster members yet.</div>'; }
+
   } catch(e) { console.error('loadRoster error:', e); grid.innerHTML = '<div style="font-size:.78rem;color:#5a5a6a;">Could not load roster.</div>'; }
 }
+
 
 function openRemoveRosterConfirm(username, displayName, rosterRowId) {
   document.getElementById('rmr-name').textContent = displayName;
@@ -1616,7 +1644,7 @@ async function removeFromRoster(username, rosterRowId) {
     if (session && session.username === username) {
       const btn = document.getElementById('join-roster-btn');
       if (btn) {
-        btn.innerHTML = '+ Join Roster';
+        btn.innerHTML = 'Part of Roster?';
         btn.style.background = 'rgba(200,168,75,.15)';
         btn.style.borderColor = 'rgba(200,168,75,.35)';
         btn.style.color = 'var(--gold)';
@@ -1641,6 +1669,32 @@ function showToast(msg, duration = 2800) {
   t.style.opacity = '1'; t.style.transform = 'translateX(-50%) translateY(0)';
   clearTimeout(t._timer);
   t._timer = setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(12px)'; }, duration);
+}
+
+function scrollEpRow(dir) {
+  const row = document.getElementById('episodes-row'); if (!row) return;
+  row.scrollBy({ left: dir * 500, behavior: 'smooth' });
+  setTimeout(updateEpArrows, 350);
+}
+function jumpEpRow(pos) {
+  const row = document.getElementById('episodes-row'); if (!row) return;
+  row.scrollTo({ left: pos === 'start' ? 0 : row.scrollWidth, behavior: 'smooth' });
+  setTimeout(updateEpArrows, 350);
+}
+function updateEpArrows() {
+  const row = document.getElementById('episodes-row');
+  const aL = document.getElementById('ep-arr-left');
+  const aR = document.getElementById('ep-arr-right');
+  const jL = document.getElementById('ep-jump-left');
+  const jR = document.getElementById('ep-jump-right');
+  if (!row) return;
+  const atStart  = row.scrollLeft <= 0;
+  const atEnd    = row.scrollLeft + row.clientWidth >= row.scrollWidth - 4;
+  const noScroll = row.scrollWidth <= row.clientWidth + 4;
+  if (aL) aL.classList.toggle('hidden', atStart || noScroll);
+  if (aR) aR.classList.toggle('hidden', atEnd   || noScroll);
+  if (jL) jL.classList.toggle('hidden', atStart || noScroll);
+  if (jR) jR.classList.toggle('hidden', atEnd   || noScroll);
 }
 
 function getTimeAgo(ts) {
@@ -1892,16 +1946,26 @@ function triggerInstall() {
 <!-- ── EPISODES ── -->
 <div class="section" id="episodes-section">
   <div class="sec-title">Episodes</div>
-  <div id="episodes-row" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
-    <div style="font-size:.78rem;color:var(--muted);">No episodes yet.</div>
+  <div style="display:flex;align-items:center;gap:4px;">
+    <div class="prof-arr-col">
+      <button class="prof-pill-arr hidden" id="ep-arr-left" onclick="scrollEpRow(-1)">&#8249;</button>
+      <button class="prof-jump-btn hidden" id="ep-jump-left" onclick="jumpEpRow('start')" title="Jump to first">&#171;&#171;</button>
+    </div>
+    <div id="episodes-row" style="flex:1;display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none;-webkit-overflow-scrolling:touch;" onscroll="updateEpArrows()">
+      <div style="font-size:.78rem;color:var(--muted);">No episodes yet.</div>
+    </div>
+    <div class="prof-arr-col">
+      <button class="prof-pill-arr hidden" id="ep-arr-right" onclick="scrollEpRow(1)">&#8250;</button>
+      <button class="prof-jump-btn hidden" id="ep-jump-right" onclick="jumpEpRow('end')" title="Jump to last">&#187;&#187;</button>
+    </div>
   </div>
 </div>
 
 <!-- ── ROSTER ── -->
 <div class="section" id="roster-section">
   <div class="sec-title">Roster</div>
-  <div id="join-roster-row" style="display:none;justify-content:flex-end;margin-bottom:14px;">
-    <button id="join-roster-btn" onclick="openJoinRosterModal()" style="padding:6px 14px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:20px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;letter-spacing:1px;cursor:pointer;white-space:nowrap;">+ Join Roster</button>
+  <div id="join-roster-row" style="display:none;justify-content:center;margin-bottom:14px;">
+    <button id="join-roster-btn" onclick="openJoinRosterModal()" style="padding:6px 14px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:20px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;letter-spacing:1px;cursor:pointer;white-space:nowrap;">Part of Roster?</button>
   </div>
   <div id="roster-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
     <div style="font-size:.78rem;color:var(--muted);grid-column:span 3;">No roster members yet.</div>
@@ -2284,29 +2348,35 @@ async function markAllNotifsRead() {
 <div id="join-roster-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeJoinRosterModal()">
   <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:400px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.8);">
     <div style="padding:20px 22px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Join Roster</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Part of Roster?</div>
       <button onclick="closeJoinRosterModal()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;">✕</button>
     </div>
-    <div style="padding:20px 22px;">
 
-      <!-- Efed info -->
+    <!-- REQUEST PANEL -->
+    <div id="jr-request-panel" style="padding:20px 22px;">
       <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);border-radius:10px;margin-bottom:18px;">
         <div id="jr-efed-logo" style="width:40px;height:40px;border-radius:8px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.9rem;color:var(--accent);flex-shrink:0;overflow:hidden;"></div>
         <div>
           <div style="font-size:.85rem;font-weight:600;color:#fff;" id="jr-efed-name"></div>
-          <div style="font-size:.62rem;color:#8a8a9a;margin-top:2px;">You are requesting to join this eFed's roster.</div>
+          <div style="font-size:.62rem;color:#8a8a9a;margin-top:2px;">Confirm you are part of this eFed's roster.</div>
         </div>
       </div>
-
-      <!-- What this means -->
       <div style="font-size:.72rem;color:#8a8a9a;line-height:1.8;margin-bottom:18px;">
         <div style="color:rgba(255,255,255,.5);font-size:.6rem;letter-spacing:2px;text-transform:uppercase;font-weight:700;margin-bottom:8px;">What happens next</div>
-        Your profile will appear on this eFed's roster page. The promotion owner will be notified. You can leave the roster at any time from your profile page.
+        Your profile will appear on this eFed's roster page. The promotion owner will be notified to verify your status. You can leave the roster at any time.
       </div>
-
-
       <div id="jr-msg" style="font-size:.7rem;min-height:16px;margin-bottom:10px;"></div>
-      <button id="jr-submit-btn" onclick="submitJoinRoster()" style="width:100%;padding:13px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:10px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:background .2s;">Request to Join</button>
+      <button id="jr-submit-btn" onclick="submitJoinRoster()" style="width:100%;padding:13px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:10px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:background .2s;">I'm Part of This Roster</button>
+    </div>
+
+    <!-- CONFIRMATION PANEL -->
+    <div id="jr-confirm-panel" style="display:none;padding:28px 22px;text-align:center;">
+      <div style="width:52px;height:52px;border-radius:50%;background:rgba(76,175,100,.12);border:2px solid rgba(76,175,100,.3);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4caf64" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:2px;color:#fff;margin-bottom:10px;">You're on the Roster!</div>
+      <div style="font-size:.76rem;color:#8a8a9a;line-height:1.8;margin-bottom:22px;" id="jr-confirm-msg"></div>
+      <button onclick="closeJoinRosterModal()" style="width:100%;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;">OK</button>
     </div>
   </div>
 </div>
@@ -2325,6 +2395,8 @@ function openJoinRosterModal() {
     logoEl.textContent = EFED_NAME.split(' ').map(w=>w[0]).join('').slice(0,3).toUpperCase();
   }
   document.getElementById('jr-msg').textContent = '';
+  document.getElementById('jr-request-panel').style.display = 'block';
+  document.getElementById('jr-confirm-panel').style.display = 'none';
   const btn = document.getElementById('jr-submit-btn');
   btn.disabled = false; btn.textContent = 'Request to Join';
   modal.style.display = 'flex';
@@ -2336,13 +2408,24 @@ function closeJoinRosterModal() {
   document.body.style.overflow = '';
 }
 
-function setJoinedState() {
+function setApprovedState() {
   const btn = document.getElementById('join-roster-btn');
   if (!btn) return;
   btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> On Roster`;
   btn.style.background = 'rgba(76,175,100,.12)';
   btn.style.borderColor = 'rgba(76,175,100,.35)';
   btn.style.color = '#4caf64';
+  btn.style.cursor = 'default';
+  btn.onclick = null;
+}
+
+function setJoinedState() {
+  const btn = document.getElementById('join-roster-btn');
+  if (!btn) return;
+  btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Pending...`;
+  btn.style.background = 'rgba(200,168,75,.08)';
+  btn.style.borderColor = 'rgba(200,168,75,.2)';
+  btn.style.color = 'rgba(200,168,75,.6)';
   btn.style.cursor = 'default';
   btn.onclick = null;
 }
@@ -2371,7 +2454,8 @@ async function submitJoinRoster() {
         efed: EFED_NAME,
         username: session.username,
         caw_name: session.displayName || session.username,
-        joined_at: Date.now()
+        joined_at: Date.now(),
+        status: 'pending'
       })
     });
 
@@ -2394,6 +2478,12 @@ async function submitJoinRoster() {
     btn.textContent = 'Joined!';
     setJoinedState();
 
+    // Show confirmation panel with eFed-specific message
+    document.getElementById('jr-request-panel').style.display = 'none';
+    document.getElementById('jr-confirm-panel').style.display = 'block';
+    document.getElementById('jr-confirm-msg').textContent =
+      `${EFED_NAME} will verify your roster status soon. Your profile now appears on their roster page.`;
+
     // Immediately inject the user's own card into the grid without waiting for DB
     const grid = document.getElementById('roster-grid');
     if (grid) {
@@ -2408,8 +2498,8 @@ async function submitJoinRoster() {
       }
       const avInner = session.avatarUrl ? `<img src="${session.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">` : (session.displayName||session.username||'?')[0].toUpperCase();
       const card = document.createElement('div');
-      card.style.cssText = 'background:#111114;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px 10px;text-align:center;cursor:pointer;transition:border-color .2s;';
-      card.innerHTML = `<div style="width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.2);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#c0000e;margin:0 auto 8px;overflow:hidden;">${avInner}</div><div style="font-size:.7rem;font-weight:600;color:#fff;">${_esc(session.displayName||session.username||'')}</div><div style="font-size:.55rem;color:#5a5a6a;letter-spacing:1px;margin-top:3px;">Member</div>`;
+      card.style.cssText = 'background:#111114;border:1px solid rgba(200,168,75,.2);border-radius:10px;padding:14px 10px;text-align:center;cursor:default;opacity:.35;';
+      card.innerHTML = `<div style="width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.2);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#c0000e;margin:0 auto 8px;overflow:hidden;">${avInner}</div><div style="font-size:.7rem;font-weight:600;color:#fff;">${_esc(session.displayName||session.username||'')}</div><div style="font-size:.55rem;color:#5a5a6a;letter-spacing:1px;margin-top:3px;">Member</div><div style="font-size:.45rem;letter-spacing:1px;text-transform:uppercase;color:#c8a84b;margin-top:4px;font-weight:700;">Pending</div>`;
       card.onclick = () => window.location.href = 'profile.html?u=' + encodeURIComponent(session.username);
       wrap.appendChild(card);
       const statEl = document.getElementById('stat-roster');
@@ -2426,6 +2516,138 @@ async function submitJoinRoster() {
     msg.style.color = '#ff6b6b';
     btn.disabled = false; btn.textContent = 'Request to Join';
   }
+}
+</script>
+
+<!-- ── ROSTER MODERATE MODAL (approve/deny pending) ── -->
+<div id="roster-moderate-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:360px;padding:28px 24px;box-shadow:0 32px 80px rgba(0,0,0,.8);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.25);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2.5" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </div>
+      <div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Roster Request</div>
+        <div style="font-size:.65rem;color:#8a8a9a;margin-top:1px;" id="rm-subtitle"></div>
+      </div>
+    </div>
+    <div style="font-size:.75rem;color:rgba(255,255,255,.6);line-height:1.7;margin-bottom:22px;">
+      <strong id="rm-name" style="color:#fff;"></strong> says they are part of your roster. Approve to make them visible to everyone, or deny to remove the request.
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="denyRosterRequest()" style="flex:1;padding:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Deny</button>
+      <button onclick="approveRosterRequest()" style="flex:2;padding:12px;background:rgba(76,175,100,.15);border:1px solid rgba(76,175,100,.35);border-radius:10px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">✓ Approve</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── ROSTER OWNER MENU (PC dropdown for approved members) ── -->
+<div id="roster-owner-menu" style="display:none;position:fixed;z-index:99999;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:6px 0;min-width:160px;box-shadow:0 12px 32px rgba(0,0,0,.7);">
+  <button id="rom-remove-btn" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;background:none;border:none;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;" onmouseover="this.style.background='rgba(192,0,14,.08)'" onmouseout="this.style.background='none'">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+    Remove from Roster
+  </button>
+</div>
+
+<!-- ── LEAVE EFED CONFIRM MODAL ── -->
+<div id="leave-roster-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:360px;padding:28px 24px;box-shadow:0 32px 80px rgba(0,0,0,.8);">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;margin-bottom:14px;">Leave Roster</div>
+    <div style="font-size:.76rem;color:rgba(255,255,255,.65);line-height:1.7;margin-bottom:8px;">
+      You are about to leave the <strong id="leave-efed-name" style="color:#fff;"></strong> roster.
+    </div>
+    <div style="font-size:.72rem;color:#8a8a9a;line-height:1.7;margin-bottom:22px;">
+      Your profile will be removed from their roster page. You can rejoin at any time by visiting their eFed page.
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="document.getElementById('leave-roster-bg').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
+      <button id="leave-roster-confirm-btn" style="flex:1;padding:12px;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.35);border-radius:10px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Leave</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _rmUsername = null, _rmName = null, _rmRosterRowId = null;
+
+function openRosterModerateModal(username, displayName, rosterRowId) {
+  _rmUsername = username; _rmName = displayName; _rmRosterRowId = rosterRowId;
+  document.getElementById('rm-name').textContent = displayName;
+  document.getElementById('rm-subtitle').textContent = '@' + username;
+  document.getElementById('roster-moderate-bg').style.display = 'flex';
+}
+
+async function approveRosterRequest() {
+  document.getElementById('roster-moderate-bg').style.display = 'none';
+  try {
+    await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+_rmRosterRowId, {
+      method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({status:'approved'})
+    });
+    // Notify the approved user
+    await fetch(SUPABASE_URL+'/rest/v1/notifications', {
+      method:'POST', headers:SB_HEADERS,
+      body:JSON.stringify({
+        username: _rmUsername,
+        type: 'roster_approved',
+        message: `✅ You have been approved as a member of the ${EFED_NAME} roster!`,
+        read: false,
+        created_at: Date.now()
+      })
+    });
+    loadRoster(); loadEfedStats();
+    showToast(_rmName + ' approved!');
+  } catch(e) { showToast('Could not approve.'); }
+}
+
+async function denyRosterRequest() {
+  document.getElementById('roster-moderate-bg').style.display = 'none';
+  try {
+    await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+_rmRosterRowId, { method:'DELETE', headers:SB_HEADERS });
+    loadRoster(); loadEfedStats();
+    showToast(_rmName + ' denied and removed.');
+  } catch(e) { showToast('Could not deny.'); }
+}
+
+let _romUsername = null, _romName = null, _romRosterRowId = null;
+function openRosterOwnerMenu(e, username, displayName, rosterRowId) {
+  _romUsername = username; _romName = displayName; _romRosterRowId = rosterRowId;
+  const menu = document.getElementById('roster-owner-menu');
+  menu.style.display = 'block';
+  menu.style.left = Math.min(e.clientX, window.innerWidth - 170) + 'px';
+  menu.style.top  = Math.min(e.clientY + 4, window.innerHeight - 80) + 'px';
+  document.getElementById('rom-remove-btn').onclick = () => {
+    menu.style.display = 'none';
+    openRemoveRosterConfirm(_romUsername, _romName, _romRosterRowId);
+  };
+  setTimeout(() => document.addEventListener('click', () => menu.style.display = 'none', { once: true }), 50);
+}
+
+function openLeaveRosterConfirm(username, displayName, rosterRowId) {
+  document.getElementById('leave-efed-name').textContent = EFED_NAME;
+  document.getElementById('leave-roster-bg').style.display = 'flex';
+  document.getElementById('leave-roster-confirm-btn').onclick = () => doLeaveRoster(username, rosterRowId);
+}
+
+async function doLeaveRoster(username, rosterRowId) {
+  document.getElementById('leave-roster-bg').style.display = 'none';
+  try {
+    if (rosterRowId) {
+      await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+rosterRowId, { method:'DELETE', headers:SB_HEADERS });
+    } else {
+      await fetch(SUPABASE_URL+'/rest/v1/roster?efed=eq.'+encodeURIComponent(EFED_NAME)+'&username=eq.'+encodeURIComponent(username), { method:'DELETE', headers:SB_HEADERS });
+    }
+    // Reset join button
+    const btn = document.getElementById('join-roster-btn');
+    if (btn) {
+      btn.innerHTML = 'Part of Roster?';
+      btn.style.background = 'rgba(200,168,75,.15)';
+      btn.style.borderColor = 'rgba(200,168,75,.35)';
+      btn.style.color = 'var(--gold)';
+      btn.style.cursor = 'pointer';
+      btn.onclick = openJoinRosterModal;
+    }
+    loadRoster(); loadEfedStats();
+    showToast('You left the roster.');
+  } catch(e) { showToast('Could not leave roster.'); }
 }
 </script>
 
