@@ -904,30 +904,69 @@ async function submitProfileVideo() {
   if (!session) return;
   if (!url) { msg.textContent = 'Please paste a YouTube URL.'; msg.style.color='#ff6b6b'; return; }
   if (!url.includes('youtu')) { msg.textContent = 'Must be a YouTube link.'; msg.style.color='#ff6b6b'; return; }
-  btn.disabled = true; btn.textContent = 'Submitting...'; msg.textContent = '';
+
+  btn.disabled = true; btn.textContent = 'Verifying…'; msg.textContent = '';
+
   try {
+    // Load owner promo_name + yt_channel for verification
+    const ownerRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,yt_channel`);
+    const owner = ownerRows[0];
+    if (!owner?.promo_name) { msg.textContent = 'No eFed found for your account.'; msg.style.color='#ff6b6b'; btn.disabled=false; btn.textContent='Submit'; return; }
+
+    // Fetch oEmbed to get title + channel info
     const oembed = await fetch('https://www.youtube.com/oembed?url='+encodeURIComponent(url)+'&format=json').then(r=>r.json()).catch(()=>null);
-    const showName = oembed ? oembed.title : '';
+    if (!oembed) { msg.textContent = 'Could not verify this YouTube link.'; msg.style.color='#ff6b6b'; btn.disabled=false; btn.textContent='Submit'; return; }
+
+    // Channel verification — only if owner has yt_channel set
+    if (owner.yt_channel) {
+      const ownerHandle = owner.yt_channel.replace(/https?:\/\/(www\.)?youtube\.com\/@?/i,'').replace(/\/$/, '').toLowerCase();
+      const videoAuthor = (oembed.author_name || '').toLowerCase();
+      const videoAuthorUrl = (oembed.author_url || '').replace(/https?:\/\/(www\.)?youtube\.com\/@?/i,'').replace(/\/$/, '').toLowerCase();
+      const match = videoAuthor.includes(ownerHandle) || ownerHandle.includes(videoAuthor) ||
+                    videoAuthorUrl.includes(ownerHandle) || ownerHandle.includes(videoAuthorUrl);
+      if (!match) {
+        msg.textContent = 'This video is from "' + oembed.author_name + '" — doesn\'t match your channel. Only submit your own eFed content.';
+        msg.style.color='#ff6b6b'; btn.disabled=false; btn.textContent='Submit'; return;
+      }
+    }
+
+    // Check if already on the hub
     const existing = await sbGet('submissions', 'url=eq.'+encodeURIComponent(url));
-    if (existing.length) { msg.textContent = 'Already on the hub.'; msg.style.color='#ff6b6b'; btn.disabled=false; btn.textContent='Submit'; return; }
+    if (existing.length) {
+      // Already exists — if not tagged to this efed yet, claim it
+      if (existing[0].efed !== owner.promo_name) {
+        btn.textContent = 'Claiming…';
+        await fetch(SUPABASE_URL+'/rest/v1/submissions?id=eq.'+existing[0].id, {
+          method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({ efed: owner.promo_name })
+        });
+        msg.textContent = 'Episode claimed for ' + owner.promo_name + '!'; msg.style.color='#4caf64';
+        loadEpisodes(); loadEfedStats();
+        setTimeout(closeProfileSubmit, 1200);
+      } else {
+        msg.textContent = 'Already in your episodes.'; msg.style.color='#ff6b6b'; btn.disabled=false; btn.textContent='Submit';
+      }
+      return;
+    }
+
+    // New submission — tag directly to this eFed
+    btn.textContent = 'Submitting…';
     await fetch(SUPABASE_URL+'/rest/v1/submissions', {
       method:'POST', headers:{...SB_HEADERS,'Prefer':'return=representation'},
-      body: JSON.stringify({ url, show_name: showName, efed: 'Community', submitted_by: session.username, submitted_at: Date.now(), status: 'approved', community: true })
+      body: JSON.stringify({
+        url,
+        show_name: oembed.title || '',
+        efed: owner.promo_name,
+        submitted_by: session.username,
+        submitted_at: Date.now(),
+        status: 'approved',
+        community: false
+      })
     });
-    msg.textContent = 'Submitted!'; msg.style.color='#4caf64';
-    const row = document.getElementById('submitted-row');
-    if (row) {
-      const id = (url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/) || [])[1] || '';
-      const thumb = id ? 'https://i.ytimg.com/vi/'+id+'/mqdefault.jpg' : '';
-      const card = document.createElement('div');
-      card.className = 'vid-card';
-      card.innerHTML = '<div class="vid-thumb">'+(thumb?'<img src="'+thumb+'" style="width:100%;height:100%;object-fit:cover;">':'')+'</div><div class="vid-title">'+(showName||url)+'</div>';
-      row.prepend(card);
-      const countEl = document.getElementById('stat-submitted');
-      if (countEl) countEl.textContent = parseInt(countEl.textContent||'0')+1;
-    }
+    msg.textContent = 'Episode added!'; msg.style.color='#4caf64';
+    loadEpisodes(); loadEfedStats();
     setTimeout(closeProfileSubmit, 1200);
-  } catch(e) { msg.textContent = 'Could not submit.'; msg.style.color='#ff6b6b'; btn.disabled=false; btn.textContent='Submit'; }
+
+  } catch(e) { msg.textContent = 'Could not submit. Try again.'; msg.style.color='#ff6b6b'; btn.disabled=false; btn.textContent='Submit'; }
 }
 
 window.addEventListener('scroll', () => {
@@ -1108,6 +1147,8 @@ async function loadProfile() {
         document.getElementById('edit-pencil').style.display = 'flex';
         const sec = document.getElementById('signings-section');
         if (sec) sec.style.display = 'block';
+        const fab = document.getElementById('post-fab');
+        if (fab) fab.classList.add('visible');
       }
     } catch(e) {}
   }
@@ -1548,6 +1589,11 @@ function triggerInstall() {
 
 </div><!-- /page-card -->
 
+<!-- ── SUBMIT EPISODE FAB ── -->
+<button id="post-fab" onclick="openProfileSubmit()" title="Submit Episode" aria-label="Submit Episode">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+</button>
+
 <!-- ── BANNER CROP MODAL ── -->
 <div id="banner-crop-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.92);backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;">
   <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:700px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.8);">
@@ -1573,10 +1619,10 @@ function triggerInstall() {
 <div id="prof-submit-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeProfileSubmit()">
   <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:400px;padding:28px 24px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Submit Video</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Submit Episode</div>
       <button onclick="closeProfileSubmit()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;">&#x2715;</button>
     </div>
-    <div style="font-size:.72rem;color:#8a8a9a;margin-bottom:16px;line-height:1.6;">Paste a YouTube link to add it to the hub.</div>
+    <div style="font-size:.72rem;color:#8a8a9a;margin-bottom:16px;line-height:1.6;">Paste a YouTube link to add it to your eFed episodes. If you've set a YouTube channel, we'll verify it matches.</div>
     <input id="prof-submit-url" type="url" placeholder="https://youtube.com/watch?v=..." style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:11px 14px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;margin-bottom:12px;">
     <div id="prof-submit-msg" style="font-size:.72rem;min-height:18px;margin-bottom:12px;"></div>
     <button id="prof-submit-btn" onclick="submitProfileVideo()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Submit</button>
