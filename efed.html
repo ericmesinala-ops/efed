@@ -421,10 +421,12 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 <div class="page-card" id="page-card">
 
 <!-- ── BANNER ── -->
-<div style="padding:24px 28px 20px;display:flex;align-items:center;gap:18px;background:linear-gradient(135deg,#1a0005 0%,#0d0d12 50%,#07070a 100%);">
-    <button id="efed-edit-pencil" onclick="openLinksModal()" title="Edit eFed" style="display:none;position:absolute;top:8px;right:8px;z-index:10;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.15);padding:7px;color:rgba(255,255,255,.4);cursor:pointer;border-radius:8px;transition:color .2s,background .2s;backdrop-filter:blur(4px);" onmouseover="this.style.color='rgba(255,255,255,.9)';this.style.background='rgba(0,0,0,.7)'" onmouseout="this.style.color='rgba(255,255,255,.4)';this.style.background='rgba(0,0,0,.45)'">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-    </button>
+<div style="position:relative;padding:24px 28px 20px;display:flex;align-items:center;gap:18px;background:linear-gradient(135deg,#1a0005 0%,#0d0d12 50%,#07070a 100%);overflow:hidden;">
+  <img id="efed-banner-img" src="" alt="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.35;pointer-events:none;">
+  <input type="file" id="efed-banner-input" accept="image/*" style="display:none;" onchange="handleEfedBannerFile(event)">
+  <button id="efed-banner-btn" onclick="document.getElementById('efed-banner-input').click()" style="display:none;position:absolute;bottom:8px;right:8px;z-index:10;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.15);padding:6px 10px;color:rgba(255,255,255,.5);cursor:pointer;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:.62rem;letter-spacing:1px;transition:color .2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.5)'">
+    📷 Banner
+  </button>
     <div class="efed-logo-box" id="efed-logo-box">
       <span id="efed-logo-initials">FSW</span>
       <img id="efed-logo-img" src="" alt="" style="display:none;width:100%;height:100%;object-fit:cover;border-radius:12px;">
@@ -644,10 +646,6 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 const _params = new URLSearchParams(window.location.search);
 let FSW_EFED_NAME = decodeURIComponent(_params.get('e') || 'First Strike Wrestling');
 // FSW hardcoded videos — only injected when viewing FSW
-const FSW_VIDEOS = FSW_EFED_NAME === 'First Strike Wrestling' ? [
-  { url: "https://youtu.be/SGQqbCUJvME", show: 'FSW 52: Maximum — “Choices”', date: "Feb 12, 2026", thumb: "https://i.imgur.com/vUWtsKv.png" },
-] : [];
-const FSW_UPCOMING = [];
 let FSW_OWNER = ''; // set dynamically after DB lookup by promo_name
 
 function extractId(url) {
@@ -839,7 +837,7 @@ async function loadPage() {
   try {
     const session = getSession();
     if (!session) throw new Error('no session');
-    const owners = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=username,display_name,avatar_url,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website,efed_open_signings,efed_signings_link`);
+    const owners = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=username,display_name,avatar_url,avatar_banner,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,promo_website,efed_open_signings,efed_signings_link`);
     const owner = owners[0];
     if (owner) {
       FSW_OWNER = owner.username;
@@ -848,6 +846,17 @@ async function loadPage() {
       const ownerAvEl = document.getElementById('owner-av');
       if (owner.avatar_url) {
         ownerAvEl.innerHTML = `<img src="${owner.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;">`;
+      }
+
+      // Load banner
+      if (owner.avatar_banner) {
+        const bannerImg = document.getElementById('efed-banner-img');
+        if (bannerImg) { bannerImg.src = owner.avatar_banner; bannerImg.style.display = 'block'; }
+      }
+      // Show banner upload button for owner
+      const isOwner = (owner.is_efed_owner || owner.role === 'owner') && owner.promo_name?.trim().toLowerCase() === FSW_EFED_NAME?.trim().toLowerCase();
+      const bannerBtn = document.getElementById('efed-banner-btn');
+      if (bannerBtn && isOwner) bannerBtn.style.display = 'flex';
       } else {
         ownerAvEl.textContent = name[0].toUpperCase();
       }
@@ -955,7 +964,7 @@ async function loadPage() {
 
   // Videos — hardcoded + DB approved
   // videos rendered into #videos-row
-  let allVideos = [...FSW_VIDEOS];
+  let allVideos = [];
   try {
     const dbRows = await sbGet('submissions', `efed=eq.${encodeURIComponent(FSW_EFED_NAME)}&status=eq.approved&order=date_ms.desc`);
     const existingUrls = new Set(allVideos.map(v => v.url));
@@ -1221,6 +1230,36 @@ document.addEventListener('click', e => {
   const menu = document.getElementById('logo-ctx-menu');
   if (!box.contains(e.target) && !menu.contains(e.target)) closeLogoMenu();
 });
+
+function handleEfedBannerFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    openBannerCrop(e.target.result, 960, 200, async (croppedDataUrl) => {
+      const session = getSession();
+      if (!session) return;
+      const img = new Image();
+      img.onload = async () => {
+        const W = 640, H = 133;
+        const canvas = document.createElement('canvas');
+        canvas.width = W; canvas.height = H;
+        canvas.getContext('2d').drawImage(img, 0, 0, W, H);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+        const bannerImg = document.getElementById('efed-banner-img');
+        if (bannerImg) { bannerImg.src = dataUrl; bannerImg.style.display = 'block'; }
+        try {
+          await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
+            method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({avatar_banner:dataUrl})
+          });
+        } catch(err) { console.error('Banner save failed', err); }
+      };
+      img.src = croppedDataUrl;
+    });
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
 
 async function handleLogoFile(event) {
   const file = event.target.files[0];
