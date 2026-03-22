@@ -3092,47 +3092,55 @@ function makeCard(v) {
 
   thumbDiv.appendChild(cardOver);
 
-  // 3-dot menu sits inside thumbDiv above card-over
-  if (canDelete) {
+  // 3-dot menu — always rendered for logged-in users, items shown based on role
+  if (session) {
     const menuBtn = document.createElement('button');
     menuBtn.className = 'card-menu-btn';
+    menuBtn.style.cssText = 'position:absolute;top:7px;right:7px;z-index:50;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.75);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;';
     menuBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>';
+
     const drop = document.createElement('div');
-    drop.className = 'card-menu-dropdown';
+    drop.style.cssText = 'display:none;position:absolute;top:38px;right:7px;z-index:9999;background:#1a1a20;border:1px solid rgba(255,255,255,.12);border-radius:8px;overflow:hidden;min-width:140px;box-shadow:0 8px 24px rgba(0,0,0,.8);';
+
     menuBtn.onclick = function(e) {
       e.stopPropagation();
-      document.querySelectorAll('.card-menu-dropdown.open').forEach(m => { if (m !== drop) m.classList.remove('open'); });
-      drop.classList.toggle('open');
+      e.preventDefault();
+      // Close all other open drops
+      document.querySelectorAll('[data-card-drop="open"]').forEach(d => { if (d !== drop) { d.style.display='none'; delete d.dataset.cardDrop; } });
+      if (drop.style.display === 'block') { drop.style.display='none'; delete drop.dataset.cardDrop; }
+      else { drop.style.display='block'; drop.dataset.cardDrop='open'; }
     };
-    if (isAdmin) {
+
+    // Report — always visible
+    const reportBtn = document.createElement('button');
+    reportBtn.style.cssText = 'width:100%;padding:10px 14px;background:none;border:none;color:#e8e8e8;font-family:DM Sans,sans-serif;font-size:.78rem;text-align:left;cursor:pointer;display:block;';
+    reportBtn.textContent = '⚑ Report';
+    reportBtn.onmouseover = () => reportBtn.style.background = 'rgba(255,255,255,.06)';
+    reportBtn.onmouseout = () => reportBtn.style.background = 'none';
+    reportBtn.onclick = (e) => { e.stopPropagation(); drop.style.display='none'; openReportModal && openReportModal(v); };
+    drop.appendChild(reportBtn);
+
+    if (isAdmin || isOwner) {
       const delBtn = document.createElement('button');
-      delBtn.className = 'card-menu-item';
-      delBtn.style.color = '#ff6b6b';
-      delBtn.textContent = '🗑 Delete';
+      delBtn.style.cssText = 'width:100%;padding:10px 14px;background:none;border:none;color:#ff6b6b;font-family:DM Sans,sans-serif;font-size:.78rem;text-align:left;cursor:pointer;display:block;';
+      delBtn.textContent = isAdmin ? '🗑 Delete' : '✕ Remove';
+      delBtn.onmouseover = () => delBtn.style.background = 'rgba(192,0,14,.12)';
+      delBtn.onmouseout = () => delBtn.style.background = 'none';
       delBtn.onclick = async function(e) {
         e.stopPropagation();
-        drop.classList.remove('open');
-        if (!confirm('Delete this video from the Hub?')) return;
-        try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast('Deleted.'); }
+        drop.style.display='none';
+        if (!confirm(isAdmin ? 'Delete from Hub?' : 'Remove this video?')) return;
+        try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast(isAdmin ? 'Deleted.' : 'Removed.'); }
         catch(err) { showToast('Could not delete.'); }
       };
       drop.appendChild(delBtn);
     }
-    if (isOwner && !isAdmin) {
-      const removeBtn = document.createElement('button');
-      removeBtn.className = 'card-menu-item';
-      removeBtn.textContent = '✕ Remove';
-      removeBtn.onclick = async function(e) {
-        e.stopPropagation();
-        drop.classList.remove('open');
-        if (!confirm('Remove this video?')) return;
-        try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast('Removed.'); }
-        catch(err) { showToast('Could not remove.'); }
-      };
-      drop.appendChild(removeBtn);
-    }
+
     thumbDiv.appendChild(menuBtn);
     thumbDiv.appendChild(drop);
+
+    // Close on outside click
+    document.addEventListener('click', function() { drop.style.display='none'; delete drop.dataset.cardDrop; }, { once: false, capture: false });
   }
 
   el.appendChild(thumbDiv);
