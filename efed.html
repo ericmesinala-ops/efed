@@ -1740,14 +1740,18 @@ function notifAcceptRoster(rosterRowId, requesterUsername, requesterName, efedNa
   document.getElementById('nra-confirm-btn').onclick = async () => {
     document.getElementById('nra-modal-bg').style.display = 'none';
     try {
-      // Approve roster row — use id if available, otherwise fallback to efed+username
-      const patchUrl = rosterRowId
-        ? SUPABASE_URL+'/rest/v1/roster?id=eq.'+rosterRowId
-        : SUPABASE_URL+'/rest/v1/roster?username=eq.'+encodeURIComponent(requesterUsername)+'&efed=eq.'+encodeURIComponent(efedName||EFED_NAME)+'&status=eq.pending';
-      const patchRes = await fetch(patchUrl, {
-        method:'PATCH', headers:{...SB_HEADERS,'Prefer':'return=representation'}, body:JSON.stringify({status:'approved'})
+      // Always fetch the roster row fresh at accept time
+      const targetEfed = efedName || EFED_NAME;
+      const rows = await sbGet('roster', `username=eq.${encodeURIComponent(requesterUsername)}&efed=eq.${encodeURIComponent(targetEfed)}&status=eq.pending&limit=1`);
+      if (!rows.length) {
+        // Maybe already approved
+        showToast('Row not found — may already be approved.');
+        loadRoster(); loadEfedStats(); return;
+      }
+      const rowId = rows[0].id;
+      await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+rowId, {
+        method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({status:'approved'})
       });
-      console.log('[accept] PATCH status:', patchRes.status, 'url:', patchUrl);
       // Notify user
       await fetch(SUPABASE_URL+'/rest/v1/notifications', {
         method:'POST', headers:SB_HEADERS,
@@ -1779,10 +1783,13 @@ function notifDenyRoster(rosterRowId, requesterUsername, requesterName, efedName
   document.getElementById('nrd-confirm-btn').onclick = async () => {
     document.getElementById('nrd-modal-bg').style.display = 'none';
     try {
-      // Delete roster row — use id if available, otherwise fallback to efed+username
-      const deleteUrl = rosterRowId
-        ? SUPABASE_URL+'/rest/v1/roster?id=eq.'+rosterRowId
-        : SUPABASE_URL+'/rest/v1/roster?username=eq.'+encodeURIComponent(requesterUsername)+'&efed=eq.'+encodeURIComponent(efedName||EFED_NAME)+'&status=eq.pending';
+      // Always fetch the roster row fresh at deny time
+      const targetEfed = efedName || EFED_NAME;
+      const rows = await sbGet('roster', `username=eq.${encodeURIComponent(requesterUsername)}&efed=eq.${encodeURIComponent(targetEfed)}&status=eq.pending&limit=1`);
+      const rowId = rows[0]?.id;
+      const deleteUrl = rowId
+        ? SUPABASE_URL+'/rest/v1/roster?id=eq.'+rowId
+        : SUPABASE_URL+'/rest/v1/roster?username=eq.'+encodeURIComponent(requesterUsername)+'&efed=eq.'+encodeURIComponent(targetEfed)+'&status=eq.pending';
       await fetch(deleteUrl, { method:'DELETE', headers:SB_HEADERS });
       // Notify user
       await fetch(SUPABASE_URL+'/rest/v1/notifications', {
