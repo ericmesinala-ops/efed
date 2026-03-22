@@ -969,7 +969,7 @@ async function loadPage() {
     const existingUrls = new Set(allVideos.map(v => v.url));
     dbRows.forEach(r => {
       if (!existingUrls.has(r.url)) {
-        allVideos.push({ url: r.url, show: r.show_name || '', date: r.date || '', thumb: r.thumb_url || null, dateMs: r.date_ms || r.submitted_at || 0 });
+        allVideos.push({ url: r.url, show: r.show_name || '', date: r.date || '', thumb: r.thumb_url || null, dateMs: r.date_ms || r.submitted_at || 0, dbId: r.id });
       }
     });
   } catch(e) {}
@@ -985,11 +985,13 @@ async function loadPage() {
       if (!v.dateMs && v.date) v.dateMs = Date.parse(v.date) || 0;
     });
     allVideos.sort((a,b) => (b.dateMs||0) - (a.dateMs||0));
+    const isPageOwner = session && FSW_OWNER && session.username.toLowerCase() === FSW_OWNER.toLowerCase();
     row.innerHTML = allVideos.map(v => {
       const id = extractId(v.url);
       const thumb = v.thumb || (id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '');
       return `
-        <div style="flex-shrink:0;width:160px;cursor:pointer;" onclick="openOnHub('${v.url}')">
+        <div style="flex-shrink:0;width:160px;cursor:pointer;position:relative;" onclick="openOnHub('${v.url}')">
+          ${isPageOwner ? `<button onclick="event.stopPropagation();removeEfedEpisode('${v.dbId||''}')" title="Remove from eFed" style="position:absolute;top:4px;right:4px;z-index:10;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.75);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.6);font-size:.7rem;display:flex;align-items:center;justify-content:center;cursor:pointer;line-height:1;">✕</button>` : ''}
           <div style="width:160px;height:90px;border-radius:6px;overflow:hidden;background:var(--surface2);position:relative;margin-bottom:7px;transition:transform .2s;">
             ${thumb ? `<img src="${thumb}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" onerror="this.style.display='none'">` : ''}
             <div style="position:absolute;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0">
@@ -1401,6 +1403,21 @@ function openEfedSubmit() {
 
 // Store link values so openLinksModal can read them back cleanly
 let _linkData = { yt: '', ig: '', x: '', web: '' };
+
+async function removeEfedEpisode(submissionId) {
+  if (!submissionId) return;
+  if (!confirm('Remove this show from your eFed episodes?')) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/submissions?id=eq.${submissionId}`, {
+      method: 'PATCH', headers: SB_HEADERS,
+      body: JSON.stringify({ efed: null })
+    });
+    // Reload the page to reflect change
+    loadPage();
+  } catch(e) {
+    alert('Could not remove. Try again.');
+  }
+}
 
 function openOnHub(url) {
   // Go to hub with video pre-selected so expand panel opens automatically
