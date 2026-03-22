@@ -410,6 +410,9 @@
   .card-show { font-size: .82rem; font-weight: 600; color: #fff; line-height: 1.3; margin-bottom: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .card-date { font-size: .68rem; color: rgba(255,255,255,.6); }
   .card-posted-by { font-size: .62rem; color: rgba(255,255,255,.5); margin-top: 3px; font-style: italic; letter-spacing: .3px; }
+  .card-claim-btn { position: absolute; top: 6px; left: 6px; width: 24px; height: 24px; border-radius: 50%; background: rgba(0,0,0,.7); border: 1px solid rgba(255,255,255,.25); color: rgba(255,255,255,.7); display: none; align-items: center; justify-content: center; cursor: pointer; z-index: 10; transition: background .15s, color .15s; }
+  .card:hover .card-claim-btn { display: flex; }
+  .card-claim-btn:hover { background: var(--gold); border-color: var(--gold); color: #000; }
 
   /* Pending card styles */
   .card.pending { pointer-events: none; }
@@ -1558,13 +1561,19 @@
 
   .expand-actions {
     display: flex; align-items: center;
-    gap: 8px; flex-wrap: wrap; margin-bottom: 20px;
+    gap: 8px; margin-bottom: 20px;
+    overflow-x: auto; flex-wrap: nowrap;
+    scrollbar-width: none; -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
   }
+  .expand-actions::-webkit-scrollbar { display: none; }
   .expand-action-btn {
     display: flex; align-items: center; gap: 6px;
     padding: 7px 14px; border-radius: 40px;
     background: rgba(255,255,255,.06);
     border: 1px solid rgba(255,255,255,.1);
+    flex-shrink: 0;
     color: #e8e8e8; font-family: 'DM Sans', sans-serif;
     font-size: .72rem; font-weight: 600; cursor: pointer;
     transition: background .2s, border-color .2s;
@@ -1763,6 +1772,19 @@
     </div>
   </div>
 </nav>
+
+<!-- ── CLAIM MODAL ── -->
+<div id="claim-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeClaimModal()">
+  <div style="background:#111115;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:360px;padding:28px 24px;box-shadow:0 24px 60px rgba(0,0,0,.6);">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#fff;margin-bottom:8px;">Add to My eFed</div>
+    <div id="claim-show-name" style="font-size:.82rem;color:#c8a84b;font-weight:600;margin-bottom:12px;"></div>
+    <div style="font-size:.78rem;color:#8a8a9a;line-height:1.6;margin-bottom:20px;">Only add this show if <strong style="color:#fff;">you own this promotion</strong>. This will appear on your eFed page as one of your episodes.</div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="closeClaimModal()" style="flex:1;padding:11px;border-radius:40px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Cancel</button>
+      <button onclick="confirmClaim()" style="flex:1;padding:11px;border-radius:40px;background:var(--gold);border:none;color:#000;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Yes, I Own This</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── CONFIRM MODAL ── -->
 <div id="confirm-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
@@ -2237,6 +2259,10 @@
       <button class="expand-action-btn" id="expand-support-btn" onclick="toggleExpandSupport()" title="Support">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
         <span id="expand-support-label" class="expand-btn-tooltip">Support</span>
+      </button>
+      <button class="expand-action-btn" id="expand-claim-btn" onclick="openClaimModal(_expandVideo)" title="Add to My eFed" style="display:none;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <span class="expand-btn-tooltip">Add to eFed</span>
       </button>
       <button class="expand-action-btn" id="expand-visit-efed-btn" onclick="visitExpandEfed()" title="Visit eFed" style="display:none;">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -3286,6 +3312,12 @@ setTimeout(()=>{ if(typeof loadVerifiedUsers==="function") loadVerifiedUsers(); 
     }
   } else {
     initHub();
+    // Handle ?tab= param (e.g. from notification bell on other pages)
+    const _tab = new URLSearchParams(window.location.search).get('tab');
+    if (_tab) {
+      history.replaceState(null, '', window.location.pathname);
+      setTimeout(() => bnavGo(_tab), 800);
+    }
   }
 })();
 const _grid = document.getElementById('card-grid');
@@ -4019,6 +4051,11 @@ function handleFormSubmit(formId, successId) {
         if ((user.is_efed_owner || user.role === 'owner') && user.promo_name) {
           ddEmail.textContent = 'Owner of ' + user.promo_name;
           ddEmail.style.color = '#c8a84b';
+          // Store in session for card claim button
+          session.is_efed_owner = true;
+          session.promo_name = user.promo_name;
+          session.role = user.role;
+          localStorage.setItem('efed_session', JSON.stringify(session));
           // My eFed button — show for all efed owners
           const myEfedBtn = document.getElementById('my-efed-btn');
           if (myEfedBtn) {
@@ -4037,6 +4074,42 @@ function handleFormSubmit(formId, successId) {
   } catch(_) {} // non-critical — nav still works from local session
 })();
 
+
+// ── CLAIM SHOW ──
+let _claimVideo = null;
+
+function openClaimModal(v) {
+  _claimVideo = v;
+  document.getElementById('claim-show-name').textContent = v.show || v.url;
+  document.getElementById('claim-modal-bg').style.display = 'flex';
+}
+
+function closeClaimModal() {
+  document.getElementById('claim-modal-bg').style.display = 'none';
+  _claimVideo = null;
+}
+
+async function confirmClaim() {
+  const session = getSession();
+  if (!session || !_claimVideo || !session.promo_name) return;
+  closeClaimModal();
+  try {
+    // Update the submission's efed field to this owner's promo name
+    const rows = await sbGet('submissions', `url=eq.${encodeURIComponent(_claimVideo.url)}&status=eq.approved`);
+    if (rows.length) {
+      await fetch(`${SUPABASE_URL}/rest/v1/submissions?id=eq.${rows[0].id}`, {
+        method: 'PATCH', headers: SB_HEADERS,
+        body: JSON.stringify({ efed: session.promo_name })
+      });
+      showToast('✅ Added to your eFed episodes!');
+    } else {
+      showToast('Could not find this video in the database.');
+    }
+  } catch(e) {
+    showToast('Something went wrong. Try again.');
+    console.error(e);
+  }
+}
 
 function handleSignOut() {
   localStorage.removeItem('efed_session');
@@ -4899,6 +4972,13 @@ function openExpand(v) {
   if (tab) tab.style.display = 'none';
   _expandVideo = v;
   const id = extractId(v.url);
+
+  // Show claim button for eFed owners only
+  const _claimBtn = document.getElementById('expand-claim-btn');
+  if (_claimBtn) {
+    const sess = getSession();
+    _claimBtn.style.display = (sess && (sess.is_efed_owner || sess.role === 'owner') && sess.promo_name) ? 'flex' : 'none';
+  }
 
   // Visit eFed button — always visible
   const _visitBtn = document.getElementById('expand-visit-efed-btn');
