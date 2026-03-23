@@ -657,17 +657,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   color: rgba(255,255,255,.18); font-size: .6rem; margin: 0 4px; flex-shrink: 0; line-height: 1;
   margin-top: -16px; /* align with avatar center */
 }
-.reply-av-carousel {
-  display: flex; align-items: center; overflow: hidden;
-  /* carousel window — shows 5 at a time */
-  width: calc(5 * 28px + 4 * 2px);
-  flex-shrink: 0;
-}
-.reply-av-track {
-  display: flex; gap: 2px;
-  transition: transform .25s cubic-bezier(.32,.72,0,1);
-  flex-shrink: 0;
-}
+/* carousel removed — single avatar slot used instead */
 .post-reply-av {
   width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
   background: rgba(255,255,255,.07); border: 1.5px solid rgba(255,255,255,.12);
@@ -927,50 +917,32 @@ const _posts = (() => {
 
   // Build a reply-avatar carousel for a post's gen-2 replies
   // activeIdx = which reply is currently viewed (-1 = none active)
-  function _replyCarousel(postId, activeIdx) {
-    const reps = _replies[postId] || [];
-    if (!reps.length) return '';
-    const MAX_VISIBLE = 5;
-    // scroll so active stays centered (but clamp at edges)
-    let scrollTo = 0;
-    if (activeIdx >= 0) {
-      const center = Math.floor(MAX_VISIBLE / 2);
-      scrollTo = Math.max(0, Math.min(activeIdx - center, reps.length - MAX_VISIBLE));
-    }
-    const avItems = reps.map((r, i) => {
-      const img = r.avatar_url ? `<img src="${_esc(r.avatar_url)}" alt="">` : (r.display_name||r.username||'?')[0].toUpperCase();
-      const activeClass = i === activeIdx ? ' active' : '';
-      return `<div class="post-reply-av${activeClass}" onclick="_posts.enterGen2('${postId}',${i})" title="${_esc(r.display_name||r.username||'')}">${img}</div>`;
-    }).join('');
-    const trackOffset = scrollTo * (26 + 2); // av width + gap
-    const carouselW = Math.min(reps.length, MAX_VISIBLE) * (26 + 2) - 2;
-    return `<span class="post-reply-arrow">←</span>
-      <div class="reply-av-carousel" style="width:${carouselW}px;">
-        <div class="reply-av-track" style="transform:translateX(-${trackOffset}px);">${avItems}</div>
-      </div>`;
+  // Sort replies by likes desc — most liked is index 0
+  function _sortedReplies(arr) {
+    return [...arr].sort((a, b) => (b.likes||0) - (a.likes||0));
   }
 
-  // Build gen-3 carousel (replies to the active gen-2 reply)
-  function _gen3Carousel(gen2Reply, activeGen3Idx) {
+  // Single avatar slot showing the most-liked reply
+  function _replySlot(postId) {
+    const reps = _replies[postId] || [];
+    if (!reps.length) return '';
+    const sorted = _sortedReplies(reps);
+    const top = sorted[0];
+    const img = top.avatar_url ? `<img src="${_esc(top.avatar_url)}" alt="">` : (top.display_name||top.username||'?')[0].toUpperCase();
+    // find real index in _replies[postId] so enterGen2 lands on the right card
+    const realIdx = reps.indexOf(top);
+    return `<span class="post-reply-arrow">←</span><div class="post-reply-av" onclick="_posts.enterGen2('${postId}',${realIdx})" title="${_esc(top.display_name||top.username||'')}">${img}</div>`;
+  }
+
+  // Single avatar slot showing the most-liked gen-3 reply
+  function _gen3Slot(gen2Reply) {
     const children = gen2Reply.children || [];
     if (!children.length) return '';
-    const MAX_VISIBLE = 5;
-    let scrollTo = 0;
-    if (activeGen3Idx >= 0) {
-      const center = Math.floor(MAX_VISIBLE / 2);
-      scrollTo = Math.max(0, Math.min(activeGen3Idx - center, children.length - MAX_VISIBLE));
-    }
-    const avItems = children.map((r, i) => {
-      const img = r.avatar_url ? `<img src="${_esc(r.avatar_url)}" alt="">` : (r.display_name||r.username||'?')[0].toUpperCase();
-      const activeClass = i === activeGen3Idx ? ' active' : '';
-      return `<div class="post-reply-av${activeClass}" onclick="_posts.enterGen3(${i})" title="${_esc(r.display_name||r.username||'')}">${img}</div>`;
-    }).join('');
-    const trackOffset = scrollTo * 28;
-    const carouselW = Math.min(children.length, MAX_VISIBLE) * 28 - 2;
-    return `<span class="post-reply-arrow" style="color:rgba(255,255,255,.12);">←</span>
-      <div class="reply-av-carousel" style="width:${carouselW}px;">
-        <div class="reply-av-track" style="transform:translateX(-${trackOffset}px);">${avItems}</div>
-      </div>`;
+    const sorted = _sortedReplies(children);
+    const top = sorted[0];
+    const img = top.avatar_url ? `<img src="${_esc(top.avatar_url)}" alt="">` : (top.display_name||top.username||'?')[0].toUpperCase();
+    const realIdx = children.indexOf(top);
+    return `<span class="post-reply-arrow" style="color:rgba(255,255,255,.2);">←</span><div class="post-reply-av" onclick="_posts.enterGen3(${realIdx})" title="${_esc(top.display_name||top.username||'')}">${img}</div>`;
   }
 
   // ── card renderers ──
@@ -993,7 +965,7 @@ const _posts = (() => {
       ? `<button class="post-action-btn" onclick="_posts.openReplyModal('${p.id}',2)" title="Reply">
            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
          </button>` : '';
-    const carousel = _replyCarousel(p.id, -1);
+    const carousel = _replySlot(p.id);
     return `<div class="post-card ${mode}" data-id="${p.id}">
       <div class="post-card-header">
         <div class="post-av-col">
@@ -1029,7 +1001,7 @@ const _posts = (() => {
     const reps = _replies[parentPost.id] || [];
     const myIdx = reps.indexOf(r);
     const counter = reps.length > 1 ? `<span style="font-size:.48rem;color:rgba(255,255,255,.2);margin-right:4px;">${myIdx+1}/${reps.length}</span>` : '';
-    const gen3Carousel = _gen3Carousel(r, -1);
+    const gen3Carousel = _gen3Slot(r);
     const replyBtn = session
       ? `<button class="post-action-btn" onclick="_posts.openReplyModal('${r.id}',3)" title="Reply">
            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
@@ -1176,12 +1148,21 @@ const _posts = (() => {
 
   // ── layer transitions ──
   function enterGen2(postId, replyIdx) {
-    _layer = 'gen2'; _parentId = postId; _gen2Idx = replyIdx || 0;
+    _layer = 'gen2'; _parentId = postId;
+    // Sort replies by likes so most-liked is first when swiping
+    if (_replies[postId]) _replies[postId] = _sortedReplies(_replies[postId]);
+    // replyIdx is already the real index in the (now sorted) array
+    _gen2Idx = replyIdx || 0;
     _fullRender();
   }
 
   function enterGen3(childIdx) {
-    _layer = 'gen3'; _gen3Idx = childIdx || 0;
+    _layer = 'gen3';
+    // Sort gen-3 replies by likes
+    const reps = _replies[_parentId] || [];
+    const gen2Reply = reps[_gen2Idx];
+    if (gen2Reply?.children) gen2Reply.children = _sortedReplies(gen2Reply.children);
+    _gen3Idx = childIdx || 0;
     _fullRender();
   }
 
