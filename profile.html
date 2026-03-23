@@ -698,7 +698,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .pm-close { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); color: #fff; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 1rem; display: flex; align-items: center; justify-content: center; transition: background .15s; }
 .pm-close:hover { background: rgba(255,255,255,.16); }
 .pm-textarea {
-  width: 100%; min-height: 110px; background: rgba(255,255,255,.04);
+  width: 100%; min-height: 180px; background: rgba(255,255,255,.04);
   border: 1px solid rgba(255,255,255,.1); border-radius: 12px;
   padding: 12px 14px; color: #e8e8e8; font-family: 'DM Sans', sans-serif;
   font-size: .88rem; line-height: 1.65; outline: none; resize: none;
@@ -768,6 +768,43 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .pm-emoji-picker.open { display: flex; }
 .pm-emoji { font-size: 1.3rem; cursor: pointer; padding: 4px; border-radius: 6px; transition: background .1s; line-height: 1; }
 .pm-emoji:hover { background: rgba(255,255,255,.1); }
+
+/* ── REPLY AVATARS ── */
+.post-reply-avatars {
+  display: flex; align-items: center; gap: 0; margin-left: 4px;
+}
+.post-reply-arrow {
+  color: rgba(255,255,255,.2); font-size: .65rem; margin: 0 3px; line-height: 1;
+  flex-shrink: 0;
+}
+.post-reply-av {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(255,255,255,.08); border: 1.5px solid rgba(255,255,255,.15);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Bebas Neue', sans-serif; font-size: .6rem; color: rgba(255,255,255,.6);
+  overflow: hidden; cursor: pointer; transition: border-color .15s, transform .15s;
+  position: relative;
+}
+.post-reply-av:hover { border-color: rgba(200,168,75,.6); transform: scale(1.1); }
+.post-reply-av img { position:absolute;inset:0;width:100%;height:100%;object-fit:cover; }
+.post-reply-av.active { border-color: #c8a84b; }
+.post-reply-av.more {
+  background: rgba(255,255,255,.06); font-size: .5rem; font-family: 'DM Sans',sans-serif;
+  font-weight: 700; color: rgba(255,255,255,.4);
+}
+/* reply mode card indicator */
+.post-card.reply-mode { border-top: 1px solid rgba(200,168,75,.25); }
+.post-reply-back {
+  display: flex; align-items: center; gap: 6px;
+  font-size: .55rem; letter-spacing: 1px; text-transform: uppercase;
+  color: rgba(255,255,255,.3); cursor: pointer; transition: color .15s;
+  background: none; border: none; padding: 0;
+}
+.post-reply-back:hover { color: rgba(255,255,255,.7); }
+.post-reply-indicator {
+  font-size: .55rem; letter-spacing: 1px; text-transform: uppercase;
+  color: #c8a84b; opacity: .7;
+}
 </style>
 
 <div class="posts-section" id="posts-section">
@@ -838,9 +875,16 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 <script>
 const _posts = (() => {
   let _idx = 0;
-  let _items = [];
+  let _items = [];           // top-level posts
   let _targetUser = null;
-  let _mode = 'ic'; // 'ic' | 'ooc'
+  let _mode = 'ic';
+
+  // Reply state
+  let _replyMode = false;    // are we browsing replies?
+  let _replyParentId = null; // which post are we replying to / viewing replies of
+  let _replies = {};         // { postId: [ reply objects ] }
+  let _replyIdx = 0;         // current reply index
+  let _replyingToId = null;  // id of post we're composing a reply to
 
   function setMode(m) {
     _mode = m;
@@ -868,6 +912,30 @@ const _posts = (() => {
     return Math.floor(s/86400) + 'd ago';
   }
 
+  function _avatarHtml(item, size=38, extraClass='') {
+    const av = item.avatar_url
+      ? `<img src="${_esc(item.avatar_url)}" alt="">`
+      : `<span>${(item.display_name||item.username||'?')[0].toUpperCase()}</span>`;
+    return `<div class="post-card-avatar${extraClass ? ' '+extraClass : ''}" style="width:${size}px;height:${size}px;">${av}</div>`;
+  }
+
+  function _replyAvatarCluster(postId) {
+    const reps = _replies[postId] || [];
+    if (!reps.length) return '';
+    // Dedupe by username, keep first occurrence
+    const seen = new Set();
+    const unique = reps.filter(r => { if (seen.has(r.username)) return false; seen.add(r.username); return true; });
+    const max = 3;
+    const shown = unique.slice(0, max);
+    const extra = unique.length - max;
+    let avs = shown.map((r, i) => {
+      const img = r.avatar_url ? `<img src="${_esc(r.avatar_url)}" alt="">` : (r.display_name||r.username||'?')[0].toUpperCase();
+      return `<div class="post-reply-av" title="${_esc(r.display_name||r.username||'')}" onclick="_posts.enterReplyMode('${postId}',${i})">${img}</div>`;
+    }).join('');
+    if (extra > 0) avs += `<div class="post-reply-av more">+${extra}</div>`;
+    return `<div class="post-reply-arrow">←</div><div class="post-reply-avatars">${avs}</div>`;
+  }
+
   function _renderCard(p) {
     const session = getSession();
     const avatarHtml = p.avatar_url
@@ -888,9 +956,17 @@ const _posts = (() => {
            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
          </button>`
       : '';
+    const replyCluster = _replyAvatarCluster(p.id);
+    const canReply = session != null;
+    const replyBtn = canReply
+      ? `<button class="post-action-btn" onclick="_posts.openReplyModal('${p.id}')" title="Reply">
+           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+         </button>`
+      : '';
     return `<div class="post-card ${mode}" data-id="${p.id}">
       <div class="post-card-header">
         <div class="post-card-avatar">${avatarHtml}</div>
+        ${replyCluster}
         <div style="flex:1;min-width:0;">
           <div class="post-card-time">${_timeAgo(p.created_at)}${editedLabel}</div>
         </div>
@@ -905,7 +981,56 @@ const _posts = (() => {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="${p._liked?'#c0000e':'none'}" stroke="${p._liked?'#c0000e':'currentColor'}" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
           <span>${p.likes||0}</span>
         </button>
+        ${replyBtn}
         ${ownerBtns}
+      </div>
+    </div>`;
+  }
+
+  function _renderReplyCard(r, parentPost) {
+    const session = getSession();
+    const replyAv = r.avatar_url
+      ? `<img src="${_esc(r.avatar_url)}" alt="">`
+      : `<span>${(r.display_name||r.username||'?')[0].toUpperCase()}</span>`;
+    const parentAv = parentPost.avatar_url
+      ? `<img src="${_esc(parentPost.avatar_url)}" alt="">`
+      : `<span>${(parentPost.display_name||parentPost.username||'?')[0].toUpperCase()}</span>`;
+    const imgHtml = r.image_url
+      ? `<div class="post-card-img-wrap"><img src="${_esc(r.image_url)}" alt="" onclick="_posts.lightbox('${_esc(r.image_url)}')" style="cursor:pointer;"></div>`
+      : '';
+    const mode = r.post_type === 'ooc' ? 'ooc' : 'ic';
+    const modeLabel = mode === 'ic' ? 'IC' : 'OOC';
+    const editedLabel = r.edited_at ? `<span style="font-size:.55rem;color:rgba(255,255,255,.22);letter-spacing:.5px;margin-left:4px;">· edited</span>` : '';
+    const reps = _replies[parentPost.id] || [];
+    const seen = new Set(); const unique = reps.filter(x => { if (seen.has(x.username)) return false; seen.add(x.username); return true; });
+    const curIdx = unique.findIndex(x => x.username === r.username);
+    const total = unique.length;
+    const counter = total > 1 ? `<span style="font-size:.55rem;color:rgba(255,255,255,.25);letter-spacing:.5px;">${curIdx+1}/${total}</span>` : '';
+
+    return `<div class="post-card ${mode} reply-mode" data-id="${r.id}" data-reply="1">
+      <div class="post-card-header">
+        <div class="post-card-avatar" style="cursor:pointer;" onclick="_posts.exitReplyMode()" title="Back to post">${parentAv}</div>
+        <div class="post-reply-arrow" style="color:rgba(255,255,255,.3);font-size:.7rem;margin:0 4px;">←</div>
+        <div class="post-card-avatar">${replyAv}</div>
+        <div style="flex:1;min-width:0;margin-left:8px;">
+          <div class="post-card-time">${_timeAgo(r.created_at)}${editedLabel}</div>
+        </div>
+        ${counter}
+        <span class="post-card-mode-badge ${mode}">${modeLabel}</span>
+      </div>
+      <div class="post-card-body">
+        ${r.text ? `<div class="post-card-text">${_esc(r.text)}</div>` : ''}
+        ${imgHtml}
+      </div>
+      <div class="post-card-footer">
+        <button class="post-action-btn" onclick="_posts.like('${r.id}',this)" data-liked="${r._liked?'1':'0'}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="${r._liked?'#c0000e':'none'}" stroke="${r._liked?'#c0000e':'currentColor'}" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          <span>${r.likes||0}</span>
+        </button>
+        <button class="post-reply-back" onclick="_posts.exitReplyMode()">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+          Back
+        </button>
       </div>
     </div>`;
   }
@@ -917,9 +1042,65 @@ const _posts = (() => {
   function _update() {
     const track = _track();
     if (!track) return;
+    if (_replyMode && _replyParentId) {
+      _renderReplyView();
+    } else {
+      track.innerHTML = _items.length ? _items.map(_renderCard).join('') : _renderEmpty();
+      _goTo(_idx, false);
+      _renderDots();
+    }
+  }
+
+  function _renderReplyView() {
+    const track = _track(); if (!track) return;
+    const parentPost = _items.find(p => p.id === _replyParentId);
+    if (!parentPost) { exitReplyMode(); return; }
+    const reps = _replies[_replyParentId] || [];
+    if (!reps.length) { exitReplyMode(); return; }
+    // Expand to one card per unique replier (all their replies in order)
+    // Actually show all replies in order
+    track.innerHTML = reps.map(r => _renderReplyCard(r, parentPost)).join('');
+    _goTo(_replyIdx, false);
+    _renderReplyDots(reps.length);
+  }
+
+  function _renderReplyDots(n) {
+    const el = _dotsEl(); if (!el) return;
+    el.innerHTML = n > 1 ? Array.from({length:n},(_,i)=>`<div class="posts-dot${i===_replyIdx?' active':''}" onclick="_posts.goToReply(${i})"></div>`).join('') : '';
+  }
+
+  function enterReplyMode(postId, replyIdx) {
+    _replyMode = true;
+    _replyParentId = postId;
+    _replyIdx = replyIdx || 0;
+    _renderReplyView();
+    // Update nav buttons for reply count
+    const reps = _replies[postId] || [];
+    const pb = _prevBtn(), nb = _nextBtn();
+    if (pb) pb.disabled = _replyIdx === 0;
+    if (nb) nb.disabled = _replyIdx >= reps.length - 1;
+    _renderReplyDots(reps.length);
+  }
+
+  function exitReplyMode() {
+    _replyMode = false;
+    _replyParentId = null;
+    _replyIdx = 0;
+    const track = _track(); if (!track) return;
     track.innerHTML = _items.length ? _items.map(_renderCard).join('') : _renderEmpty();
     _goTo(_idx, false);
     _renderDots();
+  }
+
+  function goToReply(i) {
+    const reps = _replies[_replyParentId] || [];
+    _replyIdx = Math.max(0, Math.min(i, reps.length - 1));
+    const track = _track(); if (!track) return;
+    track.style.transform = `translateX(-${_replyIdx * 100}%)`;
+    const pb = _prevBtn(), nb = _nextBtn();
+    if (pb) pb.disabled = _replyIdx === 0;
+    if (nb) nb.disabled = _replyIdx >= reps.length - 1;
+    _renderReplyDots(reps.length);
   }
 
   function _renderDots() {
@@ -930,19 +1111,37 @@ const _posts = (() => {
 
   function _goTo(i, animate=true) {
     const track = _track(); if (!track) return;
-    const n = Math.max(_items.length, 1);
-    _idx = Math.max(0, Math.min(i, n-1));
+    const n = _replyMode
+      ? Math.max((_replies[_replyParentId]||[]).length, 1)
+      : Math.max(_items.length, 1);
+    const idx = Math.max(0, Math.min(i, n-1));
+    if (_replyMode) _replyIdx = idx; else _idx = idx;
     if (!animate) track.style.transition = 'none';
-    track.style.transform = `translateX(-${_idx * 100}%)`;
+    track.style.transform = `translateX(-${idx * 100}%)`;
     if (!animate) requestAnimationFrame(() => { track.style.transition = ''; });
     const pb = _prevBtn(), nb = _nextBtn();
-    if (pb) pb.disabled = _idx === 0;
-    if (nb) nb.disabled = _idx >= n-1;
-    _renderDots();
+    if (pb) pb.disabled = idx === 0;
+    if (nb) nb.disabled = idx >= n-1;
+    if (_replyMode) _renderReplyDots(n); else _renderDots();
   }
 
-  function prev() { _goTo(_idx - 1); }
-  function next() { _goTo(_idx + 1); }
+  function prev() {
+    if (_replyMode) {
+      if (_replyIdx === 0) { exitReplyMode(); return; }
+      goToReply(_replyIdx - 1);
+    } else {
+      _goTo(_idx - 1);
+    }
+  }
+  function next() {
+    if (_replyMode) {
+      const reps = _replies[_replyParentId] || [];
+      if (_replyIdx >= reps.length - 1) { exitReplyMode(); return; }
+      goToReply(_replyIdx + 1);
+    } else {
+      _goTo(_idx + 1);
+    }
+  }
   function goTo(i) { _goTo(i); }
 
   // Touch/swipe
@@ -956,7 +1155,6 @@ const _posts = (() => {
       const dx = e.changedTouches[0].clientX - _tx;
       if (Math.abs(dx) > 40) dx < 0 ? next() : prev();
     }, {passive:true});
-    // Desktop wheel snap
     let _wheelLock = false;
     wrap.addEventListener('wheel', e => {
       e.preventDefault();
@@ -967,18 +1165,49 @@ const _posts = (() => {
     }, {passive:false});
   }
 
+  async function _loadReplies(postIds, session) {
+    if (!postIds.length) return;
+    try {
+      const ids = postIds.map(id => encodeURIComponent(id)).join(',');
+      const rows = await sbGet('posts', `reply_to=in.(${ids})&order=created_at.asc`);
+      // fetch avatars for repliers
+      const usernames = [...new Set(rows.map(r => r.username))];
+      let userMap = {};
+      if (usernames.length) {
+        try {
+          const users = await sbGet('users', `username=in.(${usernames.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
+          users.forEach(u => { userMap[u.username] = u; });
+        } catch(e) {}
+      }
+      // check liked
+      let likedSet = new Set();
+      if (session) {
+        try {
+          const liked = await sbGet('post_likes', `username=eq.${encodeURIComponent(session.username)}&select=post_id`);
+          liked.forEach(l => likedSet.add(l.post_id));
+        } catch(e) {}
+      }
+      _replies = {};
+      rows.forEach(r => {
+        const u = userMap[r.username] || {};
+        const enriched = { ...r, avatar_url: u.avatar_url||null, display_name: u.display_name||r.username, _liked: likedSet.has(r.id) };
+        if (!_replies[r.reply_to]) _replies[r.reply_to] = [];
+        _replies[r.reply_to].push(enriched);
+      });
+    } catch(e) { _replies = {}; }
+  }
+
   async function load(username) {
     _targetUser = username;
+    _replyMode = false; _replyParentId = null; _replyIdx = 0;
     try {
-      const rows = await sbGet('posts', `username=eq.${encodeURIComponent(username)}&order=created_at.desc&limit=30`);
-      // fetch avatar for the profile user once
+      const rows = await sbGet('posts', `username=eq.${encodeURIComponent(username)}&reply_to=is.null&order=created_at.desc&limit=30`);
       const session = getSession();
       let avatarUrl = null, displayName = null;
       try {
         const u = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=avatar_url,display_name`);
         if (u[0]) { avatarUrl = u[0].avatar_url; displayName = u[0].display_name; }
       } catch(e) {}
-      // check liked posts
       let likedSet = new Set();
       if (session) {
         try {
@@ -987,27 +1216,44 @@ const _posts = (() => {
         } catch(e) {}
       }
       _items = rows.map(r => ({...r, avatar_url: avatarUrl, display_name: displayName||r.username, _liked: likedSet.has(r.id)}));
+      // load all replies for these posts
+      await _loadReplies(_items.map(p => p.id), session);
     } catch(e) {
       _items = [];
     }
     _idx = 0;
     _update();
     _initSwipe();
-    // Show post button only on own profile
     const session = getSession();
     const btn = document.getElementById('open-post-modal-btn');
     if (btn && session && session.username === username) btn.style.display = 'flex';
   }
 
   function openModal() {
+    _replyingToId = null;
     _resetModal();
     setMode('ic');
     document.getElementById('post-modal-bg').classList.add('open');
     document.getElementById('pm-text').focus();
     _buildEmojis();
   }
+
+  function openReplyModal(postId) {
+    _replyingToId = postId;
+    _resetModal();
+    setMode('ic');
+    const title = document.getElementById('pm-modal-title');
+    if (title) title.textContent = 'Reply';
+    const btn = document.getElementById('pm-submit');
+    if (btn) { btn.textContent = 'Reply'; btn.onclick = () => _posts.submit(); }
+    document.getElementById('post-modal-bg').classList.add('open');
+    document.getElementById('pm-text').focus();
+    _buildEmojis();
+  }
+
   function closeModal() {
     document.getElementById('post-modal-bg').classList.remove('open');
+    _replyingToId = null;
     _resetModal();
   }
 
@@ -1016,7 +1262,6 @@ const _posts = (() => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = ev => {
-      // Open crop/position modal (same system as banner/avatar)
       openBannerCrop(ev.target.result, 960, 540, (croppedDataUrl) => {
         _imgData = croppedDataUrl;
         const prev = document.getElementById('pm-img-preview');
@@ -1068,7 +1313,8 @@ const _posts = (() => {
     const text = document.getElementById('pm-text').value.trim();
     if (!text && !_imgData) return;
     const btn = document.getElementById('pm-submit');
-    btn.disabled = true; btn.textContent = 'Posting…';
+    const isReply = !!_replyingToId;
+    btn.disabled = true; btn.textContent = isReply ? 'Replying…' : 'Posting…';
     try {
       const payload = {
         username: session.username,
@@ -1076,23 +1322,45 @@ const _posts = (() => {
         image_url: _imgData || null,
         post_type: _mode,
         likes: 0,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        reply_to: _replyingToId || null
       };
       const r = await fetch(SUPABASE_URL+'/rest/v1/posts', {
         method:'POST', headers: SB_HEADERS,
         body: JSON.stringify(payload)
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
+      const [saved] = await r.json();
       closeModal();
       document.getElementById('pm-text').value = '';
       document.getElementById('pm-char').textContent = '0 / 140';
       removeImg();
-      await load(session.username);
-      showToast('Posted!');
+      if (isReply && saved) {
+        // enrich with session user's avatar
+        let avatarUrl = null, displayName = session.username;
+        try {
+          const u = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=avatar_url,display_name`);
+          if (u[0]) { avatarUrl = u[0].avatar_url; displayName = u[0].display_name||session.username; }
+        } catch(e) {}
+        const enriched = { ...saved, avatar_url: avatarUrl, display_name: displayName, _liked: false };
+        if (!_replies[_replyingToId]) _replies[_replyingToId] = [];
+        _replies[_replyingToId].push(enriched);
+        // Re-render the parent post card to show the new avatar
+        const track = _track();
+        if (track) {
+          track.innerHTML = _items.map(_renderCard).join('');
+          _goTo(_idx, false);
+          _renderDots();
+        }
+        showToast('Reply posted!');
+      } else {
+        await load(session.username);
+        showToast('Posted!');
+      }
     } catch(err) {
       showToast('Post failed: ' + err.message);
     }
-    btn.disabled = false; btn.textContent = 'Post';
+    btn.disabled = false; btn.textContent = isReply ? 'Reply' : 'Post';
   }
 
   async function deletePost(id) {
@@ -1114,12 +1382,10 @@ const _posts = (() => {
   function openEditModal(id) {
     const post = _items.find(p => p.id === id); if (!post) return;
     _editingId = id;
-    // Pre-fill text
     const ta = document.getElementById('pm-text');
     if (ta) ta.value = post.text || '';
     const charEl = document.getElementById('pm-char');
     if (charEl) charEl.textContent = (post.text||'').length + ' / 140';
-    // Pre-fill image if any
     if (post.image_url) {
       _imgData = post.image_url;
       document.getElementById('pm-img-prev-img').src = _imgData;
@@ -1127,9 +1393,7 @@ const _posts = (() => {
     } else {
       removeImg();
     }
-    // Restore mode
     setMode(post.post_type === 'ooc' ? 'ooc' : 'ic');
-    // Change modal title and button
     const title = document.getElementById('pm-modal-title');
     if (title) title.textContent = 'Edit Post';
     const btn = document.getElementById('pm-submit');
@@ -1151,7 +1415,6 @@ const _posts = (() => {
         method:'PATCH', headers: SB_HEADERS, body: JSON.stringify(payload)
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      // Update in-memory item
       const item = _items.find(p => p.id === _editingId);
       if (item) { item.text = text || null; item.image_url = _imgData || null; item.post_type = _mode; item.edited_at = payload.edited_at; }
       _resetModal();
@@ -1175,7 +1438,15 @@ const _posts = (() => {
 
   async function like(id, btn) {
     const session = getSession(); if (!session) { showToast('Sign in to like posts.'); return; }
-    const item = _items.find(p => p.id === id); if (!item) return;
+    // check both top-level and replies
+    let item = _items.find(p => p.id === id);
+    if (!item) {
+      for (const arr of Object.values(_replies)) {
+        item = arr.find(r => r.id === id);
+        if (item) break;
+      }
+    }
+    if (!item) return;
     const wasLiked = item._liked;
     item._liked = !wasLiked;
     item.likes = (item.likes||0) + (wasLiked ? -1 : 1);
@@ -1197,8 +1468,9 @@ const _posts = (() => {
     if (bg && img) { img.src = url; bg.style.display = 'flex'; }
   }
 
-  return { load, prev, next, goTo, openModal, closeModal, handleImg, removeImg, toggleEmoji, openGif, submit, submitEdit, openEditModal, deletePost, like, lightbox, setMode };
+  return { load, prev, next, goTo, goToReply, enterReplyMode, exitReplyMode, openModal, openReplyModal, closeModal, handleImg, removeImg, toggleEmoji, openGif, submit, submitEdit, openEditModal, deletePost, like, lightbox, setMode };
 })();
+
 </script>
 
 <div class="section" id="caw-images-section">
