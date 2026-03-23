@@ -133,10 +133,10 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 
 /* ── AVATAR ── */
 .profile-av-box {
-  width: 160px; height: 160px; border-radius: 50%;
-  background: rgba(192,0,14,.12); border: 4px solid rgba(192,0,14,.35);
+  width: 80px; height: 80px; border-radius: 50%;
+  background: rgba(192,0,14,.12); border: 3px solid rgba(192,0,14,.35);
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  font-family: 'Bebas Neue', sans-serif; font-size: 4rem; color: var(--accent);
+  font-family: 'Bebas Neue', sans-serif; font-size: 2rem; color: var(--accent);
   overflow: hidden; position: relative; cursor: pointer; transition: border-color .2s;
 }
 .profile-av-box:hover { border-color: rgba(255,255,255,.15); }
@@ -281,7 +281,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   .nav-right { gap: 10px; }
   .profile-banner { height: 170px; }
   .profile-name { font-size: 1.2rem; }
-  .profile-av-box { width: 128px; height: 128px; font-size: 3rem; }
+  .profile-av-box { width: 64px; height: 64px; font-size: 1.5rem; }
 }
 
   #post-fab {
@@ -394,6 +394,10 @@ nav.scrolled { background: rgba(7,7,10,.99); }
     </div>
     <button class="edit-pencil" id="edit-pencil" style="display:none;" onclick="openEditModal()" title="Edit profile">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    </button>
+    <button id="add-to-roster-btn" style="display:none;align-items:center;gap:6px;padding:7px 14px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);border-radius:20px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;letter-spacing:.5px;cursor:pointer;white-space:nowrap;transition:background .2s;" onclick="openAddToRosterModal()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+      Add to Roster
     </button>
   </div>
 </div>
@@ -542,6 +546,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 <script>
 let _hasAvatar = false;
 let _isOwnProfile = false;
+let _ownerEfedName = '';
 
 function extractId(url) {
   if (!url) return '';
@@ -593,7 +598,7 @@ function handleCawFile(event) {
         const canvas = document.createElement('canvas');
         canvas.width = 400; canvas.height = 400;
         canvas.getContext('2d').drawImage(img, 0, 0, 400, 400);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
         const imgEl = document.getElementById('caw-img-' + _cawSlot);
         const plusEl = document.getElementById('caw-plus-' + _cawSlot);
         if (imgEl) { imgEl.src = dataUrl; imgEl.style.display = 'block'; }
@@ -900,11 +905,11 @@ async function epHandleAvatar(event) {
   reader.onload = async e => {
     const img = new Image();
     img.onload = async () => {
-      const MAX = 400; const canvas = document.createElement('canvas');
+      const MAX = 200; const canvas = document.createElement('canvas');
       const scale = Math.min(MAX/img.width, MAX/img.height, 1);
       canvas.width = Math.round(img.width*scale); canvas.height = Math.round(img.height*scale);
       canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
       // Update preview
       const avPrev = document.getElementById('ep-av-preview');
       avPrev.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;">`;
@@ -1239,6 +1244,29 @@ async function loadProfile() {
     document.getElementById('profile-av-box').style.cursor = 'default';
     const _aho = document.getElementById('av-hover-overlay'); if (_aho) _aho.style.display = 'none';
     document.getElementById('stat-invites-pill').style.display = 'none';
+    // Show "Add to Roster" button if the viewer is an eFed owner
+    try {
+      const ownerRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
+      const ownerData = ownerRows[0];
+      if (ownerData && (ownerData.is_efed_owner || ownerData.role === 'owner') && ownerData.promo_name) {
+        _ownerEfedName = ownerData.promo_name;
+        _atrTargetUsername = targetUser;
+        // Check if already on roster
+        const onRoster = await sbGet('roster', `efed=eq.${encodeURIComponent(_ownerEfedName)}&username=eq.${encodeURIComponent(targetUser)}&select=id,status`);
+        const addBtn = document.getElementById('add-to-roster-btn');
+        if (addBtn) {
+          if (onRoster.length) {
+            addBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> On Roster';
+            addBtn.style.background = 'rgba(76,175,100,.12)';
+            addBtn.style.borderColor = 'rgba(76,175,100,.3)';
+            addBtn.style.color = '#4caf64';
+            addBtn.style.cursor = 'default';
+            addBtn.onclick = null;
+          }
+          addBtn.style.display = 'flex';
+        }
+      }
+    } catch(e) {}
   } else {
     document.getElementById('edit-pencil').style.display = 'flex';
     const fab = document.getElementById('post-fab');
@@ -1259,6 +1287,7 @@ async function loadProfile() {
     if (!users.length) { document.getElementById('profile-name').textContent = 'User not found'; return; }
     const user = users[0];
     const name = user.display_name || user.username;
+    _atrTargetName = name;
     document.title = name + ' — EFED Hub';
     document.getElementById('profile-name').textContent = name;
     document.getElementById('profile-handle').textContent = '@' + user.username;
@@ -1572,7 +1601,7 @@ function confirmBannerCrop() {
     vpH / _cropState.scale,
     0, 0, _cropState.W, _cropState.H
   );
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.87);
   document.getElementById('banner-crop-bg').style.display = 'none';
   if (_cropState.onSave) _cropState.onSave(dataUrl);
 }
@@ -2222,6 +2251,106 @@ async function markAllNotifsRead() {
   setInterval(heartbeat, HEARTBEAT_INTERVAL);
   window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') heartbeat(); });
 })();
+</script>
+
+<!-- ── ADD TO ROSTER MODAL (owner only) ── -->
+<div id="add-roster-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeAddToRosterModal()">
+  <div style="background:#111114;border:1px solid rgba(200,168,75,.2);border-radius:16px;width:100%;max-width:400px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.9);">
+    <div style="padding:20px 22px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Add to Roster</div>
+      <button onclick="closeAddToRosterModal()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;">✕</button>
+    </div>
+    <div style="padding:22px 24px;display:flex;flex-direction:column;gap:16px;">
+      <div style="font-size:.85rem;color:rgba(255,255,255,.8);line-height:1.8;">
+        Add <strong id="atr-player-name" style="color:#fff;"></strong> to the <strong id="atr-efed-name" style="color:var(--gold);"></strong> roster?
+      </div>
+      <div id="atr-msg" style="font-size:.72rem;min-height:14px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="closeAddToRosterModal()" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
+        <button id="atr-confirm-btn" onclick="confirmAddToRoster()" style="flex:2;padding:12px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.4);border-radius:10px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:background .2s;">✓ Add to Roster</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── ADD TO ROSTER (owner visits another profile) ──
+let _atrTargetUsername = null;
+let _atrTargetName = null;
+
+function openAddToRosterModal() {
+  const nameEl = document.getElementById('atr-player-name');
+  const efedEl = document.getElementById('atr-efed-name');
+  const msg = document.getElementById('atr-msg');
+  const btn = document.getElementById('atr-confirm-btn');
+  if (nameEl) nameEl.textContent = _atrTargetName || _atrTargetUsername;
+  if (efedEl) efedEl.textContent = _ownerEfedName;
+  if (msg) msg.textContent = '';
+  if (btn) { btn.disabled = false; btn.textContent = '✓ Add to Roster'; }
+  document.getElementById('add-roster-modal-bg').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeAddToRosterModal() {
+  document.getElementById('add-roster-modal-bg').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+async function confirmAddToRoster() {
+  const session = getSession(); if (!session) return;
+  const btn = document.getElementById('atr-confirm-btn');
+  const msg = document.getElementById('atr-msg');
+  btn.disabled = true; btn.textContent = 'Adding…';
+
+  try {
+    // Check not already on roster
+    const existing = await sbGet('roster', `efed=eq.${encodeURIComponent(_ownerEfedName)}&username=eq.${encodeURIComponent(_atrTargetUsername)}`);
+    if (existing.length) {
+      msg.textContent = 'Already on this roster.'; msg.style.color = '#ff6b6b';
+      btn.disabled = false; btn.textContent = '✓ Add to Roster'; return;
+    }
+    // Insert as approved directly (owner-initiated)
+    await fetch(SUPABASE_URL+'/rest/v1/roster', {
+      method:'POST', headers:{...SB_HEADERS,'Prefer':'return=representation'},
+      body: JSON.stringify({
+        efed: _ownerEfedName,
+        username: _atrTargetUsername,
+        display_name: _atrTargetName,
+        joined_at: Date.now(),
+        status: 'approved'
+      })
+    });
+    // Notify the player
+    await fetch(SUPABASE_URL+'/rest/v1/notifications', {
+      method:'POST', headers:SB_HEADERS,
+      body: JSON.stringify({
+        username: _atrTargetUsername,
+        type: 'roster_approved',
+        message: `🎉 You have been added to the <strong>${_atrEsc(_ownerEfedName)}</strong> roster by the owner!`,
+        read: false,
+        created_at: Date.now()
+      })
+    });
+    // Update button state
+    const addBtn = document.getElementById('add-to-roster-btn');
+    if (addBtn) {
+      addBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> On Roster';
+      addBtn.style.background = 'rgba(76,175,100,.12)';
+      addBtn.style.borderColor = 'rgba(76,175,100,.3)';
+      addBtn.style.color = '#4caf64';
+      addBtn.style.cursor = 'default';
+      addBtn.onclick = null;
+    }
+    closeAddToRosterModal();
+    showToast('✓ Added to roster!');
+  } catch(e) {
+    msg.textContent = 'Could not add. Try again.'; msg.style.color = '#ff6b6b';
+    btn.disabled = false; btn.textContent = '✓ Add to Roster';
+    console.error(e);
+  }
+}
+
+function _atrEsc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 </script>
 </body>
 </html>
