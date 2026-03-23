@@ -2418,12 +2418,16 @@ async function checkLiveStatus(videoIds) {
   if (!videoIds.length) return {};
   try {
     const ids = videoIds.join(',');
-    const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${ids}&key=${YT_API_KEY}`);
+    const r = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails&id=${ids}&key=${YT_API_KEY}`);
     const data = await r.json();
     const map = {};
     (data.items || []).forEach(item => {
       const bc = item.snippet.liveBroadcastContent;
-      if (bc === 'live' || bc === 'upcoming') map[item.id] = bc;
+      if (bc === 'live' || bc === 'upcoming') {
+        map[item.id] = { status: bc };
+        const sched = item.liveStreamingDetails?.scheduledStartTime;
+        if (sched) map[item.id].scheduledMs = new Date(sched).getTime();
+      }
     });
     return map;
   } catch(e) { return {}; }
@@ -2527,8 +2531,8 @@ let upcomingVideos = []; // DB upcoming submissions
 function sortByDate(arr) {
   return [...arr].sort((a, b) => {
     // Only pin if actively live
-    const aLive = liveVideoMap[extractId(a.url)] === 'live' ? 1 : 0;
-    const bLive = liveVideoMap[extractId(b.url)] === 'live' ? 1 : 0;
+    const aLive = liveVideoMap[extractId(a.url)]?.status === 'live' ? 1 : 0;
+    const bLive = liveVideoMap[extractId(b.url)]?.status === 'live' ? 1 : 0;
     if (bLive !== aLive) return bLive - aLive;
     // Sort by YouTube publish date desc
     const ta = a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
@@ -2607,7 +2611,7 @@ async function updateLiveBadges() {
   const batch = videoIds.slice(0, 50);
   const liveMap = await checkLiveStatus(batch);
 
-  // Update liveVideoMap (now stores 'live' | 'upcoming' | undefined)
+  // Update liveVideoMap (now stores { status, scheduledMs } or undefined)
   batch.forEach(id => {
     const now = liveMap[id];
     if (now) liveVideoMap[id] = now;
@@ -2621,7 +2625,8 @@ async function updateLiveBadges() {
     const thumb = card.querySelector('.card-thumb');
     if (!thumb) return;
     const existing = thumb.querySelector('.live-badge, .upcoming-badge');
-    const status = liveVideoMap[id];
+    const entry = liveVideoMap[id];
+    const status = entry?.status;
     if (status === 'live') {
       if (existing && existing.classList.contains('live-badge')) return;
       if (existing) existing.remove();
@@ -2636,6 +2641,25 @@ async function updateLiveBadges() {
       badge.className = 'upcoming-badge';
       badge.textContent = 'UPCOMING';
       thumb.appendChild(badge);
+      // Auto-add to upcoming row with accurate scheduled time if not already there
+      const cardUrl = card._videoUrl;
+      const alreadyInUpcoming = upcomingVideos.find(u => u.url === cardUrl);
+      const alreadyInHardcoded = (typeof upcoming !== 'undefined' ? upcoming : []).find(u => u.url === cardUrl);
+      if (!alreadyInUpcoming && !alreadyInHardcoded && cardUrl) {
+        const cardShow = card.querySelector('.card-show')?.textContent || '';
+        const cardEfed = card.querySelector('.card-efed')?.textContent || '';
+        const scheduledMs = entry.scheduledMs || 0;
+        const dateStr = scheduledMs ? new Date(scheduledMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+        upcomingVideos.push({
+          url: cardUrl,
+          show: cardShow,
+          efed: cardEfed,
+          date: dateStr,
+          dateMs: scheduledMs,
+          status: 'upcoming'
+        });
+        loadUpcomingRow();
+      }
     } else {
       if (existing) existing.remove();
     }
@@ -2646,10 +2670,16 @@ async function updateLiveBadges() {
   for (let i = upcomingVideos.length - 1; i >= 0; i--) {
     const uv = upcomingVideos[i];
     const id = extractId(uv.url);
-    const ytStatus = liveMap[id]; // 'live', 'upcoming', or undefined (ended/vod)
+    const ytEntry = liveMap[id];
+    const ytStatus = ytEntry?.status;
+    // Update scheduledMs from API if we now have a more accurate time
+    if (ytStatus === 'upcoming' && ytEntry.scheduledMs && ytEntry.scheduledMs !== uv.dateMs) {
+      uv.dateMs = ytEntry.scheduledMs;
+      uv.date = new Date(ytEntry.scheduledMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
     // Promote if now live OR if the scheduled date has passed and YT returned it as a normal vod (undefined = no longer upcoming)
     const datePassed = uv.dateMs && Date.now() > uv.dateMs + 4 * 3600000; // 4hr grace
-    if (ytStatus === 'live' || (!ytStatus && datePassed)) {
+    if (ytStatus === 'live' || (!ytEntry && datePassed)) {
       // Promote to main grid
       const promoted_v = { ...uv, status: 'approved', submittedAt: uv.dateMs || Date.now() };
       if (!videos.find(v => v.url === promoted_v.url)) {
@@ -4656,10 +4686,11 @@ async function fetchSubmitPreview() {
     let uploadDate = '';
     let uploadDateMs = null;
     try {
-      const ytApiRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${vidId}&key=${YT_API_KEY}`);
+      const ytApiRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails&id=${vidId}&key=${YT_API_KEY}`);
       if (ytApiRes.ok) {
         const ytApiData = await ytApiRes.json();
-        const publishedAt = ytApiData.items?.[0]?.snippet?.publishedAt;
+        const item = ytApiData.items?.[0];
+        const publishedAt = item?.snippet?.publishedAt;
         if (publishedAt) {
           const parsed = new Date(publishedAt);
           if (!isNaN(parsed)) {
@@ -4667,10 +4698,22 @@ async function fetchSubmitPreview() {
             uploadDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
           }
         }
+        // If it's a scheduled stream, use the actual scheduled start time for accurate countdown
+        const broadcastStatus = item?.snippet?.liveBroadcastContent;
+        const scheduledStart = item?.liveStreamingDetails?.scheduledStartTime;
+        if (broadcastStatus === 'upcoming' && scheduledStart) {
+          const scheduled = new Date(scheduledStart);
+          if (!isNaN(scheduled)) {
+            uploadDateMs = scheduled.getTime();
+            uploadDate = scheduled.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          }
+        }
+        _fetchedMeta_broadcastStatus = broadcastStatus || null;
+        _fetchedMeta_scheduledMs = (broadcastStatus === 'upcoming' && uploadDateMs) ? uploadDateMs : null;
       }
     } catch(e) { console.warn('YT API date fetch failed', e); }
 
-    _fetchedMeta = { title: oData.title || '', channel: oData.author_name || '', vidId, uploadDate, uploadDateMs };
+    _fetchedMeta = { title: oData.title || '', channel: oData.author_name || '', vidId, uploadDate, uploadDateMs, isUpcoming: _fetchedMeta_broadcastStatus === 'upcoming', scheduledMs: _fetchedMeta_scheduledMs || null };
 
     document.getElementById('submit-preview-title').textContent = _fetchedMeta.title;
     document.getElementById('submit-preview-channel').textContent = _fetchedMeta.channel + (_fetchedMeta.uploadDate ? '  ·  ' + _fetchedMeta.uploadDate : '');
@@ -4825,7 +4868,7 @@ function doSubmitPost() {
       // Use upload date from YouTube API
       const dateStr = _fetchedMeta.uploadDate || '';
       const dateMs = _fetchedMeta.uploadDateMs || Date.now();
-      const submitStatus = 'approved';
+      const submitStatus = (_fetchedMeta.isUpcoming && _fetchedMeta.scheduledMs) ? 'upcoming' : 'approved';
 
       const thumbUrl = 'https://i.ytimg.com/vi/' + _fetchedMeta.vidId + '/mqdefault.jpg';
 
@@ -4852,33 +4895,52 @@ function doSubmitPost() {
         if (uRows[0]?.display_name) posterDisplayName = uRows[0].display_name;
       } catch(e) {}
 
-      videos.push({
-          url,
-          show: _fetchedMeta.title,
-          efed: assignedEfed,
-          date: dateStr,
-          dateMs,
-          submittedAt: Date.now(),
-          submittedBy: session.username,
-          displayName: posterDisplayName,
-          community: true,
-          status: 'approved',
-          new: true,
-          thumb: thumbUrl
-        });
+      if (submitStatus === 'upcoming') {
+          // Add to upcoming row with countdown
+          upcomingVideos.push({
+            url,
+            show: _fetchedMeta.title,
+            efed: assignedEfed,
+            date: dateStr,
+            dateMs,
+            submittedBy: session.username,
+            community: true,
+            status: 'upcoming',
+            thumb: thumbUrl,
+            dbId: inserted[0]?.id
+          });
+          loadUpcomingRow();
+          document.getElementById('submit-ok').style.display = 'block';
+          document.getElementById('submit-ok').textContent = '⏰ Added to Upcoming Shows with countdown!';
+        } else {
+          videos.push({
+            url,
+            show: _fetchedMeta.title,
+            efed: assignedEfed,
+            date: dateStr,
+            dateMs,
+            submittedAt: Date.now(),
+            submittedBy: session.username,
+            displayName: posterDisplayName,
+            community: true,
+            status: 'approved',
+            new: true,
+            thumb: thumbUrl
+          });
 
-        buildPills();
-        renderGrid();
-        loadBookmarksRow();
-        loadEfedOwnerRow();
+          buildPills();
+          renderGrid();
+          loadBookmarksRow();
+          loadEfedOwnerRow();
 
-        window._heroFirstLoad = true;
-        heroIdx = 0;
-        buildHeroDots();
-        loadSlide();
+          window._heroFirstLoad = true;
+          heroIdx = 0;
+          buildHeroDots();
+          loadSlide();
 
-        document.getElementById('submit-ok').style.display = 'block';
-        document.getElementById('submit-ok').textContent = '🎉 Your show is now live on the Hub!';
+          document.getElementById('submit-ok').style.display = 'block';
+          document.getElementById('submit-ok').textContent = '🎉 Your show is now live on the Hub!';
+        }
 
       btn.textContent = 'Posted!';
       btn.disabled = true;
