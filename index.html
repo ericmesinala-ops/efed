@@ -626,6 +626,18 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
   .upcoming-card-efed { font-size: .6rem; color: var(--gold); letter-spacing: 2px; text-transform: uppercase; font-weight: 700; margin-bottom: 2px; }
   .upcoming-card-show { font-size: .82rem; font-weight: 600; color: var(--text); line-height: 1.3; margin-bottom: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .upcoming-card-date { font-size: .68rem; color: var(--gold); font-weight: 500; }
+  .upcoming-delete-btn {
+    position: absolute; top: 7px; right: 7px; z-index: 10;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(0,0,0,.72); border: 1px solid rgba(255,255,255,.18);
+    color: rgba(255,255,255,.7); font-size: .75rem;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; opacity: 0; transition: opacity .2s, background .2s, border-color .2s, transform .15s;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    line-height: 1;
+  }
+  .upcoming-card:hover .upcoming-delete-btn { opacity: 1; }
+  .upcoming-delete-btn:hover { background: rgba(192,0,14,.88); border-color: rgba(192,0,14,.9); color: #fff; transform: scale(1.12); }
 
   footer { border-top: 1px solid rgba(255,255,255,.05); padding: 40px 56px; font-size: .74rem; color: var(--muted); transition: margin-right .3s cubic-bezier(.16,1,.3,1); }
   .foot-inner { max-width: 680px; }
@@ -2759,6 +2771,44 @@ function makeUpcomingCard(v) {
   img.onerror = function() { this.style.display = 'none'; this.parentNode.style.background = '#1a1a1f'; };
   thumbDiv.appendChild(img);
 
+  // Delete button — visible on hover for admin or the submitter
+  const session = typeof getSession === 'function' ? getSession() : null;
+  const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
+  const isOwner = session && v.submittedBy && session.username.toLowerCase() === v.submittedBy.toLowerCase();
+  if (isAdmin || isOwner) {
+    const delBtn = document.createElement('button');
+    delBtn.className = 'upcoming-delete-btn';
+    delBtn.title = 'Remove upcoming show';
+    delBtn.innerHTML = '&#x2715;';
+    delBtn.addEventListener('click', async function(e) {
+      e.stopPropagation();
+      if (!confirm('Remove "' + (v.show || 'this show') + '" from Upcoming?')) return;
+      try {
+        // Remove from DB if it has a dbId
+        if (v.dbId) {
+          await sbDelete('submissions', 'id=eq.' + v.dbId);
+        } else if (v.url) {
+          await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)).catch(() => {});
+        }
+      } catch(e) { /* best-effort */ }
+      // Remove from upcomingVideos array
+      const idx = upcomingVideos.findIndex(u => u.url === v.url);
+      if (idx !== -1) upcomingVideos.splice(idx, 1);
+      el.remove();
+      // Update count
+      const countEl = document.getElementById('upcoming-count');
+      const grid = document.getElementById('row-upcoming');
+      const section = document.getElementById('section-upcoming');
+      if (grid && countEl) {
+        const remaining = grid.querySelectorAll('.upcoming-card').length;
+        countEl.textContent = remaining ? ' · ' + remaining : '';
+        if (!remaining && section) section.style.display = 'none';
+      }
+      showToast('Removed from Upcoming.');
+    });
+    thumbDiv.appendChild(delBtn);
+  }
+
   const overlay = document.createElement('div');
   overlay.className = 'upcoming-overlay';
 
@@ -4575,6 +4625,9 @@ function openSubmitModal() {
   clearSubmitPreview();
   document.getElementById('submit-err').style.display = 'none';
   document.getElementById('submit-ok').style.display = 'none';
+  // Keep button disabled until URL is pasted and screened
+  const _btn = document.getElementById('submit-post-btn');
+  if (_btn) { _btn.disabled = true; _btn.style.opacity = '.35'; _btn.style.cursor = 'not-allowed'; _btn.textContent = 'Submit to Hub'; }
 }
 
 function closeSubmitModal() {
@@ -4589,13 +4642,24 @@ function handleSubmitBgClick(e) {
 
 function clearSubmitPreview() {
   document.getElementById('submit-preview').style.display = 'none';
-  
-  
   document.getElementById('submit-screening').style.display = 'none';
   document.getElementById('submit-err').style.display = 'none';
   document.getElementById('submit-ok').style.display = 'none';
+  const overrideBtn = document.getElementById('submit-override-btn');
+  const notifyBtn = document.getElementById('submit-notify-btn');
+  if (overrideBtn) overrideBtn.style.display = 'none';
+  if (notifyBtn) notifyBtn.style.display = 'none';
   const btn = document.getElementById('submit-post-btn');
-  if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+  const urlVal = (document.getElementById('submit-url')?.value || '').trim();
+  if (btn) {
+    // Only disable if there's no valid URL yet
+    if (!urlVal) {
+      btn.disabled = true; btn.style.opacity = '.35'; btn.style.cursor = 'not-allowed';
+    } else {
+      btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer';
+    }
+    btn.textContent = 'Submit to Hub';
+  }
 }
 
 // ── SCREENING ENGINE (swap this function body for an API call when key available) ──
@@ -4756,10 +4820,10 @@ async function fetchSubmitPreview() {
     screenEl.style.background = 'rgba(76,175,138,.08)';
     screenEl.style.border = '1px solid rgba(76,175,138,.25)';
     screenEl.style.color = '#4caf8a';
-    btn.disabled = true;
-    btn.style.opacity = '.4';
-    btn.style.cursor = 'not-allowed';
-    btn.textContent = 'Submit to Hub'; btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer';
+    btn.textContent = 'Submit to Hub';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
 
     // Pre-fill date if available
     // uploadDate stored in _fetchedMeta for submission
