@@ -1339,7 +1339,6 @@ async function loadProfile() {
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
-      // Mark as unclaimed — roster/supporters stay 0, but count real episodes
       _isUnclaimed = true;
       document.getElementById('stat-roster').textContent = '0';
       document.getElementById('stat-supporters').textContent = '0';
@@ -1455,6 +1454,16 @@ async function loadProfile() {
   loadEfedStats();
   loadEpisodes();
   loadRoster();
+
+  // First visit — show welcome modal tailored to whether videos exist
+  const _urlParams = new URLSearchParams(window.location.search);
+  if (_urlParams.get('firstvisit') === '1' && _isOwnProfile) {
+    const _hasVids = _urlParams.get('hasvids') === '1';
+    setTimeout(() => {
+      if (typeof openWelcomeModal === 'function') openWelcomeModal(EFED_NAME, _hasVids);
+    }, 600);
+    history.replaceState(null, '', 'efed.html?e=' + encodeURIComponent(EFED_NAME));
+  }
 }
 
 
@@ -1503,11 +1512,11 @@ async function toggleSignings() {
 }
 
 async function loadEfedStats() {
+  if (_isUnclaimed) return; // unclaimed pages always show 0
   try {
     const eps = await sbGet('submissions', `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id`);
     document.getElementById('stat-episodes').textContent = eps.length;
   } catch(e) {}
-  if (_isUnclaimed) return;
   try {
     const r = await fetch(SUPABASE_URL+'/rest/v1/roster?efed=eq.'+encodeURIComponent(EFED_NAME), { headers:{...SB_HEADERS,'Prefer':'count=exact','Range':'0-0'} });
     document.getElementById('stat-roster').textContent = parseInt(r.headers.get('Content-Range')?.split('/')[1]||'0') + 1;
@@ -3126,6 +3135,30 @@ async function doLeaveRoster(username, rosterRowId) {
 </div>
 
 <!-- ── CLAIM THIS EFED MODAL ── -->
+<!-- ── WELCOME / FIRST VISIT MODAL ── -->
+<div id="welcome-efed-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.8);backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeWelcomeModal()">
+  <div style="background:#111114;border:1px solid rgba(200,168,75,.25);border-radius:16px;width:100%;max-width:400px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.9);">
+    <div style="padding:28px 24px 24px;text-align:center;">
+      <div id="welcome-emoji" style="font-size:2.2rem;margin-bottom:12px;">🎉</div>
+      <div id="welcome-title" style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;letter-spacing:3px;color:#fff;margin-bottom:6px;"></div>
+      <div id="welcome-efed-name" style="font-size:.65rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:16px;"></div>
+      <div id="welcome-body" style="font-size:.82rem;color:rgba(255,255,255,.6);line-height:1.8;margin-bottom:20px;"></div>
+      <!-- Post tip — only shown for the encourage-to-post variant -->
+      <div id="welcome-post-tip" style="display:none;background:rgba(192,0,14,.08);border:1px solid rgba(192,0,14,.2);border-radius:10px;padding:12px 14px;margin-bottom:20px;display:none;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:32px;height:32px;border-radius:50%;background:#c0000e;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><line x1="12" y1="5" x2="12" y2="19" stroke="#fff" stroke-width="3" stroke-linecap="round"/><line x1="5" y1="12" x2="19" y2="12" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>
+          </div>
+          <div style="font-size:.75rem;color:rgba(255,255,255,.7);text-align:left;line-height:1.6;">Tap the <strong style="color:#fff;">red + button</strong> anywhere on the Hub to submit your first episode.</div>
+        </div>
+      </div>
+      <button onclick="closeWelcomeModal()" id="welcome-btn" style="width:100%;padding:14px;background:linear-gradient(135deg,#c8a84b,#a07830);border:none;border-radius:10px;color:#000;font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:2px;cursor:pointer;font-weight:700;">
+        Let's Go! 🎬
+      </button>
+    </div>
+  </div>
+</div>
+
 <div id="claim-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeClaimModal()">
   <div style="background:#111114;border:1px solid rgba(200,168,75,.2);border-radius:16px;width:100%;max-width:420px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.8);display:flex;flex-direction:column;max-height:90vh;">
 
@@ -3181,6 +3214,35 @@ async function doLeaveRoster(username, rosterRowId) {
 
 <script>
 let _isUnclaimed = false;
+
+function openWelcomeModal(efedName, hasVideos) {
+  // Only show once ever per eFed
+  if (localStorage.getItem('efed_welcomed_' + efedName)) return;
+
+  document.getElementById('welcome-efed-name').textContent = efedName;
+  const tip = document.getElementById('welcome-post-tip');
+
+  if (hasVideos) {
+    document.getElementById('welcome-emoji').textContent = '🎉';
+    document.getElementById('welcome-title').textContent = 'Your eFed is Already Here!';
+    document.getElementById('welcome-body').innerHTML = 'We found your videos on the Hub. This page is yours — customize your logo, banner, bio, manage your roster and more.<br><br>Keep the content coming and grow your audience! 🔥';
+    tip.style.display = 'block';
+  } else {
+    document.getElementById('welcome-emoji').textContent = '👋';
+    document.getElementById('welcome-title').textContent = 'Welcome to the Hub!';
+    document.getElementById('welcome-body').innerHTML = 'Your eFed page is all set up. Now it's time to fill it with content — submit your first episode and start building your audience on EFED Streaming Hub!';
+    tip.style.display = 'block';
+  }
+
+  document.getElementById('welcome-efed-modal-bg').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+function closeWelcomeModal() {
+  const nameEl = document.getElementById('welcome-efed-name');
+  if (nameEl?.textContent) localStorage.setItem('efed_welcomed_' + nameEl.textContent, '1');
+  document.getElementById('welcome-efed-modal-bg').style.display = 'none';
+  document.body.style.overflow = '';
+}
 
 function openClaimModal() {
   document.getElementById('claim-efed-subtitle').textContent = EFED_NAME;
@@ -3661,7 +3723,6 @@ const _soSearch = (() => {
 
   return { open, close, clear, setTab, openVideo, openEfed, openProfile, run };
 })();
-
 
 </script>
 </body>
