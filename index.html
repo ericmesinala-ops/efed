@@ -100,10 +100,10 @@
     var userBtn   = document.getElementById("nav-user-btn");
     var initialsEl = document.getElementById("nav-initials");
     if (session) {
-      if (userBtn)   userBtn.style.display   = "flex";
+      if (userBtn) { userBtn.style.visibility = "visible"; userBtn.style.display = "flex"; }
       if (initialsEl) { var n = session.displayName || session.username || "?"; initialsEl.textContent = n[0].toUpperCase(); }
     } else {
-      if (userBtn)   userBtn.style.display   = "none";
+      if (userBtn) userBtn.style.visibility = "hidden";
     }
   });
 function showToast(msg){const t=document.createElement("div");t.textContent=msg;t.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:8px 16px;border-radius:20px;font-size:.75rem;z-index:99999;opacity:0;transition:opacity .3s;";document.body.appendChild(t);setTimeout(()=>t.style.opacity="1",10);setTimeout(()=>{t.style.opacity="0";setTimeout(()=>t.remove(),300);},2500);}
@@ -654,7 +654,7 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
     .hero-thumb.hidden { opacity: 0 !important; }
     .hero-thumb.video-playing { opacity: 0 !important; }
     nav { padding: 14px 20px; gap: 0; }
-    #online-counter { display: none !important; }
+    #online-counter { display: none; }
     .logo-main { font-size: .95rem; letter-spacing: 1.5px; }
     .logo-eyebrow { display: none; }
     .nav-right { gap: 10px; margin-left: auto; }
@@ -1097,7 +1097,7 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
     z-index: 9999;
   }
   .user-dropdown.open { opacity: 1; pointer-events: all; transform: translateY(0); }
-  .nav-user-wrap { position: relative; }
+  .nav-user-wrap { position: relative; min-width: 57px; display: flex; align-items: center; justify-content: center; }
   .dropdown-header {
     padding: 12px 16px 8px;
     border-bottom: 1px solid rgba(255,255,255,.06); margin-bottom: 4px;
@@ -1742,7 +1742,7 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
     </button>
     <div class="nav-user-wrap" id="nav-user-wrap">
 
-      <button class="nav-icon-btn nav-user-btn" id="nav-user-btn" onclick="toggleDropdown()" style="display:none;">
+      <button class="nav-icon-btn nav-user-btn" id="nav-user-btn" onclick="toggleDropdown()" style="visibility:hidden;">
         <div class="nav-avatar-initials" id="nav-avatar-wrap">
           <img id="nav-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:none;" onerror="this.style.display='none';document.getElementById('nav-initials').style.display=''">
           <span id="nav-initials">??</span>
@@ -2107,6 +2107,30 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
       </div>
     </div>
   </section>
+
+  <!-- ── FEATURED EFED ── -->
+  <section class="section" id="section-spotlight" style="display:none;">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar" style="background:var(--gold);"></div>
+        <div>
+          <div style="font-size:.55rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:2px;">Spotlight</div>
+          <div class="sec-title" id="spotlight-name" style="line-height:1;">—</div>
+        </div>
+      </div>
+      <div style="font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:500;padding-right:56px;">Today's Pick</div>
+    </div>
+    <div class="row-wrap">
+      <div class="arr-col left">
+        <button class="pill-arr left hidden" id="spotlight-arr-left" onclick="scrollNamedRow('spotlight',-1)">&#8249;</button>
+      </div>
+      <div class="card-grid" id="row-spotlight"></div>
+      <div class="arr-col right">
+        <button class="pill-arr right" id="spotlight-arr-right" onclick="scrollNamedRow('spotlight',1)">&#8250;</button>
+      </div>
+    </div>
+  </section>
+
   <section class="section" id="section-upcoming" style="display:none;">
     <div class="sec-head">
       <div class="sec-title-wrap">
@@ -3287,6 +3311,47 @@ async function loadMostViewed(allVideos) {
   } catch(e) { console.error('Most Viewed failed:', e); }
 }
 
+// ── FEATURED EFED ──
+function loadSpotlight(allVideos) {
+  try {
+    // Get distinct eFeds that have at least 2 videos
+    const efedMap = {};
+    allVideos.forEach(v => {
+      if (!v.efed) return;
+      if (!efedMap[v.efed]) efedMap[v.efed] = [];
+      efedMap[v.efed].push(v);
+    });
+    const eligibleEfeds = Object.keys(efedMap).filter(e => efedMap[e].length >= 2);
+    if (!eligibleEfeds.length) return;
+
+    // Pick one deterministically based on day of year so it's the same all day
+    const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+    const featured = eligibleEfeds[dayOfYear % eligibleEfeds.length];
+    const shows = efedMap[featured].sort((a, b) => {
+      const ta = a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
+      const tb = b.dateMs || (b.date ? new Date(b.date).getTime() : 0);
+      return tb - ta; // most recent first
+    });
+
+    const section = document.getElementById('section-spotlight');
+    const grid = document.getElementById('row-spotlight');
+    const nameEl = document.getElementById('spotlight-name');
+    if (!section || !grid || !nameEl) return;
+
+    nameEl.textContent = featured;
+    grid.innerHTML = '';
+    shows.forEach(v => grid.appendChild(makeCard(v)));
+    section.style.display = 'block';
+
+    setTimeout(() => {
+      const left = document.getElementById('spotlight-arr-left');
+      const right = document.getElementById('spotlight-arr-right');
+      if (left) left.classList.toggle('hidden', grid.scrollLeft <= 0);
+      if (right) right.classList.toggle('hidden', grid.scrollWidth <= grid.clientWidth);
+    }, 100);
+  } catch(e) { console.error('Spotlight failed:', e); }
+}
+
 async function initHub() {
   showSkeletons(8);
   buildPills();
@@ -3362,6 +3427,7 @@ async function initHub() {
   buildHeroDots();
   loadSlide();
   loadMostViewed(videos);
+  loadSpotlight(videos);
   // ?play= param handled before initHub for instant open
 }
 
@@ -4106,7 +4172,7 @@ function handleFormSubmit(formId, successId) {
   const initialsEl = document.getElementById('nav-initials');
   const ddName = document.getElementById('dd-name');
   const ddEmail = document.getElementById('dd-email');
-  if (userBtn) userBtn.style.display = 'flex';
+  if (userBtn) { userBtn.style.visibility = 'visible'; userBtn.style.display = 'flex'; }
   if (inviteBtn) inviteBtn.classList.add('visible');
   const submitNavBtn = document.getElementById('nav-submit-btn');
   if (submitNavBtn) submitNavBtn.style.display = 'flex';
@@ -5005,6 +5071,7 @@ function doSubmitPost() {
           renderGrid();
           loadBookmarksRow();
           loadEfedOwnerRow();
+          loadVerifiedUsers().then(() => renderGrid());
 
           window._heroFirstLoad = true;
           heroIdx = 0;
@@ -7227,14 +7294,14 @@ async function loadVerifiedUsers() {
     // Get all efed owners with their yt_channel
     const owners = await sbGet('users', 'select=username,yt_channel&is_efed_owner=eq.true');
     // Get all approved submissions
-    const subs = await sbGet('submissions', 'select=username,url&status=eq.approved');
+    const subs = await sbGet('submissions', 'select=submitted_by,url&status=eq.approved');
 
     owners.forEach(u => {
       if (!u.yt_channel) return;
       const channel = u.yt_channel.toLowerCase().replace('https://youtube.com/@','').replace('https://www.youtube.com/@','').replace('@','').trim();
       // Check if any approved submission from this user matches their channel
       const hasProof = subs.some(s => {
-        if ((s.username || '').toLowerCase() !== u.username.toLowerCase()) return false;
+        if ((s.submitted_by || '').toLowerCase() !== u.username.toLowerCase()) return false;
         const url = (s.url || '').toLowerCase();
         return url.includes(channel) || channel.length > 3 && url.includes(channel);
       });
@@ -7248,7 +7315,7 @@ async function loadVerifiedUsers() {
       if (!u.yt_channel) return;
       const channel = u.yt_channel.toLowerCase().replace('https://youtube.com/@','').replace('https://www.youtube.com/@','').replace('@','').trim();
       const hasProof = subs.some(s => {
-        if ((s.username || '').toLowerCase() !== u.username.toLowerCase()) return false;
+        if ((s.submitted_by || '').toLowerCase() !== u.username.toLowerCase()) return false;
         const url = (s.url || '').toLowerCase();
         return url.includes(channel);
       });
