@@ -2214,6 +2214,26 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
     </div>
   </section>
 
+  <!-- ── RECENTLY ADDED ── -->
+  <section class="section" id="section-recently-added" style="display:none;">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar" style="background:#4caf8a;"></div>
+        <div class="sec-title">Recently Added</div>
+        <span class="sec-count" id="recently-added-count"></span>
+      </div>
+    </div>
+    <div class="row-wrap">
+      <div class="arr-col left">
+        <button class="pill-arr left hidden" id="recently-added-arr-left" onclick="scrollNamedRow('recently-added',-1)">&#8249;</button>
+      </div>
+      <div class="card-grid" id="row-recently-added"></div>
+      <div class="arr-col right">
+        <button class="pill-arr right" id="recently-added-arr-right" onclick="scrollNamedRow('recently-added',1)">&#8250;</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ── FEATURED EFED ── -->
   <section class="section" id="section-spotlight" style="display:none;">
     <div class="sec-head">
@@ -3248,10 +3268,12 @@ function updateRowArrows() {
 function scrollPills(dir) {
   const wrap = document.getElementById('filter-wrap');
   if (!wrap) return;
-  const pill = wrap.querySelector('.pill');
-  const pillW = pill ? pill.offsetWidth + 8 : 120;
-  const count = window.innerWidth <= 768 ? 3 : 10;
-  wrap.scrollBy({ left: dir * pillW * count, behavior: 'smooth' });
+  // On desktop scroll the full visible width — completely fresh batch of pills each click
+  // On mobile keep it at 3 pills
+  const amt = window.innerWidth > 768
+    ? wrap.clientWidth
+    : (wrap.querySelector('.pill')?.offsetWidth + 8 || 120) * 3;
+  wrap.scrollBy({ left: dir * amt, behavior: 'smooth' });
 }
 
 function scrollChatRooms(dir) {
@@ -3432,6 +3454,40 @@ async function loadMostViewed(allVideos) {
   } catch(e) { console.error('Most Viewed failed:', e); }
 }
 
+// ── RECENTLY ADDED ──
+function loadRecentlyAdded(allVideos) {
+  try {
+    const grid = document.getElementById('row-recently-added');
+    const section = document.getElementById('section-recently-added');
+    const count = document.getElementById('recently-added-count');
+    if (!grid || !section) return;
+
+    // Sort by submittedAt desc (most recently submitted to the hub)
+    const sorted = [...allVideos]
+      .filter(v => v.url)
+      .sort((a, b) => {
+        const ta = b.submittedAt || b.dateMs || (b.date ? new Date(b.date).getTime() : 0);
+        const tb = a.submittedAt || a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
+        return ta - tb;
+      })
+      .slice(0, 40);
+
+    if (!sorted.length) return;
+
+    grid.innerHTML = '';
+    sorted.forEach(v => grid.appendChild(makeCard(v)));
+    if (count) count.textContent = sorted.length + ' videos';
+    section.style.display = 'block';
+
+    setTimeout(() => {
+      const left = document.getElementById('recently-added-arr-left');
+      const right = document.getElementById('recently-added-arr-right');
+      if (left) left.classList.toggle('hidden', grid.scrollLeft <= 0);
+      if (right) right.classList.toggle('hidden', grid.scrollWidth <= grid.clientWidth);
+    }, 100);
+  } catch(e) { console.error('Recently Added failed:', e); }
+}
+
 // ── FEATURED EFED ──
 function loadSpotlight(allVideos) {
   try {
@@ -3548,6 +3604,7 @@ async function initHub() {
   buildHeroDots();
   loadSlide();
   loadMostViewed(videos);
+  loadRecentlyAdded(videos);
   loadSpotlight(videos);
   // ?play= param handled before initHub for instant open
 }
