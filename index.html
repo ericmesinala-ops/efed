@@ -8567,7 +8567,9 @@ function switchChatRoom(roomId, efedName) {
   window._chatCurrentRoomIsMyEfed = myEfedRooms.some(r => r.id === roomId);
   buildChatRooms();
   loadChatMessages(roomId);
+  // Reconnect WS subscribed to the new room, restart clean poll
   connectChatRealtime();
+  _stopChatPolling();
   if (_chatOpen) _startChatPolling();
   const pinned = document.getElementById('chat-pinned');
   const note = document.getElementById('chat-say-hi');
@@ -8759,7 +8761,7 @@ async function sendChatMessage() {
     const msgObj = {
       room_id: _chatRoom, username: session.username,
       display_name: displayName, message: text,
-      created_at: Date.now(), deleted: false
+      created_at: new Date().toISOString(), deleted: false
     };
 
     const pendingId = '_pending_' + Date.now();
@@ -8918,21 +8920,29 @@ let _wsRef = 0;
 
 function connectChatRealtime() {
   if (_chatWs) { try { _chatWs.close(); } catch(e) {} _chatWs = null; }
+  const roomId = _chatRoom || 'updates';
 
   try {
     const ws = new WebSocket(`${SUPABASE_WS_CHAT}?apikey=${SUPABASE_KEY_CHAT}&vsn=1.0.0`);
     _chatWs = ws;
+    // Snapshot the room this connection is bound to
+    const boundRoom = roomId;
 
     ws.onopen = () => {
       _wsRef = 1;
-      // Supabase Realtime v2 format
+      // Supabase Realtime v2 format — filter to current room only
       ws.send(JSON.stringify({
-        topic: 'realtime:chat_messages',
+        topic: `realtime:chat_messages:${boundRoom}`,
         event: 'phx_join',
         payload: {
           config: {
             broadcast: { self: false },
-            postgres_changes: [{ event: '*', schema: 'public', table: 'chat_messages' }]
+            postgres_changes: [{
+              event: '*',
+              schema: 'public',
+              table: 'chat_messages',
+              filter: `room_id=eq.${boundRoom}`
+            }]
           }
         },
         ref: String(++_wsRef)
@@ -8951,7 +8961,8 @@ function connectChatRealtime() {
         if (change) {
           if (change.type === 'INSERT' && change.record && !change.record.deleted) {
             const rec = change.record;
-            if (rec.room_id !== _chatRoom) return;
+            // Hard guard: only render if we're still in the room this WS was opened for
+            if (rec.room_id !== boundRoom || rec.room_id !== _chatRoom) return;
             if (session && rec.username === session.username) return; // already shown optimistically
             _ensureAvatar(rec.username);
             appendChatMessage(rec, true);
@@ -8973,7 +8984,8 @@ function connectChatRealtime() {
     ws.onerror = () => {};
     ws.onclose = () => {
       _chatWs = null;
-      setTimeout(() => connectChatRealtime(), 3000);
+      // Only reconnect if still on the same room
+      setTimeout(() => { if (_chatRoom === boundRoom) connectChatRealtime(); }, 3000);
     };
   } catch(err) {
     setTimeout(() => connectChatRealtime(), 3000);
@@ -9002,11 +9014,15 @@ function _startChatPolling() {
   _stopChatPolling();
   _chatPollInterval = setInterval(async () => {
     if (!_chatOpen || !_chatRoom) return;
+    // Snapshot room at start of each poll tick — discard results if room changed mid-flight
+    const pollRoom = _chatRoom;
     try {
       const session = getSession();
       const rows = await sbGet('chat_messages',
-        `room_id=eq.${_chatRoom}&deleted=eq.false&id=gt.${_chatLastMsgId}&order=created_at.asc&limit=20`);
+        `room_id=eq.${pollRoom}&deleted=eq.false&id=gt.${_chatLastMsgId}&order=created_at.asc&limit=20`);
       if (!rows.length) return;
+      // If user switched rooms while the request was in flight, discard
+      if (_chatRoom !== pollRoom) return;
       for (const rec of rows) {
         _chatLastMsgId = Math.max(_chatLastMsgId, rec.id || 0);
         // Skip if already in DOM
@@ -9281,7 +9297,7 @@ async function sendGif(url, title) {
     username: session.username,
     display_name: isVerifiedUser(session.username) ? 'Admin' : session.username,
     message: `[gif]${url}[/gif]`,
-    created_at: Date.now(),
+    created_at: new Date().toISOString(),
     deleted: false
   };
   appendChatMessage(gifMsg, true);
@@ -9298,7 +9314,7 @@ async function sendGif(url, title) {
     const result = await sbInsert('chat_messages', {
       room_id: _chatRoom, username: session.username,
       display_name: displayName, message: `[gif]${url}[/gif]`,
-      created_at: Date.now()
+      created_at: new Date().toISOString()
     });
     if (result?.[0]?.id) {
       const el = document.querySelector(`.chat-msg[data-id="${gifMsg.id}"]`);
