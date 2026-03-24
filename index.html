@@ -8338,9 +8338,9 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
     <button class="pill-arr right" id="chat-rooms-arr-right" onclick="scrollChatRooms(1)" style="display:flex;">&#8250;</button>
   </div>
   <div id="chat-pinned" style="display:none;padding:8px 14px;background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.06);font-size:.68rem;color:rgba(255,255,255,.45);line-height:1.5;font-style:italic;"></div>
-  <div id="chat-say-hi" style="padding:10px 14px;background:rgba(200,168,75,.07);border-bottom:1px solid rgba(200,168,75,.15);display:flex;align-items:flex-start;gap:10px;flex-shrink:0;">
+  <div id="chat-say-hi" style="padding:10px 14px;background:rgba(200,168,75,.07);border-bottom:1px solid rgba(200,168,75,.15);display:none;align-items:flex-start;gap:10px;flex-shrink:0;">
     <span style="font-size:1rem;flex-shrink:0;margin-top:1px;">🔧</span>
-    <span style="font-size:.7rem;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;line-height:1.6;">🔧 EFED Streaming Hub is actively being improved. You may encounter occasional bugs. We appreciate your patience. <strong style="color:rgba(200,168,75,.9);">Report any issues here</strong>, and check back for the latest changes &amp; announcements.</span>
+    <span style="font-size:.7rem;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;line-height:1.6;">EFED Streaming Hub is actively being improved. You may encounter occasional bugs. We appreciate your patience. <strong style="color:rgba(200,168,75,.9);">Report any issues here</strong>, and check back for the latest changes &amp; announcements.</span>
   </div>
   <div id="chat-messages"><div class="chat-loading">Loading…</div></div>
   <div id="chat-pickers-wrap" style="display:none;">
@@ -8369,7 +8369,7 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
       </button>
       <textarea id="chat-input" placeholder="Say something…" rows="1"
         onkeydown="chatKeyDown(event)" oninput="chatAutoResize(this)"
-        onfocus="if(window.innerWidth<=768){document.body.scrollTop=0;document.documentElement.scrollTop=0;}"></textarea>
+        onfocus="if(window.innerWidth<=768){ setTimeout(()=>{ document.getElementById('chat-input').scrollIntoView({block:'nearest',behavior:'smooth'}); },320); }"></textarea>
       <button id="chat-send-btn" onclick="sendChatMessage()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -8450,6 +8450,9 @@ function toggleChat() {
     else { scrollChatToBottom(); }
   } else {
     if (!isMobile) syncChatHeight();
+    // Reset panel bottom in case keyboard was open
+    const panel = document.getElementById('chat-panel');
+    if (panel) panel.style.bottom = '';
   }
 }
 
@@ -8469,11 +8472,13 @@ function initChat() {
   }
   buildChatRooms().then(() => {
     const pinned = document.getElementById('chat-pinned');
+    const note = document.getElementById('chat-say-hi');
     const activeEfed = (window._efedRooms || []).find(r => r.id === _chatRoom);
     if (pinned && activeEfed) {
       pinned.style.display = 'block';
       pinned.innerHTML = '<span style="opacity:.5;">🔒</span> Only the roster of <strong style="color:rgba(255,255,255,.75);">' + activeEfed.name + '</strong> can see this room.';
     }
+    if (note) note.style.display = _chatRoom === 'updates' ? 'flex' : 'none';
   });
   loadChatMessages(_chatRoom);
   connectChatRealtime();
@@ -8544,14 +8549,16 @@ function switchChatRoom(roomId, efedName) {
   loadChatMessages(roomId);
   connectChatRealtime();
   const pinned = document.getElementById('chat-pinned');
+  const note = document.getElementById('chat-say-hi');
   if (pinned) {
     if (efedName) {
       pinned.style.display = 'block';
-      pinned.innerHTML = `<span style="opacity:.5;">🔒</span> Only the roster of <strong style="color:rgba(255,255,255,.75);">${_esc(efedName)}</strong> can see this room.`;
+      pinned.innerHTML = '<span style="opacity:.5;">🔒</span> Only the roster of <strong style="color:rgba(255,255,255,.75);">' + _esc(efedName) + '</strong> can see this room.';
     } else {
       pinned.style.display = 'none';
     }
   }
+  if (note) note.style.display = roomId === 'updates' ? 'flex' : 'none';
 }
 
 const _chatAvatarCache = {};
@@ -8922,13 +8929,25 @@ function connectChatRealtime() {
 setTimeout(connectChatRealtime, 2000);
 
 // ── MOBILE KEYBOARD FIX ──
-// When keyboard opens on iOS/Android, resize chat panel to visible area
+// When keyboard opens on iOS/Android, pin the input wrap to the visible area top
 if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', () => {
-    if (!_chatOpen || window.innerWidth > 768) return;
-    // Don't resize panel — just scroll messages to bottom so input stays visible
-    scrollChatToBottom();
-  });
+  window.visualViewport.addEventListener('resize', _onViewportResize);
+  window.visualViewport.addEventListener('scroll', _onViewportResize);
+}
+
+function _onViewportResize() {
+  if (!_chatOpen || window.innerWidth > 768) return;
+  const vv = window.visualViewport;
+  const panel = document.getElementById('chat-panel');
+  const inputWrap = document.getElementById('chat-input-wrap');
+  if (!panel || !inputWrap) return;
+
+  // Pin the panel bottom to the top of the keyboard
+  const offsetFromBottom = window.innerHeight - (vv.height + vv.offsetTop);
+  panel.style.bottom = offsetFromBottom + 'px';
+
+  // Scroll messages so the input is visible
+  requestAnimationFrame(scrollChatToBottom);
 }
 
 // ── WRESTLING EMOJI PICKER ──
