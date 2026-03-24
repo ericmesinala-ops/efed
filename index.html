@@ -8389,7 +8389,7 @@ const SUPABASE_WS_CHAT = 'wss://osbarvhklizidsffytye.supabase.co/realtime/v1/web
 const SUPABASE_KEY_CHAT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
 
 let _chatOpen = false;
-let _chatRoom = 'updates';
+let _chatRoom = null; // set dynamically on init
 let _chatWs = null;
 let _chatUnread = 0;
 let _chatAtBottom = true;
@@ -8471,16 +8471,28 @@ function initChat() {
     if (loggedOut) loggedOut.style.display = 'block';
   }
   buildChatRooms().then(() => {
+    // Default to first efed room, otherwise updates
+    const efedRooms = window._efedRooms || [];
+    if (!_chatRoom) {
+      _chatRoom = efedRooms.length ? efedRooms[0].id : 'updates';
+    }
+    // Re-render pills with correct active state
+    buildChatRooms();
+
     const pinned = document.getElementById('chat-pinned');
     const note = document.getElementById('chat-say-hi');
-    const activeEfed = (window._efedRooms || []).find(r => r.id === _chatRoom);
-    if (pinned && activeEfed) {
-      pinned.style.display = 'block';
-      pinned.innerHTML = '<span style="opacity:.5;">🔒</span> Only the roster of <strong style="color:rgba(255,255,255,.75);">' + activeEfed.name + '</strong> can see this room.';
+    const activeEfed = efedRooms.find(r => r.id === _chatRoom);
+    if (pinned) {
+      if (activeEfed) {
+        pinned.style.display = 'block';
+        pinned.innerHTML = '<span style="opacity:.5;">🔒</span> Only the roster of <strong style="color:rgba(255,255,255,.75);">' + activeEfed.name + '</strong> can see this room.';
+      } else {
+        pinned.style.display = 'none';
+      }
     }
     if (note) note.style.display = _chatRoom === 'updates' ? 'flex' : 'none';
   });
-  loadChatMessages(_chatRoom);
+  loadChatMessages(_chatRoom || 'updates');
   connectChatRealtime();
 
   const box = document.getElementById('chat-messages');
@@ -8582,7 +8594,7 @@ async function loadChatMessages(roomId) {
     const msgIds = rows.map(r => r.id).filter(Boolean);
     if (msgIds.length) loadAllReactions(msgIds);
   } catch(e) {
-    box.innerHTML = '<div class="chat-empty">Could not load messages.</div>';
+    box.innerHTML = '<div class="chat-empty" style="flex-direction:column;gap:6px;"><span style="font-size:1.1rem;">⚠️</span><span>Table not set up yet — run chat_setup.sql in Supabase.</span></div>';
   }
 }
 
