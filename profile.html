@@ -599,11 +599,15 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 <!-- ── POSTS SECTION ── -->
 <style>
 /* ── POSTS SECTION ── */
-.posts-section { padding: 22px 0 0; border-bottom: 1px solid var(--border); }
-.posts-section-header { display: flex; align-items: center; gap: 6px; padding: 0 16px 14px; }
+.posts-section { padding: 0; border-bottom: 1px solid var(--border); }
+.posts-section-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 22px 20px 14px 20px;
+}
+.posts-section-header .sec-title { margin-right: auto; }
 .posts-track-wrap {
   position: relative; overflow: hidden;
-  touch-action: pan-y;
+  height: 200px;
 }
 .posts-track {
   display: flex; height: 100%;
@@ -613,14 +617,12 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 }
 /* ── SINGLE POST CARD ── */
 .post-card {
-  flex-shrink: 0; width: 100%;
+  flex-shrink: 0; width: 100%; height: 100%;
   padding: 18px 20px 14px;
   display: flex; flex-direction: column; gap: 0;
   box-sizing: border-box;
   position: relative;
   background: #181820;
-  border-top: 1px solid rgba(255,255,255,.09);
-  border-bottom: 1px solid rgba(255,255,255,.09);
 }
 .post-card.ic  { background: #19160e; }
 .post-card.ooc { background: #10131c; }
@@ -702,6 +704,23 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .post-action-btn { background: none; border: none; cursor: pointer; color: rgba(255,255,255,.4); display: flex; align-items: center; gap: 5px; font-family: 'DM Sans', sans-serif; font-size: .78rem; padding: 0; transition: color .12s; }
 .post-action-btn:hover { color: rgba(255,255,255,.8); }
 .post-action-btn.liked { color: #c0000e; }
+.post-action-btn.disabled {
+  opacity: .25; cursor: not-allowed; pointer-events: none;
+  filter: grayscale(1);
+}
+.post-action-btn.reply-disabled {
+  opacity: .2; cursor: not-allowed; pointer-events: all; position: relative;
+  filter: grayscale(1);
+}
+.post-action-btn.reply-disabled::after {
+  content: 'Replies coming soon'; position: absolute; bottom: calc(100% + 6px); left: 50%;
+  transform: translateX(-50%); background: rgba(20,20,28,.95);
+  color: rgba(255,255,255,.7); font-size: .6rem; white-space: nowrap;
+  padding: 4px 8px; border-radius: 6px; pointer-events: none;
+  opacity: 0; transition: opacity .15s; border: 1px solid rgba(255,255,255,.08);
+}
+.post-action-btn.reply-disabled:hover::after { opacity: 1; }
+.post-action-btn.reply-disabled:hover { color: rgba(255,255,255,.25); }
 .post-card-mode-badge {
   font-size: .48rem; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
   padding: 2px 7px; border-radius: 40px; flex-shrink: 0; margin-left: auto;
@@ -816,8 +835,8 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 
 <div class="posts-section" id="posts-section">
   <div class="posts-section-header">
+    <div class="sec-title" style="margin-bottom:0;">Posts</div>
     <button class="posts-nav-btn" id="posts-prev" onclick="_posts.prev()">&#8249;</button>
-    <div class="sec-title" style="margin-bottom:0;margin:0 6px;">Posts</div>
     <div class="posts-dots" id="posts-dots"></div>
     <button class="posts-nav-btn posts-jump-btn" id="posts-jump" onclick="_posts.jumpCurrent()" title="Current">&#9679;</button>
     <button class="posts-nav-btn" id="posts-next" onclick="_posts.next()">&#8250;</button>
@@ -899,96 +918,46 @@ const _posts = (() => {
     const isOwn = session && session.username === p.username;
     const mode = p.post_type==='ooc'?'ooc':'ic';
 
-    const reps = _replies[p.id]||[];
-    const activeIdx = _activeReply[p.id]??-1;  // -1 = showing OP
-    const activeRep = activeIdx>=0 ? reps[activeIdx] : null;
+    // ── OP avatar always on LEFT, no reply avatars for now ──
+    const opAv = `<div class="post-op-av selected" title="${_esc(p.display_name||p.username||'')}">${_avHtml(p)}</div>`;
+    const topRow = `<div class="post-top-row" style="border-bottom:none;padding-bottom:0;margin-bottom:10px;">${opAv}</div>`;
 
-    // ── TOP ROW: reply avatars → arrow → OP avatar ──
-    // Arrow points RIGHT toward OP: replies ──→ [OP]
-    const opSelected = activeIdx === -1;
-    const opAv = `<div class="post-op-av${opSelected?' selected':''}" onclick="_posts.selectOP('${p.id}')" title="${_esc(p.display_name||p.username||'')}">${_avHtml(p)}</div>`;
-
-    let topRow = '';
-    if(reps.length){
-      const replyAvatars = reps.map((r,i)=>
-        `<div class="post-reply-av${i===activeIdx?' active':''}" onclick="_posts.selectReply('${p.id}',${i})" title="${_esc(r.display_name||r.username||'')}">${_avHtml(r)}</div>`
-      ).join('');
-      // Layout: [reply avatars scroll] ──→ [OP]
-      topRow = `<div class="post-top-row">
-        <div class="post-reply-scroll-wrap" id="reply-strip-${p.id}">${replyAvatars}</div>
-        <div class="post-reply-arrow-big">&#8594;</div>
-        ${opAv}
+    // ── BODY ──
+    const editedLabel = p.edited_at ? ` <span style="font-size:.55rem;color:rgba(255,255,255,.2);">· edited</span>` : '';
+    const bodyHtml = `
+      <div class="post-card-body">
+        <div class="post-op-name">${_esc(p.display_name||p.username||'')} <span class="post-op-time">${_timeAgo(p.created_at)}${editedLabel}</span></div>
+        ${p.text ? `<div class="post-card-text">${_esc(p.text)}</div>` : ''}
       </div>`;
-    } else {
-      // No replies yet — just show OP avatar alone, left-aligned
-      topRow = `<div class="post-top-row" style="border-bottom:none;padding-bottom:0;margin-bottom:10px;">${opAv}</div>`;
-    }
 
-    // ── MAIN BODY: ONE thing at a time — either OP post OR reply ──
-    let bodyHtml = '';
-    let footerLikeBtn = '';
-    let footerReplyBtn = '';
-    let footerOwnerBtns = '';
+    // ── FOOTER ──
+    const likeBtn = `<button class="post-action-btn${p._liked?' liked':''}" onclick="_posts.like('${p.id}',this)" data-liked="${p._liked?'1':'0'}">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="${p._liked?'#c0000e':'none'}" stroke="${p._liked?'#c0000e':'currentColor'}" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      <span>${p.likes||0}</span>
+    </button>`;
 
-    if(!activeRep){
-      // ── showing ONLY the original post ──
-      const editedLabel = p.edited_at ? ` <span style="font-size:.55rem;color:rgba(255,255,255,.2);">· edited</span>` : '';
-      const imgHtml = p.image_url
-        ? `<div class="post-card-img-wrap"><img src="${_esc(p.image_url)}" alt="" onclick="_posts.lightbox('${_esc(p.image_url)}')" style="cursor:pointer;"></div>`
-        : '';
-      bodyHtml = `
-        <div class="post-card-body">
-          <div class="post-op-name">${_esc(p.display_name||p.username||'')} <span class="post-op-time">${_timeAgo(p.created_at)}${editedLabel}</span></div>
-          ${p.text ? `<div class="post-card-text">${_esc(p.text)}</div>` : ''}
-          ${imgHtml}
-        </div>`;
-      // footer actions for OP post
-      footerLikeBtn = `<button class="post-action-btn${p._liked?' liked':''}" onclick="_posts.like('${p.id}',this)" data-liked="${p._liked?'1':'0'}">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="${p._liked?'#c0000e':'none'}" stroke="${p._liked?'#c0000e':'currentColor'}" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-        <span>${p.likes||0}</span>
-      </button>`;
-      if(session) footerReplyBtn = `<button class="post-action-btn" onclick="_posts.openReplyModal('${p.id}')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-        Reply
-      </button>`;
-      if(isOwn) footerOwnerBtns = `
-        <button class="post-action-btn" onclick="_posts.openEditModal('${p.id}')" title="Edit" style="margin-left:auto;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        </button>
-        <button class="post-action-btn" onclick="_posts.deletePost('${p.id}')" title="Delete">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-        </button>`;
-    } else {
-      // ── showing ONLY the selected reply — nothing else ──
-      const repEdited = activeRep.edited_at ? ` <span style="font-size:.55rem;color:rgba(255,255,255,.2);">· edited</span>` : '';
-      const repImgHtml = activeRep.image_url
-        ? `<div class="post-reply-img-wrap"><img src="${_esc(activeRep.image_url)}" alt="" onclick="_posts.lightbox('${_esc(activeRep.image_url)}')" style="cursor:pointer;"></div>`
-        : '';
-      bodyHtml = `
-        <div class="post-card-body">
-          <div class="post-op-name">${_esc(activeRep.display_name||activeRep.username||'')} <span class="post-op-time">${_timeAgo(activeRep.created_at)}${repEdited}</span></div>
-          ${activeRep.text ? `<div class="post-card-text">${_esc(activeRep.text)}</div>` : ''}
-          ${repImgHtml}
-        </div>`;
-      // footer actions for the reply
-      footerLikeBtn = `<button class="post-action-btn${activeRep._liked?' liked':''}" onclick="_posts.like('${activeRep.id}',this)" data-liked="${activeRep._liked?'1':'0'}">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="${activeRep._liked?'#c0000e':'none'}" stroke="${activeRep._liked?'#c0000e':'currentColor'}" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-        <span>${activeRep.likes||0}</span>
-      </button>`;
-      // Still show Reply button so people can reply to this post
-      if(session) footerReplyBtn = `<button class="post-action-btn" onclick="_posts.openReplyModal('${p.id}')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-        Reply
-      </button>`;
-    }
+    // Reply — disabled with tooltip
+    const replyBtn = session ? `<button class="post-action-btn reply-disabled" title="">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+      Reply
+    </button>` : '';
+
+    // Edit + image — greyed out, disabled
+    const ownerBtns = isOwn ? `
+      <button class="post-action-btn disabled" title="Edit" style="margin-left:auto;" disabled>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
+      <button class="post-action-btn" onclick="_posts.deletePost('${p.id}')" title="Delete">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      </button>` : '';
 
     return `<div class="post-card ${mode}" data-id="${p.id}">
       ${topRow}
       ${bodyHtml}
       <div class="post-card-footer">
-        ${footerLikeBtn}
-        ${footerReplyBtn}
-        ${footerOwnerBtns}
+        ${likeBtn}
+        ${replyBtn}
+        ${ownerBtns}
         <span class="post-card-mode-badge ${mode}">${mode==='ic'?'IC':'OOC'}</span>
       </div>
     </div>`;
