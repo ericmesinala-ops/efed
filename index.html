@@ -5959,13 +5959,21 @@ function openExpand(v) {
   const liked = session && _expandLikes[videoKey]?.includes(session.username);
   likeBtn.classList.toggle('liked', !!liked);
 
-  // Bookmark button - reset first, then check Supabase
+  // Bookmark button - use cache if available, else fetch from Supabase once
   const bookmarkBtn = document.getElementById('expand-bookmark-btn');
+  const bKey = encodeURIComponent(extractId(v.url));
   bookmarkBtn.classList.remove('bookmarked');
   if (session) {
-    sbGet('bookmarks', 'video_id=eq.' + encodeURIComponent(extractId(v.url)) + '&username=eq.' + encodeURIComponent(session.username))
-      .then(rows => { if (rows.length) bookmarkBtn.classList.add('bookmarked'); })
-      .catch(() => {});
+    if (_expandBookmarks[bKey] !== undefined) {
+      bookmarkBtn.classList.toggle('bookmarked', !!_expandBookmarks[bKey]);
+    } else {
+      sbGet('bookmarks', 'video_id=eq.' + encodeURIComponent(extractId(v.url)) + '&username=eq.' + encodeURIComponent(session.username))
+        .then(rows => {
+          _expandBookmarks[bKey] = rows.length > 0;
+          bookmarkBtn.classList.toggle('bookmarked', _expandBookmarks[bKey]);
+        })
+        .catch(() => {});
+    }
   }
 
   // Comments
@@ -6423,10 +6431,17 @@ async function toggleExpandLike() {
       await sbDelete('likes', `video_id=eq.${encodeURIComponent(extractId(url))}&username=eq.${encodeURIComponent(session.username)}`);
       btn.classList.remove('liked');
       countEl.textContent = Math.max(0, parseInt(countEl.textContent) - 1);
+      // Keep cache in sync
+      if (_expandLikes[key]) {
+        _expandLikes[key] = _expandLikes[key].filter(u => u !== session.username);
+      }
     } else {
       await sbInsert('likes', { video_url: url, video_id: extractId(url), username: session.username, liked_at: Date.now() });
       btn.classList.add('liked');
       countEl.textContent = parseInt(countEl.textContent) + 1;
+      // Keep cache in sync
+      if (!_expandLikes[key]) _expandLikes[key] = [];
+      if (!_expandLikes[key].includes(session.username)) _expandLikes[key].push(session.username);
       // Notify the video owner
       const vidOwner = _expandVideo?.submittedBy;
       if (vidOwner && vidOwner !== session.username) {
@@ -6444,16 +6459,19 @@ async function toggleExpandBookmark() {
   if (!session) { alert('Sign in to bookmark shows.'); return; }
   if (!_expandVideo) return;
   const url = _expandVideo.url;
+  const key = encodeURIComponent(extractId(url));
   const btn = document.getElementById('expand-bookmark-btn');
   const isBookmarked = btn.classList.contains('bookmarked');
 
   try {
     if (isBookmarked) {
-      await sbDelete('bookmarks', `video_id=eq.${encodeURIComponent(extractId(url))}&username=eq.${encodeURIComponent(session.username)}`);
+      await sbDelete('bookmarks', `video_id=eq.${key}&username=eq.${encodeURIComponent(session.username)}`);
       btn.classList.remove('bookmarked');
+      _expandBookmarks[key] = false;
     } else {
       await sbInsert('bookmarks', { video_url: url, video_id: extractId(url), username: session.username, saved_at: Date.now() });
       btn.classList.add('bookmarked');
+      _expandBookmarks[key] = true;
     }
   } catch(e) { console.warn('Bookmark failed', e); }
   loadBookmarksRow();
