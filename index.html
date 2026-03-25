@@ -57,9 +57,11 @@
     return r.json();
   }
   async function sbDelete(table, filters) {
-    const r = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + filters, { method: 'DELETE', headers: SB_HEADERS });
+    const headers = { ...SB_HEADERS, 'Prefer': 'return=representation' };
+    const r = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + filters, { method: 'DELETE', headers });
     if (!r.ok) throw new Error(await r.text());
-    return r.json();
+    const txt = await r.text();
+    return txt ? JSON.parse(txt) : [];
   }
   // Simple session-based auth guard — no third party needed
   (function() {
@@ -2645,7 +2647,7 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
           <span id="rate-btn-label">Rate</span>
         </div>
         <div id="rate-watch-bar-wrap" style="display:none;width:100%;flex-direction:column;align-items:center;gap:3px;">
-          <div style="font-size:.5rem;letter-spacing:1px;color:rgba(255,255,255,.4);white-space:nowrap;" id="rate-watch-timer">0:00 / 10:00</div>
+          <div style="font-size:.5rem;letter-spacing:1px;color:rgba(255,255,255,.85);white-space:nowrap;" id="rate-watch-timer">0:00 / 10:00</div>
           <div style="width:100%;height:2px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;">
             <div id="rate-watch-bar" style="height:100%;width:0%;background:var(--gold);border-radius:2px;transition:width .5s linear;"></div>
           </div>
@@ -6140,12 +6142,17 @@ async function deleteExpandVideo() {
   const session = getSession();
   if (!session) return;
   try {
-    await sbDelete('submissions', `url=eq.${encodeURIComponent(_expandVideo.url)}`);
+    const isAdmin = session.username.toLowerCase() === ADMIN_USERNAME;
+    const filter = isAdmin
+      ? `url=eq.${encodeURIComponent(_expandVideo.url)}`
+      : `url=eq.${encodeURIComponent(_expandVideo.url)}&submitted_by=eq.${encodeURIComponent(session.username)}`;
+    await sbDelete('submissions', filter);
     const vi = videos.findIndex(v => v.url === _expandVideo.url);
     if (vi !== -1) videos.splice(vi, 1);
     closeExpand();
     buildPills();
     renderGrid();
+    loadRecentlyAdded(videos);
   } catch(e) { alert('Delete failed. Try again.'); console.error(e); }
 }
 
