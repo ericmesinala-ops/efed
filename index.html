@@ -5201,7 +5201,7 @@ async function savePassword() {
 
 <!-- ── SUBMIT MODAL ── -->
 <div id="submit-modal-bg" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="handleSubmitBgClick(event)">
-  <div onclick="event.stopPropagation()" style="background:#111114;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:90%;max-width:480px;padding:36px 32px;position:relative;box-shadow:0 40px 80px rgba(0,0,0,.6);box-sizing:border-box;overflow:visible;max-height:90vh;overflow-y:auto;scrollbar-width:none;">
+  <div onclick="event.stopPropagation()" style="background:#111114;border:1px solid rgba(255,255,255,.08);border-radius:16px;width:90%;max-width:480px;padding:36px 32px;position:relative;box-shadow:0 40px 80px rgba(0,0,0,.6);box-sizing:border-box;max-height:90vh;overflow-y:auto;overflow-x:visible;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
     <button type="button" onclick="closeSubmitModal()" style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;">✕</button>
     <div style="font-family:'Bebas Neue',sans-serif;font-size:1.6rem;letter-spacing:3px;color:#fff;margin-bottom:4px;">Post a Show</div>
     <p style="font-size:.75rem;color:rgba(255,255,255,.6);margin-bottom:24px;line-height:1.7;">Our filter system screens submissions for eFed content. If a show is incorrectly flagged, use Request Review to notify the admin.</p>
@@ -5232,8 +5232,9 @@ async function savePassword() {
     <button id="submit-override-btn" type="button" onclick="overrideAndSubmit()" style="display:none;width:100%;padding:10px;margin-bottom:12px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.35);border-radius:8px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:1px;cursor:pointer;">⚡ Admin Override — Post Anyway</button>
     <button id="submit-notify-btn" type="button" onclick="notifyAdminScreening()" style="display:none;width:100%;padding:10px;margin-bottom:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:600;letter-spacing:1px;cursor:pointer;transition:all .2s;">📣 Request Review</button>
 
-    <button id="submit-post-btn" type="button" onclick="event.stopPropagation();doSubmitPost()"
-      style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;">
+    <button id="submit-post-btn" type="button"
+      onclick="event.preventDefault();event.stopPropagation();doSubmitPost()"
+      style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">
       Submit to Hub
     </button>
   </div>
@@ -5281,7 +5282,7 @@ function openSubmitModal() {
   document.getElementById('submit-ok').style.display = 'none';
   // Keep button disabled until URL is pasted and screened
   const _btn = document.getElementById('submit-post-btn');
-  if (_btn) { _btn.disabled = true; _btn.style.opacity = '.35'; _btn.style.cursor = 'not-allowed'; _btn.textContent = 'Paste a link to continue'; }
+  if (_btn) { _btn.disabled = true; _btn.style.opacity = '.35'; _btn.style.cursor = 'not-allowed'; _btn.textContent = 'Submit to Hub'; }
 }
 
 function closeSubmitModal() {
@@ -5309,7 +5310,7 @@ function clearSubmitPreview() {
     // Only disable if there's no valid URL yet
     if (!urlVal) {
       btn.disabled = true; btn.style.opacity = '.35'; btn.style.cursor = 'not-allowed';
-      btn.textContent = 'Paste a link to continue';
+      btn.textContent = 'Submit to Hub';
     } else {
       btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer';
       btn.textContent = 'Submit to Hub';
@@ -5371,7 +5372,7 @@ function debounceFetchPreview() {
   _fetchDebounce = setTimeout(fetchSubmitPreview, delay);
 }
 
-async function fetchSubmitPreview() {
+async function fetchSubmitPreview(autoSubmit = false) {
   const url = document.getElementById('submit-url').value.trim();
   if (!url) return;
   const vidId = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/)?.[1];
@@ -5453,9 +5454,6 @@ async function fetchSubmitPreview() {
     btn.disabled = true;
     const screenEl = document.getElementById('submit-screening');
 
-    // Simulate async for UX feel
-    await new Promise(r => setTimeout(r, 800));
-
     const result = screenVideo(_fetchedMeta.title, _fetchedMeta.channel);
     if (!result.approved) {
       screenEl.textContent = '❌ ' + result.reason;
@@ -5488,6 +5486,11 @@ async function fetchSubmitPreview() {
     btn.disabled = false;
     btn.style.opacity = '1';
     btn.style.cursor = 'pointer';
+    btn.blur(); // prevent ghost-click from paste focus carrying over
+
+    if (autoSubmit) {
+      doSubmitPost();
+    }
 
     // Pre-fill date if available
     // uploadDate stored in _fetchedMeta for submission
@@ -5557,16 +5560,14 @@ function doSubmitPost() {
   const url = document.getElementById('submit-url').value.trim();
   if (!url) { showSubmitErr('Please paste a YouTube link.'); return; }
 
-  // If preview hasn't loaded yet, fetch first then post
+  // If preview hasn't loaded yet, cancel any pending debounce and fetch+post in one shot
   if (!_fetchedMeta || !_fetchedMeta.title) {
+    clearTimeout(_fetchDebounce);
     const btn = document.getElementById('submit-post-btn');
     btn.disabled = true; btn.style.opacity = '.7'; btn.textContent = 'Loading…';
-    fetchSubmitPreview().then(() => {
-      if (_fetchedMeta && _fetchedMeta.title) {
-        doSubmitPost();
-      } else {
-        showSubmitErr('Could not load video info. Please try again.');
-      }
+    fetchSubmitPreview(true).then(() => {
+      // autoSubmit=true means doSubmitPost will be called inside fetchSubmitPreview if screening passes
+      // nothing else needed here
     }).catch(e => showSubmitErr('Preview error: ' + e.message));
     return;
   }
