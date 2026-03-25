@@ -9224,10 +9224,21 @@ async function sendChatMessage() {
     appendChatMessage({ ...msgObj, id: pendingId }, true);
 
     const result = await sbInsert('chat_messages', msgObj);
-    // Update pending message with real id if returned
-    if (result?.[0]?.id) {
+    // Update pending message with real id
+    let realId = result?.[0]?.id;
+    if (!realId) {
+      // RLS may have blocked SELECT on insert — fetch back our own message
+      try {
+        const fetched = await sbGet('chat_messages',
+          `username=eq.${encodeURIComponent(session.username)}&room_id=eq.${encodeURIComponent(_chatRoom)}&order=created_at.desc&limit=1`);
+        realId = fetched?.[0]?.id;
+        if (realId) _chatLastMsgId = Math.max(_chatLastMsgId, realId);
+      } catch(e) {}
+    }
+    if (realId) {
       const el = document.querySelector(`.chat-msg[data-id="${pendingId}"]`);
-      if (el) el.dataset.id = result[0].id;
+      if (el) el.dataset.id = realId;
+      _chatLastMsgId = Math.max(_chatLastMsgId, realId);
     }
   } catch(e) {
     console.error('Chat send failed:', e);
@@ -9483,8 +9494,14 @@ function _startChatPolling() {
         _chatLastMsgId = Math.max(_chatLastMsgId, rec.id || 0);
         // Skip if already in DOM
         if (document.querySelector(`.chat-msg[data-id="${rec.id}"]`)) continue;
-        // Skip own pending messages
-        if (session && rec.username === session.username) continue;
+        // Skip own messages only if already rendered with real id
+        if (session && rec.username === session.username) {
+          // Update any pending element with the real id
+          const pending = document.querySelector('.chat-msg[data-id^="_pending_"]');
+          if (pending) pending.dataset.id = rec.id;
+          _chatLastMsgId = Math.max(_chatLastMsgId, rec.id || 0);
+          continue;
+        }
         _ensureAvatar(rec.username);
         appendChatMessage(rec, true);
       }
