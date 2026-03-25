@@ -1690,37 +1690,47 @@ function updateSubArrows() {
 }
 
 // ── EDIT PROFILE MODAL ──
-async function openEditModal() {
+async async function openEditModal() {
   const session = getSession();
   if (!session) return;
-  // Pre-fill avatar preview
+
+  // Always fetch own user data fresh from DB — never rely on session which may be
+  // contaminated by visiting another user's profile
+  let _ownData = {};
+  try {
+    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,bio`);
+    _ownData = _rows[0] || {};
+  } catch(e) {}
+
+  // Pre-fill avatar preview from DB
   const avPrev = document.getElementById('ep-av-preview');
+  const ownAvatar = _ownData.avatar_url || null;
   if (avPrev) {
-    if (session.avatarUrl) {
-      avPrev.innerHTML = `<img src="${session.avatarUrl}" style="width:100%;height:100%;object-fit:cover;">`;
+    if (ownAvatar) {
+      avPrev.innerHTML = `<img src="${ownAvatar}" style="width:100%;height:100%;object-fit:cover;">`;
       document.getElementById('ep-av-remove').style.display = 'block';
     } else {
-      avPrev.textContent = (session.displayName || session.username || '?')[0].toUpperCase();
+      avPrev.textContent = (_ownData.display_name || session.username || '?')[0].toUpperCase();
       document.getElementById('ep-av-remove').style.display = 'none';
     }
   }
-  // Pre-fill name
+  // Pre-fill name from DB
   const nameInput = document.getElementById('ep-name-input');
-  if (nameInput) nameInput.value = session.displayName || session.username || '';
+  if (nameInput) nameInput.value = _ownData.display_name || session.username || '';
 
   // Clear msgs
   ['ep-av-msg','ep-name-msg'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = ''; });
-  const _igIn = document.getElementById('ep-ig-input'); if (_igIn) _igIn.value = (session.igHandle || '').replace('@','');
-  const _xIn  = document.getElementById('ep-x-input');  if (_xIn)  _xIn.value  = (session.xHandle  || '').replace('@','');
-  // Prefill bio
-  try {
-    const udata = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=bio`);
-    const bioVal = udata[0]?.bio || '';
-    const bioInput = document.getElementById('ep-bio-input');
-    const bioCount = document.getElementById('ep-bio-count');
-    if (bioInput) { bioInput.value = bioVal; }
-    if (bioCount) bioCount.textContent = bioVal.length + ' / 160';
-  } catch(e) {}
+  // Pre-fill ig/x from DB fetch above
+  const _igIn = document.getElementById('ep-ig-input');
+  const _xIn  = document.getElementById('ep-x-input');
+  if (_igIn) _igIn.value = (_ownData.ig_handle || '').replace('@','');
+  if (_xIn)  _xIn.value  = (_ownData.x_handle  || '').replace('@','');
+  // Prefill bio from DB fetch above
+  const bioVal = _ownData.bio || '';
+  const bioInput = document.getElementById('ep-bio-input');
+  const bioCount = document.getElementById('ep-bio-count');
+  if (bioInput) { bioInput.value = bioVal; }
+  if (bioCount) bioCount.textContent = bioVal.length + ' / 160';
   document.getElementById('edit-modal-bg').style.display = 'flex';
 }
 
@@ -2133,11 +2143,13 @@ async function loadProfile() {
       if (noiseEl) noiseEl.style.display = 'none';
       if (glowEl) glowEl.style.display = 'none';
     }
-    // Load socials — DB first, cache to localStorage
-    const ig = (user.ig_handle || session.igHandle || '').replace('@','');
-    const x  = (user.x_handle  || session.xHandle  || '').replace('@','');
-    session.igHandle = ig; session.xHandle = x;
-    localStorage.setItem('efed_session', JSON.stringify(session));
+    // Load socials — DB first, only cache to session for own profile
+    const ig = (user.ig_handle || (_isOwnProfile ? session.igHandle : '') || '').replace('@','');
+    const x  = (user.x_handle  || (_isOwnProfile ? session.xHandle  : '') || '').replace('@','');
+    if (_isOwnProfile) {
+      session.igHandle = ig; session.xHandle = x;
+      localStorage.setItem('efed_session', JSON.stringify(session));
+    }
     renderSocialLinks(ig, x);
     loadCawImages(user);
     _posts.load(targetUser);
