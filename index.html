@@ -5583,7 +5583,15 @@ function doSubmitPost() {
   (async () => {
     try {
       // Check duplicate
-      const existing = await sbGet('submissions', `url=eq.${encodeURIComponent(url)}`);
+      let existing;
+      try { existing = await sbGet('submissions', `url=eq.${encodeURIComponent(url)}`); }
+      catch(dbErr) {
+        const el = document.getElementById('submit-err');
+        el.textContent = 'DB Error (read): ' + dbErr.message;
+        el.style.display = 'block';
+        btn.textContent = 'Submit to Hub'; btn.disabled = false; btn.style.opacity = '1';
+        return;
+      }
       if (existing.length) {
         const userRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
         const user = userRows[0];
@@ -5615,17 +5623,26 @@ function doSubmitPost() {
       // Use YouTube channel name directly as the eFed name
       const assignedEfed = (_fetchedMeta.channel && _fetchedMeta.channel.trim()) ? _fetchedMeta.channel.trim() : '';
 
-      const inserted = await sbInsert('submissions', {
-        url,
-        show_name: _fetchedMeta.title,
-        efed: assignedEfed,
-        date: dateStr,
-        date_ms: dateMs,
-        submitted_by: session.username,
-        submitted_at: Date.now(),
-        community: true,
-        status: submitStatus
-      });
+      let inserted;
+      try {
+        inserted = await sbInsert('submissions', {
+          url,
+          show_name: _fetchedMeta.title,
+          efed: assignedEfed,
+          date: dateStr,
+          date_ms: dateMs,
+          submitted_by: session.username,
+          submitted_at: Date.now(),
+          community: true,
+          status: submitStatus
+        });
+      } catch(insertErr) {
+        const el = document.getElementById('submit-err');
+        el.textContent = 'DB Error: ' + insertErr.message;
+        el.style.display = 'block';
+        btn.textContent = 'Submit to Hub'; btn.disabled = false; btn.style.opacity = '1';
+        return;
+      }
 
       // Get display name for card label
       let posterDisplayName = session.username;
