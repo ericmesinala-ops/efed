@@ -6145,6 +6145,22 @@ function openExpand(v) {
     if (!_isTwitch) startWatchTimer(v.url);
     const _eq = document.getElementById('expand-eq');
     if (_eq) _eq.classList.add('playing');
+    // Twitch offline detection for live streams
+    if (_isTwitch && id.startsWith('live_')) {
+      const _offlineHandler = (e) => {
+        if (!e.data || typeof e.data !== 'string') return;
+        try {
+          const d = JSON.parse(e.data);
+          if (d.eventName === 'offline' || d.eventName === 'streamOffline' || d.event === 'offline') {
+            _showTwitchOffline();
+            window.removeEventListener('message', _offlineHandler);
+            window._twitchOfflineHandler = null;
+          }
+        } catch(err) {}
+      };
+      window.addEventListener('message', _offlineHandler);
+      window._twitchOfflineHandler = _offlineHandler;
+    }
   }
 
   // Open overlay
@@ -6238,12 +6254,46 @@ async function deleteExpandVideo() {
   } catch(e) { alert('Delete failed. Try again.'); console.error(e); }
 }
 
+function _showTwitchOffline() {
+  const frame = document.getElementById('expand-frame');
+  const hero = document.getElementById('expand-hero');
+  if (!frame || !hero) return;
+  frame.style.display = 'none';
+  // Show offline message over the hero
+  let offlineEl = document.getElementById('twitch-offline-msg');
+  if (!offlineEl) {
+    offlineEl = document.createElement('div');
+    offlineEl.id = 'twitch-offline-msg';
+    offlineEl.style.cssText = 'position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(7,7,10,.92);gap:10px;';
+    offlineEl.innerHTML = `
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="rgba(145,70,255,.6)" stroke-width="1.5" stroke-linecap="round"><path d="M21 2H3v16h5v4l4-4h4l5-5V2zm-10 9V7m4 4V7"/></svg>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:rgba(255,255,255,.6);">Stream Ended</div>
+      <div style="font-size:.68rem;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;">This live stream has ended.</div>`;
+    hero.appendChild(offlineEl);
+  }
+  offlineEl.style.display = 'flex';
+  // Update expiry note
+  const note = document.getElementById('expand-twitch-note');
+  if (note) {
+    note.style.background = 'rgba(192,0,14,.1)';
+    note.style.borderColor = 'rgba(192,0,14,.25)';
+    note.style.color = 'rgba(255,100,100,.9)';
+    note.innerHTML = note.innerHTML.replace(/This Twitch.*/, '⚠️ This live stream has ended and is no longer available.');
+  }
+}
+
 function closeExpand(fromPopState) {
   const _chatTab = document.getElementById('chat-tab');
   if (_chatTab) _chatTab.style.display = '';
   // Clean up URL without adding another history entry
   if (!fromPopState) history.replaceState(null, '', window.location.pathname);
   const overlay = document.getElementById('card-expand');
+  if (window._twitchOfflineHandler) {
+    window.removeEventListener('message', window._twitchOfflineHandler);
+    window._twitchOfflineHandler = null;
+  }
+  const _offlineEl = document.getElementById('twitch-offline-msg');
+  if (_offlineEl) _offlineEl.remove();
   if (_expandVideo) {
     stopWatchTimer(_expandVideo.url);
     delete _watchSessionSecs[_expandVideo.url];
