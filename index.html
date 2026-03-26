@@ -5932,6 +5932,7 @@ function doSubmitPost() {
       try {
         inserted = await sbInsert('submissions', {
           url,
+          video_id: extractId(url),
           show_name: _fetchedMeta.title,
           efed: assignedEfed,
           date: dateStr,
@@ -10387,13 +10388,15 @@ async function saveVideoTags() {
   const btn = document.getElementById('tag-save-btn');
   btn.disabled = true; btn.textContent = 'Saving…';
   try {
-    const result = await sbUpdate('submissions', { tags }, `url=eq.${_tagVideoUrl}`);
+    const vid = extractId(_tagVideoUrl);
+    if (!vid) throw new Error('Could not extract video ID');
+    const patchRes = await fetch(
+      SUPABASE_URL + '/rest/v1/submissions?video_id=eq.' + encodeURIComponent(vid),
+      { method: 'PATCH', headers: { ...SB_HEADERS, 'Prefer': 'return=representation' }, body: JSON.stringify({ tags }) }
+    );
+    if (!patchRes.ok) throw new Error(await patchRes.text());
+    const result = await patchRes.json();
     console.log('Tag save result:', result);
-    if (!result || result.length === 0) {
-      // Try by video_id as fallback
-      const vid = extractId(_tagVideoUrl);
-      if (vid) await sbUpdate('submissions', { tags }, `video_id=eq.${encodeURIComponent(vid)}`);
-    }
     // Update local video object
     const v = videos.find(v => v.url === _tagVideoUrl);
     if (v) v.tags = tags;
