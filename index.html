@@ -5527,23 +5527,37 @@ async function fetchSubmitPreview() {
   // ── TWITCH PATH ──
   if (isTwitch) {
     try {
-      const noembedRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`).catch(()=>null);
-      let title = '', channel = '';
-      if (noembedRes && noembedRes.ok) {
-        const nd = await noembedRes.json();
-        title = nd.title || (isLive ? ('🔴 ' + (twitchChannel || 'Live Stream')) : ('Twitch VOD ' + twitchId));
-        channel = nd.author_name || twitchChannel || '';
-      } else {
-        title = isLive ? ('🔴 ' + (twitchChannel || 'Live Stream')) : ('Twitch VOD ' + twitchId);
-        channel = twitchChannel || '';
+      let title = '', channel = '', thumbUrl = '', uploadDate = '', uploadDateMs = Date.now();
+      // Twitch oEmbed — works without auth for public VODs and channels
+      const oembedUrl = isVod
+        ? `https://www.twitch.tv/videos/${twitchId}`
+        : `https://www.twitch.tv/${twitchChannel}`;
+      const oRes = await fetch(`https://api.twitch.tv/v5/oembed?url=${encodeURIComponent(oembedUrl)}`).catch(()=>null);
+      // Fall back to noembed
+      const nbRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`).catch(()=>null);
+      if (nbRes && nbRes.ok) {
+        const nd = await nbRes.json();
+        if (nd && !nd.error) {
+          title = nd.title || '';
+          channel = nd.author_name || '';
+          thumbUrl = nd.thumbnail_url || '';
+        }
       }
+      // Fallbacks if noembed gave nothing
+      if (!title) title = isLive ? ('🔴 ' + (twitchChannel || 'Live Stream')) : ('Twitch VOD ' + twitchId);
+      if (!channel) channel = twitchChannel || (isVod ? 'Twitch' : '');
+      // Thumb fallback for VOD
+      if (!thumbUrl && isVod) thumbUrl = `https://static-cdn.jtvnw.net/cf_vods/${twitchId}/thumb/thumb0-320x180.jpg`;
+      if (!thumbUrl && isLive) thumbUrl = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${twitchChannel}-320x180.jpg`;
+
       const embedId = isVod ? twitchId : twitchChannel;
       _fetchedMeta = {
         title, channel,
         vidId: embedId,
-        uploadDate: '', uploadDateMs: Date.now(),
+        uploadDate, uploadDateMs,
         isUpcoming: false, scheduledMs: null,
-        isTwitch: true, isLive
+        isTwitch: true, isLive,
+        twitchThumb: thumbUrl
       };
       document.getElementById('submit-preview-title').textContent = title;
       document.getElementById('submit-preview-channel').textContent = (channel || 'Twitch') + (isLive ? '  ·  🔴 LIVE' : '');
@@ -5774,9 +5788,16 @@ function doSubmitPost() {
       const dateMs = _fetchedMeta.uploadDateMs || Date.now();
       const submitStatus = (_fetchedMeta.isUpcoming && _fetchedMeta.scheduledMs) ? 'upcoming' : 'approved';
 
-      const thumbUrl = _fetchedMeta.isTwitch
-        ? 'https://static-cdn.jtvnw.net/cf_vods/' + _fetchedMeta.vidId + '/thumb/thumb0-320x180.jpg'
-        : 'https://i.ytimg.com/vi/' + _fetchedMeta.vidId + '/mqdefault.jpg';
+      let thumbUrl;
+      if (_fetchedMeta.isTwitch) {
+        thumbUrl = _fetchedMeta.twitchThumb || (
+          _fetchedMeta.isLive
+            ? `https://static-cdn.jtvnw.net/previews-ttv/live_user_${_fetchedMeta.vidId}-320x180.jpg`
+            : `https://static-cdn.jtvnw.net/cf_vods/${_fetchedMeta.vidId}/thumb/thumb0-320x180.jpg`
+        );
+      } else {
+        thumbUrl = 'https://i.ytimg.com/vi/' + _fetchedMeta.vidId + '/mqdefault.jpg';
+      }
 
       // Determine eFed — check if submitter's registered yt_channel matches video channel
       // Use YouTube channel name directly as the eFed name
@@ -5793,7 +5814,8 @@ function doSubmitPost() {
           submitted_by: session.username,
           submitted_at: Date.now(),
           community: true,
-          status: submitStatus
+          status: submitStatus,
+          thumb_url: thumbUrl || null
         });
       } catch(insertErr) {
         const el = document.getElementById('submit-err');

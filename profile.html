@@ -51,6 +51,7 @@ function confirmResolve(val) { if (_confirmResolve) { _confirmResolve(val); _con
 }
 body { background: #000; color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; scrollbar-width: none; -ms-overflow-style: none; }
 body::-webkit-scrollbar { display: none; }
+body::-webkit-scrollbar { display: none; }
 
 .page-card {
   max-width: 960px; margin: 0 auto;
@@ -585,6 +586,20 @@ nav.scrolled { background: rgba(7,7,10,.99); }
     </div>
     <div id="signings-toggle" onclick="toggleSignings()" style="width:44px;height:24px;border-radius:40px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.1);cursor:pointer;position:relative;transition:background .2s,border-color .2s;flex-shrink:0;">
       <div id="signings-knob" style="position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .2s;opacity:.4;"></div>
+    </div>
+  </div>
+  <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
+</div>
+
+<!-- ── AUTO STREAM ON HUB ── -->
+<div id="autostream-section" style="display:none;padding:16px 16px 0;">
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div style="font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:#8a8a9a;font-weight:700;margin-bottom:4px;">Auto Stream on Hub</div>
+      <div style="font-size:.72rem;color:rgba(255,255,255,.55);" id="autostream-status-label">Toggle on to automatically post your Twitch stream to the Hub when you go live.</div>
+    </div>
+    <div id="autostream-toggle" onclick="toggleAutoStream()" style="width:44px;height:24px;border-radius:40px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.1);cursor:pointer;position:relative;transition:background .2s,border-color .2s;flex-shrink:0;">
+      <div id="autostream-knob" style="position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .2s;opacity:.4;"></div>
     </div>
   </div>
   <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
@@ -1871,6 +1886,54 @@ document.addEventListener('click', e => {
 });
 
 let _signingsState = false;
+let _autoStreamState = false;
+
+function updateAutoStreamUI(isOn, promoName) {
+  const section = document.getElementById('autostream-section');
+  const toggle = document.getElementById('autostream-toggle');
+  const knob = document.getElementById('autostream-knob');
+  const label = document.getElementById('autostream-status-label');
+  if (!toggle || !section) return;
+  // Only show to own profile with a twitch channel
+  if (!_isOwnProfile) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  if (isOn) {
+    toggle.style.background = 'rgba(145,70,255,.5)';
+    toggle.style.borderColor = 'rgba(145,70,255,.6)';
+    knob.style.transform = 'translateX(20px)';
+    knob.style.opacity = '1';
+    if (label) label.textContent = (promoName || 'Your eFed') + ' is auto streaming on the Hub.';
+  } else {
+    toggle.style.background = 'rgba(255,255,255,.12)';
+    toggle.style.borderColor = 'rgba(255,255,255,.1)';
+    knob.style.transform = 'translateX(0)';
+    knob.style.opacity = '.4';
+    if (label) label.textContent = 'Toggle on to automatically post your Twitch stream to the Hub when you go live.';
+  }
+}
+
+async function toggleAutoStream() {
+  const session = getSession();
+  if (!session) return;
+  _autoStreamState = !_autoStreamState;
+  // Get promo name for label
+  let promoName = '';
+  try {
+    const u = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name`);
+    promoName = u[0]?.promo_name || '';
+  } catch(e) {}
+  updateAutoStreamUI(_autoStreamState, promoName);
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH',
+      headers: SB_HEADERS,
+      body: JSON.stringify({ auto_stream: _autoStreamState })
+    });
+  } catch(e) {
+    _autoStreamState = !_autoStreamState;
+    updateAutoStreamUI(_autoStreamState, promoName);
+  }
+}
 
 function updateSigningsUI(isOpen) {
   const section = document.getElementById('signings-section');
@@ -1974,7 +2037,7 @@ async function openEditModal() {
   // contaminated by visiting another user's profile
   let _ownData = {};
   try {
-    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,bio`);
+    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio`);
     _ownData = _rows[0] || {};
   } catch(e) {}
 
@@ -2001,6 +2064,8 @@ async function openEditModal() {
   const _xIn  = document.getElementById('ep-x-input');
   if (_igIn) _igIn.value = (_ownData.ig_handle || '').replace('@','');
   if (_xIn)  _xIn.value  = (_ownData.x_handle  || '').replace('@','');
+  const _twIn = document.getElementById('ep-twitch-input');
+  if (_twIn) _twIn.value = (_ownData.twitch_channel || '').replace('twitch.tv/','').replace('@','');
   // Prefill bio from DB fetch above
   const bioVal = _ownData.bio || '';
   const bioInput = document.getElementById('ep-bio-input');
@@ -2066,14 +2131,15 @@ async function epRemoveAvatar() {
   } catch(e) {}
 }
 
-function renderSocialLinks(ig, x) {
+function renderSocialLinks(ig, x, twitch) {
   const wrap = document.getElementById('profile-social-links');
   if (!wrap) return;
   wrap.innerHTML = [
     ig ? `<a href="https://instagram.com/${ig}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:5px;color:rgba(255,255,255,.45);font-size:.62rem;letter-spacing:1px;text-decoration:none;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.45)'"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>@${ig}</a>` : '',
-    x  ? `<a href="https://x.com/${x}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:5px;color:rgba(255,255,255,.45);font-size:.62rem;letter-spacing:1px;text-decoration:none;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.45)'"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.737-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@${x}</a>` : ''
+    x  ? `<a href="https://x.com/${x}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:5px;color:rgba(255,255,255,.45);font-size:.62rem;letter-spacing:1px;text-decoration:none;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.45)'"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.737-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@${x}</a>` : '',
+    twitch ? `<a href="https://twitch.tv/${twitch}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:5px;color:rgba(145,70,255,.7);font-size:.62rem;letter-spacing:1px;text-decoration:none;" onmouseover="this.style.color='#9146ff'" onmouseout="this.style.color='rgba(145,70,255,.7)'"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg>/${twitch}</a>` : ''
   ].filter(Boolean).join('<span style="color:rgba(255,255,255,.15);">·</span>');
-  wrap.style.display = (ig || x) ? 'flex' : 'none';
+  wrap.style.display = (ig || x || twitch) ? 'flex' : 'none';
 }
 async function saveEditProfile() {
   const session = getSession();
@@ -2088,7 +2154,8 @@ async function saveEditProfile() {
   const x  = (document.getElementById('ep-x-input')?.value.trim()  || '').replace('@','');
   const bio = (document.getElementById('ep-bio-input')?.value || '').slice(0, 160);
   try {
-    const updates = { display_name: name, ig_handle: ig, x_handle: x, bio: bio || null };
+    const twitch = (document.getElementById('ep-twitch-input')?.value.trim() || '').replace('twitch.tv/','').replace('@','');
+    const updates = { display_name: name, ig_handle: ig, x_handle: x, twitch_channel: twitch || null, bio: bio || null };
     await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(updates) });
 
     session.displayName = name; session.igHandle = ig; session.xHandle = x;
@@ -2097,7 +2164,7 @@ async function saveEditProfile() {
     document.getElementById('profile-av-initial').textContent = name[0].toUpperCase();
     const navImg = document.getElementById('nav-avatar-img');
     if (!navImg || navImg.style.display === 'none') document.getElementById('nav-initials').textContent = name[0].toUpperCase();
-    renderSocialLinks(ig, x);
+    renderSocialLinks(ig, x, twitch);
     // Update bio on page
     const bioEl = document.getElementById('profile-bio');
     const bioSec = document.getElementById('bio-section');
@@ -2408,11 +2475,11 @@ async function loadProfile() {
       document.getElementById('profile-handle').textContent = '@' + (session.username || '');
       document.getElementById('profile-av-initial').textContent = _cachedName[0].toUpperCase();
       if (session.avatarUrl) setAvatar(session.avatarUrl);
-      if (session.igHandle || session.xHandle) renderSocialLinks(session.igHandle || '', session.xHandle || '');
+      if (session.igHandle || session.xHandle) renderSocialLinks(session.igHandle || '', session.xHandle || '', '');
     }
   }
   try {
-    const users = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=username,display_name,avatar_url,avatar_banner,is_verified,role,promo_name,ig_handle,x_handle,caw_image_1,caw_image_2,caw_image_3,caw_image_4,open_for_signings,bio`);
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=username,display_name,avatar_url,avatar_banner,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,auto_stream,caw_image_1,caw_image_2,caw_image_3,caw_image_4,open_for_signings,bio`);
     if (!users.length) { document.getElementById('profile-name').textContent = 'User not found'; return; }
     const user = users[0];
     const name = user.display_name || user.username;
@@ -2434,11 +2501,13 @@ async function loadProfile() {
     // Load socials — DB first, only cache to session for own profile
     const ig = (user.ig_handle || (_isOwnProfile ? session.igHandle : '') || '').replace('@','');
     const x  = (user.x_handle  || (_isOwnProfile ? session.xHandle  : '') || '').replace('@','');
+    const twitch = (user.twitch_channel || '').replace('twitch.tv/','').replace('@','');
+
     if (_isOwnProfile) {
       session.igHandle = ig; session.xHandle = x;
       localStorage.setItem('efed_session', JSON.stringify(session));
     }
-    renderSocialLinks(ig, x);
+    renderSocialLinks(ig, x, twitch);
     loadCawImages(user);
     _posts.load(targetUser);
 
@@ -2840,6 +2909,15 @@ function triggerInstall() {
         <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
           <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.82rem;">@</span>
           <input id="ep-x-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+        </div>
+      </div>
+
+      <!-- Twitch -->
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Twitch eFed Channel</div>
+        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.75rem;font-family:'DM Sans',sans-serif;white-space:nowrap;">twitch.tv/</span>
+          <input id="ep-twitch-input" type="text" placeholder="channelname" maxlength="60" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
         </div>
       </div>
 
