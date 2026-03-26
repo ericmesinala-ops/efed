@@ -2644,7 +2644,7 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
         <div id="expand-poster"></div>
         <div id="expand-twitch-note" style="display:none;align-items:center;gap:6px;margin-top:6px;padding:6px 10px;background:rgba(145,70,255,.1);border:1px solid rgba(145,70,255,.25);border-radius:6px;font-size:.62rem;color:rgba(145,70,255,.9);font-family:'DM Sans',sans-serif;">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          This Twitch video is embedded and may expire after a limited time.
+          This Twitch video is embedded and may expire after a limited time. Live streams will stop working once the broadcast ends.
         </div>
       </div>
 
@@ -2864,8 +2864,12 @@ async function checkLiveStatus(videoIds) {
 function extractId(url) {
   if (!url) return '';
   if (getPlatform(url) === 'twitch') {
-    const m = url.match(/twitch\.tv\/videos\/(\d+)/);
-    return m ? m[1] : '';
+    const vodM = url.match(/twitch\.tv\/videos\/(\d+)/);
+    if (vodM) return 'vod_' + vodM[1];
+    // Live channel: twitch.tv/channelname
+    const liveM = url.match(/twitch\.tv\/([^/?#]+)/);
+    if (liveM) return 'live_' + liveM[1].toLowerCase();
+    return '';
   }
   const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/);
   return m ? m[1] : url;
@@ -5508,34 +5512,43 @@ async function fetchSubmitPreview() {
   const url = document.getElementById('submit-url').value.trim();
   if (!url) return;
 
-  const isTwitch = url.includes('twitch.tv/videos/');
-  const twitchId = isTwitch ? url.match(/twitch\.tv\/videos\/(\d+)/)?.[1] : null;
+  const isTwitch = url.includes('twitch.tv');
+  const isVod = isTwitch && url.includes('twitch.tv/videos/');
+  const isLive = isTwitch && !isVod && /twitch\.tv\/[^/?#]+/.test(url);
+  const twitchId = isVod ? url.match(/twitch\.tv\/videos\/(\d+)/)?.[1] : null;
+  const twitchChannel = isLive ? url.match(/twitch\.tv\/([^/?#]+)/)?.[1] : null;
   const vidId = !isTwitch ? url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/)?.[1] : null;
 
-  if (!vidId && !twitchId) return;
+  if (!vidId && !twitchId && !twitchChannel) return;
 
   const btn = document.getElementById('submit-post-btn');
   showSubmitStatus('🔍 Looking up video…', 'info');
 
   // ── TWITCH PATH ──
-  if (isTwitch && twitchId) {
+  if (isTwitch) {
     try {
-      const oRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`).catch(()=>null);
-      // Twitch oEmbed — use noembed as fallback since YouTube oEmbed won't work for Twitch
-      const noembedRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
+      const noembedRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`).catch(()=>null);
       let title = '', channel = '';
-      if (noembedRes.ok) {
+      if (noembedRes && noembedRes.ok) {
         const nd = await noembedRes.json();
-        title = nd.title || ('Twitch VOD ' + twitchId);
-        channel = nd.author_name || '';
+        title = nd.title || (isLive ? ('🔴 ' + (twitchChannel || 'Live Stream')) : ('Twitch VOD ' + twitchId));
+        channel = nd.author_name || twitchChannel || '';
       } else {
-        title = 'Twitch VOD ' + twitchId;
+        title = isLive ? ('🔴 ' + (twitchChannel || 'Live Stream')) : ('Twitch VOD ' + twitchId);
+        channel = twitchChannel || '';
       }
-      _fetchedMeta = { title, channel, vidId: twitchId, uploadDate: '', uploadDateMs: Date.now(), isUpcoming: false, scheduledMs: null, isTwitch: true };
+      const embedId = isVod ? twitchId : twitchChannel;
+      _fetchedMeta = {
+        title, channel,
+        vidId: embedId,
+        uploadDate: '', uploadDateMs: Date.now(),
+        isUpcoming: false, scheduledMs: null,
+        isTwitch: true, isLive
+      };
       document.getElementById('submit-preview-title').textContent = title;
-      document.getElementById('submit-preview-channel').textContent = channel || 'Twitch';
+      document.getElementById('submit-preview-channel').textContent = (channel || 'Twitch') + (isLive ? '  ·  🔴 LIVE' : '');
       document.getElementById('submit-preview').style.display = 'block';
-      showSubmitStatus('✅ Twitch VOD verified — posting…', 'success');
+      showSubmitStatus(isLive ? '🔴 Live stream detected — posting…' : '✅ Twitch VOD verified — posting…', 'success');
       setTimeout(() => doSubmitPost(), 1200);
     } catch(e) {
       showSubmitStatus('', '');
@@ -5780,8 +5793,7 @@ function doSubmitPost() {
           submitted_by: session.username,
           submitted_at: Date.now(),
           community: true,
-          status: submitStatus,
-          platform: _fetchedMeta.isTwitch ? 'twitch' : 'youtube'
+          status: submitStatus
         });
       } catch(insertErr) {
         const el = document.getElementById('submit-err');
@@ -6107,7 +6119,14 @@ function openExpand(v) {
     const _isTwitch = _platform === 'twitch';
     let _src;
     if (_isTwitch) {
-      _src = `https://player.twitch.tv/?video=${id}&parent=${location.hostname}&autoplay=true`;
+      // id is prefixed: vod_123 or live_channelname
+      if (id.startsWith('live_')) {
+        const ch = id.replace('live_', '');
+        _src = `https://player.twitch.tv/?channel=${ch}&parent=${location.hostname}&autoplay=true`;
+      } else {
+        const vodId = id.replace('vod_', '');
+        _src = `https://player.twitch.tv/?video=${vodId}&parent=${location.hostname}&autoplay=true`;
+      }
     } else {
       const _t = extractT(v.url);
       _src = `https://www.youtube.com/embed/${id}?autoplay=1&start=${_t}&rel=0&modestbranding=1&enablejsapi=1&playsinline=1`;
