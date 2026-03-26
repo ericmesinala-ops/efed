@@ -73,7 +73,47 @@
     const txt = await r.text();
     return txt ? JSON.parse(txt) : [];
   }
-  // Simple session-based auth guard — no third party needed
+  // ── PAGE VIEW TRACKING ──
+  // Tracks views on profile and efed pages. Owner views don't count.
+  // SQL to run once in Supabase:
+  //   create table if not exists page_views (
+  //     id bigserial primary key,
+  //     page_type text not null,   -- 'profile' or 'efed'
+  //     page_key  text not null,   -- username or efed name
+  //     viewer    text,            -- viewer's username (null = logged out)
+  //     viewed_at bigint not null
+  //   );
+  //   create index if not exists page_views_key_idx on page_views(page_type, page_key);
+  //   alter table page_views disable row level security;
+
+  async function trackPageView(pageType, pageKey, ownerUsername) {
+    try {
+      const session = getSession();
+      const viewer = session ? session.username.toLowerCase() : null;
+      const owner  = (ownerUsername || '').toLowerCase();
+      // Don't count owner's own views
+      if (viewer && viewer === owner) return;
+      await sbInsert('page_views', {
+        page_type: pageType,
+        page_key:  pageKey,
+        viewer:    viewer,
+        viewed_at: Date.now()
+      });
+    } catch(e) {}
+  }
+
+  async function getPageViewCount(pageType, pageKey) {
+    try {
+      const rows = await sbGet('page_views', `page_type=eq.${encodeURIComponent(pageType)}&page_key=eq.${encodeURIComponent(pageKey)}&select=id`);
+      return rows.length;
+    } catch(e) { return 0; }
+  }
+
+  function formatViewCount(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 1000)    return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+    return n.toString();
+  }
   (function() {
     try {
       const session = JSON.parse(localStorage.getItem('efed_session'));
@@ -732,6 +772,7 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
     .nav-invite-btn { display: none !important; }
     .nav-invite-btn.visible { display: none !important; }
   }
+  @media (max-width: 768px) {
     .hero { padding: 0 20px 50px; height: 70vh; min-height: 400px; }
     .hero-title { font-size: 1.8rem; }
     .divider, .sec-head, .filter-outer { padding: 0 20px; }
@@ -752,6 +793,13 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
     .card-info { padding: 7px 2px 0; }
     .modal-big-play { width: 56px; height: 56px; }
     .hero-vid-wrap iframe { width: 200%; height: 200%; }
+  }
+  @media (min-width: 769px) {
+    .card-grid { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
+    .card-grid::-webkit-scrollbar { display: block; height: 4px; }
+    .card-grid::-webkit-scrollbar-track { background: transparent; }
+    .card-grid::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); border-radius: 2px; }
+    .card-grid::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.4); }
   }
   @media (max-width: 480px) {
     .hero-title { font-size: 1.5rem; }
@@ -7056,7 +7104,11 @@ function autoResizeComment(el) {
 })();
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeM(); closeExpand(); }
+  if (e.key === 'Escape') {
+    const tagBg = document.getElementById('tag-modal-bg');
+    if (tagBg && tagBg.classList.contains('open')) { closeTagModal(); return; }
+    closeM(); closeExpand();
+  }
 });
 </script>
 
@@ -10347,6 +10399,7 @@ function updateTagCount() {
 }
 
 function handleTagModalBgClick(e) {
+  e.stopPropagation();
   if (e.target === document.getElementById('tag-modal-bg')) closeTagModal();
 }
 
@@ -10410,7 +10463,7 @@ function renderExpandTags(tags) {
 
 <!-- ── TAG MODAL ── -->
 <div id="tag-modal-bg" onclick="handleTagModalBgClick(event)">
-  <div id="tag-modal">
+  <div id="tag-modal" onclick="event.stopPropagation()">
     <div class="tag-modal-title">Tag This Video</div>
     <div class="tag-modal-sub">Choose exactly 5 tags across any category.</div>
     <div id="tag-options-wrap"></div>
