@@ -2616,6 +2616,28 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
   </section>
 
   <!-- ── FEATURED EFED ── -->
+  <section class="section" id="section-best-matches" style="display:none;">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar" style="background:var(--accent);"></div>
+        <div>
+          <div class="sec-title" style="line-height:1;margin-bottom:3px;">Best Matches</div>
+          <div style="font-size:.65rem;letter-spacing:3px;text-transform:uppercase;color:var(--accent);font-weight:700;line-height:1;">UNDER 30 MIN</div>
+        </div>
+      </div>
+      <span class="sec-count" id="best-matches-count"></span>
+    </div>
+    <div class="row-wrap">
+      <div class="arr-col left">
+        <button class="pill-arr left hidden" id="best-matches-arr-left" onclick="scrollNamedRow('best-matches',-1)">&#8249;</button>
+      </div>
+      <div class="card-grid" id="row-best-matches"></div>
+      <div class="arr-col right">
+        <button class="pill-arr right" id="best-matches-arr-right" onclick="scrollNamedRow('best-matches',1)">&#8250;</button>
+      </div>
+    </div>
+  </section>
+
   <section class="section" id="section-spotlight" style="display:none;">
     <div class="sec-head">
       <div class="sec-title-wrap">
@@ -3947,6 +3969,33 @@ function loadSpotlight(allVideos) {
   } catch(e) { console.error('Spotlight failed:', e); }
 }
 
+function loadBestMatches(allVideos) {
+  try {
+    const section = document.getElementById('section-best-matches');
+    const grid = document.getElementById('row-best-matches');
+    const count = document.getElementById('best-matches-count');
+    if (!section || !grid) return;
+    const matches = allVideos
+      .filter(v => v.url && v.durationSecs > 0 && v.durationSecs < 1800)
+      .sort((a, b) => {
+        const ta = a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
+        const tb = b.dateMs || (b.date ? new Date(b.date).getTime() : 0);
+        return tb - ta;
+      });
+    if (!matches.length) return;
+    grid.innerHTML = '';
+    matches.forEach(v => grid.appendChild(makeCard(v)));
+    if (count) count.textContent = ' · ' + matches.length + ' match' + (matches.length !== 1 ? 'es' : '');
+    section.style.display = '';
+    setTimeout(() => {
+      const left = document.getElementById('best-matches-arr-left');
+      const right = document.getElementById('best-matches-arr-right');
+      if (left) left.classList.toggle('hidden', grid.scrollLeft <= 0);
+      if (right) right.classList.toggle('hidden', grid.scrollWidth <= grid.clientWidth);
+    }, 100);
+  } catch(e) { console.error('Best Matches failed:', e); }
+}
+
 async function initHub() {
   showSkeletons(8);
   buildPills();
@@ -4014,16 +4063,51 @@ async function initHub() {
     }
   } catch(e) {}
 
-  buildPills();
-  renderGrid();
-  loadUpcomingRow();
-  loadBookmarksRow();
-  loadEfedOwnerRow();
-  buildHeroDots();
-  loadSlide();
-  loadMostViewed(videos);
-  loadRecentlyAdded(videos);
-  loadSpotlight(videos);
+  // Fetch durations first, then build all rows so Best Matches filter works
+  (async () => {
+    try {
+      // Pull saved durations from DB
+      const dbDurRows = await sbGet('submissions', 'status=eq.approved&select=url,duration_seconds').catch(() => []);
+      dbDurRows.forEach(r => {
+        if (r.duration_seconds) {
+          const v = videos.find(v => v.url === r.url);
+          if (v) v.durationSecs = r.duration_seconds;
+        }
+      });
+      // Fetch remaining from YT API in batches of 50
+      const stillNeed = videos.filter(v => v.url && !v.durationSecs && !v.url.includes('twitch'));
+      for (let i = 0; i < stillNeed.length; i += 50) {
+        const batch = stillNeed.slice(i, i + 50);
+        const ids = batch.map(v => (v.url||'').match(/(?:v=|youtu\.be\/)([^&?/]+)/)?.[1]).filter(Boolean);
+        if (!ids.length) continue;
+        try {
+          const res = await fetch('https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=' + ids.join(',') + '&key=' + YT_API_KEY);
+          const data = await res.json();
+          (data.items || []).forEach(item => {
+            const iso = item?.contentDetails?.duration;
+            if (!iso) return;
+            const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+            const secs = (parseInt(m?.[1]||0)*3600) + (parseInt(m?.[2]||0)*60) + parseInt(m?.[3]||0);
+            const vid = videos.find(v => (v.url||'').includes(item.id));
+            if (vid) vid.durationSecs = secs;
+          });
+        } catch(e) {}
+      }
+    } catch(e) { console.warn('Duration fetch failed:', e); }
+
+    // Now build all rows with durations populated
+    buildPills();
+    renderGrid();
+    loadUpcomingRow();
+    loadBookmarksRow();
+    loadEfedOwnerRow();
+    buildHeroDots();
+    loadSlide();
+    loadMostViewed(videos);
+    loadRecentlyAdded(videos);
+    loadSpotlight(videos);
+    loadBestMatches(videos);
+  })();
   // ?play= param handled before initHub for instant open
 }
 
