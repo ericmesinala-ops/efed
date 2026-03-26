@@ -589,6 +589,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   <div class="stat-pill"><div class="stat-num" id="stat-rated">—</div><div class="stat-lbl">Rated</div></div>
   <div class="stat-pill" id="stat-invites-pill"><div class="stat-num" id="stat-invites">—</div><div class="stat-lbl">Invited</div></div>
   <div class="stat-pill"><div class="stat-num" id="stat-watch-hours">—</div><div class="stat-lbl">Hours Watched</div></div>
+  <div class="stat-pill" id="stat-views-pill" style="display:none;"><div class="stat-num" id="stat-views">—</div><div class="stat-lbl">Profile Views</div></div>
   <div class="stat-pill"><div class="stat-num" id="stat-points">—</div><div class="stat-lbl" style="color:#c8a84b;">Points</div></div>
 </div>
 
@@ -2716,6 +2717,32 @@ async function loadProfile() {
       return makeVidCard(b.video_url, s.show_name, s.date, s.thumb_url);
     }).join('');
   } catch(e) { bmRow.innerHTML = '<div class="empty">Could not load.</div>'; }
+
+  // ── PAGE VIEW TRACKING & DISPLAY ──
+  try {
+    const _pvKey = targetUser.toLowerCase();
+    const _pvViewer = session.username.toLowerCase();
+
+    // Track — only if viewing someone else's profile (recurring views count)
+    if (!_isOwnProfile) {
+      fetch(SUPABASE_URL + '/rest/v1/page_views', {
+        method: 'POST',
+        headers: { ...SB_HEADERS, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ page_type: 'profile', page_key: _pvKey, viewer: _pvViewer, viewed_at: Date.now() })
+      }).catch(() => {});
+    }
+
+    // Display count — show to everyone (owner sees their own count too)
+    const _pvRows = await sbGet('page_views', `page_type=eq.profile&page_key=eq.${encodeURIComponent(_pvKey)}&select=id`);
+    const _pvCount = _pvRows.length;
+    const _pvFmt = _pvCount >= 1000000 ? (_pvCount/1000000).toFixed(1).replace(/\.0$/,'') + 'M'
+                 : _pvCount >= 1000    ? (_pvCount/1000).toFixed(1).replace(/\.0$/,'') + 'K'
+                 : _pvCount.toString();
+    const _pvEl = document.getElementById('stat-views');
+    const _pvPill = document.getElementById('stat-views-pill');
+    if (_pvEl) _pvEl.textContent = _pvFmt;
+    if (_pvPill) _pvPill.style.display = '';
+  } catch(e) {}
 }
 
 initNav();
