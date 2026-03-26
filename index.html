@@ -3145,14 +3145,14 @@ function isMatch(v) {
   const secs = v.durationSecs || 0;
   if (!secs) return false;
   const title = (v.show || '').toLowerCase();
-  // 1. Always a match if under 15 min
+  // Always a match if under 15 min
   if (secs < 900) return true;
-  // 2. Never a match — full show keywords
+  // Never a match — full show keywords
   const fullShowWords = ['episode','tryout','tryouts','full show','part 1','part 2','part 3','part1','part2','part3','network','supershow','season'];
   if (fullShowWords.some(w => title.includes(w))) return false;
-  // 3. Match if under 30 min AND title has match signal
+  // Match if under 30 min AND title has match signal
   if (secs < 1800) {
-    const matchWords = [' vs ',' vs.','v. ',' match','full match','1v1','2v2','championship'];
+    const matchWords = [' vs ',' vs.','v. ','* match','full match','1v1','2v2','championship'];
     if (matchWords.some(w => title.includes(w))) return true;
   }
   return false;
@@ -3767,7 +3767,26 @@ function makeCard(v) {
   }
 
   img.onerror = function() {
-    if (platform === 'twitch') return; // already handled above
+    if (platform === 'twitch') {
+      // Twitch thumb expired — fetch fresh from noembed and update
+      (async () => {
+        try {
+          const nb = await fetch('https://noembed.com/embed?url=' + encodeURIComponent(v.url)).then(r => r.json());
+          const freshThumb = nb?.thumbnail_url;
+          if (freshThumb) {
+            img.src = freshThumb;
+            v.thumb = freshThumb;
+            // Persist to DB if community video
+            if (v.community && v.url) {
+              fetch(SUPABASE_URL + '/rest/v1/submissions?url=eq.' + encodeURIComponent(v.url), {
+                method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ thumb_url: freshThumb })
+              }).catch(() => {});
+            }
+          }
+        } catch(e) {}
+      })();
+      return;
+    }
     this.onerror = function() {
       this.onerror = function() {
         this.style.display = 'none';
