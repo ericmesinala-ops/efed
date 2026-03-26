@@ -23,6 +23,12 @@
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   }
+  async function sbDelete(table, filters) {
+    const headers = { ...SB_HEADERS, 'Prefer': 'return=representation' };
+    const r = await fetch(SUPABASE_URL+'/rest/v1/'+table+'?'+filters, { method: 'DELETE', headers });
+    if (!r.ok) throw new Error(await r.text());
+    const txt = await r.text(); return txt ? JSON.parse(txt) : [];
+  }
   (function() {
     try {
       const s = JSON.parse(localStorage.getItem('efed_session'));
@@ -201,12 +207,25 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 /* ── VIDEO ROW ── */
 .vid-row { display: flex; gap: 10px; overflow-x: auto; overflow-y: visible; padding: 4px 2px 16px; scroll-behavior: smooth; scrollbar-width: none; -ms-overflow-style: none; }
 .vid-row::-webkit-scrollbar { display: none; }
-.vid-card { flex-shrink: 0; width: 150px; cursor: pointer; }
+.vid-card { flex-shrink: 0; width: 150px; cursor: pointer; position: relative; }
 .vid-thumb { width: 150px; height: 85px; border-radius: 6px; overflow: hidden; background: var(--surface2); position: relative; margin-bottom: 7px; transition: transform .2s; }
 .vid-card:hover .vid-thumb { transform: scale(1.03); }
 .vid-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .vid-play-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.3); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .2s; }
 .vid-card:hover .vid-play-overlay { opacity: 1; }
+.bm-del-btn {
+  position: absolute; top: 6px; right: 6px; z-index: 10;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(0,0,0,.72); backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,.18);
+  color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transform: scale(.8);
+  transition: opacity .18s, transform .18s, background .15s;
+  pointer-events: none;
+}
+.vid-card:hover .bm-del-btn { opacity: 1; transform: scale(1); pointer-events: all; }
+.bm-del-btn:hover { background: rgba(192,0,14,.85) !important; border-color: rgba(192,0,14,.7) !important; }
 .play-dot { width: 26px; height: 26px; border-radius: 50%; background: rgba(192,0,14,.9); display: flex; align-items: center; justify-content: center; }
 .vid-title { font-size: .7rem; font-weight: 600; color: var(--text); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .vid-date { font-size: .58rem; color: var(--muted); margin-top: 2px; }
@@ -446,26 +465,56 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 
 /* ── INVITE MODAL ── */
   .invite-modal-bg {
-  .invite-modal-bg.open { opacity: 1; pointer-events: all; }
+    display: none; position: fixed; inset: 0; z-index: 9999;
+    background: rgba(0,0,0,.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity .25s;
+  }
+  .invite-modal-bg.open { display: flex; opacity: 1; pointer-events: all; }
   .invite-modal {
+    background: #111114; border: 1px solid rgba(255,255,255,.1); border-radius: 16px;
+    width: 90%; max-width: 400px; padding: 28px 24px; position: relative;
+    box-shadow: 0 24px 60px rgba(0,0,0,.6);
+    transform: scale(.96) translateY(8px); transition: transform .25s;
+  }
   .invite-modal-bg.open .invite-modal { transform: scale(1) translateY(0); }
   .invite-modal-close {
+    position: absolute; top: 14px; right: 14px; background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.1); color: rgba(255,255,255,.5); width: 28px; height: 28px;
+    border-radius: 50%; cursor: pointer; font-size: .9rem; display: flex; align-items: center; justify-content: center;
+  }
   .invite-modal-close:hover { color: #fff; }
   .invite-modal-title {
+    font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; letter-spacing: 3px; color: #fff; margin-bottom: 4px;
+  }
   .invite-modal-sub { font-size: .68rem; color: var(--muted); margin-bottom: 18px; line-height: 1.5; }
   .invite-code-block {
+    display: flex; align-items: center; justify-content: space-between;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+  }
   .invite-code-block.copied { border-color: rgba(200,168,75,.4); }
   .invite-code-big { font-family: monospace; font-size: 1rem; letter-spacing: 3px; color: #fff; }
   .invite-copy-big {
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15);
+    color: #fff; padding: 6px 14px; border-radius: 6px; font-size: .7rem; font-weight: 700;
+    letter-spacing: 1px; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: opacity .2s;
+  }
   .invite-copy-big:hover { opacity: .85; }
   .invite-copy-big.done { background: #4caf8a; color: #fff; }
   .invite-hint { font-size: .65rem; color: var(--muted); line-height: 1.6; text-align: center; }
   .invite-codes-divider { border: none; border-top: 1px solid rgba(255,255,255,.06); margin: 16px 0 12px; }
   .invite-codes-label { font-size: .54rem; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
   .invite-code-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.04);
+  }
   .invite-code-row-text { font-family: monospace; font-size: .75rem; color: #fff; letter-spacing: 2px; }
   .invite-code-row-used { font-family: monospace; font-size: .75rem; color: var(--muted); letter-spacing: 2px; text-decoration: line-through; }
   .invite-code-row-copy {
+    background: none; border: none; color: rgba(255,255,255,.4); cursor: pointer; font-size: .7rem;
+    font-family: 'DM Sans', sans-serif; transition: opacity .2s;
+  }
   .invite-code-row-copy:hover { opacity: .6; }
   .invite-code-row-copy.done { color: #4caf8a; }
   .invite-no-codes { text-align: center; padding: 12px 0; font-size: .72rem; color: var(--muted); }
@@ -2444,6 +2493,62 @@ function makeVidCard(url, showName, date, thumbUrl) {
     <div class="vid-date">${_esc(date || '')}</div>
   </div>`;
 }
+function makeBookmarkVidCard(url, showName, date, thumbUrl, canDelete, session, bmRow) {
+  const id = extractId(url);
+  const thumb = thumbUrl || (id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '');
+
+  const card = document.createElement('div');
+  card.className = 'vid-card';
+  card.onclick = () => { window.location.href = 'index.html?play=' + encodeURIComponent(url); };
+
+  const thumbDiv = document.createElement('div');
+  thumbDiv.className = 'vid-thumb';
+
+  if (thumb) {
+    const img = document.createElement('img');
+    img.src = thumb; img.alt = '';
+    img.onerror = function() { this.style.display = 'none'; };
+    thumbDiv.appendChild(img);
+  }
+
+  const playOverlay = document.createElement('div');
+  playOverlay.className = 'vid-play-overlay';
+  playOverlay.innerHTML = '<div class="play-dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="white" style="margin-left:2px"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>';
+  thumbDiv.appendChild(playOverlay);
+
+  if (canDelete && session) {
+    const delBtn = document.createElement('button');
+    delBtn.className = 'bm-del-btn';
+    delBtn.title = 'Remove bookmark';
+    delBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    delBtn.onclick = async function(e) {
+      e.stopPropagation();
+      try {
+        const vidId = extractId(url);
+        await sbDelete('bookmarks', 'video_id=eq.' + encodeURIComponent(vidId) + '&username=eq.' + encodeURIComponent(session.username));
+        card.remove();
+        if (bmRow && !bmRow.querySelector('.vid-card')) {
+          bmRow.innerHTML = '<div class="empty">No bookmarks yet.</div>';
+        }
+      } catch(err) { console.error(err); }
+    };
+    thumbDiv.appendChild(delBtn);
+  }
+
+  card.appendChild(thumbDiv);
+
+  const titleDiv = document.createElement('div');
+  titleDiv.className = 'vid-title';
+  titleDiv.textContent = showName || '';
+  card.appendChild(titleDiv);
+
+  const dateDiv = document.createElement('div');
+  dateDiv.className = 'vid-date';
+  dateDiv.textContent = date || '';
+  card.appendChild(dateDiv);
+
+  return card;
+}
 
 // ── MAIN ──
 async function loadProfile() {
@@ -2712,10 +2817,12 @@ async function loadProfile() {
         bmSubs.forEach(s => { subMap[s.url] = s; });
       } catch(e) {}
     }
-    bmRow.innerHTML = bookmarks.map(b => {
+    bmRow.innerHTML = '';
+    bookmarks.forEach(b => {
       const s = subMap[b.video_url] || {};
-      return makeVidCard(b.video_url, s.show_name, s.date, s.thumb_url);
-    }).join('');
+      const card = makeBookmarkVidCard(b.video_url, s.show_name, s.date, s.thumb_url, _canSeeBookmarks, session, bmRow);
+      bmRow.appendChild(card);
+    });
   } catch(e) { bmRow.innerHTML = '<div class="empty">Could not load.</div>'; }
 
   // ── PAGE VIEW TRACKING & DISPLAY ──
