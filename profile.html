@@ -1041,7 +1041,7 @@ const _posts = (() => {
 
     const likeBtn = `<button class="post-action-btn${p._liked?' liked':''}" onclick="_posts.like('${p.id}',this)" data-liked="${p._liked?'1':'0'}">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="${p._liked?'#c0000e':'none'}" stroke="${p._liked?'#c0000e':'currentColor'}" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-      <span>${p.likes||0}</span>
+      <span>${Math.max(0,parseInt(p.likes)||0)}</span>
     </button>`;
 
     const session_r = getSession();
@@ -1064,10 +1064,8 @@ const _posts = (() => {
       ${avRow}
       ${bodyHtml}
       <div class="post-card-footer">
-        ${likeBtn}
-        ${replyBtn}
-        ${ownerBtns}
-        <span class="post-card-mode-badge ${mode}">${mode==='ic'?'IC':'OOC'}</span>
+        <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">${ownerBtns}<span class="post-card-mode-badge ${mode}">${mode==='ic'?'IC':'OOC'}</span></div>
       </div>
       <div class="post-replies-wrap">
         <button class="post-replies-toggle" id="replies-toggle-${p.id}" onclick="_posts.toggleReplies('${p.id}',this)">
@@ -1303,20 +1301,21 @@ const _posts = (() => {
     return `<div class="post-reply-av-sm">${inner}</div>`;
   }
 
-  function _renderReplyCard(r, isNested) {
+  function _renderReplyCard(r, isNested, rootPostId) {
+    rootPostId = rootPostId || r.reply_to;
     const session = getSession();
     const isOwn = session && session.username === r.username;
     const likeReplyBtn = `<button class="post-action-btn${r._liked?' liked':''}" onclick="_posts.likeReply('${r.id}','${r.reply_to}',this)" data-liked="${r._liked?'1':'0'}">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="${r._liked?'#c0000e':'none'}" stroke="${r._liked?'#c0000e':'currentColor'}" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-      <span>${r.likes||0}</span>
+      <span>${Math.max(0,parseInt(r.likes)||0)}</span>
     </button>`;
     const replyToReplyBtn = session
-      ? `<button class="post-action-btn" onclick="_posts.openReplyToReply('${r.reply_to}','${r.id}',this)">
+      ? `<button class="post-action-btn" onclick="_posts.openReplyToReply('${rootPostId}','${r.id}',this)">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
           Reply
         </button>` : '';
     const deleteReplyBtn = isOwn
-      ? `<button class="post-action-btn" onclick="_posts.deleteReply('${r.id}','${r.reply_to}')" style="margin-left:auto;">
+      ? `<button class="post-action-btn" onclick="_posts.deleteReply('${r.id}','${rootPostId}')" style="margin-left:auto;">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
         </button>` : '';
     const imgHtml = r.image_url
@@ -1338,17 +1337,29 @@ const _posts = (() => {
 
   async function _loadReplies(postId) {
     try {
-      const rows = await sbGet('posts', `reply_to=eq.${encodeURIComponent(postId)}&order=created_at.asc&limit=50`);
+      // Load all replies in the thread by fetching multiple generations
+      let allRows = [];
+      let idsToFetch = [postId];
+      const seen = new Set();
+      while (idsToFetch.length) {
+        const batch = idsToFetch.filter(id => !seen.has(id));
+        if (!batch.length) break;
+        batch.forEach(id => seen.add(id));
+        const rows = await sbGet('posts', `reply_to=in.(${batch.map(id=>encodeURIComponent(id)).join(',')})&order=created_at.asc&limit=100`);
+        if (!rows.length) break;
+        allRows = allRows.concat(rows);
+        idsToFetch = rows.map(r => r.id);
+      }
+      if (!allRows.length) return [];
       const session = getSession();
       let likedSet = new Set();
-      if (session && rows.length) {
+      if (session) {
         try {
-          const liked = await sbGet('post_likes', `username=eq.${encodeURIComponent(session.username)}&post_id=in.(${rows.map(r=>encodeURIComponent(r.id)).join(',')})`);
+          const liked = await sbGet('post_likes', `username=eq.${encodeURIComponent(session.username)}&post_id=in.(${allRows.map(r=>encodeURIComponent(r.id)).join(',')})`);
           liked.forEach(l => likedSet.add(l.post_id));
         } catch(e) {}
       }
-      // Fetch avatars
-      const usernames = [...new Set(rows.map(r=>r.username))];
+      const usernames = [...new Set(allRows.map(r=>r.username))];
       const avMap = {};
       if (usernames.length) {
         try {
@@ -1356,7 +1367,7 @@ const _posts = (() => {
           users.forEach(u => { avMap[u.username] = { avatar_url: u.avatar_url, display_name: u.display_name }; });
         } catch(e) {}
       }
-      return rows.map(r => ({
+      return allRows.map(r => ({
         ...r,
         avatar_url: avMap[r.username]?.avatar_url || null,
         display_name: avMap[r.username]?.display_name || r.username,
@@ -1392,15 +1403,20 @@ const _posts = (() => {
 
   function _renderRepliesInto(postId, list) {
     const replies = _replyCache[postId] || [];
-    // Top-level replies to postId
-    const topLevel = replies.filter(r => r.reply_to === postId);
-    let html = '';
-    topLevel.forEach(r => {
-      html += _renderReplyCard(r, false);
-      // Nested replies to this reply
-      const nested = replies.filter(n => n.reply_to === r.id);
-      nested.forEach(n => { html += _renderReplyCard(n, true); });
+    const byParent = {};
+    replies.forEach(r => {
+      if (!byParent[r.reply_to]) byParent[r.reply_to] = [];
+      byParent[r.reply_to].push(r);
     });
+    let html = '';
+    function renderChildren(parentId, depth) {
+      const children = byParent[parentId] || [];
+      children.forEach(r => {
+        html += _renderReplyCard(r, depth > 0, postId);
+        renderChildren(r.id, depth + 1);
+      });
+    }
+    renderChildren(postId, 0);
     list.innerHTML = html || '<div style="padding:10px 20px;font-size:.72rem;color:rgba(255,255,255,.3);">No replies yet.</div>';
   }
 
