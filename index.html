@@ -351,7 +351,7 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
   .pill.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 0 14px rgba(192,0,14,.35), inset 0 1px 0 rgba(255,100,100,.2); backdrop-filter: none; }
 
   /* Netflix horizontal scroll row */
-  .row-wrap { display: flex; align-items: center; gap: 0; padding: 0 56px 0 8px; }
+  .row-wrap { display: flex; align-items: center; gap: 0; padding: 0 56px 0 8px; overflow: hidden; }
   .row-wrap .pill-arr { flex-shrink: 0; }
   .row-wrap .pill-arr.hidden { opacity: 0.15; pointer-events: none; }
   .card-grid {
@@ -3583,9 +3583,19 @@ function scrollChatRooms(dir) {
 function makeCard(v) {
   const platform = getPlatform(v.url);
   const id = extractId(v.url);
-  const thumbUrl = v.thumb || (platform === 'twitch'
-    ? 'https://vod-secure.twitch.tv/v1/vod/' + id + '/preview-320x180.jpg'
-    : 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg');
+  // For Twitch: extract clean id from prefixed extractId result
+  const twitchVodId = id.startsWith('vod_') ? id.replace('vod_','') : null;
+  const twitchChannel = id.startsWith('live_') ? id.replace('live_','') : null;
+  let thumbUrl = v.thumb;
+  if (!thumbUrl) {
+    if (platform === 'twitch') {
+      if (twitchChannel) thumbUrl = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${twitchChannel}-320x180.jpg`;
+      else if (twitchVodId) thumbUrl = `https://static-cdn.jtvnw.net/cf_vods/${twitchVodId}/thumb/thumb0-320x180.jpg`;
+      else thumbUrl = '';
+    } else {
+      thumbUrl = 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg';
+    }
+  }
 
   const session = (typeof getSession === 'function') ? getSession() : null;
   const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
@@ -3608,6 +3618,18 @@ function makeCard(v) {
   img.alt = v.show || '';
   img.loading = 'lazy';
   img.onerror = function() {
+    if (platform === 'twitch') {
+      // Twitch thumb failed — show dark placeholder
+      this.onerror = null;
+      this.style.display = 'none';
+      this.parentNode.style.background = '#1a1a1f';
+      // Add Twitch icon placeholder
+      const ph = document.createElement('div');
+      ph.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;';
+      ph.innerHTML = '<svg width="32" height="32" viewBox="0 0 24 24" fill="rgba(145,70,255,.3)"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg>';
+      this.parentNode.appendChild(ph);
+      return;
+    }
     this.onerror = function() {
       this.onerror = function() {
         this.style.display = 'none';
