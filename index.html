@@ -738,7 +738,11 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
     .filter-outer { padding-bottom: 12px; }
     .card-grid { padding: 8px 0 20px; }
     .row-wrap { padding: 0 16px 0 0; }
-    .swipe-hint { display: block; font-size: .58rem; color: rgba(255,255,255,.22); letter-spacing: 1.5px; text-transform: uppercase; padding: 0 0 6px 2px; font-family: 'DM Sans', sans-serif; }
+    .swipe-hint { display: block !important; font-size: .58rem; color: rgba(255,255,255,.22); letter-spacing: 1.5px; text-transform: uppercase; padding: 0 0 6px 2px; font-family: 'DM Sans', sans-serif; }
+    .card-grid { scrollbar-width: none !important; }
+    .card-grid::-webkit-scrollbar { display: none !important; }
+    .filter-wrap { scrollbar-width: none !important; }
+    .filter-wrap::-webkit-scrollbar { display: none !important; }
     .row-arr { display: flex; }
     footer { padding: 24px 20px; }
     :root { --card-w: 178px; --card-h: 100px; }
@@ -2423,7 +2427,7 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
   <section class="section">
     <div class="sec-head">
       <div style="display:flex;flex-direction:column;gap:2px;">
-        <div class="swipe-hint" style="padding-left:13px;">Swipe to view more</div>
+        <div class="swipe-hint" style="padding-left:13px;display:none;">Swipe to view more</div>
         <div class="sec-title-wrap">
           <div class="s-bar"></div>
           <div class="sec-title">Latest Videos</div>
@@ -2697,9 +2701,7 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
       </button>
 
       <!-- Add to eFed -->
-      <button class="expand-action-btn" id="expand-claim-btn" onclick="openClaimModal(_expandVideo)" data-tip="Add to My eFed" style="display:none;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      </button>
+      
 
       <!-- Visit eFed -->
       <button class="expand-action-btn" id="expand-visit-efed-btn" onclick="visitExpandEfed()" data-tip="Visit eFed" style="display:none;">
@@ -6007,11 +6009,7 @@ function openExpand(v) {
   const id = extractId(v.url);
 
   // Show claim button for eFed owners only
-  const _claimBtn = document.getElementById('expand-claim-btn');
-  if (_claimBtn) {
-    const sess = getSession();
-    _claimBtn.style.display = (sess && (sess.is_efed_owner || sess.role === 'owner') && sess.promo_name) ? 'flex' : 'none';
-  }
+
 
   // Visit eFed button — always visible
   const _visitBtn = document.getElementById('expand-visit-efed-btn');
@@ -6192,10 +6190,23 @@ function openExpand(v) {
       }
     } else {
       const _t = extractT(v.url);
-      _src = `https://www.youtube.com/embed/${id}?autoplay=1&start=${_t}&rel=0&modestbranding=1&enablejsapi=1&playsinline=1`;
+      const _isMobile = window.innerWidth <= 768;
+      // Mobile requires mute=1 for autoplay; we unmute immediately via postMessage
+      const _muteParam = _isMobile ? '&mute=1' : '';
+      _src = `https://www.youtube.com/embed/${id}?autoplay=1&start=${_t}&rel=0&modestbranding=1&enablejsapi=1&playsinline=1${_muteParam}`;
     }
-    document.getElementById('expand-frame').src = _src;
-    document.getElementById('expand-frame').style.display = 'block';
+    const _frame = document.getElementById('expand-frame');
+    _frame.src = _src;
+    _frame.style.display = 'block';
+    // Unmute on mobile after iframe loads (mute=1 was needed to trigger autoplay)
+    if (window.innerWidth <= 768 && !_isTwitch) {
+      setTimeout(() => {
+        try {
+          _frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
+          _frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [100] }), '*');
+        } catch(e) {}
+      }, 1500);
+    }
     document.getElementById('expand-hero-thumb').style.display = 'none';
     document.getElementById('expand-play-btn').style.display = 'none';
     const _vig = document.getElementById('expand-hero-vignette'); if (_vig) _vig.style.display = 'none';
