@@ -80,7 +80,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const users = await sbGet('users', 'twitch_channel=not.is.null&select=username,display_name,twitch_channel');
+    const users = await sbGet('users', 'twitch_channel=not.is.null&auto_stream=eq.true&select=username,display_name,twitch_channel,promo_name');
     if (!users.length) return res.status(200).json({ message: 'No Twitch users registered' });
 
     const channelMap = {};
@@ -106,7 +106,7 @@ export default async function handler(req, res) {
       const alreadyPosted = existing.length > 0;
 
       if (isLive && !alreadyPosted) {
-        const displayName = user.display_name || user.username;
+        const displayName = user.promo_name || user.display_name || user.username;
         const title = stream?.title
           ? `🔴 ${displayName} — ${stream.title}`
           : `🔴 ${displayName} is LIVE on Twitch`;
