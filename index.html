@@ -3138,9 +3138,25 @@ function sortByDate(arr) {
   });
 }
 
+function isMatch(v) {
+  const secs = v.durationSecs || 0;
+  if (!secs) return false;
+  const title = (v.show || '').toLowerCase();
+  // Always a match if under 15 min
+  if (secs < 900) return true;
+  // Never a match — full show keywords
+  const fullShowWords = ['episode','tryout','tryouts','full show','part 1','part 2','part 3','part1','part2','part3','network','supershow','season'];
+  if (fullShowWords.some(w => title.includes(w))) return false;
+  // Match if under 30 min AND title has match signal
+  if (secs < 1800) {
+    const matchWords = [' vs ',' vs.','v. ','* match','full match','1v1','2v2','championship'];
+    if (matchWords.some(w => title.includes(w))) return true;
+  }
+  return false;
+}
 function filteredVideos() {
   const list = activeFilter === 'all' ? [...videos] : videos.filter(v => v.efed === activeFilter);
-  return sortByDate(list.filter(v => !v.durationSecs || v.durationSecs >= 1800));
+  return sortByDate(list.filter(v => !isMatch(v)));
 }
 function buildPills() {
   const efeds = [...new Set(videos.map(v => v.efed).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -3840,7 +3856,7 @@ function sbGetWithTimeout(table, filters, ms = 5000) {
 async function loadMostViewed(allVideos) {
   try {
     // Get all approved video IDs
-    const toFetch = allVideos.filter(v => v.url && (!v.durationSecs || v.durationSecs >= 1800));
+    const toFetch = allVideos.filter(v => v.url && !isMatch(v));
     if (!toFetch.length) return;
 
     // Extract YouTube video IDs
@@ -3904,7 +3920,7 @@ function loadRecentlyAdded(allVideos) {
 
     // Sort by submittedAt desc (most recently submitted to the hub)
     const sorted = [...allVideos]
-      .filter(v => v.url && (!v.durationSecs || v.durationSecs >= 1800))
+      .filter(v => v.url && !isMatch(v))
       .sort((a, b) => {
         const ta = b.submittedAt || b.dateMs || (b.date ? new Date(b.date).getTime() : 0);
         const tb = a.submittedAt || a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
@@ -3976,13 +3992,13 @@ function loadBestMatches(allVideos) {
     const count = document.getElementById('best-matches-count');
     if (!section || !grid) return;
     const matches = allVideos
-      .filter(v => v.url && v.durationSecs > 0 && v.durationSecs < 1800)
+      .filter(v => v.url && isMatch(v))
       .sort((a, b) => {
         const ta = a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
         const tb = b.dateMs || (b.date ? new Date(b.date).getTime() : 0);
         return tb - ta;
       });
-    if (!matches.length) return;
+    if (!matches.length) { section.style.display = 'none'; return; }
     grid.innerHTML = '';
     matches.forEach(v => grid.appendChild(makeCard(v)));
     if (count) count.textContent = ' · ' + matches.length + ' match' + (matches.length !== 1 ? 'es' : '');
@@ -4063,10 +4079,9 @@ async function initHub() {
     }
   } catch(e) {}
 
-  // Fetch durations first, then build all rows so Best Matches filter works
+  // Fetch durations first so isMatch() works before any row builds
   (async () => {
     try {
-      // Pull saved durations from DB
       const dbDurRows = await sbGet('submissions', 'status=eq.approved&select=url,duration_seconds').catch(() => []);
       dbDurRows.forEach(r => {
         if (r.duration_seconds) {
@@ -4074,7 +4089,6 @@ async function initHub() {
           if (v) v.durationSecs = r.duration_seconds;
         }
       });
-      // Fetch remaining from YT API in batches of 50
       const stillNeed = videos.filter(v => v.url && !v.durationSecs && !v.url.includes('twitch'));
       for (let i = 0; i < stillNeed.length; i += 50) {
         const batch = stillNeed.slice(i, i + 50);
@@ -4094,8 +4108,6 @@ async function initHub() {
         } catch(e) {}
       }
     } catch(e) { console.warn('Duration fetch failed:', e); }
-
-    // Now build all rows with durations populated
     buildPills();
     renderGrid();
     loadUpcomingRow();
