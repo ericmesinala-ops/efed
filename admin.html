@@ -162,6 +162,7 @@
     <button class="tab-btn" onclick="switchTab('broadcast', this)">📢 Broadcast</button>
     <button class="tab-btn" onclick="switchTab('scanner', this)">📡 Scanner</button>
     <button class="tab-btn" onclick="switchTab('channels', this)">📺 eFed Channels</button>
+    <button class="tab-btn" onclick="switchTab('queue', this)" id="queue-tab-btn">🗂️ Scan Queue <span id="queue-badge" style="background:var(--accent);color:#fff;font-size:.5rem;padding:1px 6px;border-radius:10px;margin-left:4px;display:none;"></span></button>
   </div>
 
   <!-- ONLINE -->
@@ -249,16 +250,23 @@
     </div>
   </div>
 
+  <!-- SCAN QUEUE -->
+  <div class="tab-panel" id="tab-queue">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+        <div class="card-title" style="margin-bottom:0;"><div class="dot" style="background:var(--gold);"></div>Scan Queue <span id="queue-count" style="font-size:.7rem;color:var(--muted);font-weight:400;letter-spacing:0;margin-left:4px;"></span></div>
+        <button class="btn btn-red btn-sm" onclick="clearQueue()">Clear All</button>
+      </div>
+      <div id="queue-list"><div class="empty"><div class="empty-icon">🗂️</div>No queued results. Run a scan first.</div></div>
+    </div>
+  </div>
+
   <!-- CHANNELS -->
   <div class="tab-panel" id="tab-channels">
     <div class="card">
       <div class="card-title"><div class="dot"></div>Add eFed Channel</div>
       <div class="input-row">
-        <div class="input-group">
-          <label class="input-label">eFed Name</label>
-          <input class="input-field" id="ch-name" placeholder="e.g. First Strike Wrestling">
-        </div>
-        <div class="input-group" style="flex:2;">
+        <div class="input-group" style="flex:3;">
           <label class="input-label">YouTube Channel URL</label>
           <input class="input-field" id="ch-url" placeholder="https://www.youtube.com/@ChannelName">
         </div>
@@ -320,6 +328,7 @@ function switchTab(name, btn) {
   if(name==='flagged') loadFlagged();
   if(name==='users') loadUsers();
   if(name==='channels') loadChannels();
+  if(name==='queue') loadQueue();
   if(name==='scanner') { loadScanLog(); checkScanLock(); updateCostPreview(); }
 }
 
@@ -338,6 +347,7 @@ async function init() {
   } catch(e){}
   loadStats();
   loadOnline();
+  updateQueueBadge();
 }
 
 async function loadStats() {
@@ -692,6 +702,7 @@ async function startScan() {
   try { await sbInsert('scan_log',{channels_scanned:channels.length,videos_found:results.length,videos_added:0}); } catch(e){}
   localStorage.setItem('admin_last_scan',Date.now().toString());
   loadStats(); loadScanLog();
+  await saveResultsToQueue(results);
   showScanResults(results);
   btn.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg> Scan eFeds';
   checkScanLock();
@@ -808,16 +819,30 @@ async function loadChannels() {
 }
 
 async function addChannel() {
-  const name=document.getElementById('ch-name').value.trim();
   const url=document.getElementById('ch-url').value.trim();
-  if(!name||!url){toast('Fill in both fields.');return;}
+  if(!url){toast('Paste a YouTube channel URL.');return;}
   if(!url.includes('youtube.com')&&!url.includes('youtu.be')){toast('Must be a YouTube channel URL.');return;}
+  const btn=document.querySelector('#tab-channels .btn-gold');
+  btn.disabled=true; btn.textContent='Fetching…';
   try {
-    await sbInsert('efed_channels',{efed_name:name,yt_channel_url:url});
-    document.getElementById('ch-name').value='';
+    // Resolve channel ID and get real channel name from YouTube
+    const cid=await resolveChannelId(url);
+    let efedName='';
+    if(cid){
+      const r=await fetch(`https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${cid}&key=${YT_API_KEY}`);
+      const d=await r.json();
+      efedName=d.items?.[0]?.snippet?.title||'';
+    }
+    if(!efedName){
+      // Fallback: extract handle from URL
+      const hm=url.match(/@([A-Za-z0-9_.-]+)/);
+      efedName=hm?hm[1]:url;
+    }
+    await sbInsert('efed_channels',{efed_name:efedName,yt_channel_url:url});
     document.getElementById('ch-url').value='';
-    toast('✅ Channel added!'); loadChannels(); loadStats();
+    toast('✅ '+efedName+' added!'); loadChannels(); loadStats();
   } catch(e){toast('Error: '+e.message);}
+  finally{btn.disabled=false;btn.textContent='+ Add';}
 }
 
 async function deleteChannel(id,name) {
@@ -837,6 +862,128 @@ function adminConfirm(msg, title='Confirm') {
     document.getElementById('confirm-modal-msg').textContent = msg;
     document.getElementById('confirm-modal-bg').style.display = 'flex';
   });
+}
+
+// ── SCAN QUEUE ──
+async function saveResultsToQueue(results) {
+  if(!results.length) return;
+  try {
+    const rows = results.map(r => ({
+      video_id: r.videoId,
+      url: r.url,
+      title: r.title,
+      efed: r.efed,
+      date: r.date,
+      date_ms: r.dateMs || (r.date ? new Date(r.date).getTime() : Date.now()),
+      thumb_url: r.thumb || null,
+      duration_seconds: r.durationSecs || null,
+      is_upcoming: !!r.isUpcoming,
+      status: 'pending'
+    }));
+    // Insert in batches, skip duplicates by video_id
+    for(let i=0;i<rows.length;i+=50) {
+      await fetch(SUPABASE_URL+'/rest/v1/scan_results', {
+        method:'POST',
+        headers:{...SB_HEADERS,'Prefer':'resolution=ignore-duplicates'},
+        body:JSON.stringify(rows.slice(i,i+50))
+      });
+    }
+    updateQueueBadge();
+  } catch(e){ console.error('Queue save failed:',e); }
+}
+
+async function updateQueueBadge() {
+  try {
+    const rows = await sbGet('scan_results','status=eq.pending&select=id');
+    const badge = document.getElementById('queue-badge');
+    const count = rows.length;
+    if(badge) { badge.textContent = count; badge.style.display = count>0?'inline':'none'; }
+  } catch(e){}
+}
+
+async function loadQueue() {
+  const list = document.getElementById('queue-list');
+  const countEl = document.getElementById('queue-count');
+  list.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
+  try {
+    const rows = await sbGet('scan_results','status=eq.pending&order=scanned_at.desc');
+    if(countEl) countEl.textContent = rows.length ? '· '+rows.length+' pending' : '';
+    if(!rows.length){ list.innerHTML='<div class="empty"><div class="empty-icon">🗂️</div>Queue is empty.</div>'; return; }
+    list.innerHTML='';
+    rows.forEach(r => {
+      const item = document.createElement('div');
+      item.className='result-item'; item.id='q-'+r.id;
+      const durStr = r.duration_seconds>0 ? `<span style="font-size:.6rem;font-family:'JetBrains Mono',monospace;color:rgba(255,255,255,.5);background:rgba(255,255,255,.06);border-radius:4px;padding:2px 7px;">${Math.floor(r.duration_seconds/60)}m${String(r.duration_seconds%60).padStart(2,'0')}s</span>` : '';
+      const dest = r.is_upcoming
+        ? '<span style="font-size:.6rem;font-weight:700;letter-spacing:1px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);color:var(--gold);border-radius:4px;padding:2px 8px;">⏰ UPCOMING</span>'
+        : (r.duration_seconds>0&&r.duration_seconds<900)
+          ? '<span style="font-size:.6rem;font-weight:700;letter-spacing:1px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;border-radius:4px;padding:2px 8px;">🥊 BEST MATCHES</span>'
+          : (() => {
+              const fw=['episode','tryout','tryouts','full show','part 1','part 2','part 3','network','supershow','season'];
+              const mw=[' vs ',' vs.','v. ',' match','full match','1v1','2v2','championship'];
+              const t=(r.title||'').toLowerCase();
+              if(r.duration_seconds>0&&r.duration_seconds<1800&&!fw.some(w=>t.includes(w))&&mw.some(w=>t.includes(w)))
+                return '<span style="font-size:.6rem;font-weight:700;letter-spacing:1px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;border-radius:4px;padding:2px 8px;">🥊 BEST MATCHES</span>';
+              return '<span style="font-size:.6rem;font-weight:700;letter-spacing:1px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.5);border-radius:4px;padding:2px 8px;">📺 LATEST VIDEOS</span>';
+            })();
+      const scannedDate = new Date(r.scanned_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      item.innerHTML = `
+        <div class="result-thumb"><img src="${esc(r.thumb_url||'')}" alt="" onerror="this.style.display='none'"></div>
+        <div class="result-info">
+          <div class="result-title">${esc(r.title||'')}</div>
+          <div class="result-meta" style="margin-bottom:5px;">${esc(r.efed)} · ${r.date} · <span style="color:var(--muted);font-size:.6rem;">Scanned ${scannedDate}</span></div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">${durStr} ${dest}</div>
+          <div class="result-actions">
+            <button class="btn btn-green btn-sm" onclick="approveQueued(${r.id},'${esc(r.url)}','${esc(r.video_id||'')}','${esc(r.title||'')}','${esc(r.efed||'')}','${r.date||''}',${r.date_ms||0},'${esc(r.thumb_url||'')}',${r.duration_seconds||0},${r.is_upcoming||false})">✓ Add to Hub</button>
+            <button class="btn btn-red btn-sm" onclick="skipQueued(${r.id})">Skip</button>
+            <a href="${esc(r.url)}" target="_blank" class="btn btn-ghost btn-sm">▶ Watch</a>
+          </div>
+        </div>`;
+      list.appendChild(item);
+    });
+    updateQueueBadge();
+  } catch(e){ list.innerHTML='<div class="empty">Error loading queue.</div>'; }
+}
+
+async function approveQueued(id, url, videoId, title, efed, date, dateMs, thumb, durSecs, isUpcoming) {
+  const btn = document.querySelector(`#q-${id} .btn-green`);
+  if(btn){ btn.disabled=true; btn.textContent='Adding…'; }
+  try {
+    const status = isUpcoming ? 'upcoming' : 'approved';
+    await sbInsert('submissions',{
+      url, video_id:videoId, show_name:title, efed, date,
+      date_ms:dateMs||Date.now(),
+      submitted_by:ADMIN_USERNAME, submitted_at:Date.now(),
+      community:true, status,
+      thumb_url:thumb||null,
+      duration_seconds:durSecs||null
+    });
+    await sbUpdate('scan_results',{status:'approved'},`id=eq.${id}`);
+    const el=document.getElementById('q-'+id);
+    if(el){ el.style.opacity='.3'; el.style.pointerEvents='none'; }
+    if(btn) btn.textContent='✓ Added';
+    toast('✅ Added to Hub!'); loadStats(); updateQueueBadge();
+  } catch(e){
+    if(btn){ btn.disabled=false; btn.textContent='✓ Add to Hub'; }
+    toast('Error: '+e.message);
+  }
+}
+
+async function skipQueued(id) {
+  try {
+    await sbUpdate('scan_results',{status:'skipped'},`id=eq.${id}`);
+    const el=document.getElementById('q-'+id);
+    if(el){ el.style.opacity='.25'; el.style.pointerEvents='none'; }
+    updateQueueBadge();
+  } catch(e){ toast('Error: '+e.message); }
+}
+
+async function clearQueue() {
+  if(!await adminConfirm('Clear all pending scan results? This cannot be undone.','Clear Queue')) return;
+  try {
+    await sbDelete('scan_results','status=eq.pending');
+    toast('Queue cleared.'); loadQueue(); updateQueueBadge();
+  } catch(e){ toast('Error: '+e.message); }
 }
 
 init();
