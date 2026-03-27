@@ -281,6 +281,18 @@
 
 <div id="admin-toast"></div>
 
+<!-- CONFIRM MODAL -->
+<div id="confirm-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:360px;padding:28px 24px;box-shadow:0 24px 60px rgba(0,0,0,.7);">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#fff;margin-bottom:8px;" id="confirm-modal-title">Confirm</div>
+    <div style="font-size:.75rem;color:#8a8a9a;line-height:1.6;margin-bottom:24px;" id="confirm-modal-msg"></div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="_confirmResolve(false)" style="flex:1;padding:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">Cancel</button>
+      <button id="confirm-modal-ok" onclick="_confirmResolve(true)" style="flex:1;padding:11px;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.35);border-radius:10px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;" onmouseover="this.style.background='rgba(192,0,14,.25)'" onmouseout="this.style.background='rgba(192,0,14,.15)'">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const SUPABASE_URL = 'https://osbarvhklizidsffytye.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
@@ -407,7 +419,7 @@ async function adminApprove(id) {
 }
 
 async function adminReject(id) {
-  if(!confirm('Reject and delete this submission?')) return;
+  if(!await adminConfirm('Reject and delete this submission? This cannot be undone.', 'Reject Submission')) return;
   const row=document.getElementById('prow-'+id); if(row) row.style.opacity='.4';
   try {
     await sbDelete('submissions',`id=eq.${id}`);
@@ -512,7 +524,7 @@ async function adminToggleCreator(username,grant) {
 }
 
 async function adminBanUser(username) {
-  if(!confirm('Ban @'+username+'? They will not be able to log in.')) return;
+  if(!await adminConfirm('Ban @'+username+'? They will not be able to log in.', 'Ban User')) return;
   try { await sbUpdate('users',{banned:true,banned_reason:'Banned by admin'},`username=eq.${encodeURIComponent(username)}`); toast('🚫 '+username+' banned.'); loadUsers(); }
   catch(e){ toast('Error: '+e.message); }
 }
@@ -611,10 +623,39 @@ async function startScan() {
       if(!cid) continue;
       const r=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${cid}&type=video&publishedAfter=${sevenDaysAgo}&maxResults=10&order=date&key=${YT_API_KEY}`);
       const d=await r.json();
-      for(const item of(d.items||[])){
-        const vid=item.id?.videoId;
-        if(!vid||existingIds.has(vid)) continue;
-        results.push({videoId:vid,title:item.snippet.title,channel:item.snippet.channelTitle,efed:ch.efed_name,date:item.snippet.publishedAt?.split('T')[0]||'',thumb:item.snippet.thumbnails?.medium?.url||'',url:`https://www.youtube.com/watch?v=${vid}`});
+      const newVids=(d.items||[]).filter(item=>item.id?.videoId&&!existingIds.has(item.id.videoId));
+      if(!newVids.length) continue;
+      // Fetch durations + liveStreamingDetails in batch
+      const vidIds=newVids.map(i=>i.id.videoId).join(',');
+      const detailRes=await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails,liveStreamingDetails,snippet&id=${vidIds}&key=${YT_API_KEY}`);
+      const detailData=await detailRes.json();
+      const detailMap={};
+      (detailData.items||[]).forEach(v=>{ detailMap[v.id]=v; });
+      for(const item of newVids){
+        const vid=item.id.videoId;
+        // Skip shorts (URL-based or duration < 62s)
+        const detail=detailMap[vid];
+        const iso=detail?.contentDetails?.duration||'';
+        const dm=iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        const durSecs=(parseInt(dm?.[1]||0)*3600)+(parseInt(dm?.[2]||0)*60)+parseInt(dm?.[3]||0);
+        if(durSecs>0&&durSecs<62) continue; // skip shorts
+        // Detect upcoming (scheduled premiere)
+        const broadcastStatus=detail?.liveStreamingDetails?.activeLiveChatId?'live':detail?.snippet?.liveBroadcastContent;
+        const scheduledStart=detail?.liveStreamingDetails?.scheduledStartTime;
+        const isUpcoming=broadcastStatus==='upcoming'&&scheduledStart;
+        const dateMs=isUpcoming?new Date(scheduledStart).getTime():(item.snippet.publishedAt?new Date(item.snippet.publishedAt).getTime():Date.now());
+        results.push({
+          videoId:vid,
+          title:item.snippet.title,
+          channel:item.snippet.channelTitle,
+          efed:ch.efed_name,
+          date:item.snippet.publishedAt?.split('T')[0]||'',
+          dateMs,
+          thumb:item.snippet.thumbnails?.medium?.url||'',
+          url:`https://www.youtube.com/watch?v=${vid}`,
+          durationSecs:durSecs,
+          isUpcoming:!!isUpcoming
+        });
         existingIds.add(vid);
       }
     } catch(e){console.warn('Scan failed:',ch.efed_name,e);}
@@ -659,7 +700,7 @@ function showScanResults(results) {
       <div class="result-thumb"><img src="${esc(r.thumb)}" alt="" onerror="this.style.display='none'"></div>
       <div class="result-info">
         <div class="result-title">${esc(r.title)}</div>
-        <div class="result-meta">${esc(r.efed)} · ${r.date}</div>
+        <div class="result-meta">${esc(r.efed)} · ${r.date}${r.isUpcoming?' · <span style="color:var(--gold);font-weight:700;">⏰ UPCOMING</span>':''}${r.durationSecs>0?' · '+Math.floor(r.durationSecs/60)+'m'+String(r.durationSecs%60).padStart(2,'0')+'s':''}</div>
         <div class="result-actions">
           <button class="btn btn-green btn-sm" onclick="approveScanned(${idx})">✓ Add to Hub</button>
           <button class="btn btn-ghost btn-sm" onclick="skipScanned(${idx})">Skip</button>
@@ -675,7 +716,16 @@ async function approveScanned(idx) {
   const btn=document.querySelector(`#result-${idx} .btn-green`);
   btn.disabled=true; btn.textContent='Adding…';
   try {
-    await sbInsert('submissions',{url:r.url,video_id:r.videoId,show_name:r.title,efed:r.efed,date:r.date,date_ms:r.date?new Date(r.date).getTime():Date.now(),submitted_by:ADMIN_USERNAME,submitted_at:Date.now(),community:true,status:'approved',thumb_url:r.thumb||null});
+    const _status=r.isUpcoming?'upcoming':'approved';
+    const _durSecs=r.durationSecs||null;
+    await sbInsert('submissions',{
+      url:r.url,video_id:r.videoId,show_name:r.title,efed:r.efed,
+      date:r.date,date_ms:r.dateMs||Date.now(),
+      submitted_by:ADMIN_USERNAME,submitted_at:Date.now(),
+      community:true,status:_status,
+      thumb_url:r.thumb||null,
+      duration_seconds:_durSecs
+    });
     document.getElementById('result-'+idx).style.opacity='.35';
     document.getElementById('result-'+idx).style.pointerEvents='none';
     btn.textContent='✓ Added';
@@ -735,9 +785,22 @@ async function addChannel() {
 }
 
 async function deleteChannel(id,name) {
-  if(!confirm(`Remove "${name}" from the scanner list?`)) return;
+  if(!await adminConfirm(`Remove "${name}" from the scanner list?`, 'Remove Channel')) return;
   try { await sbDelete('efed_channels',`id=eq.${id}`); toast('Removed.'); loadChannels(); loadStats(); }
   catch(e){toast('Error: '+e.message);}
+}
+
+let _confirmResolve = null;
+function adminConfirm(msg, title='Confirm') {
+  return new Promise(resolve => {
+    _confirmResolve = (val) => {
+      document.getElementById('confirm-modal-bg').style.display = 'none';
+      resolve(val);
+    };
+    document.getElementById('confirm-modal-title').textContent = title;
+    document.getElementById('confirm-modal-msg').textContent = msg;
+    document.getElementById('confirm-modal-bg').style.display = 'flex';
+  });
 }
 
 init();
