@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="EFED Hub">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📺</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2307070a'/><rect x='4' y='8' width='24' height='14' rx='2' fill='none' stroke='%23c8a84b' stroke-width='1.8'/><rect x='8' y='10' width='16' height='10' rx='1' fill='%23c0000e' opacity='.7'/><line x1='11' y1='22' x2='9' y2='26' stroke='%23c8a84b' stroke-width='1.5' stroke-linecap='round'/><line x1='21' y1='22' x2='23' y2='26' stroke='%23c8a84b' stroke-width='1.5' stroke-linecap='round'/><line x1='9' y1='26' x2='23' y2='26' stroke='%23c8a84b' stroke-width='1.5' stroke-linecap='round'/></svg>">
 <link rel="apple-touch-icon" href="/efed-hub-icon.svg">
 <title>EFED Streaming Hub</title>
 <!-- Open Graph / Social -->
@@ -516,6 +516,19 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
   .card-claimed-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.5); border-radius: 8px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .2s; z-index: 10; pointer-events: none; }
   .card:hover .card-claimed-overlay { opacity: 1; }
   .card-claimed-label { font-size: .6rem; font-weight: 700; color: var(--gold); letter-spacing: 1px; text-align: center; padding: 6px 10px; background: rgba(0,0,0,.7); border-radius: 6px; text-transform: uppercase; }
+
+  /* ── CARD MOVE ICON ── */
+  .card-move-btn {
+    position: absolute; top: 7px; right: 7px; z-index: 12;
+    width: 26px; height: 26px; border-radius: 6px;
+    background: rgba(0,0,0,.75); border: 1px solid rgba(255,255,255,.2);
+    color: rgba(255,255,255,.8); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .15s, background .15s;
+    pointer-events: none;
+  }
+  .card:hover .card-move-btn { opacity: 1; pointer-events: all; }
+  .card-move-btn:hover { background: rgba(200,168,75,.8); border-color: var(--gold); color: #000; }
 
   /* Bookmark delete hover button */
   .bm-del-btn {
@@ -1798,7 +1811,6 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
     cursor: pointer; text-decoration: none; text-transform: uppercase;
     transition: background .2s, color .2s; margin-top: 2px;
   }
-  @media (max-width: 768px) { #expand-close-btn { display: none !important; } }
   #expand-close-btn:hover { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.2); }
 
   /* EQ animation bar — sits left of the title */
@@ -2486,11 +2498,6 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
               <div style="font-size:.72rem;color:#8a8a9a;line-height:1.6;">Yes. Your email and password are never publicly visible. Only your display name and activity on the Hub (likes, comments, posts) are visible to other members.</div>
             </div>
 
-            <div style="border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px 16px;">
-              <div style="font-size:.8rem;font-weight:700;color:#fff;margin-bottom:6px;">Can others see what I submitted?</div>
-              <div style="font-size:.72rem;color:#8a8a9a;line-height:1.6;">No. Your submissions are private — other members have no way of knowing which videos you posted to the Hub. Only the Hub admin can see who submitted what. On the home page and on your profile, submitted videos appear exactly like any other video with no indication of who added them.</div>
-            </div>
-
           </div>
         </div>
       </div>
@@ -2812,7 +2819,7 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
 
     </div>
 
-    <div id="expand-yt-note" style="font-size:.68rem;color:#6a6a7a;line-height:1.5;margin-bottom:16px;padding:10px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;">📺 Views from this YouTube embed are counted toward the official YouTube view total.</div>
+    <div style="font-size:.68rem;color:#6a6a7a;line-height:1.5;margin-bottom:16px;padding:10px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;">📺 Views from this YouTube embed are counted toward the official YouTube view total.</div>
     <div class="expand-actions">
       <!-- Like -->
       <button class="expand-action-btn" id="expand-like-btn" onclick="toggleExpandLike()" data-tip="Like">
@@ -3718,6 +3725,36 @@ function scrollChatRooms(dir) {
   if (wrap) wrap.scrollBy({ left: dir * 150, behavior: 'smooth' });
 }
 
+function openMoveCategoryModal(v, btn) {
+  const curMatch = isMatch(v);
+  const label = curMatch ? 'Move to Full Episodes' : 'Move to Best Matches';
+  const hint = curMatch
+    ? 'This will treat the video as a full show and remove it from Best Matches.'
+    : 'This will treat the video as a match and move it to Best Matches.';
+
+  if (!confirm(label + '\n\n' + hint)) return;
+
+  // Toggle: if currently a match, force it out by setting durationSecs to 0 override
+  // We store override in DB as duration_seconds tweak
+  const newDuration = curMatch ? 99999 : 60; // 99999 = definitely full show, 60 = definitely a match
+  fetch(SUPABASE_URL + '/rest/v1/submissions?url=eq.' + encodeURIComponent(v.url), {
+    method: 'PATCH', headers: SB_HEADERS,
+    body: JSON.stringify({ duration_seconds: newDuration })
+  }).then(r => {
+    if (r.ok) {
+      v.durationSecs = newDuration;
+      showToast(curMatch ? '✅ Moved to Full Episodes' : '✅ Moved to Best Matches');
+      // Rebuild rows
+      buildPills();
+      renderGrid();
+      loadBestMatches(videos);
+      if (btn) btn.title = curMatch ? 'Move to Best Matches' : 'Move to Full Episodes';
+    } else {
+      showToast('Could not move. Try again.');
+    }
+  }).catch(() => showToast('Could not move. Try again.'));
+}
+
 function makeCard(v) {
   const platform = getPlatform(v.url);
   const id = extractId(v.url);
@@ -3804,7 +3841,23 @@ function makeCard(v) {
 
   thumbDiv.appendChild(cardOver);
 
-
+  // Move to Best Matches / Latest Videos button — admin always, poster only on own
+  if (v.community && v.submittedBy) {
+    const _ms = getSession();
+    const _mIsAdmin = _ms && _ms.username.toLowerCase() === ADMIN_USERNAME;
+    const _mIsPoster = _ms && _ms.username.toLowerCase() === v.submittedBy.toLowerCase();
+    if (_mIsAdmin || _mIsPoster) {
+      const moveBtn = document.createElement('button');
+      moveBtn.className = 'card-move-btn';
+      moveBtn.title = v.durationSecs && isMatch(v) ? 'Move to Full Episodes' : 'Move to Best Matches';
+      moveBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>';
+      moveBtn.onclick = (e) => {
+        e.stopPropagation();
+        openMoveCategoryModal(v, moveBtn);
+      };
+      thumbDiv.appendChild(moveBtn);
+    }
+  }
 
   el.appendChild(thumbDiv);
 
@@ -3827,18 +3880,18 @@ function makeCard(v) {
   dateDiv.textContent = v.date || '';
   infoDiv.appendChild(dateDiv);
 
-  // Only admin and the poster see the submitted-by text
+  // Only admin sees non-own submissions; poster sees their own; admin never sees their own
   if (v.community && v.submittedBy) {
-    const _cardSession = getSession();
-    const _isCardAdmin = _cardSession && _cardSession.username.toLowerCase() === ADMIN_USERNAME;
-    const _isCardPoster = _cardSession && _cardSession.username.toLowerCase() === v.submittedBy.toLowerCase();
-    if (_isCardAdmin || _isCardPoster) {
+    const _cs = getSession();
+    const _isAdmin = _cs && _cs.username.toLowerCase() === ADMIN_USERNAME;
+    const _isPoster = _cs && _cs.username.toLowerCase() === v.submittedBy.toLowerCase();
+    const _isOwnSubmission = _isAdmin && v.submittedBy.toLowerCase() === ADMIN_USERNAME;
+    if ((_isAdmin && !_isOwnSubmission) || (_isPoster && !_isAdmin)) {
       const postedDiv = document.createElement('div');
       postedDiv.className = 'card-posted-by';
-      if (_isCardPoster && !_isCardAdmin) {
+      if (_isPoster && !_isAdmin) {
         postedDiv.textContent = 'You submitted this video';
       } else {
-        // Admin sees "by [efed name]"
         postedDiv.innerHTML = 'by ' + withVerified(v.displayName || v.submittedBy, v.submittedBy, false);
       }
       infoDiv.appendChild(postedDiv);
@@ -5725,7 +5778,7 @@ function screenVideo(title, channel) {
     'wrestling federation','wrestling promotion','wrestling show','wrestling ep',
     'episode','ep.','ep ','season','event','ppv','pay per view','pay-per-view',
     'championship','title match','vs','vs.','versus','superstar','roster','ple',
-    'wwe 2k','fire pro','no mercy','here comes the pain','svr',
+    'wwe 2k','wwe2k','2k25','2k26','2k24','2k23','universe mode','my universe','fire pro','no mercy','here comes the pain','svr',
     'smackdown vs raw','wrestling universe','wrestling network',
     'wrestling hub','wrestling tv','wrestling weekly','wrestling'
   ];
@@ -6363,8 +6416,8 @@ function openExpand(v) {
   loadExpandSupport();
   loadSupportersRow();
 
-  // Inject Back to Hub button above comments on all screen sizes
-  {
+  // Desktop: inject Back to Hub button between actions and comments
+  if (window.innerWidth >= 769) {
     const _existingClone = document.getElementById('expand-close-btn-desktop');
     if (_existingClone) _existingClone.remove();
     const _origBtn = document.getElementById('expand-close-btn');
@@ -6417,8 +6470,6 @@ function openExpand(v) {
     // Twitch expiry notice
     const _twitchNote = document.getElementById('expand-twitch-note');
     if (_twitchNote) _twitchNote.style.display = _isTwitch ? 'flex' : 'none';
-    const _ytNote = document.getElementById('expand-yt-note');
-    if (_ytNote) _ytNote.style.display = _isTwitch ? 'none' : '';
     if (!_isTwitch) startWatchTimer(v.url);
     const _eq = document.getElementById('expand-eq');
     if (_eq) _eq.classList.add('playing');
