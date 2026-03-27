@@ -653,10 +653,14 @@ async function startScan() {
     const ex=await sbGet('submissions','select=video_id,url');
     ex.forEach(r=>{
       if(r.video_id) existingIds.add(r.video_id);
-      // Also extract ID from URL as fallback
       const m=r.url?.match(/(?:v=|youtu\.be\/)([^&?/]+)/);
       if(m?.[1]) existingIds.add(m[1]);
     });
+  } catch(e){}
+  // Also exclude videos already in scan queue (pending or skipped)
+  try {
+    const queued=await sbGet('scan_results','select=video_id&status=eq.pending');
+    queued.forEach(r=>{ if(r.video_id) existingIds.add(r.video_id); });
   } catch(e){}
   for(let i=0;i<channels.length;i++){
     const ch=channels[i];
@@ -667,12 +671,28 @@ async function startScan() {
       const cid=await resolveChannelId(ch.yt_channel_url);
       if(!cid) continue;
       const r=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${cid}&type=video&publishedAfter=${sevenDaysAgo}&maxResults=10&order=date&key=${YT_API_KEY}`);
+      if(r.status===403) {
+        const errData=await r.json();
+        if(errData?.error?.errors?.[0]?.reason==='quotaExceeded'||errData?.error?.code===403) {
+          fill.style.width='100%';
+          fill.style.background='rgba(192,0,14,.8)';
+          label.textContent=`⚠️ YouTube quota exceeded — scanned ${i} of ${channels.length} channels. Try again tomorrow.`;
+          toast('⚠️ YouTube API quota exceeded!',5000);
+          break;
+        }
+      }
       const d=await r.json();
       const newVids=(d.items||[]).filter(item=>item.id?.videoId&&!existingIds.has(item.id.videoId));
       if(!newVids.length) continue;
       // Fetch durations + liveStreamingDetails in batch
       const vidIds=newVids.map(i=>i.id.videoId).join(',');
       const detailRes=await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails,liveStreamingDetails,snippet&id=${vidIds}&key=${YT_API_KEY}`);
+      if(detailRes.status===403){
+        label.textContent=`⚠️ YouTube quota exceeded — scanned ${i} of ${channels.length} channels. Try again tomorrow.`;
+        fill.style.background='rgba(192,0,14,.8)';
+        toast('⚠️ YouTube API quota exceeded!',5000);
+        break;
+      }
       const detailData=await detailRes.json();
       const detailMap={};
       (detailData.items||[]).forEach(v=>{ detailMap[v.id]=v; });
