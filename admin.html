@@ -225,8 +225,9 @@
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
         <div>
           <div class="card-title" style="margin-bottom:6px;"><div class="dot" style="background:var(--accent);"></div>YouTube Scanner</div>
-          <div style="font-size:.7rem;color:var(--muted);line-height:1.7;" id="scan-quota-note">Scans all eFed channels for videos from the last 7 days. Limit: 1 scan per 24 hours.</div>
+          <div style="font-size:.7rem;color:var(--muted);line-height:1.7;" id="scan-quota-note">Scans all eFed channels for videos from the last 7 days.</div>
           <div style="font-size:.68rem;color:rgba(200,168,75,.6);margin-top:4px;" id="scan-cost-preview"></div>
+          <div style="font-size:.68rem;color:rgba(192,0,14,.7);margin-top:4px;font-family:'JetBrains Mono',monospace;" id="scan-countdown"></div>
         </div>
         <button class="scan-btn" id="scan-btn" onclick="startScan()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -575,20 +576,43 @@ async function updateCostPreview() {
   } catch(e) {}
 }
 
+let _scanCountdownTimer = null;
+
 function checkScanLock() {
-  const last=localStorage.getItem('admin_last_scan');
-  const btn=document.getElementById('scan-btn');
-  if(last){
-    const remaining=24*60*60*1000-(Date.now()-parseInt(last));
-    if(remaining>0){
-      const hrs=Math.floor(remaining/3600000);
-      const mins=Math.floor((remaining%3600000)/60000);
-      btn.disabled=true;
-      document.getElementById('scan-quota-note').textContent=`Next scan available in ${hrs}h ${mins}m`;
+  const last = localStorage.getItem('admin_last_scan');
+  const btn = document.getElementById('scan-btn');
+  if (_scanCountdownTimer) { clearInterval(_scanCountdownTimer); _scanCountdownTimer = null; }
+  if (last) {
+    const remaining = 24*60*60*1000 - (Date.now() - parseInt(last));
+    if (remaining > 0) {
+      btn.disabled = true;
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Scan Locked';
+      const updateCountdown = () => {
+        const rem = 24*60*60*1000 - (Date.now() - parseInt(last));
+        if (rem <= 0) {
+          clearInterval(_scanCountdownTimer);
+          _scanCountdownTimer = null;
+          const cd = document.getElementById('scan-countdown');
+          if (cd) cd.textContent = '';
+          btn.disabled = false;
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg> Scan eFeds';
+          return;
+        }
+        const hrs = Math.floor(rem/3600000);
+        const mins = Math.floor((rem%3600000)/60000);
+        const secs = Math.floor((rem%60000)/1000);
+        const cd = document.getElementById('scan-countdown');
+        if (cd) cd.textContent = `🔒 Next scan in ${hrs}h ${String(mins).padStart(2,'0')}m ${String(secs).padStart(2,'0')}s`;
+      };
+      updateCountdown();
+      _scanCountdownTimer = setInterval(updateCountdown, 1000);
       return false;
     }
   }
-  btn.disabled=false;
+  const cd = document.getElementById('scan-countdown');
+  if (cd) cd.textContent = '';
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg> Scan eFeds';
   return true;
 }
 
@@ -700,7 +724,19 @@ function showScanResults(results) {
       <div class="result-thumb"><img src="${esc(r.thumb)}" alt="" onerror="this.style.display='none'"></div>
       <div class="result-info">
         <div class="result-title">${esc(r.title)}</div>
-        <div class="result-meta">${esc(r.efed)} · ${r.date}${r.isUpcoming?' · <span style="color:var(--gold);font-weight:700;">⏰ UPCOMING</span>':''}${r.durationSecs>0?' · '+Math.floor(r.durationSecs/60)+'m'+String(r.durationSecs%60).padStart(2,'0')+'s':''}</div>
+        <div class="result-meta" style="margin-bottom:5px;">${esc(r.efed)} · ${r.date}</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+          ${r.durationSecs>0?`<span style="font-size:.6rem;font-family:'JetBrains Mono',monospace;color:rgba(255,255,255,.5);background:rgba(255,255,255,.06);border-radius:4px;padding:2px 7px;">${Math.floor(r.durationSecs/60)}m${String(r.durationSecs%60).padStart(2,'0')}s</span>`:'<span style="font-size:.6rem;color:var(--muted);">duration unknown</span>'}
+          ${(()=>{
+            if(r.isUpcoming) return '<span style="font-size:.6rem;font-weight:700;letter-spacing:1px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);color:var(--gold);border-radius:4px;padding:2px 8px;">⏰ UPCOMING</span>';
+            if(r.durationSecs>0&&r.durationSecs<900) return '<span style="font-size:.6rem;font-weight:700;letter-spacing:1px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;border-radius:4px;padding:2px 8px;">🥊 BEST MATCHES</span>';
+            const fullShowWords=['episode','tryout','tryouts','full show','part 1','part 2','part 3','part1','part2','part3','network','supershow','season'];
+            const matchWords=[' vs ',' vs.','v. ',' match','full match','1v1','2v2','championship'];
+            const t=(r.title||'').toLowerCase();
+            if(r.durationSecs>0&&r.durationSecs<1800&&!fullShowWords.some(w=>t.includes(w))&&matchWords.some(w=>t.includes(w))) return '<span style="font-size:.6rem;font-weight:700;letter-spacing:1px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;border-radius:4px;padding:2px 8px;">🥊 BEST MATCHES</span>';
+            return '<span style="font-size:.6rem;font-weight:700;letter-spacing:1px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.5);border-radius:4px;padding:2px 8px;">📺 LATEST VIDEOS</span>';
+          })()}
+        </div>
         <div class="result-actions">
           <button class="btn btn-green btn-sm" onclick="approveScanned(${idx})">✓ Add to Hub</button>
           <button class="btn btn-ghost btn-sm" onclick="skipScanned(${idx})">Skip</button>
