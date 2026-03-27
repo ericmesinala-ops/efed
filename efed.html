@@ -1479,9 +1479,9 @@ async function loadProfile() {
     if (!_isOwnProfile) {
       document.querySelectorAll('.caw-slot').forEach(s => { s.onclick = null; s.style.cursor = 'default'; });
       document.querySelectorAll('.caw-plus').forEach(p => { p.style.display = 'none'; });
-      // Show join roster button for non-owners, check if already joined
+      // Show join roster button for logged-in non-owners
       const session = getSession();
-      if (session) {
+      if (session && session.username.toLowerCase() !== (EFED_OWNER || '').toLowerCase()) {
         const joinRow = document.getElementById('join-roster-row');
         const joinBtn = document.getElementById('join-roster-btn');
         if (joinBtn) joinBtn.style.display = 'inline-flex';
@@ -1831,17 +1831,22 @@ async function loadRoster() {
   const grid = document.getElementById('roster-grid'); if (!grid) return;
   const session = getSession();
   try {
-    // Owner sees all rows (including pending); everyone else only sees approved
-    const filter = _isOwnProfile
-      ? `efed=eq.${encodeURIComponent(EFED_NAME)}&order=joined_at.asc`
-      : `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&order=joined_at.asc`;
+    // Owner sees all rows; logged-in user sees approved + their own pending; others see approved only
+    let filter;
+    if (_isOwnProfile) {
+      filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&order=joined_at.asc`;
+    } else if (session) {
+      filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&or=(status.eq.approved,and(status.eq.pending,username.eq.${encodeURIComponent(session.username)}))&order=joined_at.asc`;
+    } else {
+      filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&order=joined_at.asc`;
+    }
     const rosterRows = await sbGet('roster', filter);
     const ownerRows  = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url`);
     const owner = ownerRows[0];
     const ownerUsername = owner?.username || EFED_OWNER || '';
 
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px;';
+    wrap.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;align-items:stretch;';
 
     function makeCard(u, role, rosterRowId, status) {
       const isOwnerCard = role === 'OWNER';
@@ -1851,7 +1856,7 @@ async function loadRoster() {
       const canModerate = !isOwnerCard && _isOwnProfile && !isOwnerCard;
 
       const card = document.createElement('div');
-      card.style.cssText = `background:#111114;border:1px solid ${isPending ? 'rgba(200,168,75,.2)' : 'rgba(255,255,255,.07)'};border-radius:10px;padding:14px 10px;text-align:center;position:relative;user-select:none;cursor:pointer;transition:border-color .2s,opacity .2s;${isPending ? 'opacity:.35;' : ''}`;
+      card.style.cssText = `background:#111114;border:1px solid ${isPending ? 'rgba(200,168,75,.2)' : 'rgba(255,255,255,.07)'};border-radius:10px;padding:14px 10px;text-align:center;position:relative;user-select:none;cursor:pointer;transition:border-color .2s,opacity .2s;display:flex;flex-direction:column;align-items:center;justify-content:center;${isPending ? 'opacity:.35;' : ''}`;
       card.dataset.username = u.username;
       card.dataset.rosterid = rosterRowId || '';
       card.dataset.name = u.display_name || u.username || '';
@@ -1971,7 +1976,13 @@ async function loadRoster() {
       const unames = rosterRows.map(r=>r.username).filter(u=>u!==ownerUsername);
       if (unames.length) {
         const uRows = await sbGet('users', `username=in.(${unames.map(u=>encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url`);
-        unames.forEach(uname => {
+        // Sort alphabetically by display_name
+        const sortedUnames = [...unames].sort((a, b) => {
+          const ua = uRows.find(r=>r.username===a)?.display_name || a;
+          const ub = uRows.find(r=>r.username===b)?.display_name || b;
+          return ua.localeCompare(ub);
+        });
+        sortedUnames.forEach(uname => {
           const u = uRows.find(r=>r.username===uname);
           if (!u) return;
           const rosterRow = rosterRows.find(r=>r.username===uname);
@@ -3012,6 +3023,7 @@ function openJoinRosterModal() {
 function closeJoinRosterModal() {
   document.getElementById('join-roster-modal-bg').style.display = 'none';
   document.body.style.overflow = '';
+  loadRoster();
 }
 
 function setApprovedState() {
@@ -3040,7 +3052,7 @@ async function submitJoinRoster() {
   const session = getSession(); if (!session) return;
   const btn = document.getElementById('jr-submit-btn');
   const msg = document.getElementById('jr-msg');
-  btn.disabled = true; btn.textContent = 'Sending…'; msg.textContent = '';
+  btn.disabled = true; btn.textContent = 'Adding…'; msg.textContent = '';
 
   try {
     // Check if already on roster
@@ -3052,7 +3064,7 @@ async function submitJoinRoster() {
       return;
     }
 
-    // Add to roster table
+    // Add directly as approved — no pending flow
     const rosterInsertRes = await fetch(SUPABASE_URL+'/rest/v1/roster', {
       method: 'POST',
       headers: {...SB_HEADERS, 'Prefer': 'return=representation'},
@@ -3060,60 +3072,22 @@ async function submitJoinRoster() {
         efed: EFED_NAME,
         username: session.username,
         joined_at: Date.now(),
-        status: 'pending'
+        status: 'approved'
       })
     });
     if (!rosterInsertRes.ok) {
       const errText = await rosterInsertRes.text();
       console.error('[roster insert failed]', rosterInsertRes.status, errText);
-      msg.textContent = 'Could not submit request. Try again.';
+      msg.textContent = 'Could not add. Try again.';
       msg.style.color = '#ff6b6b';
       btn.disabled = false; btn.textContent = "I'm on this Roster";
       return;
     }
 
-    // Notify the eFed owner — store roster row id in video_url for accept/deny actions
-    const rosterInsertResult = await sbGet('roster',
-      `efed=eq.${encodeURIComponent(EFED_NAME)}&username=eq.${encodeURIComponent(session.username)}&status=eq.pending&order=joined_at.desc&limit=1`
-    ).catch(()=>[]);
-    const newRosterRowId = rosterInsertResult[0]?.id || null;
-
-    // Get owner username reliably
-    let efedOwnerUsername = EFED_OWNER;
-    if (!efedOwnerUsername) {
-      const ownerCheck = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username&limit=1`).catch(()=>[]);
-      efedOwnerUsername = ownerCheck[0]?.username || '';
-    }
-
-    if (efedOwnerUsername) {
-      const rosterMeta = JSON.stringify({
-        rosterRowId: String(newRosterRowId || ''),
-        requesterUsername: session.username,
-        requesterName: session.displayName || session.username,
-        efedName: EFED_NAME
-      });
-      await fetch(SUPABASE_URL+'/rest/v1/notifications', {
-        method: 'POST', headers: SB_HEADERS,
-        body: JSON.stringify({
-          username: efedOwnerUsername,
-          type: 'roster_join',
-          message: `🤼 <strong>${_esc(session.displayName || session.username)}</strong> says they are part of your <strong>${_esc(EFED_NAME)}</strong> roster.||ROSTER:${rosterMeta}||`,
-          read: false,
-          created_at: Date.now()
-        })
-      });
-    }
-
-    msg.textContent = '✓ Request sent!';
-    msg.style.color = '#4caf64';
-    btn.textContent = 'Sent!';
-    setJoinedState();
-
-    // Show confirmation panel — user must click OK to close
-    document.getElementById('jr-request-panel').style.display = 'none';
-    document.getElementById('jr-confirm-panel').style.display = 'block';
-    document.getElementById('jr-confirm-msg').textContent =
-      `${EFED_NAME} will verify your roster status. You will receive a notification once approved.`;
+    setApprovedState();
+    loadRoster();
+    closeJoinRosterModal();
+    showToast('✅ Added to roster!');
 
   } catch(e) {
     console.error('Join roster failed:', e);
@@ -3122,64 +3096,7 @@ async function submitJoinRoster() {
     btn.disabled = false; btn.textContent = "I'm on this Roster";
   }
 }
-</script>
 
-<!-- ── ROSTER MODERATE MODAL (approve/deny pending) ── -->
-<div id="roster-moderate-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)this.style.display='none'">
-  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:360px;padding:28px 24px;box-shadow:0 32px 80px rgba(0,0,0,.8);">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-      <div style="width:36px;height:36px;border-radius:50%;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.25);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2.5" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      </div>
-      <div>
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Roster Request</div>
-        <div style="font-size:.65rem;color:#8a8a9a;margin-top:1px;" id="rm-subtitle"></div>
-      </div>
-    </div>
-    <div style="font-size:.75rem;color:rgba(255,255,255,.6);line-height:1.7;margin-bottom:22px;">
-      <strong id="rm-name" style="color:#fff;"></strong> says they are part of your roster. Approve to make them visible to everyone, or deny to remove the request.
-    </div>
-    <div style="display:flex;gap:10px;">
-      <button onclick="denyRosterRequest()" style="flex:1;padding:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Deny</button>
-      <button onclick="approveRosterRequest()" style="flex:2;padding:12px;background:rgba(76,175,100,.15);border:1px solid rgba(76,175,100,.35);border-radius:10px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">✓ Approve</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── ROSTER OWNER MENU (PC dropdown for approved members) ── -->
-<div id="roster-owner-menu" style="display:none;position:fixed;z-index:99999;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:6px 0;min-width:160px;box-shadow:0 12px 32px rgba(0,0,0,.7);">
-  <button id="rom-remove-btn" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;background:none;border:none;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;" onmouseover="this.style.background='rgba(192,0,14,.08)'" onmouseout="this.style.background='none'">
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-    Remove from Roster
-  </button>
-</div>
-
-<!-- ── LEAVE EFED CONFIRM MODAL ── -->
-<div id="leave-roster-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)this.style.display='none'">
-  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:360px;padding:28px 24px;box-shadow:0 32px 80px rgba(0,0,0,.8);">
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;margin-bottom:14px;">Leave Roster</div>
-    <div style="font-size:.76rem;color:rgba(255,255,255,.65);line-height:1.7;margin-bottom:8px;">
-      You are about to leave the <strong id="leave-efed-name" style="color:#fff;"></strong> roster.
-    </div>
-    <div style="font-size:.72rem;color:#8a8a9a;line-height:1.7;margin-bottom:22px;">
-      Your profile will be removed from their roster page. You can rejoin at any time by visiting their eFed page.
-    </div>
-    <div style="display:flex;gap:10px;">
-      <button onclick="document.getElementById('leave-roster-bg').style.display='none'" style="flex:1;padding:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;">Cancel</button>
-      <button id="leave-roster-confirm-btn" style="flex:1;padding:12px;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.35);border-radius:10px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Leave</button>
-    </div>
-  </div>
-</div>
-
-<script>
-let _rmUsername = null, _rmName = null, _rmRosterRowId = null;
-
-function openRosterModerateModal(username, displayName, rosterRowId) {
-  _rmUsername = username; _rmName = displayName; _rmRosterRowId = rosterRowId;
-  document.getElementById('rm-name').textContent = displayName;
-  document.getElementById('rm-subtitle').textContent = '@' + username;
-  document.getElementById('roster-moderate-bg').style.display = 'flex';
-}
 
 async function approveRosterRequest() {
   document.getElementById('roster-moderate-bg').style.display = 'none';
