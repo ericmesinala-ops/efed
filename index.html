@@ -2506,6 +2506,18 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
   </div>
 </div>
 
+<!-- ── MOVE CATEGORY MODAL ── -->
+<div id="move-cat-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.7);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeMoveModal()">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:360px;padding:28px 24px;box-shadow:0 24px 60px rgba(0,0,0,.7);">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#fff;margin-bottom:8px;" id="move-cat-title"></div>
+    <div style="font-size:.75rem;color:#8a8a9a;line-height:1.6;margin-bottom:24px;" id="move-cat-hint"></div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="closeMoveModal()" style="flex:1;padding:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">Cancel</button>
+      <button id="move-cat-confirm-btn" onclick="confirmMoveCategory()" style="flex:1;padding:11px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.4);border-radius:10px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(200,168,75,.25)'" onmouseout="this.style.background='rgba(200,168,75,.15)'">Move</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── SUBMIT VIDEO MODAL ── -->
 
 
@@ -3725,34 +3737,50 @@ function scrollChatRooms(dir) {
   if (wrap) wrap.scrollBy({ left: dir * 150, behavior: 'smooth' });
 }
 
+let _moveCatVideo = null, _moveCatBtn = null;
+
 function openMoveCategoryModal(v, btn) {
+  _moveCatVideo = v;
+  _moveCatBtn = btn;
   const curMatch = isMatch(v);
-  const label = curMatch ? 'Move to Full Episodes' : 'Move to Best Matches';
-  const hint = curMatch
+  document.getElementById('move-cat-title').textContent = curMatch ? 'Move to Full Episodes' : 'Move to Best Matches';
+  document.getElementById('move-cat-hint').textContent = curMatch
     ? 'This will treat the video as a full show and remove it from Best Matches.'
     : 'This will treat the video as a match and move it to Best Matches.';
+  document.getElementById('move-cat-confirm-btn').textContent = curMatch ? 'Move to Episodes' : 'Move to Matches';
+  const bg = document.getElementById('move-cat-modal-bg');
+  bg.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
 
-  if (!confirm(label + '\n\n' + hint)) return;
+function closeMoveModal() {
+  document.getElementById('move-cat-modal-bg').style.display = 'none';
+  document.body.style.overflow = '';
+  _moveCatVideo = null; _moveCatBtn = null;
+}
 
-  // Toggle: if currently a match, force it out by setting durationSecs to 0 override
-  // We store override in DB as duration_seconds tweak
-  const newDuration = curMatch ? 99999 : 60; // 99999 = definitely full show, 60 = definitely a match
+function confirmMoveCategory() {
+  const v = _moveCatVideo; const btn = _moveCatBtn;
+  if (!v) return;
+  const curMatch = isMatch(v);
+  const newDuration = curMatch ? 99999 : 60;
+  const confirmBtn = document.getElementById('move-cat-confirm-btn');
+  confirmBtn.disabled = true; confirmBtn.textContent = 'Moving…';
   fetch(SUPABASE_URL + '/rest/v1/submissions?url=eq.' + encodeURIComponent(v.url), {
     method: 'PATCH', headers: SB_HEADERS,
     body: JSON.stringify({ duration_seconds: newDuration })
   }).then(r => {
     if (r.ok) {
       v.durationSecs = newDuration;
+      closeMoveModal();
       showToast(curMatch ? '✅ Moved to Full Episodes' : '✅ Moved to Best Matches');
-      // Rebuild rows
-      buildPills();
-      renderGrid();
-      loadBestMatches(videos);
+      buildPills(); renderGrid(); loadBestMatches(videos);
       if (btn) btn.title = curMatch ? 'Move to Best Matches' : 'Move to Full Episodes';
     } else {
       showToast('Could not move. Try again.');
+      confirmBtn.disabled = false; confirmBtn.textContent = 'Move';
     }
-  }).catch(() => showToast('Could not move. Try again.'));
+  }).catch(() => { showToast('Could not move. Try again.'); confirmBtn.disabled = false; confirmBtn.textContent = 'Move'; });
 }
 
 function makeCard(v) {
