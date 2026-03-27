@@ -328,24 +328,20 @@ async function init() {
 }
 
 async function loadStats() {
+  const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
+  try { const r=await sbGet('users','select=id'); set('stat-users',r.length); document.getElementById('page-sub-info').textContent=r.length+' members'; } catch(e){}
+  try { const r=await sbGet('submissions','status=eq.approved&select=id'); set('stat-submissions',r.length); } catch(e){}
+  try { const r=await sbGet('submissions','status=eq.pending&select=id'); set('stat-pending',r.length); } catch(e){}
+  try { const r=await sbGet('efed_channels','select=id'); set('stat-channels',r.length); } catch(e){}
   try {
-    const cutoff = Date.now()-120000;
-    const [users,subs,pending,channels,logs,online] = await Promise.all([
-      sbGet('users','select=id'),
-      sbGet('submissions','status=eq.approved&select=id'),
-      sbGet('submissions','status=eq.pending&select=id'),
-      sbGet('efed_channels','select=id'),
-      sbGet('scan_log','select=scanned_at&order=scanned_at.desc&limit=1'),
-      sbGet('presence',`last_seen=gt.${cutoff}&select=username`)
-    ]);
-    document.getElementById('stat-users').textContent=users.length;
-    document.getElementById('stat-submissions').textContent=subs.length;
-    document.getElementById('stat-pending').textContent=pending.length;
-    document.getElementById('stat-channels').textContent=channels.length;
-    document.getElementById('stat-online').textContent=online.length;
-    document.getElementById('page-sub-info').textContent=`${online.length} online · ${users.length} members`;
-    if(logs.length){const d=new Date(logs[0].scanned_at);document.getElementById('stat-last-scan').textContent=d.toLocaleDateString('en-US',{month:'short',day:'numeric'});}
-    else document.getElementById('stat-last-scan').textContent='Never';
+    const cutoff=Date.now()-120000;
+    const r=await sbGet('presence',`last_seen=gt.${cutoff}&select=username,last_seen&order=last_seen.desc`);
+    set('stat-online',r.length);
+  } catch(e){ set('stat-online','—'); }
+  try {
+    const r=await sbGet('scan_log','select=scanned_at&order=scanned_at.desc&limit=1');
+    if(r.length){const d=new Date(r[0].scanned_at);set('stat-last-scan',d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));}
+    else set('stat-last-scan','Never');
   } catch(e){}
 }
 
@@ -365,7 +361,10 @@ async function loadOnline() {
       div.innerHTML=`<div class="online-dot"></div><div><div style="font-size:.82rem;font-weight:600;color:#e8e8e8;">${r.username?'@'+esc(r.username):'Guest'}</div><div style="font-size:.62rem;color:var(--muted);">Active ${ago<60?ago+'s ago':Math.floor(ago/60)+'m ago'}</div></div>`;
       list.appendChild(div);
     });
-  } catch(e){list.innerHTML='<div class="empty">Could not load presence data.</div>';}
+  } catch(e){
+    // Presence table may not have data yet
+    list.innerHTML='<div class="empty"><div class="empty-icon">💤</div>No presence data — users need to be active on the Hub.</div>';
+  }
 }
 
 // ── PENDING ──
@@ -468,7 +467,7 @@ async function loadUsers() {
   const list=document.getElementById('users-list');
   list.innerHTML='<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
   try {
-    _allUsers=await sbGet('users','order=joined_at.desc');
+    _allUsers=await sbGet('users','order=created_at.desc');
     renderUsers(_allUsers);
   } catch(e){list.innerHTML='<div class="empty">Could not load users.</div>';}
 }
@@ -489,7 +488,7 @@ function renderUsers(users) {
         <div style="min-width:0;">
           <div style="font-size:.78rem;font-weight:600;color:${u.banned?'#ff6b6b':'#e8e8e8'};margin-bottom:2px;">${esc(u.display_name||u.username||'')} ${u.banned?'🚫':''} <span class="role-badge role-${role}">${role}</span></div>
           <div style="font-size:.62rem;color:var(--muted);">@${esc(u.username||'')} · ${esc(u.email||'')}</div>
-          <div style="font-size:.6rem;color:var(--muted);">Strikes: ${u.strikes||0} · Joined ${u.joined_at?new Date(u.joined_at).toLocaleDateString('en-US',{month:'short',year:'numeric'}):'?'}</div>
+          <div style="font-size:.6rem;color:var(--muted);">Strikes: ${u.strikes||0} · Joined ${u.created_at?new Date(u.created_at).toLocaleDateString('en-US',{month:'short',year:'numeric'}):'?'}</div>
           ${(u.is_efed_owner||u.role==='owner')&&u.promo_name?`<div style="font-size:.62rem;color:var(--gold);margin-top:2px;">eFed: <b>${esc(u.promo_name)}</b> <button onclick="adminEditPromoName('${esc(u.username)}','${esc(u.promo_name)}')" style="background:none;border:none;color:var(--gold);cursor:pointer;font-size:.6rem;padding:0 4px;opacity:.7;">✏️</button>${u.yt_channel?` · <a href="${esc(u.yt_channel)}" target="_blank" style="color:var(--gold);">YT ↗</a>`:''}</div>`:''}
         </div>
       </div>
