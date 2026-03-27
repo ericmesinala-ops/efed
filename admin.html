@@ -226,6 +226,7 @@
         <div>
           <div class="card-title" style="margin-bottom:6px;"><div class="dot" style="background:var(--accent);"></div>YouTube Scanner</div>
           <div style="font-size:.7rem;color:var(--muted);line-height:1.7;" id="scan-quota-note">Scans all eFed channels for videos from the last 7 days. Limit: 1 scan per 24 hours.</div>
+          <div style="font-size:.68rem;color:rgba(200,168,75,.6);margin-top:4px;" id="scan-cost-preview"></div>
         </div>
         <button class="scan-btn" id="scan-btn" onclick="startScan()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -306,7 +307,7 @@ function switchTab(name, btn) {
   if(name==='flagged') loadFlagged();
   if(name==='users') loadUsers();
   if(name==='channels') loadChannels();
-  if(name==='scanner') { loadScanLog(); checkScanLock(); }
+  if(name==='scanner') { loadScanLog(); checkScanLock(); updateCostPreview(); }
 }
 
 async function init() {
@@ -554,6 +555,15 @@ async function adminSendBroadcast(toAll) {
 }
 
 // ── SCANNER ──
+async function updateCostPreview() {
+  try {
+    const channels = await sbGet('efed_channels','select=id');
+    const cost = channels.length * 100;
+    const el = document.getElementById('scan-cost-preview');
+    if (el) el.textContent = `Estimated cost: ${cost} YouTube API units (${channels.length} channel${channels.length!==1?'s':''} × 100) out of 10,000 daily free quota`;
+  } catch(e) {}
+}
+
 function checkScanLock() {
   const last=localStorage.getItem('admin_last_scan');
   const btn=document.getElementById('scan-btn');
@@ -583,7 +593,15 @@ async function startScan() {
   const sevenDaysAgo=new Date(Date.now()-7*24*60*60*1000).toISOString();
   const results=[];
   const existingIds=new Set();
-  try { const ex=await sbGet('submissions','select=video_id'); ex.forEach(r=>{if(r.video_id)existingIds.add(r.video_id);}); } catch(e){}
+  try {
+    const ex=await sbGet('submissions','select=video_id,url');
+    ex.forEach(r=>{
+      if(r.video_id) existingIds.add(r.video_id);
+      // Also extract ID from URL as fallback
+      const m=r.url?.match(/(?:v=|youtu\.be\/)([^&?/]+)/);
+      if(m?.[1]) existingIds.add(m[1]);
+    });
+  } catch(e){}
   for(let i=0;i<channels.length;i++){
     const ch=channels[i];
     fill.style.width=Math.round((i/channels.length)*100)+'%';
@@ -604,7 +622,9 @@ async function startScan() {
     await new Promise(r=>setTimeout(r,300));
   }
   fill.style.width='100%';
-  label.textContent=`Scan complete — ${results.length} new video${results.length!==1?'s':''} found`;
+  const _totalCost = channels.length * 100;
+  const _quotaLeft = 10000 - _totalCost;
+  label.textContent=`Scan complete — ${results.length} new video${results.length!==1?'s':''} found · Cost: ${_totalCost} units (${_quotaLeft.toLocaleString()} remaining today)`;
   try { await sbInsert('scan_log',{channels_scanned:channels.length,videos_found:results.length,videos_added:0}); } catch(e){}
   localStorage.setItem('admin_last_scan',Date.now().toString());
   loadStats(); loadScanLog();
@@ -671,7 +691,7 @@ async function loadScanLog() {
     const logs=await sbGet('scan_log','select=*&order=scanned_at.desc&limit=20');
     const wrap=document.getElementById('scan-log-wrap');
     if(!logs.length){wrap.innerHTML='<div class="empty"><div class="empty-icon">📋</div>No scans yet.</div>';return;}
-    wrap.innerHTML=`<table class="log-table"><thead><tr><th>Date & Time</th><th>Channels</th><th>Found</th><th>Added</th></tr></thead><tbody>${logs.map(l=>{const d=new Date(l.scanned_at);return`<tr><td>${d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})} ${d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</td><td>${l.channels_scanned}</td><td>${l.videos_found}</td><td>${l.videos_added}</td></tr>`;}).join('')}</tbody></table>`;
+    wrap.innerHTML=`<table class="log-table"><thead><tr><th>Date & Time</th><th>Channels</th><th>Found</th><th>Added</th><th>YT Units Used</th></tr></thead><tbody>${logs.map(l=>{const d=new Date(l.scanned_at);const cost=(l.channels_scanned||0)*100;return`<tr><td>${d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})} ${d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</td><td>${l.channels_scanned}</td><td>${l.videos_found}</td><td>${l.videos_added}</td><td style="color:var(--gold);">${cost.toLocaleString()} / 10,000</td></tr>`;}).join('')}</tbody></table>`;
   } catch(e){}
 }
 
