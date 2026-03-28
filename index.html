@@ -298,7 +298,7 @@ html, body { overscroll-behavior-y: none; }
     display: block; position: relative; overflow: hidden;
     border-radius: 10px; height: 68px; text-decoration: none;
     background: linear-gradient(135deg, rgba(192,0,14,.08) 0%, rgba(0,0,0,.85) 100%);
-    border: 1px solid rgba(192,0,14,.15);
+    border: 1px solid rgba(255,255,255,.08);
     transition: transform .18s, background .18s, border-color .18s;
   }
   .my-efed-banner-card::before {
@@ -308,10 +308,10 @@ html, body { overscroll-behavior-y: none; }
   }
   .my-efed-banner-card::after {
     content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(192,0,14,.25), transparent);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent);
     pointer-events: none;
   }
-  .my-efed-banner-card:hover { transform: translateY(-2px); background: linear-gradient(135deg, rgba(192,0,14,.13) 0%, rgba(0,0,0,.88) 100%); border-color: rgba(192,0,14,.3); }
+  .my-efed-banner-card:hover { transform: translateY(-2px); background: linear-gradient(135deg, rgba(192,0,14,.13) 0%, rgba(0,0,0,.88) 100%); border-color: rgba(255,255,255,.15); }
   .my-efed-banner-overlay {
     position: absolute; inset: 0;
     display: flex; align-items: center; gap: 14px; padding: 0 20px;
@@ -2607,7 +2607,7 @@ html, body { overscroll-behavior-y: none; }
     <div class="sec-head">
       <div class="sec-title-wrap">
         <div class="s-bar"></div>
-        <div class="sec-title">Joined eFeds</div>
+        <div class="sec-title">eFeds</div>
       </div>
     </div>
     <div id="my-efeds-row" style="display:flex;flex-direction:column;gap:8px;padding:0 56px;"></div>
@@ -5350,46 +5350,40 @@ async function loadMyEfedsRow() {
   const seen = new Set();
 
   try {
-    // Always fetch own user data first
     const userRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role,promo_logo,efed_banner`);
     const user = userRows[0];
 
-    // Owner or admin with own eFed — show their eFed
-    if ((user?.is_efed_owner || user?.role === 'owner' || isAdmin) && user?.promo_name) {
+    if ((user?.is_efed_owner || user?.role === 'owner') && user?.promo_name) {
       seen.add(user.promo_name.toLowerCase());
-      efeds.push({ name: user.promo_name, logo: user.promo_logo, banner: user.efed_banner, role: isAdmin ? 'Owner' : 'Owner' });
+      efeds.push({ name: user.promo_name, logo: user.promo_logo, subtitle: 'Owned' });
     }
 
-    // Roster memberships (non-admin or admin on other rosters)
-    if (!isAdmin) {
-      const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&select=efed,status`);
-      for (const r of (rosterRows || []).filter(r => r.status === 'approved' && r.efed)) {
-        if (!seen.has(r.efed.toLowerCase())) {
-          seen.add(r.efed.toLowerCase());
-          efeds.push({ name: r.efed, logo: null, banner: null, role: 'Roster' });
-        }
+    const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&select=efed,status`);
+    for (const r of (rosterRows || []).filter(r => r.status === 'approved' && r.efed)) {
+      if (!seen.has(r.efed.toLowerCase())) {
+        seen.add(r.efed.toLowerCase());
+        efeds.push({ name: r.efed, logo: null, subtitle: 'Joined' });
       }
-      // fetch banners + logos for roster efeds
-      const noData = efeds.filter(e => !e.banner);
-      if (noData.length) {
-        try {
-          const rows = await sbGet('users', `promo_name=in.(${noData.map(e => encodeURIComponent(e.name)).join(',')})&is_efed_owner=eq.true&select=promo_name,promo_logo,efed_banner`);
-          rows.forEach(u => {
-            const ef = efeds.find(e => e.name.toLowerCase() === u.promo_name?.toLowerCase());
-            if (ef) { ef.logo = u.promo_logo; ef.banner = u.efed_banner; }
-          });
-        } catch(e) {}
-      }
+    }
+
+    if (efeds.filter(e => !e.logo).length) {
+      try {
+        const rows = await sbGet('users', `promo_name=in.(${efeds.filter(e=>!e.logo).map(e => encodeURIComponent(e.name)).join(',')})&is_efed_owner=eq.true&select=promo_name,promo_logo`);
+        rows.forEach(u => {
+          const ef = efeds.find(e => e.name.toLowerCase() === u.promo_name?.toLowerCase());
+          if (ef && u.promo_logo) ef.logo = u.promo_logo;
+        });
+      } catch(e) {}
     }
   } catch(e) {}
 
   if (!efeds.length) return;
 
-  const section = document.getElementById('my-efeds-section');
+  const sec = document.getElementById('my-efeds-section');
   const row = document.getElementById('my-efeds-row');
-  if (!section || !row) return;
+  if (!sec || !row) return;
 
-  section.style.display = '';
+  sec.style.display = '';
   row.innerHTML = efeds.map(e => `
     <a class="my-efed-banner-card" href="efed.html?e=${encodeURIComponent(e.name)}">
       <div class="my-efed-banner-overlay">
@@ -5398,7 +5392,7 @@ async function loadMyEfedsRow() {
         </div>
         <div>
           <div class="my-efed-banner-name">${e.name}</div>
-          <div class="my-efed-banner-role">${e.role}</div>
+          <div class="my-efed-banner-role">${e.subtitle}</div>
         </div>
       </div>
     </a>`).join('');
