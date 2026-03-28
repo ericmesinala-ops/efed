@@ -2636,30 +2636,38 @@ function handleBannerUpload(event, type) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async e => {
-    openBannerCrop(e.target.result, 1920, 400, async (croppedDataUrl) => {
+    openBannerCrop(e.target.result, 1280, 320, async (croppedDataUrl) => {
       const session = getSession();
       if (!session) return;
-      // High-res banner for crisp display
       const img = new Image();
       img.onload = async () => {
-        const W = 1920, H = 400;
+        // Compress to 1280×320 at 0.85 quality — keeps base64 under ~200KB
+        const W = 1280, H = 320;
         const canvas = document.createElement('canvas');
         canvas.width = W; canvas.height = H;
         canvas.getContext('2d').drawImage(img, 0, 0, W, H);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.97);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        // Show immediately
         const bannerImg = document.getElementById('profile-banner-img');
         if (bannerImg) { bannerImg.src = dataUrl; bannerImg.style.display = 'block'; }
         const _bn = document.querySelector('.banner-noise'); if (_bn) _bn.style.display = 'none';
         const _bg = document.querySelector('.banner-glow'); if (_bg) _bg.style.display = 'none';
+        const bmsg = document.getElementById('ep-banner-msg');
+        // Save base64 directly to DB (same as avatar/gallery pattern)
         try {
-          const storagePath = 'banners/' + session.username + '_banner';
-          const publicUrl = await uploadToStorage(dataUrl, 'avatars', storagePath);
-          const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({avatar_banner:publicUrl}) });
+          const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+            method: 'PATCH',
+            headers: SB_HEADERS,
+            body: JSON.stringify({ avatar_banner: dataUrl })
+          });
           if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
-          if (bannerImg) bannerImg.src = publicUrl;
-          const bmsg = document.getElementById('ep-banner-msg');
-          if (bmsg) { bmsg.textContent = 'Banner saved!'; bmsg.style.color='#4caf64'; setTimeout(() => bmsg.textContent='', 2000); }
-        } catch(err) { const bmsg = document.getElementById('ep-banner-msg'); if (bmsg) { bmsg.textContent = 'Save failed: ' + err.message; bmsg.style.color='#ff6b6b'; } console.error(err); }
+          if (bmsg) { bmsg.textContent = 'Banner saved!'; bmsg.style.color = '#4caf64'; setTimeout(() => bmsg.textContent = '', 2500); }
+          if (typeof showToast === 'function') showToast('Banner saved!');
+        } catch(err) {
+          console.error('Banner save failed:', err);
+          if (bmsg) { bmsg.textContent = 'Save failed: ' + err.message; bmsg.style.color = '#ff6b6b'; }
+          if (typeof showToast === 'function') showToast('Banner save failed');
+        }
       };
       img.src = croppedDataUrl;
     });
