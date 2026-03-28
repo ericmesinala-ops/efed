@@ -974,7 +974,7 @@ async function loadExistingCodes() {
   const output=document.getElementById('invite-codes-output');
   if(!output) return;
   try {
-    const codes=await sbGet('invites','created_by=eq.'+ADMIN_USERNAME+'&used=eq.false&order=code.asc');
+    const codes=await sbGet('invites','created_by=eq.'+ADMIN_USERNAME+'&used=eq.false&admin_generated=eq.true&order=code.asc');
     if(!codes.length){output.style.display='none';output.innerHTML='';return;}
     output.style.display='flex';
     output.innerHTML='<div style="font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:8px;">'+codes.length+' unused code'+(codes.length!==1?'s':'')+' available</div>';
@@ -984,38 +984,33 @@ async function loadExistingCodes() {
       row.id='invite-row-'+c.id;
       row.style.cssText='display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid '+(isSent?'rgba(76,175,100,.25)':'var(--border)')+';border-radius:8px;padding:12px 14px;opacity:'+(isSent?'.55':'1')+';';
 
-      // Sent label (defined first so onchange closure can reference it)
-      const sentLabel=document.createElement('span');
-      sentLabel.style.cssText='font-size:.6rem;color:#4caf64;font-weight:700;letter-spacing:1px;display:'+(isSent?'inline':'none')+';';
-      sentLabel.textContent='SENT';
-
       // Sent checkbox
       const chk=document.createElement('input');
       chk.type='checkbox'; chk.checked=isSent;
       chk.title='Mark as sent';
       chk.style.cssText='width:16px;height:16px;cursor:pointer;accent-color:#4caf64;flex-shrink:0;';
-      chk.onchange=(function(code,row,lbl){return function(){
+      chk.onchange=(function(id,row,code){return function(){
         const sent=this.checked;
-        const self=this;
-        sbUpdate('invites',{sent:sent},'code=eq.'+encodeURIComponent(code)).then(function(){
+        sbUpdate('invites',{sent:sent},'id=eq.'+id).then(function(){
           row.style.borderColor=sent?'rgba(76,175,100,.25)':'var(--border)';
           row.style.opacity=sent?'.55':'1';
-          lbl.style.display=sent?'inline':'none';
-        }).catch(function(e){
-          self.checked=!sent; // revert
-          toast('Save failed: '+e.message);
-        });
-      };})(c.code,row,sentLabel);
+        }).catch(function(){});
+      };})(c.id,row,c.code);
 
       const codeSpan=document.createElement('span');
       codeSpan.style.cssText="font-family:'JetBrains Mono',monospace;font-size:1rem;letter-spacing:4px;color:#fff;font-weight:600;flex:1;";
       codeSpan.textContent=c.code;
 
+      // Sent label
+      const sentLabel=document.createElement('span');
+      sentLabel.style.cssText='font-size:.6rem;color:#4caf64;font-weight:700;letter-spacing:1px;display:'+(isSent?'inline':'none')+';';
+      sentLabel.textContent='SENT';
+
       const copyBtn=document.createElement('button');
       copyBtn.textContent='Copy Message';
       copyBtn.style.cssText='padding:6px 14px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.4);border-radius:6px;color:var(--gold);font-size:.65rem;font-weight:700;cursor:pointer;white-space:nowrap;';
-      const msg='Welcome to the EFED Streaming Hub!\n\nYour invite code: '+c.code+'\n\nJoin here: https://efed-stream.vercel.app/auth.html\n\nSee you on the Hub!';
-      copyBtn.onclick=(function(btn,m,chk,lbl,code,row){return function(){
+      const msg='Over 300 YouTube and Twitch eFed videos all organized into a Netflix style layout.\n\nCreate and manage your own eFed page, post content, chat, promote yourself, and connect with other creators in the scene. This is your chance to be seen and grow your viewers.\n\nThis isn\'t just a platform it\'s a network and an opportunity.\n\nCheck it out efed-stream.vercel.app\nUse my code '+c.code;
+      copyBtn.onclick=(function(btn,m,chk,lbl,id,row){return function(){
         navigator.clipboard.writeText(m).then(function(){
           btn.textContent='Copied!';btn.style.color='#4caf64';
           // Auto-check sent on copy
@@ -1024,11 +1019,11 @@ async function loadExistingCodes() {
             lbl.style.display='inline';
             row.style.borderColor='rgba(76,175,100,.25)';
             row.style.opacity='.55';
-            sbUpdate('invites',{sent:true},'code=eq.'+encodeURIComponent(code)).catch(function(){});
+            sbUpdate('invites',{sent:true},'id=eq.'+id).catch(function(){});
           }
           setTimeout(function(){btn.textContent='Copy Message';btn.style.color='var(--gold)';},2000);
         });
-      };})(copyBtn,msg,chk,sentLabel,c.code,row);
+      };})(copyBtn,msg,chk,sentLabel,c.id,row);
 
       row.appendChild(chk);
       row.appendChild(codeSpan);
@@ -1036,7 +1031,7 @@ async function loadExistingCodes() {
       row.appendChild(copyBtn);
       output.appendChild(row);
     });
-  } catch(e){ console.error('loadExistingCodes error:',e); toast('Error loading codes: '+e.message); }
+  } catch(e){}
 }
 
 async function generateInviteCodes() {
@@ -1054,7 +1049,7 @@ async function generateInviteCodes() {
         var check=await sbGet('invites','code=eq.'+encodeURIComponent(code)+'&select=code').catch(function(){return[];});
         exists=check.length>0;
       }
-      await sbInsert('invites',{code:code,created_by:ADMIN_USERNAME,used:false,admin_generated:true,sent:false});
+      await sbInsert('invites',{code:code,created_by:ADMIN_USERNAME,used:false,admin_generated:true});
     }
     toast('5 codes generated!');
     loadExistingCodes();
