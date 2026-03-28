@@ -2264,7 +2264,7 @@ async function loadLinks(targetUser) {
     const myEfeds = [];
     if ((user?.is_efed_owner || user?.role === 'owner') && user?.promo_name) myEfeds.push(user.promo_name);
     rosterRows.filter(r => r.status === 'approved' && r.efed).forEach(r => {
-      if (!myEfeds.includes(r.efed)) myEfeds.push(r.efed);
+      if (!myEfeds.map(e => e.toLowerCase()).includes(r.efed.toLowerCase())) myEfeds.push(r.efed);
     });
 
     if (!myEfeds.length) {
@@ -2273,29 +2273,42 @@ async function loadLinks(targetUser) {
       return;
     }
 
-    // For each eFed, get approved roster members (excluding targetUser)
     const byEfed = {};
     const seenUsernames = new Set();
     let totalLinks = 0;
 
     for (const efed of myEfeds) {
+      // Get approved roster members excluding targetUser
       const members = await sbGet('roster',
-        `efed=eq.${encodeURIComponent(efed)}&status=eq.approved&username=neq.${encodeURIComponent(targetUser)}&select=username`
+        `efed=ilike.${encodeURIComponent(efed)}&status=eq.approved&username=neq.${encodeURIComponent(targetUser)}&select=username`
       );
-      // Also include the owner of that eFed
+      // Get the owner of that eFed (use ilike to handle casing differences)
       const ownerRows = await sbGet('users',
-        `promo_name=eq.${encodeURIComponent(efed)}&is_efed_owner=eq.true&select=username,display_name,avatar_url`
+        `promo_name=ilike.${encodeURIComponent(efed)}&is_efed_owner=eq.true&select=username,display_name,avatar_url`
       );
-      const memberUsernames = members.map(m => m.username).filter(u => u !== targetUser);
-      if (ownerRows[0] && ownerRows[0].username !== targetUser) {
-        if (!memberUsernames.includes(ownerRows[0].username)) memberUsernames.push(ownerRows[0].username);
+
+      // Build full username list: roster members + owner (excluding self)
+      const memberUsernames = [...new Set(members.map(m => m.username))].filter(u => u !== targetUser);
+      const owner = ownerRows[0];
+      if (owner && owner.username !== targetUser && !memberUsernames.includes(owner.username)) {
+        memberUsernames.push(owner.username);
       }
+
       if (!memberUsernames.length) continue;
 
-      // Fetch user details
-      const details = await sbGet('users',
-        `username=in.(${memberUsernames.map(u => encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url`
-      );
+      // Fetch display details for roster members; owner details already fetched
+      const nonOwnerUsernames = memberUsernames.filter(u => u !== owner?.username);
+      let details = [];
+      if (nonOwnerUsernames.length) {
+        details = await sbGet('users',
+          `username=in.(${nonOwnerUsernames.map(u => encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url`
+        );
+      }
+      // Add owner to details if present
+      if (owner && memberUsernames.includes(owner.username)) {
+        details = [owner, ...details];
+      }
+
       byEfed[efed] = details;
       details.forEach(d => {
         if (!seenUsernames.has(d.username)) { seenUsernames.add(d.username); totalLinks++; }
@@ -2305,6 +2318,7 @@ async function loadLinks(targetUser) {
     _linksData = { count: totalLinks, byEfed };
     document.getElementById('stat-links').textContent = totalLinks;
   } catch(e) {
+    console.error('loadLinks error:', e);
     document.getElementById('stat-links').textContent = '0';
   }
 }
@@ -2338,42 +2352,6 @@ function openPointsModal() {
     </div>`;
   const bg = document.getElementById('points-modal-bg');
   bg.style.display = 'flex';
-  document.body.style.overflow = 'hidden';
-}
-function closePointsModal() {
-  const bg = document.getElementById('points-modal-bg');
-  if (bg) bg.style.display = 'none';
-  document.body.style.overflow = '';
-}
-
-function openPointsModal() {
-  const sub     = parseInt(document.getElementById('pts-submitted').value) || 0;
-  const rated   = parseInt(document.getElementById('pts-rated').value) || 0;
-  const invites = parseInt(document.getElementById('pts-invites').value) || 0;
-  const sup     = parseInt(document.getElementById('pts-supports').value) || 0;
-  const bonus   = parseInt(document.getElementById('pts-invite-bonus').value) || 0;
-  const rows = [
-    { label: 'Approved Submissions', count: sub,     pts: sub * 5,     each: 5 },
-    { label: 'Videos Rated',         count: rated,   pts: rated * 3,   each: 3 },
-    { label: 'Members Invited',      count: invites, pts: invites * 8, each: 8 },
-    { label: 'eFeds Supported',      count: sup,     pts: sup * 1,     each: 1 },
-  ];
-  if (bonus > 0) rows.push({ label: 'All 5 Invites Used (Bonus)', count: null, pts: bonus, each: null });
-  const total = rows.reduce((s, r) => s + r.pts, 0);
-  const body = document.getElementById('points-modal-body');
-  body.innerHTML = rows.map(r => `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);">
-      <div>
-        <div style="font-size:.82rem;font-weight:600;color:#e8e8e8;">${r.label}</div>
-        ${r.count !== null ? `<div style="font-size:.62rem;color:rgba(255,255,255,.3);margin-top:2px;">${r.count} × ${r.each} pts</div>` : ''}
-      </div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#c8a84b;letter-spacing:1px;">+${r.pts}</div>
-    </div>`).join('') + `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding-top:14px;">
-      <div style="font-size:.72rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.4);font-weight:700;">Total</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:#c8a84b;letter-spacing:1px;">${total}</div>
-    </div>`;
-  document.getElementById('points-modal-bg').style.display = 'flex';
   document.body.style.overflow = 'hidden';
 }
 function closePointsModal() {
@@ -2489,7 +2467,7 @@ async function openEditModal() {
   // Fetch own user data fresh from DB
   let _ownData = {};
   try {
-    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio`);
+    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio,avatar_side`);
     _ownData = _rows[0] || {};
   } catch(e) {}
 
@@ -2521,6 +2499,9 @@ async function openEditModal() {
   const bioCount = document.getElementById('ep-bio-count');
   if (bioInput) { bioInput.value = bioVal; }
   if (bioCount) bioCount.textContent = bioVal.length + ' / 160';
+
+  // Pre-fill avatar side
+  epSetSide(_ownData.avatar_side || 'left', false);
 
   document.getElementById('edit-modal-bg').style.display = 'flex';
 }
@@ -2609,8 +2590,10 @@ async function saveEditProfile() {
   try {
     const websiteRaw = (document.getElementById('ep-twitch-input')?.value.trim() || '').replace(/^https?:\/\//,'');
     const twitch = websiteRaw ? 'https://' + websiteRaw : null;
-    const updates = { display_name: name, ig_handle: ig, x_handle: x, twitch_channel: twitch || null, bio: bio || null };
+    const avatarSide = document.getElementById('ep-side-right')?.dataset.active === '1' ? 'right' : 'left';
+    const updates = { display_name: name, ig_handle: ig, x_handle: x, twitch_channel: twitch || null, bio: bio || null, avatar_side: avatarSide };
     await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(updates) });
+    applyAvatarSide(avatarSide);
 
     session.displayName = name; session.igHandle = ig; session.xHandle = x;
     localStorage.setItem('efed_session', JSON.stringify(session));
@@ -2628,6 +2611,22 @@ async function saveEditProfile() {
     nameMsg.textContent = 'Saved!'; nameMsg.style.color = '#4caf64';
     setTimeout(closeEditModal, 800);
   } catch(e) { nameMsg.textContent = 'Could not save.'; nameMsg.style.color='#ff6b6b'; }
+}
+
+// ── AVATAR SIDE TOGGLE ──
+function epSetSide(side, updatePreview = true) {
+  const lBtn = document.getElementById('ep-side-left');
+  const rBtn = document.getElementById('ep-side-right');
+  const active = 'background:rgba(192,0,14,.18);border-color:rgba(192,0,14,.5);color:#fff;';
+  const inactive = 'background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1);color:#e8e8e8;';
+  if (lBtn) { lBtn.style.cssText = lBtn.style.cssText.replace(/background:[^;]+;border-color:[^;]+;color:[^;]+;/g,'') + (side === 'left' ? active : inactive); lBtn.dataset.active = side === 'left' ? '1' : '0'; }
+  if (rBtn) { rBtn.style.cssText = rBtn.style.cssText.replace(/background:[^;]+;border-color:[^;]+;color:[^;]+;/g,'') + (side === 'right' ? active : inactive); rBtn.dataset.active = side === 'right' ? '1' : '0'; }
+  if (updatePreview) applyAvatarSide(side);
+}
+
+function applyAvatarSide(side) {
+  const inner = document.querySelector('.banner-inner');
+  if (inner) inner.style.flexDirection = side === 'right' ? 'row-reverse' : 'row';
 }
 
 // ── BANNER UPLOAD ──
@@ -3014,8 +3013,8 @@ async function loadProfile() {
     } catch(e) {}
     // Fetch avatar + banner separately
     try {
-      const avRow = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=avatar_url,avatar_banner`);
-      if (avRow[0]) { user.avatar_url = avRow[0].avatar_url; user.avatar_banner = avRow[0].avatar_banner; }
+      const avRow = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=avatar_url,avatar_banner,avatar_side`);
+      if (avRow[0]) { user.avatar_url = avRow[0].avatar_url; user.avatar_banner = avRow[0].avatar_banner; user.avatar_side = avRow[0].avatar_side; }
     } catch(e) {}
     const name = user.display_name || user.username;
     _atrTargetName = name;
@@ -3033,6 +3032,8 @@ async function loadProfile() {
       if (noiseEl) noiseEl.style.display = 'none';
       if (glowEl) glowEl.style.display = 'none';
     }
+    // Apply avatar side preference
+    if (user.avatar_side) applyAvatarSide(user.avatar_side);
     // Load socials — DB first, only cache to session for own profile
     const ig = (user.ig_handle || (_isOwnProfile ? session.igHandle : '') || '').replace('@','');
     const x  = (user.x_handle  || (_isOwnProfile ? session.xHandle  : '') || '').replace('@','');
@@ -3469,7 +3470,20 @@ function triggerInstall() {
         <div id="ep-banner-msg" style="font-size:.68rem;margin-top:4px;min-height:14px;color:#4caf64;"></div>
       </div>
 
-      <!-- Links -->
+      <!-- Avatar Position -->
+      <div>
+        <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:8px;">Profile Picture Position</div>
+        <div style="display:flex;gap:8px;">
+          <button id="ep-side-left" onclick="epSetSide('left')" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .15s,border-color .15s;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="12" r="4"/><line x1="14" y1="12" x2="21" y2="12"/></svg>
+            Left
+          </button>
+          <button id="ep-side-right" onclick="epSetSide('right')" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .15s,border-color .15s;">
+            Right
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="12" x2="10" y2="12"/><circle cx="16" cy="12" r="4"/></svg>
+          </button>
+        </div>
+      </div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:2px;">Links</div>
 
