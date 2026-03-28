@@ -3732,11 +3732,6 @@ function scrollPills(dir) {
   setTimeout(_pillSliderSync, 350);
 }
 
-function scrollChatRooms(dir) {
-  const wrap = document.getElementById('chat-rooms');
-  if (wrap) wrap.scrollBy({ left: dir * 150, behavior: 'smooth' });
-}
-
 let _moveCatVideo = null, _moveCatBtn = null;
 
 function openMoveCategoryModal(v, btn) {
@@ -9082,21 +9077,13 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
 
 /* Rooms */
 #chat-rooms {
-  display: flex; gap: 5px; padding: 10px 14px;
-  overflow-x: auto; scrollbar-width: none; flex-shrink: 0;
-  border-bottom: 1px solid rgba(255,255,255,.05);
-  background: #0d0d10;
+  width: 100%; background: #1a1a1f;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
+  color: #e8e8e8; font-family: 'DM Sans', sans-serif;
+  font-size: .75rem; font-weight: 600; padding: 7px 10px;
+  cursor: pointer; outline: none;
 }
-#chat-rooms::-webkit-scrollbar { display: none; }
-.chat-room-pill {
-  font-size: .65rem; font-weight: 700; letter-spacing: 1.5px;
-  text-transform: uppercase; padding: 4px 10px; border-radius: 20px;
-  border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.04);
-  color: rgba(255,255,255,.4); cursor: pointer; white-space: nowrap;
-  transition: all .15s; font-family: 'DM Sans', sans-serif; flex-shrink: 0;
-}
-.chat-room-pill:hover { background: rgba(255,255,255,.09); color: #fff; }
-.chat-room-pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+#chat-rooms option { background: #1a1a1f; color: #e8e8e8; }
 
 /* Messages */
 #chat-messages {
@@ -9294,10 +9281,8 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
     <div id="chat-header-title">EFED CHAT</div>
     <button id="chat-close-btn" onclick="toggleChat()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
   </div>
-  <div style="display:flex;align-items:center;gap:4px;padding:0 8px;flex-shrink:0;">
-    <button class="pill-arr left" id="chat-rooms-arr-left" onclick="scrollChatRooms(-1)" style="display:flex;">&#8249;</button>
-    <div id="chat-rooms" style="flex:1;"></div>
-    <button class="pill-arr right" id="chat-rooms-arr-right" onclick="scrollChatRooms(1)" style="display:flex;">&#8250;</button>
+  <div style="padding:8px 12px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.05);background:#0d0d10;">
+    <select id="chat-rooms" onchange="switchChatRoom(this.value, this.options[this.selectedIndex].dataset.efed || null)" style="width:100%;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:600;padding:7px 10px;cursor:pointer;outline:none;appearance:none;-webkit-appearance:none;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a8a9a' stroke-width='2' stroke-linecap='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;"></select>
   </div>
   <div id="chat-pinned" style="display:none;padding:8px 14px;background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.06);font-size:.68rem;color:rgba(255,255,255,.45);line-height:1.5;font-style:italic;flex-shrink:0;"></div>
   <div id="chat-say-hi" style="padding:10px 14px;background:rgba(200,168,75,.07);border-bottom:1px solid rgba(200,168,75,.15);display:none;align-items:flex-start;gap:10px;flex-shrink:0;">
@@ -9486,12 +9471,13 @@ function initChat() {
 }
 
 async function buildChatRooms() {
-  const wrap = document.getElementById('chat-rooms');
-  wrap.innerHTML = '';
+  const sel = document.getElementById('chat-rooms');
+  sel.innerHTML = '';
 
   const updatesRoom = { id: 'updates', name: 'Updates' };
   let orderedRooms = [];
   let activeEfedRooms = []; // admin-only: owners currently online
+  const allIds = new Set(); // dedup across sections
 
   const session = getSession();
   const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
@@ -9510,6 +9496,7 @@ async function buildChatRooms() {
         const id = 'efed_' + name.toLowerCase().replace(/[^a-z0-9]/g, '_');
         orderedRooms.push({ id, name, isEfed: true, isOwned: true });
         addedNames.add(name.toLowerCase());
+        allIds.add(id);
       }
 
       // 2. Member eFeds
@@ -9518,6 +9505,7 @@ async function buildChatRooms() {
           const id = 'efed_' + name.toLowerCase().replace(/[^a-z0-9]/g, '_');
           orderedRooms.push({ id, name, isEfed: true });
           addedNames.add(name.toLowerCase());
+          allIds.add(id);
         }
       });
     } catch(e) {}
@@ -9536,7 +9524,8 @@ async function buildChatRooms() {
           ownerRows.forEach(u => {
             if (!u.promo_name) return;
             const id = 'efed_' + u.promo_name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-            if (!addedActive.has(id)) {
+            // Skip if already in user's own rooms (no duplicate FSW etc.)
+            if (!addedActive.has(id) && !allIds.has(id)) {
               addedActive.add(id);
               activeEfedRooms.push({ id, name: u.promo_name, isEfed: true, isActive: true });
             }
@@ -9552,41 +9541,34 @@ async function buildChatRooms() {
   // store for init use
   window._efedRooms = orderedRooms.filter(r => r.isEfed);
 
-  // Admin: render active eFed rooms section first
+  const makeOpt = (id, label, efedName, prefix) => {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = (prefix || '') + label;
+    if (efedName) opt.dataset.efed = efedName;
+    if (id === _chatRoom) opt.selected = true;
+    return opt;
+  };
+
+  // Admin active eFeds group (owners online, not already in user's rooms)
   if (isAdmin && activeEfedRooms.length) {
-    const label = document.createElement('span');
-    label.style.cssText = 'font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:#4caf64;font-weight:700;white-space:nowrap;align-self:center;flex-shrink:0;padding:0 4px 0 2px;font-family:"DM Sans",sans-serif;';
-    label.textContent = '🟢';
-    wrap.appendChild(label);
-
-    activeEfedRooms.forEach(r => {
-      const pill = document.createElement('button');
-      pill.className = 'chat-room-pill' + (r.id === _chatRoom ? ' active' : '');
-      pill.textContent = r.name;
-      pill.style.borderColor = 'rgba(76,175,100,.45)';
-      pill.style.color = 'rgba(76,175,100,.95)';
-      pill.title = r.name + ' — owner is live in Hub';
-      pill.onclick = (e) => { e.stopPropagation(); switchChatRoom(r.id, r.name); };
-      wrap.appendChild(pill);
-    });
-
-    // Divider
-    const divider = document.createElement('span');
-    divider.style.cssText = 'width:1px;height:18px;background:rgba(255,255,255,.1);flex-shrink:0;align-self:center;margin:0 4px;';
-    wrap.appendChild(divider);
+    const grp = document.createElement('optgroup');
+    grp.label = '🟢 Active eFeds';
+    activeEfedRooms.forEach(r => grp.appendChild(makeOpt(r.id, r.name, r.name, '')));
+    sel.appendChild(grp);
   }
 
-  orderedRooms.forEach(r => {
-    const pill = document.createElement('button');
-    pill.className = 'chat-room-pill' + (r.id === _chatRoom ? ' active' : '');
-    pill.textContent = r.name;
-    if (r.isEfed) {
-      pill.style.borderColor = 'rgba(200,168,75,.35)';
-      pill.style.color = 'rgba(200,168,75,.9)';
-    }
-    pill.onclick = (e) => { e.stopPropagation(); switchChatRoom(r.id, r.isEfed ? r.name : null); };
-    wrap.appendChild(pill);
-  });
+  // My rooms group (owned + member eFeds + updates)
+  const myEfeds = orderedRooms.filter(r => r.isEfed);
+  if (myEfeds.length) {
+    const grp = document.createElement('optgroup');
+    grp.label = isAdmin ? 'My Rooms' : 'eFed Rooms';
+    myEfeds.forEach(r => grp.appendChild(makeOpt(r.id, r.name, r.name, r.isOwned ? '⭐ ' : '')));
+    sel.appendChild(grp);
+  }
+
+  // Updates as its own entry at bottom
+  sel.appendChild(makeOpt('updates', 'Updates', null, '📢 '));
 }
 
 function switchChatRoom(roomId, efedName) {
