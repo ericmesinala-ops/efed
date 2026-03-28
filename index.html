@@ -9076,14 +9076,22 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
 #chat-close-btn:hover { color: #fff; background: rgba(255,255,255,.07); }
 
 /* Rooms */
-#chat-rooms {
-  width: 100%; background: #1a1a1f;
-  border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
-  color: #e8e8e8; font-family: 'DM Sans', sans-serif;
-  font-size: .75rem; font-weight: 600; padding: 7px 10px;
-  cursor: pointer; outline: none;
+#chat-room-select-wrap {
+  padding: 10px 12px; flex-shrink: 0;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  background: #0d0d10;
 }
-#chat-rooms option { background: #1a1a1f; color: #e8e8e8; }
+#chat-rooms {
+  width: 100%; padding: 8px 10px;
+  background: #18181c; color: #e8e8e8;
+  border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
+  font-family: 'DM Sans', sans-serif; font-size: .8rem; font-weight: 500;
+  cursor: pointer; outline: none;
+  transition: border-color .15s;
+}
+#chat-rooms:focus { border-color: rgba(192,0,14,.6); }
+#chat-rooms option { background: #18181c; color: #e8e8e8; }
+#chat-rooms optgroup { color: rgba(255,255,255,.4); font-size: .7rem; }
 
 /* Messages */
 #chat-messages {
@@ -9281,8 +9289,8 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
     <div id="chat-header-title">EFED CHAT</div>
     <button id="chat-close-btn" onclick="toggleChat()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
   </div>
-  <div style="padding:8px 12px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.05);background:#0d0d10;">
-    <select id="chat-rooms" onchange="switchChatRoom(this.value, this.options[this.selectedIndex].dataset.efed || null)" style="width:100%;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:600;padding:7px 10px;cursor:pointer;outline:none;appearance:none;-webkit-appearance:none;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a8a9a' stroke-width='2' stroke-linecap='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;"></select>
+  <div id="chat-room-select-wrap">
+    <select id="chat-rooms" onchange="switchChatRoom(this.value, this.options[this.selectedIndex].dataset.efed || null)"></select>
   </div>
   <div id="chat-pinned" style="display:none;padding:8px 14px;background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.06);font-size:.68rem;color:rgba(255,255,255,.45);line-height:1.5;font-style:italic;flex-shrink:0;"></div>
   <div id="chat-say-hi" style="padding:10px 14px;background:rgba(200,168,75,.07);border-bottom:1px solid rgba(200,168,75,.15);display:none;align-items:flex-start;gap:10px;flex-shrink:0;">
@@ -9474,101 +9482,62 @@ async function buildChatRooms() {
   const sel = document.getElementById('chat-rooms');
   sel.innerHTML = '';
 
-  const updatesRoom = { id: 'updates', name: 'Updates' };
-  let orderedRooms = [];
-  let activeEfedRooms = []; // admin-only: owners currently online
-  const allIds = new Set(); // dedup across sections
-
   const session = getSession();
   const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
+  let efedRooms = []; // rooms to show before Updates
+  const seen = new Set();
 
   if (session && session.username) {
     try {
-      const userRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
-      const user = userRows[0];
-      const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&select=efed`);
-      const memberEfeds = rosterRows.map(r => r.efed).filter(Boolean);
-      const addedNames = new Set();
+      if (isAdmin) {
+        // Admin sees every eFed room
+        const allOwners = await sbGet('users', 'is_efed_owner=eq.true&select=promo_name&order=promo_name.asc');
+        allOwners.forEach(u => {
+          if (!u.promo_name) return;
+          const id = 'efed_' + u.promo_name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          if (!seen.has(id)) { seen.add(id); efedRooms.push({ id, name: u.promo_name, isOwned: true }); }
+        });
+      } else {
+        // Owner: their eFed. Roster member: each eFed they belong to.
+        const [userRows, rosterRows] = await Promise.all([
+          sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
+          sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&select=efed`)
+        ]);
+        const user = userRows[0];
+        const memberEfeds = rosterRows.map(r => r.efed).filter(Boolean);
 
-      // 1. Owned eFed first
-      if ((user?.is_efed_owner || user?.role === 'owner') && user?.promo_name) {
-        const name = user.promo_name;
-        const id = 'efed_' + name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-        orderedRooms.push({ id, name, isEfed: true, isOwned: true });
-        addedNames.add(name.toLowerCase());
-        allIds.add(id);
-      }
-
-      // 2. Member eFeds
-      memberEfeds.forEach(name => {
-        if (!addedNames.has(name.toLowerCase())) {
+        if ((user?.is_efed_owner || user?.role === 'owner') && user?.promo_name) {
+          const id = 'efed_' + user.promo_name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          if (!seen.has(id)) { seen.add(id); efedRooms.push({ id, name: user.promo_name, isOwned: true }); }
+        }
+        memberEfeds.forEach(name => {
           const id = 'efed_' + name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-          orderedRooms.push({ id, name, isEfed: true });
-          addedNames.add(name.toLowerCase());
-          allIds.add(id);
-        }
-      });
+          if (!seen.has(id)) { seen.add(id); efedRooms.push({ id, name }); }
+        });
+      }
     } catch(e) {}
-
-    // 3. Admin: find eFed owners who are currently online
-    if (isAdmin) {
-      try {
-        const cutoff = Date.now() - 120000;
-        const presenceRows = await sbGet('presence', `last_seen=gt.${cutoff}&select=username`);
-        const onlineUsernames = presenceRows.map(r => r.username).filter(Boolean);
-        if (onlineUsernames.length) {
-          const ownerRows = await sbGet('users',
-            `username=in.(${onlineUsernames.map(u => encodeURIComponent(u)).join(',')})&is_efed_owner=eq.true&select=username,promo_name`
-          );
-          const addedActive = new Set();
-          ownerRows.forEach(u => {
-            if (!u.promo_name) return;
-            const id = 'efed_' + u.promo_name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-            // Skip if already in user's own rooms (no duplicate FSW etc.)
-            if (!addedActive.has(id) && !allIds.has(id)) {
-              addedActive.add(id);
-              activeEfedRooms.push({ id, name: u.promo_name, isEfed: true, isActive: true });
-            }
-          });
-        }
-      } catch(e) {}
-    }
   }
 
-  // Updates always last
-  orderedRooms.push(updatesRoom);
+  // store for permissions checks elsewhere
+  window._efedRooms = efedRooms;
 
-  // store for init use
-  window._efedRooms = orderedRooms.filter(r => r.isEfed);
-
-  const makeOpt = (id, label, efedName, prefix) => {
+  const makeOpt = (id, label, efedName) => {
     const opt = document.createElement('option');
     opt.value = id;
-    opt.textContent = (prefix || '') + label;
+    opt.textContent = label;
     if (efedName) opt.dataset.efed = efedName;
     if (id === _chatRoom) opt.selected = true;
     return opt;
   };
 
-  // Admin active eFeds group (owners online, not already in user's rooms)
-  if (isAdmin && activeEfedRooms.length) {
+  if (efedRooms.length) {
     const grp = document.createElement('optgroup');
-    grp.label = '🟢 Active eFeds';
-    activeEfedRooms.forEach(r => grp.appendChild(makeOpt(r.id, r.name, r.name, '')));
+    grp.label = isAdmin ? 'All eFed Rooms' : 'eFed Rooms';
+    efedRooms.forEach(r => grp.appendChild(makeOpt(r.id, r.name, r.name)));
     sel.appendChild(grp);
   }
 
-  // My rooms group (owned + member eFeds + updates)
-  const myEfeds = orderedRooms.filter(r => r.isEfed);
-  if (myEfeds.length) {
-    const grp = document.createElement('optgroup');
-    grp.label = isAdmin ? 'My Rooms' : 'eFed Rooms';
-    myEfeds.forEach(r => grp.appendChild(makeOpt(r.id, r.name, r.name, r.isOwned ? '⭐ ' : '')));
-    sel.appendChild(grp);
-  }
-
-  // Updates as its own entry at bottom
-  sel.appendChild(makeOpt('updates', 'Updates', null, '📢 '));
+  sel.appendChild(makeOpt('updates', 'Updates', null));
 }
 
 function switchChatRoom(roomId, efedName) {
