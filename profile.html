@@ -864,7 +864,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   border-top: 1px solid rgba(255,255,255,.09);
   border-bottom: 1px solid rgba(255,255,255,.09);
 }
-.post-card.ic  { background: #19160e; }
+.post-card.ic  { background: #0d1610; }
 .post-card.ooc { background: #10131c; }
 
 /* ── TOP ROW: reply avatars → arrow → OP avatar ── */
@@ -1171,15 +1171,25 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   background: rgba(255,255,255,.04); color: rgba(255,255,255,.25);
 }
 .pm-mode-btn + .pm-mode-btn { border-left: 1px solid rgba(255,255,255,.08); }
-.pm-mode-btn.active-ic  { background: rgba(200,168,75,.12); color: #c8a84b; }
+.pm-mode-btn.active-ic  { background: rgba(34,197,94,.12); color: #4ade80; }
 .pm-mode-btn.active-ooc { background: rgba(80,140,255,.12); color: #7ab3ff; }
-/* modal tint */
+/* IC/OOC modal tints */
 #post-modal { transition: background .35s; }
-#post-modal.mode-ic  { background: #161410; border-color: rgba(200,168,75,.18); }
+#post-modal.mode-ic  { background: #0d1610; border-color: rgba(34,197,94,.18); }
 #post-modal.mode-ooc { background: #0f1219; border-color: rgba(80,140,255,.18); }
 .pm-textarea { transition: border-color .25s, background .25s; }
-#post-modal.mode-ic  .pm-textarea:focus { border-color: rgba(200,168,75,.45); }
+#post-modal.mode-ic  .pm-textarea:focus { border-color: rgba(34,197,94,.4); }
 #post-modal.mode-ooc .pm-textarea:focus { border-color: rgba(80,140,255,.4); }
+/* Custom efed dropdown */
+.pm-efed-opt {
+  padding: 11px 14px; font-size: .82rem; font-family: 'DM Sans', sans-serif;
+  color: rgba(255,255,255,.7); cursor: pointer; transition: background .12s, color .12s;
+  background: transparent;
+}
+.pm-efed-opt:hover { background: rgba(255,255,255,.07); color: #fff; }
+.pm-efed-opt.selected { color: #fff; font-weight: 600; background: rgba(192,0,14,.1); }
+.pm-efed-opt + .pm-efed-opt { border-top: 1px solid rgba(255,255,255,.06); }
+#pm-efed-display:hover { border-color: rgba(255,255,255,.18); background: rgba(255,255,255,.06); }
 .pm-emoji-picker {
   display: none; position: absolute; bottom: 100%; left: 0;
   background: #1a1a22; border: 1px solid rgba(255,255,255,.12);
@@ -1259,11 +1269,20 @@ nav.scrolled { background: rgba(7,7,10,.99); }
       <button class="pm-img-remove" onclick="_posts.removeImg()">✕</button>
     </div>
     <!-- eFed broadcast row — hidden if user has no efeds -->
-    <div id="pm-efed-row" style="display:none;align-items:center;gap:8px;padding:2px 0 4px;">
-      <span style="font-size:.62rem;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;white-space:nowrap;">Posting to</span>
-      <select id="pm-efed-select" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.75);font-family:'DM Sans',sans-serif;font-size:.72rem;padding:6px 10px;outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;">
-        <option value="">— My profile only —</option>
-      </select>
+    <div id="pm-efed-row" style="display:none;align-items:center;gap:10px;padding:4px 0 2px;border-top:1px solid rgba(255,255,255,.06);margin-top:2px;">
+      <span style="font-size:.62rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;white-space:nowrap;letter-spacing:.3px;">Posting to</span>
+      <div id="pm-efed-wrap" style="position:relative;flex:1;">
+        <div id="pm-efed-display" onclick="pmToggleEfedDrop()" style="display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;cursor:pointer;transition:border-color .15s,background .15s;user-select:none;">
+          <span id="pm-efed-label" style="font-size:.78rem;color:rgba(255,255,255,.65);font-family:'DM Sans',sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">My profile only</span>
+          <svg id="pm-efed-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="2.5" stroke-linecap="round" style="flex-shrink:0;transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="pm-efed-drop" style="display:none;position:absolute;bottom:calc(100% + 6px);left:0;right:0;background:#111116;border:1px solid rgba(255,255,255,.12);border-radius:12px;overflow:hidden;box-shadow:0 -16px 40px rgba(0,0,0,.8);z-index:99;">
+          <div class="pm-efed-opt" data-value="" onclick="pmPickEfed(this)">My profile only</div>
+        </div>
+        <select id="pm-efed-select" style="display:none;">
+          <option value="">My profile only</option>
+        </select>
+      </div>
     </div>
     <div class="pm-toolbar" style="position:relative;">
       <button class="pm-tool-btn" title="Add image" onclick="document.getElementById('pm-img-input').click()">
@@ -1329,6 +1348,12 @@ const _posts = (() => {
         </button>`
       : '';
 
+    const efedTag = p.efed
+      ? `<a href="efed.html?e=${encodeURIComponent(p.efed)}" style="display:inline-flex;align-items:center;gap:4px;font-size:.6rem;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;text-decoration:none;letter-spacing:.3px;transition:color .15s;" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.3)'">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          posted to ${_esc(p.efed)}
+        </a>` : '';
+
     return `<div class="post-card ${mode}" data-id="${p.id}" style="position:relative;">
       <div class="post-card-header">
         <div class="post-av-wrap">${_avHtml(p)}</div>
@@ -1343,6 +1368,7 @@ const _posts = (() => {
       ${imgHtml}
       <div class="post-card-footer">
         <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}</div>
+        ${efedTag}
       </div>
       <div class="post-replies-wrap">
         <button class="post-replies-toggle" id="replies-toggle-${p.id}" onclick="_posts.toggleReplies('${p.id}',this)">
@@ -1473,15 +1499,55 @@ const _posts = (() => {
     // Populate efed dropdown
     _loadMyEfeds().then(efeds => {
       const row = document.getElementById('pm-efed-row');
+      const drop = document.getElementById('pm-efed-drop');
       const sel = document.getElementById('pm-efed-select');
-      if (!row || !sel) return;
-      sel.innerHTML = '<option value="">— My profile only —</option>';
-      efeds.forEach(e => {
-        const opt = document.createElement('option');
-        opt.value = e; opt.textContent = e;
-        sel.appendChild(opt);
+      const display = document.getElementById('pm-efed-display');
+      if (!row || !drop || !sel) return;
+
+      if (!efeds.length) {
+        // No efeds — hide row, post to profile only
+        row.style.display = 'none';
+        sel.value = '';
+        return;
+      }
+
+      if (efeds.length === 1) {
+        // Exactly one — auto-select silently, hide the dropdown trigger
+        sel.value = efeds[0];
+        const label = document.getElementById('pm-efed-label');
+        if (label) label.textContent = efeds[0];
+        drop.innerHTML = '';
+        sel.innerHTML = `<option value="${efeds[0]}">${efeds[0]}</option>`;
+        // Show as a plain label, not a clickable dropdown
+        if (display) { display.style.cursor = 'default'; display.onclick = null; }
+        const chevron = document.getElementById('pm-efed-chevron');
+        if (chevron) chevron.style.display = 'none';
+        row.style.display = 'flex';
+        return;
+      }
+
+      // 2+ efeds — show dropdown with efed choices only (no profile-only option)
+      drop.innerHTML = '';
+      sel.innerHTML = '';
+      efeds.forEach((e, i) => {
+        const opt = document.createElement('div');
+        opt.className = 'pm-efed-opt' + (i === 0 ? ' selected' : '');
+        opt.dataset.value = e;
+        opt.textContent = e;
+        opt.onclick = function() { pmPickEfed(this); };
+        drop.appendChild(opt);
+        const selOpt = document.createElement('option');
+        selOpt.value = e; selOpt.textContent = e;
+        sel.appendChild(selOpt);
       });
-      row.style.display = efeds.length ? 'flex' : 'none';
+      // Auto-select first
+      sel.value = efeds[0];
+      const label = document.getElementById('pm-efed-label');
+      if (label) label.textContent = efeds[0];
+      if (display) { display.style.cursor = 'pointer'; display.onclick = pmToggleEfedDrop; }
+      const chevron = document.getElementById('pm-efed-chevron');
+      if (chevron) chevron.style.display = '';
+      row.style.display = 'flex';
     });
   }
   let _editingId=null,_imgData=null;
@@ -1497,6 +1563,7 @@ const _posts = (() => {
     const title=document.getElementById('pm-modal-title');if(title)title.textContent='New Post';
     const btn=document.getElementById('pm-submit');if(btn){btn.textContent='Post';btn.onclick=()=>_posts.submit();}
     const sel=document.getElementById('pm-efed-select');if(sel)sel.value='';
+    pmCloseEfedDrop();
   }
   function handleImg(e){
     const file=e.target.files[0];if(!file)return;
@@ -2675,6 +2742,35 @@ function applyBannerDim(pct) {
   const el = document.getElementById('profile-banner-dim');
   if (el) el.style.background = pct > 0 ? `rgba(0,0,0,${pct/100})` : 'rgba(0,0,0,0)';
 }
+
+// ── EFED DROPDOWN ──
+function pmToggleEfedDrop() {
+  const drop = document.getElementById('pm-efed-drop');
+  const chevron = document.getElementById('pm-efed-chevron');
+  if (!drop) return;
+  const open = drop.style.display === 'block';
+  drop.style.display = open ? 'none' : 'block';
+  if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+}
+function pmCloseEfedDrop() {
+  const drop = document.getElementById('pm-efed-drop');
+  const chevron = document.getElementById('pm-efed-chevron');
+  if (drop) drop.style.display = 'none';
+  if (chevron) chevron.style.transform = '';
+}
+function pmPickEfed(el) {
+  const val = el.dataset.value;
+  const label = document.getElementById('pm-efed-label');
+  const sel = document.getElementById('pm-efed-select');
+  if (label) label.textContent = val || 'My profile only';
+  if (sel) sel.value = val;
+  // Mark selected
+  document.querySelectorAll('.pm-efed-opt').forEach(o => o.classList.toggle('selected', o === el));
+  pmCloseEfedDrop();
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('#pm-efed-wrap')) pmCloseEfedDrop();
+});
 
 function epPreviewDim(val) {
   document.getElementById('ep-dim-label').textContent = val + '%';
