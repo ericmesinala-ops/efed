@@ -4685,7 +4685,7 @@ function _efedRenderMsg(text) {
   if (!text) return '';
   if (text.startsWith('[gif]') && text.endsWith('[/gif]')) {
     const url = text.slice(5, -6);
-    return `<img src="${_esc(url)}" alt="GIF" style="max-width:60%;border-radius:8px;margin-top:4px;display:block;" loading="lazy">`;
+    return `<img src="${_esc(url)}" alt="GIF" style="max-width:40%;max-height:140px;border-radius:8px;margin-top:4px;display:block;" loading="lazy">`;
   }
   return _esc(text);
 }
@@ -4695,17 +4695,36 @@ function _efedAppendMsg(r) {
   if (!box) return;
   const empty = box.querySelector('.efed-chat-empty');
   if (empty) empty.remove();
+  const session = getSession();
+  const isOwn = session && session.username === r.username;
+  const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
+  const canDelete = isOwn || isAdmin;
   const av = _efedAvatarCache[r.username];
   const initials = (r.username || '?')[0].toUpperCase();
   const avHtml = av
     ? `<a href="profile.html?u=${encodeURIComponent(r.username)}" class="efed-chat-av"><img src="${_esc(av)}" alt=""></a>`
     : `<a href="profile.html?u=${encodeURIComponent(r.username)}" class="efed-chat-av">${initials}</a>`;
   const ago = _efedTimeAgo(r.created_at);
+  const deleteBtn = canDelete
+    ? `<button onclick="efedDeleteChatMsg('${r.id}',this)" style="background:none;border:none;color:rgba(255,255,255,.2);cursor:pointer;font-size:.7rem;padding:0 0 0 6px;flex-shrink:0;line-height:1;transition:color .15s;" onmouseover="this.style.color='#ff6b6b'" onmouseout="this.style.color='rgba(255,255,255,.2)'">✕</button>`
+    : '';
   const div = document.createElement('div');
   div.className = 'efed-chat-msg';
   div.dataset.id = r.id || '';
-  div.innerHTML = `${avHtml}<div class="efed-chat-bubble"><div class="efed-chat-meta"><strong>${_esc(r.display_name||r.username)}</strong>${ago}</div><div class="efed-chat-text">${_efedRenderMsg(r.message)}</div></div>`;
+  div.innerHTML = `${avHtml}<div class="efed-chat-bubble"><div class="efed-chat-meta"><strong>${_esc(r.display_name||r.username)}</strong>${ago}${deleteBtn}</div><div class="efed-chat-text">${_efedRenderMsg(r.message)}</div></div>`;
   box.appendChild(div);
+}
+
+async function efedDeleteChatMsg(id, btn) {
+  if (!id) return;
+  const session = getSession(); if (!session) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/chat_messages?id=eq.' + encodeURIComponent(id), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ deleted: true })
+    });
+    const msg = btn?.closest('.efed-chat-msg');
+    if (msg) msg.remove();
+  } catch(e) { console.error('Delete failed', e); }
 }
 
 function _efedScrollBottom(force) {
