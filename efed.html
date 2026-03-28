@@ -816,6 +816,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   <div class="banner-noise"></div>
   <div class="banner-glow"></div>
   <img id="profile-banner-img" src="" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;z-index:1;">
+  <div id="efed-banner-dim" style="position:absolute;inset:0;z-index:2;background:rgba(0,0,0,0);pointer-events:none;transition:background .3s;"></div>
   <input type="file" id="profile-banner-file" accept="image/*" style="display:none;" onchange="handleBannerUpload(event,'profile')">
   <div class="banner-inner">
     <div class="profile-av-box" id="profile-av-box" onclick="handleAvatarClick()">
@@ -1274,7 +1275,7 @@ async function openEditModal() {
   }
   // Pre-fill fields from DB
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=yt_channel,ig_handle,x_handle,promo_website,efed_signings_link,efed_bio`);
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=yt_channel,ig_handle,x_handle,promo_website,efed_signings_link,efed_bio,efed_banner_dim`);
     if (rows[0]) {
       const u = rows[0];
       document.getElementById('ep-yt-input').value = u.yt_channel || '';
@@ -1287,6 +1288,12 @@ async function openEditModal() {
       const bioCount = document.getElementById('ep-bio-count');
       if (bioInput) bioInput.value = bioVal;
       if (bioCount) bioCount.textContent = bioVal.length + ' / 160';
+      // Pre-fill dim slider
+      const dimVal = parseInt(u.efed_banner_dim) || 0;
+      const dimSlider = document.getElementById('efed-dim-slider');
+      const dimLabel = document.getElementById('efed-dim-label');
+      if (dimSlider) dimSlider.value = dimVal;
+      if (dimLabel) dimLabel.textContent = dimVal + '%';
     }
   } catch(e) {}
   document.getElementById('ep-name-msg').textContent = '';
@@ -1353,12 +1360,14 @@ async function saveEditProfile() {
   const web = document.getElementById('ep-web-input').value.trim();
   const apply = document.getElementById('ep-apply-input').value.trim();
   const bio = (document.getElementById('ep-bio-input')?.value || '').slice(0,160);
+  const bannerDim = parseInt(document.getElementById('efed-dim-slider')?.value) || 0;
   try {
     const _sr = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
       method:'PATCH', headers:SB_HEADERS,
-      body:JSON.stringify({yt_channel:yt||null, ig_handle:ig||null, x_handle:x||null, promo_website:web||null, efed_signings_link:apply||null, efed_bio:bio||null})
+      body:JSON.stringify({yt_channel:yt||null, ig_handle:ig||null, x_handle:x||null, promo_website:web||null, efed_signings_link:apply||null, efed_bio:bio||null, efed_banner_dim:bannerDim})
     });
     if (!_sr.ok) throw new Error('HTTP '+_sr.status+': '+await _sr.text());
+    efedApplyBannerDim(bannerDim);
     // Update bio on page
     const bioEl = document.getElementById('efed-bio');
     const bioSec = document.getElementById('efed-bio-section');
@@ -1391,6 +1400,15 @@ function renderSocialLinks(yt, ig, x, web) {
   wrap.style.display = (yt||ig||x||web) ? 'flex' : 'none';
 }
 // ── BANNER UPLOAD ──
+function efedApplyBannerDim(pct) {
+  const el = document.getElementById('efed-banner-dim');
+  if (el) el.style.background = pct > 0 ? `rgba(0,0,0,${pct/100})` : 'rgba(0,0,0,0)';
+}
+function efedPreviewDim(val) {
+  document.getElementById('efed-dim-label').textContent = val + '%';
+  efedApplyBannerDim(parseInt(val));
+}
+
 function handleBannerUpload(event, type) {
   const file = event.target.files[0];
   if (!file) return;
@@ -1692,7 +1710,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_bio&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_bio&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
@@ -1769,6 +1787,8 @@ async function loadProfile() {
       const noiseEl = document.querySelector('.banner-noise'); if (noiseEl) noiseEl.style.display = 'none';
       const glowEl = document.querySelector('.banner-glow'); if (glowEl) glowEl.style.display = 'none';
     }
+    // Banner dim
+    if (user.efed_banner_dim) efedApplyBannerDim(parseInt(user.efed_banner_dim));
 
     // Signings toggle state
     _signingsOn = !!user.efed_open_signings;
@@ -2704,6 +2724,16 @@ function triggerInstall() {
           Upload Banner
         </button>
         <div id="ep-banner-msg" style="font-size:.68rem;margin-top:4px;min-height:14px;color:#4caf64;"></div>
+        <!-- Dim slider -->
+        <div style="margin-top:10px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;">Banner Dim</div>
+            <span id="efed-dim-label" style="font-size:.62rem;color:rgba(255,255,255,.4);">0%</span>
+          </div>
+          <input id="efed-dim-slider" type="range" min="0" max="80" step="5" value="0"
+            oninput="efedPreviewDim(this.value)"
+            style="width:100%;accent-color:#c0000e;cursor:pointer;">
+        </div>
       </div>
 
       <!-- YouTube -->
