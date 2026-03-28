@@ -9031,7 +9031,6 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
   }
   /* Solid opaque backgrounds on mobile so nothing bleeds through */
   #chat-header { background: #0d0d10; padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
-  #chat-rooms { background: #0d0d10; }
   #chat-messages { background: #07070a; }
   #chat-input-wrap { background: #0d0d10; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
   /* Input — 16px prevents iOS zoom */
@@ -9079,19 +9078,46 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
 #chat-room-select-wrap {
   padding: 10px 12px; flex-shrink: 0;
   border-bottom: 1px solid rgba(255,255,255,.06);
-  background: #0d0d10;
+  background: #0d0d10; position: relative;
 }
-#chat-rooms {
-  width: 100%; padding: 8px 10px;
-  background: #18181c; color: #e8e8e8;
-  border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
+#chat-room-trigger {
+  width: 100%; padding: 8px 32px 8px 12px;
+  background: #1e1e23; color: #e8e8e8;
+  border: 1px solid rgba(255,255,255,.1); border-radius: 6px;
   font-family: 'DM Sans', sans-serif; font-size: .8rem; font-weight: 500;
-  cursor: pointer; outline: none;
-  transition: border-color .15s;
+  cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; transition: border-color .15s, background .15s; box-sizing: border-box;
+  user-select: none; position: relative;
 }
-#chat-rooms:focus { border-color: rgba(192,0,14,.6); }
-#chat-rooms option { background: #18181c; color: #e8e8e8; }
-#chat-rooms optgroup { color: rgba(255,255,255,.4); font-size: .7rem; }
+#chat-room-trigger:hover { background: #242428; border-color: rgba(255,255,255,.18); }
+#chat-room-trigger.open { border-color: rgba(192,0,14,.5); background: #242428; }
+#chat-room-trigger-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-room-trigger-arrow { flex-shrink: 0; opacity: .5; transition: transform .2s; }
+#chat-room-trigger.open #chat-room-trigger-arrow { transform: rotate(180deg); }
+#chat-room-dropdown {
+  position: absolute; left: 12px; right: 12px; top: calc(100% - 2px);
+  background: #1e1e23; border: 1px solid rgba(255,255,255,.12);
+  border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  z-index: 999; overflow: hidden;
+  max-height: 220px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.15) transparent;
+  animation: roomDropIn .12s ease-out;
+}
+#chat-room-dropdown::-webkit-scrollbar { width: 4px; }
+#chat-room-dropdown::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 2px; }
+@keyframes roomDropIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.chat-room-group-label {
+  padding: 8px 12px 4px; font-size: .62rem; font-weight: 700;
+  letter-spacing: 1.5px; text-transform: uppercase; color: rgba(255,255,255,.3);
+  font-family: 'DM Sans', sans-serif; pointer-events: none;
+}
+.chat-room-option {
+  padding: 9px 12px; font-size: .8rem; font-weight: 500; color: #d8d8e0;
+  font-family: 'DM Sans', sans-serif; cursor: pointer; transition: background .1s;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chat-room-option:hover { background: rgba(255,255,255,.07); color: #fff; }
+.chat-room-option.active { color: #fff; background: rgba(192,0,14,.15); }
 
 /* Messages */
 #chat-messages {
@@ -9290,7 +9316,10 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
     <button id="chat-close-btn" onclick="toggleChat()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
   </div>
   <div id="chat-room-select-wrap">
-    <select id="chat-rooms" onchange="switchChatRoom(this.value, this.options[this.selectedIndex].dataset.efed || null)"></select>
+    <div id="chat-room-trigger" onclick="toggleRoomDropdown(event)">
+      <span id="chat-room-trigger-label">Updates</span>
+      <svg id="chat-room-trigger-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
   </div>
   <div id="chat-pinned" style="display:none;padding:8px 14px;background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.06);font-size:.68rem;color:rgba(255,255,255,.45);line-height:1.5;font-style:italic;flex-shrink:0;"></div>
   <div id="chat-say-hi" style="padding:10px 14px;background:rgba(200,168,75,.07);border-bottom:1px solid rgba(200,168,75,.15);display:none;align-items:flex-start;gap:10px;flex-shrink:0;">
@@ -9388,6 +9417,7 @@ document.addEventListener('click', function(e) {
   const path = e.composedPath ? e.composedPath() : [];
   const insidePanel = panel && (panel.contains(e.target) || path.includes(panel));
   const insideTab   = tab   && (tab.contains(e.target)   || path.includes(tab));
+  closeRoomDropdown();
   if (!insidePanel && !insideTab) {
     if (_chatOpen) toggleChat();
   }
@@ -9478,13 +9508,50 @@ function initChat() {
   };
 }
 
-async function buildChatRooms() {
-  const sel = document.getElementById('chat-rooms');
-  sel.innerHTML = '';
+function toggleRoomDropdown(e) {
+  e.stopPropagation();
+  const trigger = document.getElementById('chat-room-trigger');
+  const wrap = document.getElementById('chat-room-select-wrap');
+  const existing = document.getElementById('chat-room-dropdown');
+  if (existing) { existing.remove(); trigger.classList.remove('open'); return; }
+  trigger.classList.add('open');
+  const dd = document.createElement('div');
+  dd.id = 'chat-room-dropdown';
+  const rooms = window._chatRoomList || [];
+  let lastGroup = null;
+  rooms.forEach(r => {
+    if (r.group && r.group !== lastGroup) {
+      lastGroup = r.group;
+      const lbl = document.createElement('div');
+      lbl.className = 'chat-room-group-label';
+      lbl.textContent = r.group;
+      dd.appendChild(lbl);
+    }
+    const item = document.createElement('div');
+    item.className = 'chat-room-option' + (r.id === _chatRoom ? ' active' : '');
+    item.textContent = r.name;
+    item.onclick = (ev) => {
+      ev.stopPropagation();
+      dd.remove();
+      trigger.classList.remove('open');
+      switchChatRoom(r.id, r.efedName || null);
+    };
+    dd.appendChild(item);
+  });
+  wrap.appendChild(dd);
+}
 
+function closeRoomDropdown() {
+  const dd = document.getElementById('chat-room-dropdown');
+  if (dd) dd.remove();
+  const trigger = document.getElementById('chat-room-trigger');
+  if (trigger) trigger.classList.remove('open');
+}
+
+async function buildChatRooms() {
   const session = getSession();
   const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
-  let efedRooms = []; // rooms to show before Updates
+  let efedRooms = [];
   const seen = new Set();
 
   if (session && session.username) {
@@ -9495,49 +9562,44 @@ async function buildChatRooms() {
         allOwners.forEach(u => {
           if (!u.promo_name) return;
           const id = 'efed_' + u.promo_name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-          if (!seen.has(id)) { seen.add(id); efedRooms.push({ id, name: u.promo_name, isOwned: true }); }
+          if (!seen.has(id)) { seen.add(id); efedRooms.push({ id, name: u.promo_name }); }
         });
       } else {
-        // Owner: their eFed. Roster member: each eFed they belong to.
+        // Owner: their room. Roster member: each eFed they're on.
         const [userRows, rosterRows] = await Promise.all([
           sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
           sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&select=efed`)
         ]);
         const user = userRows[0];
-        const memberEfeds = rosterRows.map(r => r.efed).filter(Boolean);
-
         if ((user?.is_efed_owner || user?.role === 'owner') && user?.promo_name) {
           const id = 'efed_' + user.promo_name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-          if (!seen.has(id)) { seen.add(id); efedRooms.push({ id, name: user.promo_name, isOwned: true }); }
+          if (!seen.has(id)) { seen.add(id); efedRooms.push({ id, name: user.promo_name }); }
         }
-        memberEfeds.forEach(name => {
-          const id = 'efed_' + name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-          if (!seen.has(id)) { seen.add(id); efedRooms.push({ id, name }); }
+        rosterRows.forEach(r => {
+          if (!r.efed) return;
+          const id = 'efed_' + r.efed.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          if (!seen.has(id)) { seen.add(id); efedRooms.push({ id, name: r.efed }); }
         });
       }
     } catch(e) {}
   }
 
-  // store for permissions checks elsewhere
   window._efedRooms = efedRooms;
 
-  const makeOpt = (id, label, efedName) => {
-    const opt = document.createElement('option');
-    opt.value = id;
-    opt.textContent = label;
-    if (efedName) opt.dataset.efed = efedName;
-    if (id === _chatRoom) opt.selected = true;
-    return opt;
-  };
-
+  // Build flat list for dropdown
+  const list = [];
   if (efedRooms.length) {
-    const grp = document.createElement('optgroup');
-    grp.label = isAdmin ? 'All eFed Rooms' : 'eFed Rooms';
-    efedRooms.forEach(r => grp.appendChild(makeOpt(r.id, r.name, r.name)));
-    sel.appendChild(grp);
+    efedRooms.forEach((r, i) => list.push({ id: r.id, name: r.name, efedName: r.name, group: i === 0 ? 'eFed Rooms' : null }));
   }
+  list.push({ id: 'updates', name: 'Updates', group: efedRooms.length ? 'General' : null });
+  window._chatRoomList = list;
 
-  sel.appendChild(makeOpt('updates', 'Updates', null));
+  // Update trigger label
+  const current = list.find(r => r.id === _chatRoom) || list[list.length - 1];
+  const label = document.getElementById('chat-room-trigger-label');
+  if (label) label.textContent = current.name;
+
+  if (document.getElementById('chat-room-dropdown')) closeRoomDropdown();
 }
 
 function switchChatRoom(roomId, efedName) {
