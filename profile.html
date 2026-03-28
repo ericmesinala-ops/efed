@@ -185,12 +185,6 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 }
 .profile-av-box:hover { border-color: rgba(255,255,255,.15); }
 .profile-av-box img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.av-hover-overlay {
-  position: absolute; inset: 0; border-radius: 50%;
-  background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center;
-  opacity: 0; transition: opacity .18s; pointer-events: none; z-index: 2;
-}
-.profile-av-box:hover .av-hover-overlay { opacity: 1; }
 
 /* ── IDENTITY ── */
 .profile-name { font-family: 'Bebas Neue', sans-serif; font-size: 2.2rem; letter-spacing: 3px; color: #fff; line-height: 1; margin-bottom: 4px; text-shadow: 0 1px 8px rgba(0,0,0,.9), 0 2px 24px rgba(0,0,0,.8); }
@@ -687,6 +681,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   <div class="banner-noise"></div>
   <div class="banner-glow"></div>
   <img id="profile-banner-img" src="" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;z-index:1;">
+  <div id="profile-banner-dim" style="position:absolute;inset:0;z-index:2;background:rgba(0,0,0,0);pointer-events:none;transition:background .3s;"></div>
   <input type="file" id="profile-banner-file" accept="image/*" style="display:none;" onchange="handleBannerUpload(event,'profile')">
   <!-- Edit button — top right, icon only -->
   <button class="edit-pencil" id="edit-pencil" onclick="openEditModal()" title="Edit profile">
@@ -698,9 +693,6 @@ nav.scrolled { background: rgba(7,7,10,.99); }
     <div class="profile-av-box" id="profile-av-box">
       <img id="profile-av-img" src="" alt="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">
       <span id="profile-av-initial">?</span>
-      <div class="av-hover-overlay" id="av-hover-overlay">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-      </div>
       <input type="file" id="av-file-input" accept="image/*" style="display:none;" onchange="handleAvatarFile(event)">
     </div>
     <!-- hidden name/handle kept for JS compat, not displayed -->
@@ -2467,7 +2459,7 @@ async function openEditModal() {
   // Fetch own user data fresh from DB
   let _ownData = {};
   try {
-    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio,avatar_side`);
+    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio,avatar_side,avatar_banner_dim`);
     _ownData = _rows[0] || {};
   } catch(e) {}
 
@@ -2502,6 +2494,12 @@ async function openEditModal() {
 
   // Pre-fill avatar side
   epSetSide(_ownData.avatar_side || 'left', false);
+  // Pre-fill dim slider
+  const dimVal = parseInt(_ownData.avatar_banner_dim) || 0;
+  const dimSlider = document.getElementById('ep-dim-slider');
+  const dimLabel = document.getElementById('ep-dim-label');
+  if (dimSlider) dimSlider.value = dimVal;
+  if (dimLabel) dimLabel.textContent = dimVal + '%';
 
   document.getElementById('edit-modal-bg').style.display = 'flex';
 }
@@ -2591,9 +2589,11 @@ async function saveEditProfile() {
     const websiteRaw = (document.getElementById('ep-twitch-input')?.value.trim() || '').replace(/^https?:\/\//,'');
     const twitch = websiteRaw ? 'https://' + websiteRaw : null;
     const avatarSide = document.getElementById('ep-side-right')?.dataset.active === '1' ? 'right' : 'left';
-    const updates = { display_name: name, ig_handle: ig, x_handle: x, twitch_channel: twitch || null, bio: bio || null, avatar_side: avatarSide };
+    const bannerDim = parseInt(document.getElementById('ep-dim-slider')?.value) || 0;
+    const updates = { display_name: name, ig_handle: ig, x_handle: x, twitch_channel: twitch || null, bio: bio || null, avatar_side: avatarSide, avatar_banner_dim: bannerDim };
     await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(updates) });
     applyAvatarSide(avatarSide);
+    applyBannerDim(bannerDim);
 
     session.displayName = name; session.igHandle = ig; session.xHandle = x;
     localStorage.setItem('efed_session', JSON.stringify(session));
@@ -2627,6 +2627,16 @@ function epSetSide(side, updatePreview = true) {
 function applyAvatarSide(side) {
   const inner = document.querySelector('.banner-inner');
   if (inner) inner.style.flexDirection = side === 'right' ? 'row-reverse' : 'row';
+}
+
+function applyBannerDim(pct) {
+  const el = document.getElementById('profile-banner-dim');
+  if (el) el.style.background = pct > 0 ? `rgba(0,0,0,${pct/100})` : 'rgba(0,0,0,0)';
+}
+
+function epPreviewDim(val) {
+  document.getElementById('ep-dim-label').textContent = val + '%';
+  applyBannerDim(parseInt(val));
 }
 
 // ── BANNER UPLOAD ──
@@ -2950,7 +2960,6 @@ async function loadProfile() {
 
   if (!_isOwnProfile) {
     document.getElementById('profile-av-box').style.cursor = 'default';
-    const _aho = document.getElementById('av-hover-overlay'); if (_aho) _aho.style.display = 'none';
 
     // Admin can see private sections on any profile
     if (session.username.toLowerCase() === ADMIN_USERNAME) {
@@ -3013,8 +3022,8 @@ async function loadProfile() {
     } catch(e) {}
     // Fetch avatar + banner separately
     try {
-      const avRow = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=avatar_url,avatar_banner,avatar_side`);
-      if (avRow[0]) { user.avatar_url = avRow[0].avatar_url; user.avatar_banner = avRow[0].avatar_banner; user.avatar_side = avRow[0].avatar_side; }
+      const avRow = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=avatar_url,avatar_banner,avatar_side,avatar_banner_dim`);
+      if (avRow[0]) { user.avatar_url = avRow[0].avatar_url; user.avatar_banner = avRow[0].avatar_banner; user.avatar_side = avRow[0].avatar_side; user.avatar_banner_dim = avRow[0].avatar_banner_dim; }
     } catch(e) {}
     const name = user.display_name || user.username;
     _atrTargetName = name;
@@ -3051,6 +3060,8 @@ async function loadProfile() {
     }
     // Apply avatar side preference
     if (user.avatar_side) applyAvatarSide(user.avatar_side);
+    // Apply banner dim
+    if (user.avatar_banner_dim) applyBannerDim(parseInt(user.avatar_banner_dim));
     // Load socials — DB first, only cache to session for own profile
     const ig = (user.ig_handle || (_isOwnProfile ? session.igHandle : '') || '').replace('@','');
     const x  = (user.x_handle  || (_isOwnProfile ? session.xHandle  : '') || '').replace('@','');
@@ -3468,6 +3479,20 @@ function triggerInstall() {
           </div>
         </div>
         <div id="ep-av-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
+        <!-- Position toggle — right after avatar -->
+        <div style="margin-top:10px;">
+          <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:6px;">Position on Banner</div>
+          <div style="display:flex;gap:8px;">
+            <button id="ep-side-left" onclick="epSetSide('left')" style="flex:1;padding:7px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.7rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;transition:background .15s,border-color .15s;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="12" r="4"/><line x1="14" y1="12" x2="21" y2="12"/></svg>
+              Left
+            </button>
+            <button id="ep-side-right" onclick="epSetSide('right')" style="flex:1;padding:7px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.7rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;transition:background .15s,border-color .15s;">
+              Right
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="12" x2="10" y2="12"/><circle cx="16" cy="12" r="4"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Display Name -->
@@ -3485,20 +3510,15 @@ function triggerInstall() {
           Upload Banner
         </button>
         <div id="ep-banner-msg" style="font-size:.68rem;margin-top:4px;min-height:14px;color:#4caf64;"></div>
-      </div>
-
-      <!-- Avatar Position -->
-      <div>
-        <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:8px;">Profile Picture Position</div>
-        <div style="display:flex;gap:8px;">
-          <button id="ep-side-left" onclick="epSetSide('left')" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .15s,border-color .15s;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="12" r="4"/><line x1="14" y1="12" x2="21" y2="12"/></svg>
-            Left
-          </button>
-          <button id="ep-side-right" onclick="epSetSide('right')" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:background .15s,border-color .15s;">
-            Right
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="12" x2="10" y2="12"/><circle cx="16" cy="12" r="4"/></svg>
-          </button>
+        <!-- Dim slider -->
+        <div style="margin-top:10px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;">Banner Dim</div>
+            <span id="ep-dim-label" style="font-size:.62rem;color:rgba(255,255,255,.4);">0%</span>
+          </div>
+          <input id="ep-dim-slider" type="range" min="0" max="80" step="5" value="0"
+            oninput="epPreviewDim(this.value)"
+            style="width:100%;accent-color:#c0000e;cursor:pointer;">
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:10px;">
