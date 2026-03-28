@@ -793,8 +793,32 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 
 <!-- ── BIO ── -->
 <div id="bio-section" style="display:none;" class="section">
-  <div class="sec-title">Bio</div>
+  <div class="sec-title" style="margin-bottom:12px;">
+    <span style="flex:1;">Bio</span>
+    <button id="bio-edit-btn" onclick="openBioModal()" style="display:none;background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;padding:2px;transition:color .15s;flex-shrink:0;" onmouseover="this.style.color='rgba(255,255,255,.7)'" onmouseout="this.style.color='rgba(255,255,255,.3)'" title="Edit bio">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    </button>
+  </div>
   <div style="background:rgba(255,255,255,.02);border-left:2px solid rgba(255,255,255,.08);border-radius:0 6px 6px 0;padding:12px 16px;"><div id="profile-bio" style="font-size:.82rem;color:rgba(255,255,255,.6);line-height:1.7;white-space:pre-wrap;word-break:break-word;"></div></div>
+</div>
+
+<!-- ── BIO MODAL ── -->
+<div id="bio-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeBioModal()">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:400px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.7);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px 14px;border-bottom:1px solid rgba(255,255,255,.06);">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Bio</div>
+      <button onclick="closeBioModal()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;padding:4px;">✕</button>
+    </div>
+    <div style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;">About You</div>
+        <div id="ep-bio-count" style="font-size:.6rem;color:#5a5a6a;">0 / 160</div>
+      </div>
+      <textarea id="ep-bio-input" maxlength="160" rows="5" placeholder="Tell the community about yourself…" oninput="document.getElementById('ep-bio-count').textContent=this.value.length+' / 160'" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;resize:none;line-height:1.6;box-sizing:border-box;"></textarea>
+      <button onclick="saveBio()" style="width:100%;padding:12px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Bio</button>
+      <div id="bio-modal-msg" style="font-size:.68rem;text-align:center;min-height:14px;color:#4caf64;"></div>
+    </div>
+  </div>
 </div>
 
 <!-- ── MY EFEDS (Part of / Roster) ── -->
@@ -2620,11 +2644,6 @@ async function openEditModal() {
   if (_xIn)  _xIn.value  = (_ownData.x_handle  || '').replace('@','');
   const _twIn = document.getElementById('ep-twitch-input');
   if (_twIn) _twIn.value = (_ownData.twitch_channel || '').replace(/^https?:\/\//,'');
-  const bioVal = _ownData.bio || '';
-  const bioInput = document.getElementById('ep-bio-input');
-  const bioCount = document.getElementById('ep-bio-count');
-  if (bioInput) { bioInput.value = bioVal; }
-  if (bioCount) bioCount.textContent = bioVal.length + ' / 160';
 
   // Pre-fill avatar side
   epSetSide(_ownData.avatar_side || 'left', false);
@@ -2640,6 +2659,45 @@ async function openEditModal() {
 
 function closeEditModal() {
   document.getElementById('edit-modal-bg').style.display = 'none';
+}
+
+function profileToggleLinks() {
+  const body = document.getElementById('profile-links-body');
+  const chevron = document.getElementById('profile-links-chevron');
+  const open = body.style.display === 'flex';
+  body.style.display = open ? 'none' : 'flex';
+  if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+}
+
+function openBioModal() {
+  const bg = document.getElementById('bio-modal-bg'); if (!bg) return;
+  const bioEl = document.getElementById('profile-bio');
+  const ta = document.getElementById('ep-bio-input');
+  const count = document.getElementById('ep-bio-count');
+  if (ta) ta.value = bioEl?.textContent || '';
+  if (count) count.textContent = (ta?.value.length || 0) + ' / 160';
+  document.getElementById('bio-modal-msg').textContent = '';
+  bg.style.display = 'flex';
+}
+function closeBioModal() {
+  document.getElementById('bio-modal-bg').style.display = 'none';
+}
+async function saveBio() {
+  const session = getSession(); if (!session) return;
+  const bio = (document.getElementById('ep-bio-input')?.value || '').slice(0, 160);
+  const msg = document.getElementById('bio-modal-msg');
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ bio: bio || null })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const bioEl = document.getElementById('profile-bio');
+    const bioSec = document.getElementById('bio-section');
+    if (bioEl) bioEl.textContent = bio;
+    if (bioSec) bioSec.style.display = bio ? '' : 'none';
+    msg.textContent = 'Saved!'; msg.style.color = '#4caf64';
+    setTimeout(closeBioModal, 700);
+  } catch(e) { msg.textContent = 'Save failed.'; msg.style.color = '#ff6b6b'; }
 }
 
 async function epHandleAvatar(event) {
@@ -2718,13 +2776,12 @@ async function saveEditProfile() {
   if (name.length > 24) { nameMsg.textContent = 'Max 24 characters.'; nameMsg.style.color='#ff6b6b'; return; }
   const ig = (document.getElementById('ep-ig-input')?.value.trim() || '').replace('@','');
   const x  = (document.getElementById('ep-x-input')?.value.trim()  || '').replace('@','');
-  const bio = (document.getElementById('ep-bio-input')?.value || '').slice(0, 160);
   try {
     const websiteRaw = (document.getElementById('ep-twitch-input')?.value.trim() || '').replace(/^https?:\/\//,'');
     const twitch = websiteRaw ? 'https://' + websiteRaw : null;
     const avatarSide = document.getElementById('ep-side-right')?.dataset.active === '1' ? 'right' : 'left';
     const bannerDim = parseInt(document.getElementById('ep-dim-slider')?.value) || 0;
-    const updates = { display_name: name, ig_handle: ig, x_handle: x, twitch_channel: twitch || null, bio: bio || null, avatar_side: avatarSide, avatar_banner_dim: bannerDim };
+    const updates = { display_name: name, ig_handle: ig, x_handle: x, twitch_channel: twitch || null, avatar_side: avatarSide, avatar_banner_dim: bannerDim };
     await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(updates) });
     applyAvatarSide(avatarSide);
     applyBannerDim(bannerDim);
@@ -3157,6 +3214,8 @@ async function loadProfile() {
     } catch(e) {}
   } else {
     document.getElementById('edit-pencil').style.display = 'flex';
+    const bioEditBtn = document.getElementById('bio-edit-btn');
+    if (bioEditBtn) bioEditBtn.style.display = 'block';
     // Show private sections for owner
     const _subSec = document.getElementById('submitted-section'); if (_subSec) _subSec.style.display = '';
     const _bkSec  = document.getElementById('bookmarks-section');  if (_bkSec)  _bkSec.style.display  = '';
@@ -3686,41 +3745,39 @@ function triggerInstall() {
             style="width:100%;accent-color:#c0000e;cursor:pointer;">
         </div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:2px;">Links</div>
-
-        <div>
-          <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-bottom:5px;letter-spacing:.5px;">Instagram</div>
-          <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
-            <span style="padding:10px 8px 10px 12px;color:rgba(255,255,255,.25);font-size:.82rem;">@</span>
-            <input id="ep-ig-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
-          </div>
-        </div>
-
-        <div>
-          <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-bottom:5px;letter-spacing:.5px;">X (Twitter)</div>
-          <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
-            <span style="padding:10px 8px 10px 12px;color:rgba(255,255,255,.25);font-size:.82rem;">@</span>
-            <input id="ep-x-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
-          </div>
-        </div>
-
-        <div>
-          <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-bottom:5px;letter-spacing:.5px;">Website</div>
-          <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
-            <span style="padding:10px 8px 10px 12px;color:rgba(255,255,255,.25);font-size:.75rem;font-family:'DM Sans',sans-serif;white-space:nowrap;">https://</span>
-            <input id="ep-twitch-input" type="text" placeholder="yoursite.com" maxlength="120" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
-          </div>
-        </div>
-      </div>
-
-      <!-- Bio -->
+      <!-- Links (collapsible) -->
       <div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;">Bio</div>
-          <div id="ep-bio-count" style="font-size:.6rem;color:#5a5a6a;">0 / 160</div>
+        <button onclick="profileToggleLinks()" style="width:100%;display:flex;align-items:center;justify-content:space-between;background:none;border:none;border-bottom:1px solid rgba(255,255,255,.06);padding:0 0 10px;cursor:pointer;">
+          <span style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;">Links &amp; Socials</span>
+          <svg id="profile-links-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="2.5" stroke-linecap="round" style="transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div id="profile-links-body" style="display:none;flex-direction:column;gap:14px;margin-top:14px;">
+
+          <div>
+            <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-bottom:5px;letter-spacing:.5px;">Instagram</div>
+            <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+              <span style="padding:10px 8px 10px 12px;color:rgba(255,255,255,.25);font-size:.82rem;">@</span>
+              <input id="ep-ig-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+            </div>
+          </div>
+
+          <div>
+            <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-bottom:5px;letter-spacing:.5px;">X (Twitter)</div>
+            <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+              <span style="padding:10px 8px 10px 12px;color:rgba(255,255,255,.25);font-size:.82rem;">@</span>
+              <input id="ep-x-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+            </div>
+          </div>
+
+          <div>
+            <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-bottom:5px;letter-spacing:.5px;">Website</div>
+            <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+              <span style="padding:10px 8px 10px 12px;color:rgba(255,255,255,.25);font-size:.75rem;font-family:'DM Sans',sans-serif;white-space:nowrap;">https://</span>
+              <input id="ep-twitch-input" type="text" placeholder="yoursite.com" maxlength="120" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+            </div>
+          </div>
+
         </div>
-        <textarea id="ep-bio-input" maxlength="160" rows="4" placeholder="Tell the community about yourself…" oninput="document.getElementById('ep-bio-count').textContent=this.value.length+' / 160'" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;resize:none;line-height:1.6;box-sizing:border-box;"></textarea>
       </div>
 
       <!-- Save -->
