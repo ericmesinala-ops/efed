@@ -498,6 +498,56 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   .invite-code-row-copy:hover { opacity: .6; }
   .invite-code-row-copy.done { color: #4caf8a; }
   .invite-no-codes { text-align: center; padding: 12px 0; font-size: .72rem; color: var(--muted); }
+
+/* ── EFED EMBEDDED CHAT ── */
+#efed-chat-wrap {
+  background: #0d0d10; border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.07); overflow: hidden;
+}
+#efed-chat-messages {
+  height: 280px; overflow-y: auto; padding: 14px 14px 8px;
+  display: flex; flex-direction: column; gap: 2px;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.1) transparent;
+}
+#efed-chat-messages::-webkit-scrollbar { width: 4px; }
+#efed-chat-messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 2px; }
+.efed-chat-msg { display: flex; gap: 9px; align-items: flex-start; padding: 5px 0; animation: ecIn .12s ease-out; }
+@keyframes ecIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+.efed-chat-av {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(192,0,14,.15); border: 1px solid rgba(192,0,14,.3);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Bebas Neue', sans-serif; font-size: .7rem; color: #c0000e;
+  overflow: hidden; text-decoration: none; margin-top: 1px;
+  transition: opacity .15s; cursor: pointer;
+}
+.efed-chat-av:hover { opacity: .75; }
+.efed-chat-av img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.efed-chat-bubble { flex: 1; min-width: 0; }
+.efed-chat-meta { font-size: .62rem; color: rgba(255,255,255,.35); margin-bottom: 2px; }
+.efed-chat-meta strong { color: rgba(255,255,255,.75); font-weight: 600; margin-right: 5px; }
+.efed-chat-text { font-size: .78rem; color: rgba(255,255,255,.88); line-height: 1.5; word-break: break-word; }
+.efed-chat-empty { font-size: .75rem; color: rgba(255,255,255,.25); text-align: center; padding: 40px 0; }
+#efed-chat-input-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; border-top: 1px solid rgba(255,255,255,.06);
+  background: #111114;
+}
+#efed-chat-input {
+  flex: 1; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+  border-radius: 20px; padding: 8px 14px; color: #e8e8e8;
+  font-family: 'DM Sans', sans-serif; font-size: .78rem; outline: none;
+  transition: border-color .15s;
+}
+#efed-chat-input:focus { border-color: rgba(192,0,14,.4); }
+#efed-chat-input::placeholder { color: rgba(255,255,255,.3); }
+#efed-chat-send-btn {
+  width: 34px; height: 34px; border-radius: 50%; background: #c0000e; border: none;
+  color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: background .15s;
+}
+#efed-chat-send-btn:hover { background: #e0000e; }
+
 </style>
 </head>
 <body>
@@ -665,6 +715,20 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   <button onclick="closeLightbox()" style="position:fixed;top:20px;right:24px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);color:#fff;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:1.1rem;display:flex;align-items:center;justify-content:center;">✕</button>
 </div>
 
+<!-- ── LOCKER ROOM CHAT (members only) ── -->
+<div class="section" id="efed-chat-section" style="display:none;">
+  <div class="sec-title">Locker Room</div>
+  <div id="efed-chat-wrap">
+    <div id="efed-chat-messages"></div>
+    <div id="efed-chat-input-row">
+      <input id="efed-chat-input" type="text" placeholder="Say something…" maxlength="400" autocomplete="off">
+      <button id="efed-chat-send-btn" onclick="efedChatSend()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="section" id="caw-images-section">
   <div class="sec-title">Gallery</div>
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;">
@@ -717,6 +781,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 <script>
 let _hasAvatar = false;
 let _isOwnProfile = false;
+let _isMember = false; // owner or approved roster member
 let EFED_NAME = '';
 let EFED_OWNER = '';
 let _signingsOn = false;
@@ -1419,10 +1484,17 @@ async function loadProfile() {
       const isOwner = user.username === session.username && (user.is_efed_owner || user.role === 'owner');
       _isOwnProfile = isOwner;
       if (isOwner) {
+        _isMember = true;
+        initEfedChat();
         document.getElementById('edit-pencil').style.display = 'flex';
         const sec = document.getElementById('signings-section');
         if (sec) sec.style.display = 'block';
 
+      }
+      // Admin always sees chat
+      if (!_isMember && session.username.toLowerCase() === ADMIN_USERNAME) {
+        _isMember = true;
+        initEfedChat();
       }
     }
 
@@ -3063,6 +3135,8 @@ function closeJoinRosterModal() {
 }
 
 function setApprovedState() {
+  _isMember = true;
+  initEfedChat();
   const btn = document.getElementById('join-roster-btn');
   if (!btn) return;
   btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> On Roster`;
@@ -4245,5 +4319,173 @@ async function savePassword() {
     <div id="invite-codes-list"></div>
   </div>
 </div>
+
+<script>
+// ── EFED EMBEDDED CHAT ──
+const EFED_CHAT_LIMIT = 60;
+const SUPABASE_WS_EFED = 'wss://osbarvhklizidsffytye.supabase.co/realtime/v1/websocket';
+const SUPABASE_KEY_EFED = SUPABASE_KEY;
+
+let _efedChatWs = null;
+let _efedChatPollTimer = null;
+let _efedChatLastId = 0;
+let _efedChatAtBottom = true;
+let _efedChatInited = false;
+const _efedAvatarCache = {};
+
+const EFED_BLOCKED = [
+  /n[i1!|]+g+[e3]+r/i,/n[i1!|]+gg[a@]+/i,/f[a@4]+g+[o0]+t/i,
+  /f[a@4]+g/i,/kys/i,/fuck/i,/bitch/i,/cunt/i,
+  /whore/i,/slut/i,
+];
+function _efedBlocked(t) { return EFED_BLOCKED.some(p => p.test(t)); }
+
+function initEfedChat() {
+  if (_efedChatInited) return;
+  _efedChatInited = true;
+  const sec = document.getElementById('efed-chat-section');
+  if (sec) sec.style.display = '';
+
+  const input = document.getElementById('efed-chat-input');
+  if (input) {
+    input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); efedChatSend(); } });
+  }
+
+  const box = document.getElementById('efed-chat-messages');
+  if (box) box.addEventListener('scroll', () => {
+    _efedChatAtBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  });
+
+  efedChatLoad();
+  efedChatConnect();
+  _efedChatPollTimer = setInterval(efedChatPoll, 8000);
+}
+
+function _efedRoomId() {
+  return 'efed_' + EFED_NAME.toLowerCase().replace(/[^a-z0-9]/g, '_');
+}
+
+async function efedChatLoad() {
+  const box = document.getElementById('efed-chat-messages');
+  if (!box) return;
+  box.innerHTML = '<div class="efed-chat-empty">Loading…</div>';
+  try {
+    const rows = await sbGet('chat_messages',
+      `room_id=eq.${_efedRoomId()}&deleted=eq.false&order=created_at.asc&limit=${EFED_CHAT_LIMIT}`);
+    box.innerHTML = '';
+    if (!rows.length) { box.innerHTML = '<div class="efed-chat-empty">No messages yet — say something! 👋</div>'; return; }
+    // pre-fetch avatars
+    const unames = [...new Set(rows.map(r => r.username))];
+    try {
+      const urows = await sbGet('users', `username=in.(${unames.map(u => encodeURIComponent(u)).join(',')})&select=username,avatar_url`);
+      urows.forEach(u => { _efedAvatarCache[u.username] = u.avatar_url || null; });
+    } catch(e) {}
+    rows.forEach(r => { _efedAppendMsg(r); });
+    if (rows.length) _efedChatLastId = Math.max(...rows.map(r => r.id || 0));
+    _efedScrollBottom(true);
+  } catch(e) { box.innerHTML = '<div class="efed-chat-empty">Could not load messages.</div>'; }
+}
+
+async function efedChatPoll() {
+  if (!_efedChatLastId) return;
+  try {
+    const rows = await sbGet('chat_messages',
+      `room_id=eq.${_efedRoomId()}&deleted=eq.false&id=gt.${_efedChatLastId}&order=created_at.asc&limit=20`);
+    if (!rows.length) return;
+    for (const r of rows) {
+      if (!_efedAvatarCache.hasOwnProperty(r.username)) {
+        try {
+          const u = await sbGet('users', `username=eq.${encodeURIComponent(r.username)}&select=avatar_url`);
+          _efedAvatarCache[r.username] = u[0]?.avatar_url || null;
+        } catch(e) { _efedAvatarCache[r.username] = null; }
+      }
+      _efedAppendMsg(r);
+    }
+    _efedChatLastId = Math.max(...rows.map(r => r.id || 0), _efedChatLastId);
+    if (_efedChatAtBottom) _efedScrollBottom();
+  } catch(e) {}
+}
+
+function efedChatConnect() {
+  if (_efedChatWs) { try { _efedChatWs.close(); } catch(e) {} }
+  const url = `${SUPABASE_WS_EFED}?apikey=${SUPABASE_KEY_EFED}&vsn=1.0.0`;
+  const ws = new WebSocket(url);
+  _efedChatWs = ws;
+  const roomId = _efedRoomId();
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ topic: 'realtime:public:chat_messages', event: 'phx_join', payload: {}, ref: '1' }));
+  };
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.event === 'INSERT' && msg.payload?.record?.room_id === roomId) {
+        const r = msg.payload.record;
+        if (!r.deleted) {
+          if (!_efedAvatarCache.hasOwnProperty(r.username)) {
+            sbGet('users', `username=eq.${encodeURIComponent(r.username)}&select=avatar_url`)
+              .then(u => { _efedAvatarCache[r.username] = u[0]?.avatar_url || null; _efedAppendMsg(r); if (_efedChatAtBottom) _efedScrollBottom(); })
+              .catch(() => { _efedAvatarCache[r.username] = null; _efedAppendMsg(r); if (_efedChatAtBottom) _efedScrollBottom(); });
+          } else {
+            _efedAppendMsg(r);
+            if (_efedChatAtBottom) _efedScrollBottom();
+          }
+          _efedChatLastId = Math.max(_efedChatLastId, r.id || 0);
+        }
+      }
+    } catch(e) {}
+  };
+  ws.onclose = () => { setTimeout(efedChatConnect, 3000); };
+}
+
+function _efedAppendMsg(r) {
+  const box = document.getElementById('efed-chat-messages');
+  if (!box) return;
+  const empty = box.querySelector('.efed-chat-empty');
+  if (empty) empty.remove();
+  const av = _efedAvatarCache[r.username];
+  const initials = (r.username || '?')[0].toUpperCase();
+  const avHtml = av
+    ? `<a href="profile.html?u=${encodeURIComponent(r.username)}" class="efed-chat-av"><img src="${_esc(av)}" alt=""></a>`
+    : `<a href="profile.html?u=${encodeURIComponent(r.username)}" class="efed-chat-av">${initials}</a>`;
+  const ago = _efedTimeAgo(r.created_at);
+  const div = document.createElement('div');
+  div.className = 'efed-chat-msg';
+  div.innerHTML = `${avHtml}<div class="efed-chat-bubble"><div class="efed-chat-meta"><strong>${_esc(r.display_name||r.username)}</strong>${ago}</div><div class="efed-chat-text">${_esc(r.message)}</div></div>`;
+  box.appendChild(div);
+}
+
+function _efedScrollBottom(force) {
+  const box = document.getElementById('efed-chat-messages');
+  if (box && (force || _efedChatAtBottom)) box.scrollTop = box.scrollHeight;
+}
+
+function _efedTimeAgo(ts) {
+  if (!ts) return '';
+  const s = Math.floor((Date.now() - new Date(ts)) / 1000);
+  if (s < 60) return 'now';
+  if (s < 3600) return Math.floor(s/60) + 'm';
+  if (s < 86400) return Math.floor(s/3600) + 'h';
+  return Math.floor(s/86400) + 'd';
+}
+
+async function efedChatSend() {
+  const session = getSession(); if (!session || !_isMember) return;
+  const input = document.getElementById('efed-chat-input');
+  const msg = (input?.value || '').trim();
+  if (!msg) return;
+  if (_efedBlocked(msg)) { input.value = ''; return; }
+  input.value = '';
+  try {
+    await sbInsert('chat_messages', {
+      room_id: _efedRoomId(),
+      username: session.username,
+      display_name: session.displayName || session.username,
+      message: msg,
+      deleted: false
+    });
+  } catch(e) { input.value = msg; }
+}
+</script>
+
 </body>
 </html>
