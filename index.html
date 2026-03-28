@@ -293,6 +293,28 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
   main { padding-top: 32px; padding-bottom: 80px; transition: margin-right .3s cubic-bezier(.16,1,.3,1); }
   footer { border-top: 1px solid rgba(255,255,255,.05); padding: 40px 56px; font-size: .78rem; color: var(--muted); transition: margin-right .3s cubic-bezier(.16,1,.3,1); }
   .section { margin-bottom: 56px; overflow: hidden; }
+  .my-efed-card {
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 12px; padding: 14px 18px; cursor: pointer;
+    text-decoration: none; transition: background .15s, border-color .15s, transform .15s;
+    flex: 1; min-width: 200px; max-width: 340px;
+  }
+  .my-efed-card:hover { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.15); transform: translateY(-2px); }
+  .my-efed-card-logo {
+    width: 46px; height: 46px; border-radius: 10px; flex-shrink: 0;
+    background: rgba(192,0,14,.12); border: 1px solid rgba(192,0,14,.25);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Bebas Neue', sans-serif; font-size: 1rem; color: #c0000e;
+    overflow: hidden;
+  }
+  .my-efed-card-logo img { width: 100%; height: 100%; object-fit: cover; border-radius: 9px; }
+  .my-efed-card-name { font-size: .88rem; font-weight: 700; color: #fff; line-height: 1.3; }
+  .my-efed-card-role { font-size: .6rem; color: rgba(255,255,255,.35); letter-spacing: 1.5px; text-transform: uppercase; margin-top: 3px; }
+  @media (max-width: 768px) {
+    #my-efeds-row { padding: 0 20px; }
+    .my-efed-card { min-width: calc(50% - 6px); max-width: none; flex: 1 1 calc(50% - 6px); }
+  }
   .swipe-hint { display: none; }
   .sec-head { display: flex; align-items: center; justify-content: space-between; padding: 0 56px; margin-bottom: 20px; }
   .sec-title-wrap { display: flex; align-items: center; gap: 12px; }
@@ -2565,6 +2587,17 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
 </section>
 
 <main>
+  <!-- ── MY EFEDS ROW ── -->
+  <section class="section" id="my-efeds-section" style="display:none;margin-bottom:32px;">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar"></div>
+        <div class="sec-title">My eFeds</div>
+      </div>
+    </div>
+    <div id="my-efeds-row" style="display:flex;gap:12px;padding:0 56px;flex-wrap:wrap;"></div>
+  </section>
+
   <section class="section">
     <div class="sec-head">
       <div style="display:flex;flex-direction:column;gap:2px;">
@@ -5224,6 +5257,7 @@ const _soSearch = (() => {
       }
     }
   } catch(_) {} // non-critical — nav still works from local session
+  loadMyEfedsRow();
 })();
 
 
@@ -5291,6 +5325,71 @@ async function goToMyEfed() {
 function handleSignOut() {
   localStorage.removeItem('efed_session');
   window.location.replace('auth.html');
+}
+
+async function loadMyEfedsRow() {
+  const session = getSession();
+  if (!session) return;
+  const isAdmin = session.username.toLowerCase() === ADMIN_USERNAME;
+  let efeds = [];
+  const seen = new Set();
+
+  try {
+    if (isAdmin) {
+      const owners = await sbGet('users', 'is_efed_owner=eq.true&select=promo_name,promo_logo&order=promo_name.asc');
+      owners.filter(u => u.promo_name).forEach(u => {
+        if (!seen.has(u.promo_name.toLowerCase())) {
+          seen.add(u.promo_name.toLowerCase());
+          efeds.push({ name: u.promo_name, logo: u.promo_logo, role: 'Admin' });
+        }
+      });
+    } else {
+      const [userRows, rosterRows] = await Promise.all([
+        sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role,promo_logo`),
+        sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&select=efed,status`)
+      ]);
+      const user = userRows[0];
+      if ((user?.is_efed_owner || user?.role === 'owner') && user?.promo_name) {
+        seen.add(user.promo_name.toLowerCase());
+        efeds.push({ name: user.promo_name, logo: user.promo_logo, role: 'Owner' });
+      }
+      for (const r of (rosterRows || []).filter(r => r.status === 'approved' && r.efed)) {
+        if (!seen.has(r.efed.toLowerCase())) {
+          seen.add(r.efed.toLowerCase());
+          efeds.push({ name: r.efed, logo: null, role: 'Roster' });
+        }
+      }
+      // fetch logos for roster efeds
+      const noLogo = efeds.filter(e => !e.logo);
+      if (noLogo.length) {
+        try {
+          const logoRows = await sbGet('users', `promo_name=in.(${noLogo.map(e => encodeURIComponent(e.name)).join(',')})&is_efed_owner=eq.true&select=promo_name,promo_logo`);
+          logoRows.forEach(u => {
+            const ef = efeds.find(e => e.name.toLowerCase() === u.promo_name?.toLowerCase());
+            if (ef) ef.logo = u.promo_logo;
+          });
+        } catch(e) {}
+      }
+    }
+  } catch(e) {}
+
+  if (!efeds.length) return;
+
+  const section = document.getElementById('my-efeds-section');
+  const row = document.getElementById('my-efeds-row');
+  if (!section || !row) return;
+
+  section.style.display = '';
+  row.innerHTML = efeds.map(e => `
+    <a class="my-efed-card" href="efed.html?e=${encodeURIComponent(e.name)}">
+      <div class="my-efed-card-logo">
+        ${e.logo ? `<img src="${e.logo}" alt="">` : e.name[0].toUpperCase()}
+      </div>
+      <div>
+        <div class="my-efed-card-name">${e.name}</div>
+        <div class="my-efed-card-role">${e.role}</div>
+      </div>
+    </a>`).join('');
 }
 
 function goToProfile() {
