@@ -2738,6 +2738,7 @@ async function initNav() {
 
 // ── AVATAR ──
 function setAvatar(src, updateNav = true) {
+  console.log('[DEBUG] setAvatar called, src length:', src?.length);
   const img = document.getElementById('profile-av-img');
   img.src = src; img.style.display = 'block';
   document.getElementById('profile-av-initial').style.display = 'none';
@@ -2953,6 +2954,7 @@ async function loadProfile() {
   }
   try {
     const users = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,auto_stream,open_for_signings,bio`);
+    console.log('[DEBUG] users query result:', JSON.stringify(users));
     if (!users.length) { document.getElementById('profile-name').textContent = 'User not found'; return; }
     const user = users[0];
     // Fetch gallery images in a separate query to avoid response size issues with large base64
@@ -2963,6 +2965,7 @@ async function loadProfile() {
     // Fetch avatar + banner separately
     try {
       const avRow = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=avatar_url,avatar_banner`);
+      console.log('[DEBUG] avatar query - avatar_url length:', avRow[0]?.avatar_url?.length, 'banner length:', avRow[0]?.avatar_banner?.length);
       if (avRow[0]) { user.avatar_url = avRow[0].avatar_url; user.avatar_banner = avRow[0].avatar_banner; }
     } catch(e) {}
     const name = user.display_name || user.username;
@@ -2992,13 +2995,14 @@ async function loadProfile() {
     }
     renderSocialLinks(ig, x, twitch);
     loadCawImages(user);
+    _posts.load(targetUser);
 
     // Bio
     const bioEl = document.getElementById('profile-bio');
     const bioSec = document.getElementById('bio-section');
     if (bioEl && user.bio) { bioEl.textContent = user.bio; if (bioSec) bioSec.style.display = 'block'; }
 
-    // Signings
+    // Signings — show for everyone, toggle disabled for visitors
     const sec = document.getElementById('signings-section');
     if (sec) sec.style.display = 'block';
     _signingsState = !!user.open_for_signings;
@@ -3015,9 +3019,6 @@ async function loadProfile() {
     document.getElementById('profile-handle').textContent = '@' + (session.username || '');
     if (fallbackName) document.getElementById('profile-av-initial').textContent = fallbackName[0].toUpperCase();
   }
-
-  // Load posts separately — failure here won't kill the rest of the page
-  try { _posts.load(targetUser); } catch(e) { console.warn('Posts load failed:', e); }
 
   // Stats — parallel
   const [subs, ratings, invites, supports, likes] = await Promise.allSettled([
@@ -3101,6 +3102,7 @@ async function loadProfile() {
     let ownerEfedName = null;
     try {
       const ownerCheck = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=promo_name,is_efed_owner,role`);
+      console.log('[DEBUG] ownerCheck:', JSON.stringify(ownerCheck[0]));
       const oc = ownerCheck[0];
       if (oc?.promo_name && (oc.is_efed_owner || oc.role === 'owner')) {
         ownerEfedName = oc.promo_name;
@@ -3164,9 +3166,9 @@ async function loadProfile() {
   const bmRow = document.getElementById('bookmarks-row');
   const _canSeeBookmarks = _isOwnProfile || session.username.toLowerCase() === ADMIN_USERNAME;
   try {
-    if (!_canSeeBookmarks) { bmRow.innerHTML = ''; }
+    if (!_canSeeBookmarks) { bmRow.innerHTML = ''; return; }
     const bookmarks = await sbGet('bookmarks', `username=eq.${encodeURIComponent(targetUser)}&order=saved_at.desc`);
-    if (!bookmarks.length) { bmRow.innerHTML = '<div class="empty">No bookmarks yet.</div>'; }
+    if (!bookmarks.length) { bmRow.innerHTML = '<div class="empty">No bookmarks yet.</div>'; return; }
     const urls = bookmarks.map(b => b.video_url).filter(Boolean);
     let subMap = {};
     if (urls.length) {
