@@ -669,10 +669,8 @@ nav.scrolled { background: rgba(7,7,10,.99); }
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
     Edit
   </button>
-  <!-- Social icons — bottom right -->
-  <div class="banner-social-icons" id="banner-social-icons"></div>
   <div class="banner-inner">
-    <div class="profile-av-box" id="profile-av-box">
+    <div class="profile-av-box" id="profile-av-box" onclick="handleAvatarClick()">
       <img id="profile-av-img" src="" alt="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">
       <span id="profile-av-initial">?</span>
       <div class="av-hover-overlay" id="av-hover-overlay">
@@ -738,16 +736,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   </div>
 </div>
 
-<!-- ── POINTS MODAL ── -->
-<div id="points-modal-bg" onclick="if(event.target===this)closePointsModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
-  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:360px;overflow:hidden;">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid rgba(255,255,255,.07);">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#fff;">Points Breakdown</div>
-      <button onclick="closePointsModal()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:1.1rem;cursor:pointer;padding:4px;">✕</button>
-    </div>
-    <div id="points-modal-body" style="padding:16px 20px 20px;display:flex;flex-direction:column;gap:10px;"></div>
-  </div>
-</div>
+
 
 <!-- ── LINKS MODAL ── -->
 <div id="links-modal-bg" onclick="if(event.target===this)closeLinksModal()">
@@ -2310,41 +2299,6 @@ function closePointsModal() {
   document.body.style.overflow = '';
 }
 
-function openPointsModal() {
-  const sub     = parseInt(document.getElementById('pts-submitted').value) || 0;
-  const rated   = parseInt(document.getElementById('pts-rated').value) || 0;
-  const invites = parseInt(document.getElementById('pts-invites').value) || 0;
-  const sup     = parseInt(document.getElementById('pts-supports').value) || 0;
-  const bonus   = parseInt(document.getElementById('pts-invite-bonus').value) || 0;
-  const rows = [
-    { label: 'Approved Submissions', count: sub,     pts: sub * 5,     each: 5 },
-    { label: 'Videos Rated',         count: rated,   pts: rated * 3,   each: 3 },
-    { label: 'Members Invited',      count: invites, pts: invites * 8, each: 8 },
-    { label: 'eFeds Supported',      count: sup,     pts: sup * 1,     each: 1 },
-  ];
-  if (bonus > 0) rows.push({ label: 'All 5 Invites Used (Bonus)', count: null, pts: bonus, each: null });
-  const total = rows.reduce((s, r) => s + r.pts, 0);
-  const body = document.getElementById('points-modal-body');
-  body.innerHTML = rows.map(r => `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);">
-      <div>
-        <div style="font-size:.82rem;font-weight:600;color:#e8e8e8;">${r.label}</div>
-        ${r.count !== null ? `<div style="font-size:.62rem;color:rgba(255,255,255,.3);margin-top:2px;">${r.count} × ${r.each} pts</div>` : ''}
-      </div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#c8a84b;letter-spacing:1px;">+${r.pts}</div>
-    </div>`).join('') + `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding-top:14px;">
-      <div style="font-size:.72rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.4);font-weight:700;">Total</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:#c8a84b;letter-spacing:1px;">${total}</div>
-    </div>`;
-  document.getElementById('points-modal-bg').style.display = 'flex';
-  document.body.style.overflow = 'hidden';
-}
-function closePointsModal() {
-  const bg = document.getElementById('points-modal-bg');
-  if (bg) bg.style.display = 'none';
-  document.body.style.overflow = '';
-}
 
 function openLinksModal() {
   if (!_linksData) return;
@@ -2446,8 +2400,13 @@ async function openEditModal() {
   // contaminated by visiting another user's profile
   let _ownData = {};
   try {
-    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio`);
+    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,ig_handle,x_handle,twitch_channel,bio`);
     _ownData = _rows[0] || {};
+    // Fetch avatar_url separately — base64 ~64KB, keep out of combined queries
+    try {
+      const _avRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=avatar_url`);
+      if (_avRows[0]) _ownData.avatar_url = _avRows[0].avatar_url;
+    } catch(e) {}
   } catch(e) {}
 
   // Pre-fill avatar preview from DB
@@ -2541,15 +2500,7 @@ async function epRemoveAvatar() {
 }
 
 function renderSocialLinks(ig, x, twitch) {
-  // Icon-only buttons in banner bottom-right
-  const icons = document.getElementById('banner-social-icons');
-  if (icons) {
-    icons.innerHTML = [
-      ig ? `<a class="banner-social-icon" href="https://instagram.com/${ig}" target="_blank" rel="noopener" title="@${ig}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg></a>` : '',
-      x  ? `<a class="banner-social-icon" href="https://x.com/${x}" target="_blank" rel="noopener" title="@${x}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.737-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>` : '',
-    ].filter(Boolean).join('');
-  }
-  // Keep twitch in profile-social-links if needed elsewhere
+  // Social icons removed from banner for now — will be re-added later
   const wrap = document.getElementById('profile-social-links');
   if (wrap) wrap.style.display = 'none';
 }
@@ -2700,7 +2651,7 @@ async function initNav() {
     if (notifs.length) { const dot = document.getElementById('bnav-notif-dot'); if (dot) dot.classList.add('visible'); }
   } catch(e) {}
   try {
-    const udata = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,is_efed_owner,role,promo_name,open_for_signings`);
+    const udata = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,is_efed_owner,role,promo_name,open_for_signings`);
     const u = udata[0];
     if (!u) return;
     if (u.display_name) {
@@ -2709,12 +2660,17 @@ async function initNav() {
       if (initialsEl) initialsEl.textContent = u.display_name[0].toUpperCase();
       if (ddName) ddName.textContent = u.display_name;
     }
-    if (u.avatar_url) {
-      session.avatarUrl = u.avatar_url;
-      localStorage.setItem('efed_session', JSON.stringify(session));
-      const img = document.getElementById('nav-avatar-img');
-      if (img) { img.src = u.avatar_url; img.style.display = 'block'; if (initialsEl) initialsEl.style.display = 'none'; }
-    }
+    // Fetch avatar_url separately — base64 ~64KB, keep out of combined queries
+    try {
+      const avData = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=avatar_url`);
+      const navAv = avData[0]?.avatar_url;
+      if (navAv) {
+        session.avatarUrl = navAv;
+        localStorage.setItem('efed_session', JSON.stringify(session));
+        const img = document.getElementById('nav-avatar-img');
+        if (img) { img.src = navAv; img.style.display = 'block'; if (initialsEl) initialsEl.style.display = 'none'; }
+      }
+    } catch(e) {}
     if ((u.is_efed_owner || u.role === 'owner') && u.promo_name) {
       if (ddEmail) { ddEmail.textContent = 'Owner of ' + u.promo_name; ddEmail.style.color = '#c8a84b'; }
       const myEfedBtn = document.getElementById('my-efed-btn');
