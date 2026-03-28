@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-<!-- build: v2 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -30,6 +29,30 @@
     if (!r.ok) throw new Error(await r.text());
     const txt = await r.text(); return txt ? JSON.parse(txt) : [];
   }
+
+  // ── STORAGE UPLOAD HELPER ──
+  // Converts a dataUrl to a Blob and uploads to Supabase Storage.
+  // Returns the public URL string.
+  async function uploadToStorage(dataUrl, bucket, path) {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+    const fullPath = path.replace(/\.[^.]+$/, '') + '.' + ext;
+    const uploadUrl = SUPABASE_URL + '/storage/v1/object/' + bucket + '/' + fullPath;
+    const r = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': blob.type,
+        'x-upsert': 'true'
+      },
+      body: blob
+    });
+    if (!r.ok) throw new Error('Storage upload failed: ' + await r.text());
+    return SUPABASE_URL + '/storage/v1/object/public/' + bucket + '/' + fullPath;
+  }
+
   (function() {
     try {
       const s = JSON.parse(localStorage.getItem('efed_session'));
@@ -171,26 +194,16 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 
 /* ── IDENTITY ── */
 .profile-name { font-family: 'Bebas Neue', sans-serif; font-size: 2.2rem; letter-spacing: 3px; color: #fff; line-height: 1; margin-bottom: 4px; text-shadow: 0 1px 8px rgba(0,0,0,.9), 0 2px 24px rgba(0,0,0,.8); }
-.profile-handle { display: none; }
 .edit-pencil {
   position: absolute; top: 12px; right: 12px; z-index: 10;
   background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.15);
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-  padding: 8px; color: rgba(255,255,255,.7); cursor: pointer;
+  padding: 8px 10px; color: rgba(255,255,255,.7); cursor: pointer;
   border-radius: 8px; transition: background .15s, color .15s;
-  display: none; align-items: center; justify-content: center;
+  display: none; align-items: center; gap: 6px;
+  font-family: 'DM Sans', sans-serif; font-size: .72rem; font-weight: 600; letter-spacing: .5px;
 }
 .edit-pencil:hover { background: rgba(0,0,0,.65); color: #fff; border-color: rgba(255,255,255,.3); }
-.ep-menu-item {
-  display: flex; align-items: center; gap: 14px;
-  padding: 15px 22px; cursor: pointer; color: rgba(255,255,255,.75);
-  font-family: 'DM Sans', sans-serif; font-size: .88rem; font-weight: 500;
-  border-bottom: 1px solid rgba(255,255,255,.05);
-  transition: background .12s, color .12s;
-}
-.ep-menu-item:hover { background: rgba(255,255,255,.05); color: #fff; }
-.ep-menu-item svg:first-child { flex-shrink: 0; opacity: .5; }
-.ep-menu-arrow { margin-left: auto; opacity: .25; flex-shrink: 0; }
 .banner-social-icons {
   position: absolute; bottom: 12px; right: 14px; z-index: 10;
   display: flex; align-items: center; gap: 8px;
@@ -676,7 +689,8 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   <input type="file" id="profile-banner-file" accept="image/*" style="display:none;" onchange="handleBannerUpload(event,'profile')">
   <!-- Edit button — top right -->
   <button class="edit-pencil" id="edit-pencil" onclick="openEditModal()" title="Edit profile">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    Edit
   </button>
   <!-- Social icons — bottom right -->
   <div class="banner-social-icons" id="banner-social-icons"></div>
@@ -691,6 +705,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
     </div>
     <div style="flex:1;min-width:0;">
       <div class="profile-name" id="profile-name">—</div>
+      <div id="profile-handle" style="font-size:.75rem;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;letter-spacing:.3px;margin-top:2px;"></div>
       <div id="profile-social-links" style="display:none;"></div>
     </div>
     <button id="add-to-roster-btn" style="display:none;align-items:center;gap:6px;padding:7px 14px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);border-radius:20px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;letter-spacing:.5px;cursor:pointer;white-space:nowrap;transition:background .2s;" onclick="openAddToRosterModal()">
@@ -1972,8 +1987,10 @@ function handleCawFile(event) {
         if (plusEl) plusEl.style.display = 'none';
         setCawSlotFilled(_cawSlot, true);
         const field = 'caw_image_' + _cawSlot;
-        const body = {}; body[field] = dataUrl;
         try {
+          const storagePath = 'caw/' + session.username + '_slot' + _cawSlot;
+          const publicUrl = await uploadToStorage(dataUrl, 'avatars', storagePath);
+          const body = {}; body[field] = publicUrl;
           await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
             method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(body)
           });
@@ -2447,77 +2464,87 @@ function updateSubArrows() {
 }
 
 // ── EDIT PROFILE MODAL ──
-let _epCache = null; // cached user data so switching sections is instant
+function epShowMenu() {
+  document.getElementById('ep-modal-title').textContent = 'Edit Profile';
+  document.getElementById('ep-back-btn').style.display = 'none';
+  document.getElementById('ep-panel-menu').style.display = 'flex';
+  document.getElementById('ep-panel-identity').style.display = 'none';
+  document.getElementById('ep-panel-images').style.display = 'none';
+  document.getElementById('ep-panel-links').style.display = 'none';
+}
+
+function epShowPanel(panel) {
+  const titles = { identity: 'Identity', images: 'Images', links: 'Links' };
+  document.getElementById('ep-modal-title').textContent = titles[panel] || 'Edit Profile';
+  document.getElementById('ep-back-btn').style.display = 'flex';
+  document.getElementById('ep-panel-menu').style.display = 'none';
+  document.getElementById('ep-panel-identity').style.display = panel === 'identity' ? 'flex' : 'none';
+  document.getElementById('ep-panel-images').style.display = panel === 'images' ? 'flex' : 'none';
+  document.getElementById('ep-panel-links').style.display = panel === 'links' ? 'flex' : 'none';
+
+  // Populate CAW previews when opening images panel
+  if (panel === 'images') {
+    [1,2,3,4].forEach(slot => {
+      const src = document.getElementById('caw-img-' + slot)?.src;
+      const prev = document.getElementById('ep-caw-prev-' + slot);
+      if (prev) {
+        if (src && !src.endsWith('/profile.html')) {
+          prev.innerHTML = `<img src="${src}" style="width:100%;height:100%;object-fit:cover;">`;
+        } else {
+          prev.textContent = slot;
+        }
+      }
+    });
+  }
+}
 
 async function openEditModal() {
   const session = getSession();
   if (!session) return;
-  document.getElementById('edit-modal-bg').style.display = 'flex';
-  document.body.style.overflow = 'hidden';
-  epShowMenu();
-  // Fetch fresh data in background — populate fields when ready
-  try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio`);
-    _epCache = rows[0] || {};
-    epFillFields();
-  } catch(e) {}
-}
 
-function epFillFields() {
-  if (!_epCache) return;
-  const d = _epCache;
-  const session = getSession();
-  // Avatar preview
+  // Always fetch own user data fresh from DB
+  let _ownData = {};
+  try {
+    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio`);
+    _ownData = _rows[0] || {};
+  } catch(e) {}
+
+  // Pre-fill avatar preview
   const avPrev = document.getElementById('ep-av-preview');
+  const ownAvatar = _ownData.avatar_url || null;
   if (avPrev) {
-    if (d.avatar_url) {
-      avPrev.innerHTML = `<img src="${d.avatar_url}" style="width:100%;height:100%;object-fit:cover;">`;
-      const rmBtn = document.getElementById('ep-av-remove'); if (rmBtn) rmBtn.style.display = 'block';
+    if (ownAvatar) {
+      avPrev.innerHTML = `<img src="${ownAvatar}" style="width:100%;height:100%;object-fit:cover;">`;
+      document.getElementById('ep-av-remove').style.display = 'block';
     } else {
-      avPrev.textContent = (d.display_name || session?.username || '?')[0].toUpperCase();
-      const rmBtn = document.getElementById('ep-av-remove'); if (rmBtn) rmBtn.style.display = 'none';
+      avPrev.textContent = (_ownData.display_name || session.username || '?')[0].toUpperCase();
+      document.getElementById('ep-av-remove').style.display = 'none';
     }
   }
+  // Pre-fill fields
   const nameInput = document.getElementById('ep-name-input');
-  if (nameInput) nameInput.value = d.display_name || session?.username || '';
-  const igIn = document.getElementById('ep-ig-input'); if (igIn) igIn.value = (d.ig_handle||'').replace('@','');
-  const xIn  = document.getElementById('ep-x-input');  if (xIn)  xIn.value  = (d.x_handle||'').replace('@','');
-  const twIn = document.getElementById('ep-twitch-input'); if (twIn) twIn.value = (d.twitch_channel||'').replace('twitch.tv/','').replace('@','');
+  if (nameInput) nameInput.value = _ownData.display_name || session.username || '';
+  ['ep-av-msg','ep-name-msg'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = ''; });
+  const _igIn = document.getElementById('ep-ig-input');
+  const _xIn  = document.getElementById('ep-x-input');
+  if (_igIn) _igIn.value = (_ownData.ig_handle || '').replace('@','');
+  if (_xIn)  _xIn.value  = (_ownData.x_handle  || '').replace('@','');
+  const _twIn = document.getElementById('ep-twitch-input');
+  if (_twIn) _twIn.value = (_ownData.twitch_channel || '').replace('twitch.tv/','').replace('@','');
+  const bioVal = _ownData.bio || '';
   const bioInput = document.getElementById('ep-bio-input');
   const bioCount = document.getElementById('ep-bio-count');
-  const bioVal = d.bio || '';
-  if (bioInput) bioInput.value = bioVal;
+  if (bioInput) { bioInput.value = bioVal; }
   if (bioCount) bioCount.textContent = bioVal.length + ' / 160';
-}
 
-function epShowMenu() {
-  document.getElementById('ep-menu').style.display = '';
-  document.getElementById('ep-section-body').style.display = 'none';
-  document.getElementById('ep-back-btn').style.display = 'none';
-  document.getElementById('ep-modal-title').textContent = 'Edit Profile';
-  ['ep-av-msg','ep-name-msg'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = ''; });
-}
-
-function epOpenSection(section) {
-  const titles = { photo: 'Profile Photo', banner: 'Banner', name: 'Display Name', social: 'Social Links', bio: 'Bio' };
-  document.getElementById('ep-menu').style.display = 'none';
-  const body = document.getElementById('ep-section-body');
-  body.style.display = 'flex';
-  body.scrollTop = 0;
-  document.getElementById('ep-back-btn').style.display = '';
-  document.getElementById('ep-modal-title').textContent = titles[section] || 'Edit';
-  // Show only relevant fields
-  const sections = { photo: 'ep-sec-photo', banner: 'ep-sec-banner', name: 'ep-sec-name', social: 'ep-sec-social', bio: 'ep-sec-bio' };
-  Object.values(sections).forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
-  const target = document.getElementById(sections[section]);
-  if (target) target.style.display = '';
-  epFillFields();
+  // Always open to menu
+  epShowMenu();
+  document.getElementById('edit-modal-bg').style.display = 'flex';
 }
 
 function closeEditModal() {
   document.getElementById('edit-modal-bg').style.display = 'none';
-  document.body.style.overflow = '';
-  _epCache = null;
+  epShowMenu();
 }
 
 async function epHandleAvatar(event) {
@@ -2540,13 +2567,14 @@ async function epHandleAvatar(event) {
       const avPrev = document.getElementById('ep-av-preview');
       avPrev.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;">`;
       document.getElementById('ep-av-remove').style.display = 'block';
-      // Save immediately
+      // Save via Storage
       try {
-        const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({avatar_url:dataUrl}) });
+        const storagePath = 'avatars/' + session.username + '_avatar';
+        const publicUrl = await uploadToStorage(dataUrl, 'avatars', storagePath);
+        const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({avatar_url:publicUrl}) });
         if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
-        // Update nav + profile avatar
-        setAvatar(dataUrl);
-        session.avatarUrl = dataUrl;
+        setAvatar(publicUrl);
+        session.avatarUrl = publicUrl;
         localStorage.setItem('efed_session', JSON.stringify(session));
         msg.textContent = 'Photo saved!'; msg.style.color = '#4caf64';
       } catch(err) { msg.textContent = 'Save failed: ' + err.message; msg.style.color = '#ff6b6b'; console.error(err); }
@@ -2615,8 +2643,7 @@ async function saveEditProfile() {
     if (bioEl) bioEl.textContent = bio;
     if (bioSec) bioSec.style.display = bio ? 'block' : 'none';
     nameMsg.textContent = 'Saved!'; nameMsg.style.color = '#4caf64';
-    _epCache = null; // clear cache so re-open fetches fresh
-    setTimeout(epShowMenu, 600);
+    setTimeout(closeEditModal, 800);
   } catch(e) { nameMsg.textContent = 'Could not save.'; nameMsg.style.color='#ff6b6b'; }
 }
 
@@ -2642,8 +2669,11 @@ function handleBannerUpload(event, type) {
         const _bn = document.querySelector('.banner-noise'); if (_bn) _bn.style.display = 'none';
         const _bg = document.querySelector('.banner-glow'); if (_bg) _bg.style.display = 'none';
         try {
-          const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({avatar_banner:dataUrl}) });
+          const storagePath = 'banners/' + session.username + '_banner';
+          const publicUrl = await uploadToStorage(dataUrl, 'avatars', storagePath);
+          const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({avatar_banner:publicUrl}) });
           if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
+          if (bannerImg) bannerImg.src = publicUrl;
           const bmsg = document.getElementById('ep-banner-msg');
           if (bmsg) { bmsg.textContent = 'Banner saved!'; bmsg.style.color='#4caf64'; setTimeout(() => bmsg.textContent='', 2000); }
         } catch(err) { const bmsg = document.getElementById('ep-banner-msg'); if (bmsg) { bmsg.textContent = 'Save failed: ' + err.message; bmsg.style.color='#ff6b6b'; } console.error(err); }
@@ -3241,8 +3271,11 @@ async function loadProfile() {
   } catch(e) {}
 }
 
-initNav();
-loadProfile();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => { initNav(); loadProfile(); });
+} else {
+  initNav(); loadProfile();
+}
 
 // ── BANNER CROP LOGIC ──
 let _cropState = { img: null, x: 0, y: 0, scale: 1, dragging: false, startX: 0, startY: 0, imgX: 0, imgY: 0, W: 960, H: 200, onSave: null };
@@ -3403,46 +3436,83 @@ function triggerInstall() {
 <!-- ── EDIT PROFILE MODAL ── -->
 <div id="edit-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeEditModal()">
   <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:380px;max-height:90dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.7);">
-    <div style="display:flex;align-items:center;gap:10px;padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0;">
-      <button id="ep-back-btn" onclick="epShowMenu()" style="display:none;background:none;border:none;color:rgba(255,255,255,.5);cursor:pointer;padding:4px 6px 4px 0;font-size:1rem;line-height:1;">‹</button>
-      <div id="ep-modal-title" style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;flex:1;">Edit Profile</div>
+
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 22px 16px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button id="ep-back-btn" onclick="epShowMenu()" style="display:none;background:none;border:none;color:#8a8a9a;cursor:pointer;padding:2px;display:none;align-items:center;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <div id="ep-modal-title" style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Edit Profile</div>
+      </div>
       <button onclick="closeEditModal()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;padding:4px;">✕</button>
     </div>
 
-    <!-- MENU VIEW -->
-    <div id="ep-menu" style="padding:10px 0;overflow-y:auto;flex:1;">
-      <div class="ep-menu-item" onclick="epOpenSection('photo')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M20 12a8 8 0 1 1-8-8"/><path d="M16 3l2 2-6 6"/></svg>
-        Profile Photo
-        <svg class="ep-menu-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-      </div>
-      <div class="ep-menu-item" onclick="epOpenSection('banner')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
-        Banner
-        <svg class="ep-menu-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-      </div>
-      <div class="ep-menu-item" onclick="epOpenSection('name')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        Display Name
-        <svg class="ep-menu-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-      </div>
-      <div class="ep-menu-item" onclick="epOpenSection('social')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
-        Social Links
-        <svg class="ep-menu-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-      </div>
-      <div class="ep-menu-item" onclick="epOpenSection('bio')" style="border-bottom:none;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/></svg>
-        Bio
-        <svg class="ep-menu-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-      </div>
+    <!-- ── MENU PANEL ── -->
+    <div id="ep-panel-menu" style="padding:12px 14px;display:flex;flex-direction:column;gap:4px;">
+
+      <button onclick="epShowPanel('identity')" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:14px 12px;background:none;border:none;border-radius:10px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='none'">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:34px;height:34px;border-radius:8px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c0000e" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </div>
+          <div style="text-align:left;">
+            <div style="font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;color:#e8e8e8;">Identity</div>
+            <div style="font-size:.68rem;color:#5a5a6a;margin-top:1px;">Name & bio</div>
+          </div>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5a5a6a" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+
+      <button onclick="epShowPanel('images')" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:14px 12px;background:none;border:none;border-radius:10px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='none'">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:34px;height:34px;border-radius:8px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          </div>
+          <div style="text-align:left;">
+            <div style="font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;color:#e8e8e8;">Images</div>
+            <div style="font-size:.68rem;color:#5a5a6a;margin-top:1px;">Photo, banner & CAW gallery</div>
+          </div>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5a5a6a" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+
+      <button onclick="epShowPanel('links')" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:14px 12px;background:none;border:none;border-radius:10px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='none'">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:34px;height:34px;border-radius:8px;background:rgba(80,140,255,.1);border:1px solid rgba(80,140,255,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7ab3ff" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </div>
+          <div style="text-align:left;">
+            <div style="font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:600;color:#e8e8e8;">Links</div>
+            <div style="font-size:.68rem;color:#5a5a6a;margin-top:1px;">Instagram, X & Twitch</div>
+          </div>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5a5a6a" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+
     </div>
 
-    <!-- SECTION VIEWS -->
-    <div id="ep-section-body" style="display:none;padding:20px 22px;overflow-y:auto;flex:1;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent;flex-direction:column;gap:18px;">
+    <!-- ── IDENTITY PANEL ── -->
+    <div id="ep-panel-identity" style="display:none;padding:20px 22px;flex-direction:column;gap:18px;overflow-y:auto;flex:1;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent;">
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Display Name</div>
+        <input id="ep-name-input" type="text" placeholder="Your display name" maxlength="24" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+        <div id="ep-name-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
+      </div>
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;">Bio</div>
+          <div id="ep-bio-count" style="font-size:.6rem;color:#5a5a6a;">0 / 160</div>
+        </div>
+        <textarea id="ep-bio-input" maxlength="160" rows="5" placeholder="Tell the community about yourself…" oninput="document.getElementById('ep-bio-count').textContent=this.value.length+' / 160'" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;resize:none;line-height:1.6;box-sizing:border-box;"></textarea>
+      </div>
+      <button onclick="saveEditProfile()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Changes</button>
+    </div>
 
-<div id="ep-sec-photo" style="display:none;flex-direction:column;gap:18px;">
-<!-- Avatar -->
+    <!-- ── IMAGES PANEL ── -->
+    <div id="ep-panel-images" style="display:none;padding:20px 22px;flex-direction:column;gap:20px;overflow-y:auto;flex:1;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent;">
+
+      <!-- Profile Photo -->
       <div>
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Profile Photo</div>
         <div style="display:flex;align-items:center;gap:14px;">
@@ -3458,10 +3528,8 @@ function triggerInstall() {
         </div>
         <div id="ep-av-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
       </div>
-      <button onclick="saveEditProfile()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;">Save</button>
-    </div>
-    <div id="ep-sec-banner" style="display:none;flex-direction:column;gap:18px;">
-<!-- Banner -->
+
+      <!-- Banner -->
       <div>
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Banner</div>
         <button onclick="document.getElementById('profile-banner-file').click()" style="width:100%;padding:9px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">
@@ -3470,23 +3538,29 @@ function triggerInstall() {
         </button>
         <div id="ep-banner-msg" style="font-size:.68rem;margin-top:4px;min-height:14px;color:#4caf64;"></div>
       </div>
-    </div>
-    <div id="ep-sec-name" style="display:none;flex-direction:column;gap:18px;">
-<!-- Display Name -->
+
+      <!-- CAW Gallery -->
       <div>
-        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Display Name</div>
-        <input id="ep-name-input" type="text" placeholder="Your display name" maxlength="24" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
-        <div id="ep-name-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
-      </div>
-      <button onclick="saveEditProfile()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;">Save</button>
-    </div>
-    <div id="ep-sec-social" style="display:none;flex-direction:column;gap:18px;">
-<!-- Social links note -->
-      <div style="font-size:.68rem;color:rgba(255,255,255,.38);background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:9px 12px;line-height:1.5;">
-        Instagram and X icons will appear on the bottom-right of your banner.
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:4px;">CAW Gallery</div>
+        <div style="font-size:.68rem;color:#5a5a6a;margin-bottom:10px;">Tap a slot on your profile to upload or remove images.</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;">
+          <div id="ep-caw-prev-1" style="aspect-ratio:1;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:.6rem;color:#5a5a6a;">1</div>
+          <div id="ep-caw-prev-2" style="aspect-ratio:1;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:.6rem;color:#5a5a6a;">2</div>
+          <div id="ep-caw-prev-3" style="aspect-ratio:1;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:.6rem;color:#5a5a6a;">3</div>
+          <div id="ep-caw-prev-4" style="aspect-ratio:1;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:.6rem;color:#5a5a6a;">4</div>
+        </div>
+        <div style="font-size:.65rem;color:#5a5a6a;margin-top:8px;text-align:center;">Close this panel and tap a slot to edit</div>
       </div>
 
-      <!-- Instagram -->
+    </div>
+
+    <!-- ── LINKS PANEL ── -->
+    <div id="ep-panel-links" style="display:none;padding:20px 22px;flex-direction:column;gap:18px;overflow-y:auto;flex:1;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent;">
+
+      <div style="font-size:.68rem;color:rgba(255,255,255,.38);background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:9px 12px;line-height:1.5;">
+        Instagram and X icons appear on the bottom-right of your banner.
+      </div>
+
       <div>
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Instagram</div>
         <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
@@ -3495,7 +3569,6 @@ function triggerInstall() {
         </div>
       </div>
 
-      <!-- X / Twitter -->
       <div>
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">X (Twitter)</div>
         <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
@@ -3504,7 +3577,6 @@ function triggerInstall() {
         </div>
       </div>
 
-      <!-- Twitch -->
       <div>
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Twitch eFed Channel</div>
         <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
@@ -3512,21 +3584,10 @@ function triggerInstall() {
           <input id="ep-twitch-input" type="text" placeholder="channelname" maxlength="60" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
         </div>
       </div>
-      <button onclick="saveEditProfile()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;">Save</button>
-    </div>
-    <div id="ep-sec-bio" style="display:none;flex-direction:column;gap:18px;">
-<!-- Bio -->
-      <div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;">Bio</div>
-          <div id="ep-bio-count" style="font-size:.6rem;color:#5a5a6a;">0 / 160</div>
-        </div>
-        <textarea id="ep-bio-input" maxlength="160" rows="4" placeholder="Tell the community about yourself…" oninput="document.getElementById('ep-bio-count').textContent=this.value.length+' / 160'" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;resize:none;line-height:1.6;box-sizing:border-box;"></textarea>
-      </div>
 
+      <button onclick="saveEditProfile()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Changes</button>
     </div>
-      <button onclick="saveEditProfile()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;">Save</button>
-    </div>
+
   </div>
 </div>
 
@@ -4384,7 +4445,7 @@ const _soSearch = (() => {
       html += '<div class="sr-section-label">eFeds <span class="sr-count-badge">' + efeds.length + '</span></div>';
       efeds.forEach(ef => {
         const srLogoHtml = ef.logo
-          ? '<img src="' + esc(ef.logo) + '" style="width:100%;height:100%;object-fit:cover;border-radius:9px;" onerror="this.style.display='none'">'
+          ? '<img src="' + esc(ef.logo) + '" style="width:100%;height:100%;object-fit:cover;border-radius:9px;" onerror="this.style.display=\'none\'">'
           : ef.name[0].toUpperCase();
         html += '<div class="sr-efed-item" onclick="_soSearch.openEfed(\'' + encodeURIComponent(ef.name) + '\')">' +
           '<div class="sr-efed-icon">' + srLogoHtml + '</div>' +
@@ -4678,11 +4739,14 @@ async function handleAvatarFile(event) {
       const navInitials = document.getElementById('nav-initials');
       if (navImg) { navImg.src = dataUrl; navImg.style.display = 'block'; }
       if (navInitials) navInitials.style.display = 'none';
-      // Save
+      // Save via Storage
       try {
-        await sbUpdate('users', { avatar_url: dataUrl }, `username=eq.${encodeURIComponent(session.username)}`);
-        session.avatarUrl = dataUrl;
+        const storagePath = 'avatars/' + session.username + '_avatar';
+        const publicUrl = await uploadToStorage(dataUrl, 'avatars', storagePath);
+        await sbUpdate('users', { avatar_url: publicUrl }, `username=eq.${encodeURIComponent(session.username)}`);
+        session.avatarUrl = publicUrl;
         localStorage.setItem('efed_session', JSON.stringify(session));
+        if (navImg) navImg.src = publicUrl;
         showSettingsMsg('settings-avatar-msg', 'Photo saved!', 'success');
       } catch(err) {
         showSettingsMsg('settings-avatar-msg', 'Could not save. Try again.', 'error');
