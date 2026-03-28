@@ -9491,8 +9491,11 @@ async function buildChatRooms() {
 
   const updatesRoom = { id: 'updates', name: 'Updates' };
   let orderedRooms = [];
+  let activeEfedRooms = []; // admin-only: owners currently online
 
   const session = getSession();
+  const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
+
   if (session && session.username) {
     try {
       const userRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
@@ -9518,6 +9521,29 @@ async function buildChatRooms() {
         }
       });
     } catch(e) {}
+
+    // 3. Admin: find eFed owners who are currently online
+    if (isAdmin) {
+      try {
+        const cutoff = Date.now() - 120000;
+        const presenceRows = await sbGet('presence', `last_seen=gt.${cutoff}&select=username`);
+        const onlineUsernames = presenceRows.map(r => r.username).filter(Boolean);
+        if (onlineUsernames.length) {
+          const ownerRows = await sbGet('users',
+            `username=in.(${onlineUsernames.map(u => encodeURIComponent(u)).join(',')})&is_efed_owner=eq.true&select=username,promo_name`
+          );
+          const addedActive = new Set();
+          ownerRows.forEach(u => {
+            if (!u.promo_name) return;
+            const id = 'efed_' + u.promo_name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            if (!addedActive.has(id)) {
+              addedActive.add(id);
+              activeEfedRooms.push({ id, name: u.promo_name, isEfed: true, isActive: true });
+            }
+          });
+        }
+      } catch(e) {}
+    }
   }
 
   // Updates always last
@@ -9525,6 +9551,30 @@ async function buildChatRooms() {
 
   // store for init use
   window._efedRooms = orderedRooms.filter(r => r.isEfed);
+
+  // Admin: render active eFed rooms section first
+  if (isAdmin && activeEfedRooms.length) {
+    const label = document.createElement('span');
+    label.style.cssText = 'font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:#4caf64;font-weight:700;white-space:nowrap;align-self:center;flex-shrink:0;padding:0 4px 0 2px;font-family:"DM Sans",sans-serif;';
+    label.textContent = '🟢';
+    wrap.appendChild(label);
+
+    activeEfedRooms.forEach(r => {
+      const pill = document.createElement('button');
+      pill.className = 'chat-room-pill' + (r.id === _chatRoom ? ' active' : '');
+      pill.textContent = r.name;
+      pill.style.borderColor = 'rgba(76,175,100,.45)';
+      pill.style.color = 'rgba(76,175,100,.95)';
+      pill.title = r.name + ' — owner is live in Hub';
+      pill.onclick = (e) => { e.stopPropagation(); switchChatRoom(r.id, r.name); };
+      wrap.appendChild(pill);
+    });
+
+    // Divider
+    const divider = document.createElement('span');
+    divider.style.cssText = 'width:1px;height:18px;background:rgba(255,255,255,.1);flex-shrink:0;align-self:center;margin:0 4px;';
+    wrap.appendChild(divider);
+  }
 
   orderedRooms.forEach(r => {
     const pill = document.createElement('button');
