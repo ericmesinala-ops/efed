@@ -1382,9 +1382,9 @@ const _posts = (() => {
         ${efedTag}
       </div>
       <div class="post-replies-wrap">
-        <button class="post-replies-toggle" id="replies-toggle-${p.id}" onclick="_posts.toggleReplies('${p.id}',this)">
+        <button class="post-replies-toggle${p._replyCount?' has-replies':''}" id="replies-toggle-${p.id}" onclick="_posts.toggleReplies('${p.id}',this)">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-          Replies <span class="reply-tab-count" id="replies-toggle-label-${p.id}"></span>
+          Replies <span class="reply-tab-count" id="replies-toggle-label-${p.id}">${p._replyCount||''}</span>
         </button>
         <div class="post-replies-list" id="replies-list-${p.id}"></div>
         <div class="post-reply-compose" id="reply-compose-${p.id}">
@@ -1417,18 +1417,25 @@ const _posts = (() => {
     if(nr) nr.style.display=(idx===0&&idx>=total-1)?'none':'flex';
   }
   function _setDots(idx,total){ /* dots removed — floating chevrons used instead */ }
-  function _fullRender(){
+  async function _fullRender(){
     const track=_track(); if(!track)return;
     if(!_items.length){
       track.innerHTML=`<div class="post-card"><div class="posts-empty"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>No posts yet.</div></div>`;
       _setNav(0,1);_setDots(0,0);return;
     }
+    // Fetch reply counts first so cards render with toggles already visible — no layout jump
+    try {
+      const ids = _items.map(p=>p.id).filter(Boolean);
+      if (ids.length) {
+        const rows = await sbGet('posts', `reply_to=in.(${ids.map(id=>encodeURIComponent(id)).join(',')})&select=reply_to`);
+        const counts = {};
+        rows.forEach(r => { counts[r.reply_to] = (counts[r.reply_to]||0)+1; });
+        _items.forEach(p => { p._replyCount = counts[p.id] || 0; });
+      }
+    } catch(e) {}
     track.innerHTML=_items.map(_renderCard).join('');
     _slide(_idx,false);_setNav(_idx,_items.length);_setDots(_idx,_items.length);
-    // Reset reply cache on full re-render (new profile load)
     _replyCache = {};
-    // Show reply toggle buttons for posts that have existing replies
-    setTimeout(() => _initReplyTogglesBatch(_items.map(p=>p.id)), 200);
   }
 
   function prev(){if(_idx>0){_idx--;_slide(_idx);_setNav(_idx,_items.length);_setDots(_idx,_items.length);}}
