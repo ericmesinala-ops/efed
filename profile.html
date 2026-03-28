@@ -1258,6 +1258,13 @@ nav.scrolled { background: rgba(7,7,10,.99); }
       <img id="pm-img-prev-img" src="" alt="">
       <button class="pm-img-remove" onclick="_posts.removeImg()">✕</button>
     </div>
+    <!-- eFed broadcast row — hidden if user has no efeds -->
+    <div id="pm-efed-row" style="display:none;align-items:center;gap:8px;padding:2px 0 4px;">
+      <span style="font-size:.62rem;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;white-space:nowrap;">Posting to</span>
+      <select id="pm-efed-select" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.75);font-family:'DM Sans',sans-serif;font-size:.72rem;padding:6px 10px;outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;">
+        <option value="">— My profile only —</option>
+      </select>
+    </div>
     <div class="pm-toolbar" style="position:relative;">
       <button class="pm-tool-btn" title="Add image" onclick="document.getElementById('pm-img-input').click()">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -1440,13 +1447,45 @@ const _posts = (() => {
     if(ooc) ooc.className='pm-mode-btn'+(m==='ooc'?' active-ooc':'');
   }
 
-  let _editingId=null,_imgData=null;
+  let _myEfeds = null; // cached list of efed names for the current session user
+
+  async function _loadMyEfeds() {
+    if (_myEfeds !== null) return _myEfeds;
+    const session = getSession(); if (!session) return (_myEfeds = []);
+    try {
+      const [userRows, rosterRows] = await Promise.all([
+        sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
+        sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
+      ]);
+      const u = userRows[0];
+      const efeds = [];
+      if ((u?.is_efed_owner || u?.role === 'owner') && u?.promo_name) efeds.push(u.promo_name);
+      rosterRows.forEach(r => { if (r.efed && !efeds.map(e=>e.toLowerCase()).includes(r.efed.toLowerCase())) efeds.push(r.efed); });
+      _myEfeds = efeds;
+    } catch(e) { _myEfeds = []; }
+    return _myEfeds;
+  }
 
   function openModal(){
     _editingId=null;_resetModal();setMode('ooc');
     document.getElementById('post-modal-bg').classList.add('open');
     document.getElementById('pm-text').focus();_buildEmojis();
+    // Populate efed dropdown
+    _loadMyEfeds().then(efeds => {
+      const row = document.getElementById('pm-efed-row');
+      const sel = document.getElementById('pm-efed-select');
+      if (!row || !sel) return;
+      sel.innerHTML = '<option value="">— My profile only —</option>';
+      efeds.forEach(e => {
+        const opt = document.createElement('option');
+        opt.value = e; opt.textContent = e;
+        sel.appendChild(opt);
+      });
+      row.style.display = efeds.length ? 'flex' : 'none';
+    });
   }
+  let _editingId=null,_imgData=null;
+
   function closeModal(){
     document.getElementById('post-modal-bg').classList.remove('open');
     _resetModal();
@@ -1457,6 +1496,7 @@ const _posts = (() => {
     const charEl=document.getElementById('pm-char');if(charEl)charEl.textContent='0 / 140';
     const title=document.getElementById('pm-modal-title');if(title)title.textContent='New Post';
     const btn=document.getElementById('pm-submit');if(btn){btn.textContent='Post';btn.onclick=()=>_posts.submit();}
+    const sel=document.getElementById('pm-efed-select');if(sel)sel.value='';
   }
   function handleImg(e){
     const file=e.target.files[0];if(!file)return;
@@ -1484,8 +1524,9 @@ const _posts = (() => {
     if(!text&&!_imgData)return;
     const btn=document.getElementById('pm-submit');
     btn.disabled=true;btn.textContent='Posting…';
+    const selectedEfed=(document.getElementById('pm-efed-select')?.value||'').trim()||null;
     try{
-      const payload={username:session.username,text:text||null,image_url:_imgData||null,post_type:_mode,likes:0,created_at:new Date().toISOString(),reply_to:null};
+      const payload={username:session.username,text:text||null,image_url:_imgData||null,post_type:_mode,likes:0,created_at:new Date().toISOString(),reply_to:null,efed:selectedEfed||null};
       const r=await fetch(SUPABASE_URL+'/rest/v1/posts',{method:'POST',headers:SB_HEADERS,body:JSON.stringify(payload)});
       if(!r.ok)throw new Error('HTTP '+r.status);
       let saved=null;try{const arr=await r.json();saved=arr[0]||arr;}catch(e){}
@@ -1493,7 +1534,8 @@ const _posts = (() => {
       try{const u=await sbGet('users',`username=eq.${encodeURIComponent(session.username)}&select=avatar_url,display_name`);if(u[0]){avUrl=u[0].avatar_url;dName=u[0].display_name||session.username;}}catch(e){}
       const enriched={...(saved||payload),id:saved?.id||payload.created_at,avatar_url:avUrl,display_name:dName,_liked:false};
       closeModal();
-      _items.unshift(enriched);_idx=0;_fullRender();showToast('Posted!');
+      _items.unshift(enriched);_idx=0;_fullRender();
+      showToast(selectedEfed ? `Posted to ${selectedEfed}!` : 'Posted!');
     }catch(err){showToast('Failed: '+err.message);btn.disabled=false;btn.textContent='Post';return;}
     btn.disabled=false;btn.textContent='Post';
   }

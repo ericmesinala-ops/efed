@@ -4920,31 +4920,19 @@ const _efedFeed = (() => {
     if (_inited) return;
     _inited = true;
     const sec = document.getElementById('efed-feed-section');
-    // fetch all roster members for this efed
     try {
-      const rosterRows = await sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=username`);
-      // also include the owner
-      const ownerRows = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&is_efed_owner=eq.true&select=username`);
-      const members = [...new Set([
-        ...rosterRows.map(r => r.username),
-        ...ownerRows.map(r => r.username)
-      ])];
-      if (!members.length) { if (sec) sec.style.display = ''; _fullRender(); _initSwipe(); return; }
-
       const session = getSession();
-      // Fetch posts from all members
       const rows = await sbGet('posts',
-        `username=in.(${members.map(u => encodeURIComponent(u)).join(',')})&reply_to=is.null&order=created_at.desc&limit=50`);
+        `efed=ilike.${encodeURIComponent(EFED_NAME)}&reply_to=is.null&order=created_at.desc&limit=50`);
 
-      // Avatar map
+      const usernames = [...new Set(rows.map(r => r.username))];
       const avatarMap = {};
-      if (members.length) {
+      if (usernames.length) {
         try {
-          const urows = await sbGet('users', `username=in.(${members.map(u => encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
+          const urows = await sbGet('users', `username=in.(${usernames.map(u => encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
           urows.forEach(u => { avatarMap[u.username] = { avatar_url: u.avatar_url, display_name: u.display_name }; });
         } catch(e) {}
       }
-      // Liked set
       let likedSet = new Set();
       if (session && rows.length) {
         try {
@@ -4979,16 +4967,9 @@ const _efedFeed = (() => {
         const msg = JSON.parse(ev.data);
         if (msg.event !== 'INSERT' && msg.event !== 'phx_reply') return;
         const rec = msg.payload?.record;
-        if (!rec || rec.reply_to) return; // only top-level posts
-        // Check if poster is a member of this efed
-        try {
-          const u = await sbGet('users', `username=eq.${encodeURIComponent(rec.username)}&promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username`);
-          const inRoster = await sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&username=eq.${encodeURIComponent(rec.username)}&status=eq.approved&select=username`);
-          if (!u.length && !inRoster.length) return;
-        } catch(e) { return; }
-        // already have it?
+        if (!rec || rec.reply_to) return;
+        if (!rec.efed || rec.efed.toLowerCase() !== EFED_NAME.toLowerCase()) return;
         if (_items.find(p => p.id === rec.id)) return;
-        // enrich
         let av = { avatar_url: null, display_name: rec.username };
         try { const urows = await sbGet('users', `username=eq.${encodeURIComponent(rec.username)}&select=avatar_url,display_name`); if (urows[0]) av = urows[0]; } catch(e) {}
         const enriched = { ...rec, avatar_url: av.avatar_url, display_name: av.display_name || rec.username, _liked: false };
@@ -5004,13 +4985,9 @@ const _efedFeed = (() => {
   async function _poll() {
     if (!_lastId) return;
     try {
-      const rows = await sbGet('posts', `reply_to=is.null&id=gt.${_lastId}&order=created_at.asc&limit=10`);
+      const rows = await sbGet('posts', `efed=ilike.${encodeURIComponent(EFED_NAME)}&reply_to=is.null&id=gt.${_lastId}&order=created_at.asc&limit=10`);
       if (!rows.length) return;
-      // filter to efed members
-      const rosterRows = await sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=username`);
-      const ownerRows  = await sbGet('users',  `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&is_efed_owner=eq.true&select=username`);
-      const members = new Set([...rosterRows.map(r=>r.username), ...ownerRows.map(r=>r.username)]);
-      const filtered = rows.filter(r => members.has(r.username) && !_items.find(p => p.id === r.id));
+      const filtered = rows.filter(r => !_items.find(p => p.id === r.id));
       if (!filtered.length) { _lastId = Math.max(_lastId, ...rows.map(r=>r.id||0)); return; }
       const usernames = [...new Set(filtered.map(r=>r.username))];
       const avMap = {};
