@@ -175,6 +175,7 @@
     <button class="tab-btn" onclick="switchTab('users', this)">Users</button>
     <button class="tab-btn" onclick="switchTab('broadcast', this)">📢 Broadcast</button>
     <button class="tab-btn" onclick="switchTab('invites', this)">🎟️ Invite Codes</button>
+    <button class="tab-btn" onclick="switchTab('temppass', this)">🔑 Temp Password</button>
 
   </div>
 
@@ -245,6 +246,59 @@
         <button class="btn btn-gold" onclick="adminSendBroadcast(true)">📢 Broadcast to All</button>
       </div>
       <div id="broadcast-result" style="margin-top:10px;font-size:.72rem;"></div>
+    </div>
+  </div>
+
+  <!-- TEMP PASSWORD -->
+  <div class="tab-panel" id="tab-temppass">
+    <div class="card">
+      <div class="card-title"><div class="dot" style="background:#4caf8a;"></div>Temporary Password Generator</div>
+      <div style="font-size:.75rem;color:var(--muted);line-height:1.7;margin-bottom:20px;">Generate a temporary password, get its SHA-256 hash, and copy a ready-to-paste Supabase SQL snippet to reset any user's password.</div>
+
+      <div class="input-group" style="margin-bottom:12px;">
+        <label class="input-label">Username to reset</label>
+        <input class="input-field" id="tp-username" placeholder="@username" autocomplete="off">
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
+        <button class="btn btn-gold" onclick="generateTempPass()">⚡ Generate Password</button>
+        <button class="btn" onclick="document.getElementById('tp-custom').style.display=document.getElementById('tp-custom').style.display==='none'?'block':'none'" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);">Use Custom Password</button>
+      </div>
+
+      <div id="tp-custom" style="display:none;margin-bottom:16px;">
+        <div class="input-group" style="margin-bottom:8px;">
+          <label class="input-label">Custom password</label>
+          <input class="input-field" id="tp-custom-val" placeholder="Enter password to hash" autocomplete="off" oninput="hashCustomPass()">
+        </div>
+      </div>
+
+      <div id="tp-result" style="display:none;flex-direction:column;gap:10px;">
+        <!-- Password -->
+        <div style="background:rgba(76,175,138,.06);border:1px solid rgba(76,175,138,.2);border-radius:10px;padding:14px 16px;">
+          <div style="font-size:.54rem;letter-spacing:2px;text-transform:uppercase;color:#4caf8a;font-weight:700;margin-bottom:6px;">Temporary Password</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <code id="tp-pass-display" style="font-family:'JetBrains Mono',monospace;font-size:.95rem;color:#fff;letter-spacing:1px;word-break:break-all;"></code>
+            <button onclick="copyTp('tp-pass-display','tp-copy-pass')" id="tp-copy-pass" style="flex-shrink:0;font-size:.58rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:rgba(76,175,138,.15);border:1px solid rgba(76,175,138,.3);color:#4caf8a;border-radius:6px;padding:5px 10px;cursor:pointer;transition:opacity .15s;font-family:'DM Sans',sans-serif;">Copy</button>
+          </div>
+        </div>
+        <!-- Hash -->
+        <div style="background:rgba(200,168,75,.05);border:1px solid rgba(200,168,75,.15);border-radius:10px;padding:14px 16px;">
+          <div style="font-size:.54rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:6px;">SHA-256 Hash</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <code id="tp-hash-display" style="font-family:'JetBrains Mono',monospace;font-size:.68rem;color:rgba(255,255,255,.7);word-break:break-all;line-height:1.5;"></code>
+            <button onclick="copyTp('tp-hash-display','tp-copy-hash')" id="tp-copy-hash" style="flex-shrink:0;font-size:.58rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.25);color:var(--gold);border-radius:6px;padding:5px 10px;cursor:pointer;transition:opacity .15s;font-family:'DM Sans',sans-serif;">Copy</button>
+          </div>
+        </div>
+        <!-- SQL -->
+        <div style="background:rgba(192,0,14,.05);border:1px solid rgba(192,0,14,.2);border-radius:10px;padding:14px 16px;">
+          <div style="font-size:.54rem;letter-spacing:2px;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:6px;">Supabase SQL — paste &amp; run</div>
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">
+            <pre id="tp-sql-display" style="font-family:'JetBrains Mono',monospace;font-size:.68rem;color:rgba(255,255,255,.7);word-break:break-all;white-space:pre-wrap;line-height:1.6;margin:0;flex:1;"></pre>
+            <button onclick="copyTp('tp-sql-display','tp-copy-sql')" id="tp-copy-sql" style="flex-shrink:0;font-size:.58rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;border-radius:6px;padding:5px 10px;cursor:pointer;transition:opacity .15s;font-family:'DM Sans',sans-serif;">Copy</button>
+          </div>
+        </div>
+        <div style="font-size:.65rem;color:var(--muted);line-height:1.6;padding:4px 2px;">⚠️ Share the password with the user privately. Once they log in, they should change it from their profile.</div>
+      </div>
     </div>
   </div>
 
@@ -1057,6 +1111,61 @@ async function generateInviteCodes() {
   finally{btn.disabled=false;btn.textContent='+ Generate 5 Codes';}
 }
 
+
+// ── TEMP PASSWORD ──
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function randomTempPass() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
+  let p = '';
+  const arr = new Uint8Array(12);
+  crypto.getRandomValues(arr);
+  arr.forEach(b => { p += chars[b % chars.length]; });
+  return p;
+}
+
+async function generateTempPass() {
+  const pass = randomTempPass();
+  document.getElementById('tp-custom-val').value = '';
+  await renderTempPass(pass);
+}
+
+async function hashCustomPass() {
+  const val = document.getElementById('tp-custom-val').value;
+  if (!val) { document.getElementById('tp-result').style.display = 'none'; return; }
+  await renderTempPass(val);
+}
+
+async function renderTempPass(pass) {
+  const hash = await sha256(pass);
+  const username = document.getElementById('tp-username').value.trim().replace(/^@/,'') || 'USERNAME';
+  const sql = `UPDATE users\nSET password_hash = '${hash}'\nWHERE username = '${username}';`;
+
+  document.getElementById('tp-pass-display').textContent = pass;
+  document.getElementById('tp-hash-display').textContent = hash;
+  document.getElementById('tp-sql-display').textContent = sql;
+  document.getElementById('tp-result').style.display = 'flex';
+
+  // Re-render SQL if username changes
+  document.getElementById('tp-username').oninput = () => {
+    const u = document.getElementById('tp-username').value.trim().replace(/^@/,'') || 'USERNAME';
+    document.getElementById('tp-sql-display').textContent = `UPDATE users\nSET password_hash = '${hash}'\nWHERE username = '${u}';`;
+  };
+}
+
+function copyTp(srcId, btnId) {
+  const text = document.getElementById(srcId).textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById(btnId);
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.style.opacity = '.6';
+    setTimeout(() => { btn.textContent = orig; btn.style.opacity = '1'; }, 1800);
+  });
+}
 
 init();
 </script>
