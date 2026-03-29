@@ -2390,8 +2390,7 @@ html, body { overscroll-behavior-y: none; }
   </div>
 </nav>
 
-<!-- ── MAINTENANCE BANNER ── -->
-<div id="maint-banner" style="display:none;width:100%;padding:11px 20px;text-align:center;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;line-height:1.6;position:relative;z-index:90;"></div>
+<!-- ── CLAIM MODAL ── -->
 <div id="claim-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeClaimModal()">
   <div style="background:#111115;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:360px;padding:28px 24px;box-shadow:0 24px 60px rgba(0,0,0,.6);">
     <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#fff;margin-bottom:8px;">Add to My eFed</div>
@@ -4253,37 +4252,7 @@ function loadBestMatches(allVideos) {
   } catch(e) { console.error('Best Matches failed:', e); }
 }
 
-// ── MAINTENANCE BANNER ──
-async function checkMaintenanceBanner() {
-  try {
-    const alerts = await sbGet('maintenance_alerts', 'active=eq.true&order=created_at.desc&limit=5');
-    const banner = document.getElementById('maint-banner');
-    if (!banner) return;
-    if (!alerts || !alerts.length) { banner.style.display = 'none'; return; }
-    // If multiple alerts, show the most severe first, then concatenate
-    const severityOrder = { down: 0, degraded: 1, maintenance: 2 };
-    alerts.sort((a, b) => (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9));
-    const top = alerts[0];
-    const styles = {
-      down:        'background:rgba(192,0,14,.18);border-bottom:2px solid rgba(192,0,14,.5);color:#ff8080;',
-      degraded:    'background:rgba(180,130,0,.2);border-bottom:2px solid rgba(200,168,75,.45);color:#e0b84a;',
-      maintenance: 'background:rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.14);color:rgba(255,255,255,.75);'
-    };
-    banner.style.cssText = 'width:100%;padding:11px 20px;text-align:center;font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:600;line-height:1.6;position:relative;z-index:90;' + (styles[top.severity] || styles.down);
-    if (alerts.length === 1) {
-      banner.textContent = top.message;
-    } else {
-      // Show first alert text + count of others
-      banner.textContent = top.message + '  (' + (alerts.length - 1) + ' more alert' + (alerts.length > 2 ? 's' : '') + ')';
-    }
-    banner.style.display = 'block';
-  } catch(e) {
-    // Table may not exist yet — fail silently
-  }
-}
-
 async function initHub() {
-  checkMaintenanceBanner();
   showSkeletons(8);
   buildPills();
   try {
@@ -4719,6 +4688,39 @@ const BANNED_PROMOS = [
   'coh', 'circle of honor', 'cohwrestling',
   'pwj', 'pro wrestling japan', 'prowrestlingjapan',
 ];
+
+// ── BANNED LINKS (from Supabase) ──
+let _bannedLinks = []; // array of { url, reason }
+async function loadBannedLinksRuntime() {
+  try {
+    _bannedLinks = await sbGet('banned_links', 'select=url,reason');
+  } catch(e) { _bannedLinks = []; }
+}
+loadBannedLinksRuntime();
+
+function isUrlBanned(videoUrl, channelName) {
+  if (!_bannedLinks.length) return null;
+  const urlLower = (videoUrl || '').toLowerCase();
+  const channelLower = (channelName || '').toLowerCase().replace(/\s/g,'');
+  for (const b of _bannedLinks) {
+    const bUrl = (b.url || '').toLowerCase();
+    // Exact video URL match
+    if (bUrl === urlLower) return b.reason || 'This video is not permitted on the EFED Streaming Hub.';
+    // Channel handle match — e.g. banned URL is https://www.youtube.com/@UpstateRemy
+    const handleMatch = bUrl.match(/youtube\.com\/@([a-z0-9_.-]+)/i);
+    if (handleMatch) {
+      const bannedHandle = handleMatch[1].toLowerCase();
+      // Check against submitted video URL (channel handle in URL)
+      if (urlLower.includes('@' + bannedHandle)) return b.reason || 'This channel is not permitted on the EFED Streaming Hub.';
+      // Check against resolved channel name from oEmbed/YT API
+      if (channelLower.includes(bannedHandle) || bannedHandle.includes(channelLower.replace(/\s/g,''))) return b.reason || 'This channel is not permitted on the EFED Streaming Hub.';
+    }
+    // Channel ID match — e.g. banned URL is https://www.youtube.com/channel/UCxxxxx
+    const cidMatch = bUrl.match(/youtube\.com\/channel\/(uc[a-z0-9_-]+)/i);
+    if (cidMatch && urlLower.includes(cidMatch[1].toLowerCase())) return b.reason || 'This channel is not permitted on the EFED Streaming Hub.';
+  }
+  return null;
+}
 function checkBannedPromo(val, noticeId) {
   const notice = document.getElementById(noticeId);
   if (!notice) return;
@@ -6155,7 +6157,7 @@ async function fetchSubmitPreview() {
 
     // If oEmbed gave no title (e.g. live stream), fall back to YT API title below
 
-    // Check banned promos
+    // Check banned promos (static list)
     const channelLower = (oData.author_name || '').toLowerCase().replace(/\s/g,'').replace(/@/g,'');
     const titleLower = (oData.title || '').toLowerCase();
     const isBanned = BANNED_PROMOS.some(b => {
@@ -6164,6 +6166,14 @@ async function fetchSubmitPreview() {
     });
     if (isBanned) {
       showSubmitErr('This promotion is not permitted on the EFED Streaming Hub.');
+      btn.textContent = 'Submit to Hub';
+      return;
+    }
+
+    // Check banned_links table (dynamic — set by admin)
+    const dynamicBanReason = isUrlBanned(url, oData.author_name || '');
+    if (dynamicBanReason) {
+      showSubmitErr(dynamicBanReason || 'This video or channel is not permitted on the EFED Streaming Hub.');
       btn.textContent = 'Submit to Hub';
       return;
     }
