@@ -2390,7 +2390,8 @@ html, body { overscroll-behavior-y: none; }
   </div>
 </nav>
 
-<!-- ── CLAIM MODAL ── -->
+<!-- ── MAINTENANCE BANNER ── -->
+<div id="maint-banner" style="display:none;width:100%;padding:11px 20px;text-align:center;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;line-height:1.6;position:relative;z-index:90;"></div>
 <div id="claim-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);align-items:center;justify-content:center;" onclick="if(event.target===this)closeClaimModal()">
   <div style="background:#111115;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:360px;padding:28px 24px;box-shadow:0 24px 60px rgba(0,0,0,.6);">
     <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#fff;margin-bottom:8px;">Add to My eFed</div>
@@ -4252,7 +4253,37 @@ function loadBestMatches(allVideos) {
   } catch(e) { console.error('Best Matches failed:', e); }
 }
 
+// ── MAINTENANCE BANNER ──
+async function checkMaintenanceBanner() {
+  try {
+    const alerts = await sbGet('maintenance_alerts', 'active=eq.true&order=created_at.desc&limit=5');
+    const banner = document.getElementById('maint-banner');
+    if (!banner) return;
+    if (!alerts || !alerts.length) { banner.style.display = 'none'; return; }
+    // If multiple alerts, show the most severe first, then concatenate
+    const severityOrder = { down: 0, degraded: 1, maintenance: 2 };
+    alerts.sort((a, b) => (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9));
+    const top = alerts[0];
+    const styles = {
+      down:        'background:rgba(192,0,14,.18);border-bottom:2px solid rgba(192,0,14,.5);color:#ff8080;',
+      degraded:    'background:rgba(180,130,0,.2);border-bottom:2px solid rgba(200,168,75,.45);color:#e0b84a;',
+      maintenance: 'background:rgba(255,255,255,.06);border-bottom:1px solid rgba(255,255,255,.14);color:rgba(255,255,255,.75);'
+    };
+    banner.style.cssText = 'width:100%;padding:11px 20px;text-align:center;font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:600;line-height:1.6;position:relative;z-index:90;' + (styles[top.severity] || styles.down);
+    if (alerts.length === 1) {
+      banner.textContent = top.message;
+    } else {
+      // Show first alert text + count of others
+      banner.textContent = top.message + '  (' + (alerts.length - 1) + ' more alert' + (alerts.length > 2 ? 's' : '') + ')';
+    }
+    banner.style.display = 'block';
+  } catch(e) {
+    // Table may not exist yet — fail silently
+  }
+}
+
 async function initHub() {
+  checkMaintenanceBanner();
   showSkeletons(8);
   buildPills();
   try {

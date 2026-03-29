@@ -176,6 +176,7 @@
     <button class="tab-btn" onclick="switchTab('broadcast', this)">📢 Broadcast</button>
     <button class="tab-btn" onclick="switchTab('invites', this)">🎟️ Invite Codes</button>
     <button class="tab-btn" onclick="switchTab('temppass', this)">🔑 Temp Password</button>
+    <button class="tab-btn" onclick="switchTab('maintenance', this)">🔧 Maintenance</button>
 
   </div>
 
@@ -350,7 +351,8 @@
       <div class="input-row">
         <div class="input-group" style="flex:3;">
           <label class="input-label">YouTube Channel URL</label>
-          <input class="input-field" id="ch-url" placeholder="https://www.youtube.com/@ChannelName">
+          <input class="input-field" id="ch-url" placeholder="https://www.youtube.com/@ChannelName" onblur="previewChannelName()" onkeydown="if(event.key==='Enter')addChannel()">
+          <div id="ch-name-preview" style="display:none;font-size:.7rem;font-weight:600;margin-top:6px;font-family:'JetBrains Mono',monospace;letter-spacing:.5px;"></div>
         </div>
         <button class="btn btn-gold" onclick="addChannel()" style="align-self:flex-end;">+ Add</button>
       </div>
@@ -358,6 +360,63 @@
     <div class="card">
       <div class="card-title"><div class="dot"></div>Registered Channels <span id="ch-count" style="font-size:.7rem;color:var(--muted);font-family:'DM Sans';font-weight:400;letter-spacing:0;margin-left:4px;"></span></div>
       <div class="channel-list" id="channel-list"><div class="empty"><div class="empty-icon">📺</div>No channels yet.</div></div>
+    </div>
+  </div>
+
+  <!-- MAINTENANCE -->
+  <div class="tab-panel" id="tab-maintenance">
+    <div class="card" style="background:linear-gradient(135deg,rgba(192,0,14,.08) 0%,rgba(7,7,10,0) 60%);border-color:rgba(192,0,14,.2);">
+      <div class="card-title"><div class="dot" style="background:var(--accent);"></div>Post Maintenance Alert</div>
+      <div style="font-size:.68rem;color:var(--muted);margin-bottom:18px;line-height:1.7;">Select the affected area and describe the issue. A red banner will appear on the hub below the hero until you remove it.</div>
+
+      <div class="input-row" style="margin-bottom:14px;">
+        <div class="input-group">
+          <label class="input-label">Affected Area</label>
+          <select class="input-field" id="maint-area" style="cursor:pointer;">
+            <option value="">— Select area —</option>
+            <option value="Homepage">🏠 Homepage</option>
+            <option value="Profile Page">👤 Profile Page</option>
+            <option value="eFed Page">🏟️ eFed Page</option>
+            <option value="Chat Room">💬 Chat Room</option>
+            <option value="Videos">🎬 Videos</option>
+            <option value="Video Player">▶️ Video Player</option>
+            <option value="Login / Sign Up">🔑 Login / Sign Up</option>
+            <option value="Scanner">📡 Scanner</option>
+            <option value="Notifications">🔔 Notifications</option>
+            <option value="Search">🔍 Search</option>
+            <option value="Entire Site">🌐 Entire Site</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label class="input-label">Severity</label>
+          <select class="input-field" id="maint-severity" style="cursor:pointer;">
+            <option value="down">🔴 Fully Down</option>
+            <option value="degraded">🟡 Degraded / Slow</option>
+            <option value="maintenance">🔧 Scheduled Maintenance</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="input-group" style="margin-bottom:14px;">
+        <label class="input-label">Custom Message <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;">(optional — leave blank for auto-message)</span></label>
+        <input class="input-field" id="maint-msg" placeholder="e.g. We're working on it and will be back shortly.">
+      </div>
+
+      <!-- Preview -->
+      <div id="maint-preview" style="display:none;margin-bottom:16px;">
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:8px;">Banner Preview</div>
+        <div id="maint-preview-banner" style="border-radius:8px;padding:12px 18px;font-size:.78rem;font-weight:600;line-height:1.6;"></div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-ghost btn-sm" onclick="previewMaintenance()">Preview Banner</button>
+        <button class="btn btn-red" onclick="postMaintenance()" id="maint-post-btn">🚨 Post Alert</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><div class="dot" style="background:var(--accent);"></div>Active Alerts <span id="maint-active-count" style="font-size:.7rem;color:var(--muted);font-family:'DM Sans';font-weight:400;letter-spacing:0;margin-left:4px;"></span></div>
+      <div id="maint-active-list"><div class="empty"><div class="empty-icon">✅</div>No active alerts. Site is all good.</div></div>
     </div>
   </div>
 
@@ -414,6 +473,7 @@ function switchTab(name, btn) {
   if(name==='broadcast') loadExistingCodes();
   if(name==='invites') loadExistingCodes();
   if(name==='scanner') { loadScanLog(); checkScanLock(); updateCostPreview(); }
+  if(name==='maintenance') loadMaintenanceAlerts();
 }
 
 async function init() {
@@ -911,21 +971,36 @@ async function addChannel() {
   btn.disabled=true; btn.textContent='Fetching...';
   try {
     const cid=await resolveChannelId(url);
-    let efedName='';
-    if(cid){
-      const r=await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+cid+'&key='+YT_API_KEY);
-      const d=await r.json();
-      efedName=d.items?.[0]?.snippet?.title||'';
-    }
-    if(!efedName){
-      const hm=url.match(/@([A-Za-z0-9_.-]+)/);
-      efedName=hm?hm[1]:url;
-    }
+    if(!cid){toast('❌ Could not resolve that channel URL. Check the link and try again.');return;}
+    const r=await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+cid+'&key='+YT_API_KEY);
+    const d=await r.json();
+    const efedName=d.items?.[0]?.snippet?.title||'';
+    if(!efedName){toast('❌ YouTube returned no channel name. Check the URL and try again.');return;}
     await sbInsert('efed_channels',{efed_name:efedName,yt_channel_url:url});
     document.getElementById('ch-url').value='';
-    toast('Added: '+efedName); loadChannels(); loadStats();
+    document.getElementById('ch-name-preview').style.display='none';
+    toast('✅ Added: '+efedName); loadChannels(); loadStats();
   } catch(e){toast('Error: '+e.message);}
   finally{btn.disabled=false;btn.textContent='+ Add';}
+}
+
+async function previewChannelName() {
+  const url=document.getElementById('ch-url').value.trim();
+  const preview=document.getElementById('ch-name-preview');
+  if(!url||(!url.includes('youtube.com')&&!url.includes('youtu.be'))){preview.style.display='none';return;}
+  preview.style.display='block';
+  preview.style.color='var(--muted)';
+  preview.textContent='Fetching channel name…';
+  try {
+    const cid=await resolveChannelId(url);
+    if(!cid){preview.style.color='#ff6b6b';preview.textContent='❌ Could not resolve channel';return;}
+    const r=await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&id='+cid+'&key='+YT_API_KEY);
+    const d=await r.json();
+    const name=d.items?.[0]?.snippet?.title||'';
+    if(!name){preview.style.color='#ff6b6b';preview.textContent='❌ No channel found';return;}
+    preview.style.color='#4caf64';
+    preview.textContent='✓ '+name;
+  } catch(e){preview.style.color='#ff6b6b';preview.textContent='❌ Error fetching name';}
 }
 
 async function deleteChannel(id,name) {
@@ -1165,6 +1240,115 @@ function copyTp(srcId, btnId) {
     btn.style.opacity = '.6';
     setTimeout(() => { btn.textContent = orig; btn.style.opacity = '1'; }, 1800);
   });
+}
+
+// ── MAINTENANCE ALERTS ──
+const MAINT_MESSAGES = {
+  down: area => `🚨 ${area} is currently down. We're aware of the issue and working on a fix. Thanks for your patience.`,
+  degraded: area => `⚠️ ${area} may be experiencing slowness or partial issues right now. We're looking into it.`,
+  maintenance: area => `🔧 ${area} is currently undergoing scheduled maintenance and may be temporarily unavailable.`
+};
+
+function getMaintMessage() {
+  const area = document.getElementById('maint-area').value;
+  const severity = document.getElementById('maint-severity').value;
+  const custom = document.getElementById('maint-msg').value.trim();
+  if (!area) return null;
+  const base = MAINT_MESSAGES[severity] ? MAINT_MESSAGES[severity](area) : '';
+  return custom ? base.split('.')[0] + '. ' + custom : base;
+}
+
+function previewMaintenance() {
+  const msg = getMaintMessage();
+  const preview = document.getElementById('maint-preview');
+  const banner = document.getElementById('maint-preview-banner');
+  if (!msg) { toast('Select an affected area first.'); return; }
+  const severity = document.getElementById('maint-severity').value;
+  const colors = { down: 'rgba(192,0,14,.18)', degraded: 'rgba(200,168,75,.14)', maintenance: 'rgba(255,255,255,.06)' };
+  const borders = { down: 'rgba(192,0,14,.4)', degraded: 'rgba(200,168,75,.35)', maintenance: 'rgba(255,255,255,.15)' };
+  const textColors = { down: '#ff6b6b', degraded: 'var(--gold)', maintenance: 'rgba(255,255,255,.8)' };
+  banner.style.background = colors[severity] || colors.down;
+  banner.style.border = '1px solid ' + (borders[severity] || borders.down);
+  banner.style.color = textColors[severity] || textColors.down;
+  banner.textContent = msg;
+  preview.style.display = 'block';
+}
+
+async function postMaintenance() {
+  const area = document.getElementById('maint-area').value;
+  const severity = document.getElementById('maint-severity').value;
+  const msg = getMaintMessage();
+  if (!area) { toast('Select an affected area first.'); return; }
+  const btn = document.getElementById('maint-post-btn');
+  btn.disabled = true; btn.textContent = 'Posting…';
+  try {
+    await sbInsert('maintenance_alerts', {
+      area,
+      severity,
+      message: msg,
+      posted_by: ADMIN_USERNAME,
+      active: true,
+      created_at: new Date().toISOString()
+    });
+    document.getElementById('maint-area').value = '';
+    document.getElementById('maint-msg').value = '';
+    document.getElementById('maint-preview').style.display = 'none';
+    toast('🚨 Alert posted!');
+    loadMaintenanceAlerts();
+  } catch(e) { toast('Error: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '🚨 Post Alert'; }
+}
+
+async function loadMaintenanceAlerts() {
+  const list = document.getElementById('maint-active-list');
+  const count = document.getElementById('maint-active-count');
+  list.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
+  try {
+    const alerts = await sbGet('maintenance_alerts', 'active=eq.true&order=created_at.desc');
+    count.textContent = alerts.length ? '(' + alerts.length + ' active)' : '';
+    if (!alerts.length) { list.innerHTML = '<div class="empty"><div class="empty-icon">✅</div>No active alerts. Site is all good.</div>'; return; }
+    list.innerHTML = '';
+    alerts.forEach(function(a) {
+      const severityIcon = { down: '🔴', degraded: '🟡', maintenance: '🔧' }[a.severity] || '🔴';
+      const severityLabel = { down: 'Fully Down', degraded: 'Degraded', maintenance: 'Maintenance' }[a.severity] || a.severity;
+      const dateStr = a.created_at ? new Date(a.created_at).toLocaleString('en-US', {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '';
+      const div = document.createElement('div');
+      div.id = 'maint-row-' + a.id;
+      div.style.cssText = 'padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06);display:flex;gap:12px;align-items:flex-start;';
+      div.innerHTML = `
+        <div style="font-size:1.2rem;flex-shrink:0;margin-top:2px;">${severityIcon}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
+            <span style="font-size:.82rem;font-weight:700;color:#e8e8e8;">${esc(a.area)}</span>
+            <span style="font-size:.5rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:2px 7px;border-radius:4px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.25);color:#ff6b6b;">${severityLabel}</span>
+          </div>
+          <div style="font-size:.75rem;color:rgba(255,255,255,.65);line-height:1.6;margin-bottom:5px;">${esc(a.message)}</div>
+          <div style="font-size:.6rem;color:var(--muted);">Posted by @${esc(a.posted_by)} · ${dateStr}</div>
+        </div>
+        <button class="btn btn-green btn-sm" style="flex-shrink:0;" onclick="removeMaintAlert(${a.id})">✓ Resolve</button>`;
+      list.appendChild(div);
+    });
+  } catch(e) {
+    list.innerHTML = '<div class="empty">Could not load alerts.<br><span style="font-size:.65rem;color:var(--muted);">Make sure the <code style="background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;">maintenance_alerts</code> table exists.</span></div>';
+  }
+}
+
+async function removeMaintAlert(id) {
+  if (!await adminConfirm('Mark this alert as resolved and remove the banner from the site?', 'Resolve Alert')) return;
+  const row = document.getElementById('maint-row-' + id);
+  if (row) row.style.opacity = '.4';
+  try {
+    await sbUpdate('maintenance_alerts', { active: false }, 'id=eq.' + id);
+    if (row) row.remove();
+    const count = document.getElementById('maint-active-count');
+    const remaining = document.querySelectorAll('[id^="maint-row-"]').length;
+    count.textContent = remaining ? '(' + remaining + ' active)' : '';
+    if (!remaining) document.getElementById('maint-active-list').innerHTML = '<div class="empty"><div class="empty-icon">✅</div>No active alerts. Site is all good.</div>';
+    toast('✅ Alert resolved. Banner removed.');
+  } catch(e) {
+    if (row) row.style.opacity = '1';
+    toast('Error: ' + e.message);
+  }
 }
 
 init();
