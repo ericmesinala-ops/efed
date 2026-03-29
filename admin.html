@@ -723,10 +723,12 @@ async function adminSendBroadcast(toAll) {
 // ── SCANNER ──
 async function updateCostPreview() {
   try {
-    const channels = await sbGet('efed_channels','select=id');
-    const cost = channels.length * 100;
+    const channels = await sbGet('efed_channels','select=id,efed_name');
+    const scanState = _getScanState();
+    const enabled = channels.filter(ch => scanState[ch.efed_name.toLowerCase()] !== false);
+    const cost = enabled.length * 100;
     const el = document.getElementById('scan-cost-preview');
-    if (el) el.textContent = `Estimated cost: ${cost} YouTube API units (${channels.length} channel${channels.length!==1?'s':''} × 100) out of 10,000 daily free quota`;
+    if (el) el.textContent = `Estimated cost: ${cost} YouTube API units (${enabled.length} channel${enabled.length!==1?'s':''} enabled × 100) out of 10,000 daily free quota`;
   } catch(e) {}
 }
 
@@ -772,8 +774,12 @@ function checkScanLock() {
 
 async function startScan() {
   if(!checkScanLock()) return;
-  const channels=await sbGet('efed_channels','select=*&order=efed_name.asc').catch(()=>[]);
-  if(!channels.length){toast('No channels added yet. Add some in the eFed Channels tab.');return;}
+  const allChannels=await sbGet('efed_channels','select=*&order=efed_name.asc').catch(()=>[]);
+  if(!allChannels.length){toast('No channels added yet. Add some in the eFed Channels tab.');return;}
+  // Only scan channels that have scan enabled (default: true)
+  const scanState=_getScanState();
+  const channels=allChannels.filter(ch=>scanState[ch.efed_name.toLowerCase()]!==false);
+  if(!channels.length){toast('No channels are enabled for scanning. Check the eFed Channels tab.');return;}
   const btn=document.getElementById('scan-btn');
   btn.disabled=true; btn.innerHTML='<div class="spinner"></div> Scanning…';
   document.getElementById('progress-wrap').style.display='block';
@@ -937,30 +943,167 @@ async function loadScanLog() {
 }
 
 // ── CHANNELS ──
+function _getScanState() {
+  try { return JSON.parse(localStorage.getItem('efed_scan_enabled')||'{}'); } catch { return {}; }
+}
+function _setScanState(key, val) {
+  const s = _getScanState(); s[key] = val;
+  localStorage.setItem('efed_scan_enabled', JSON.stringify(s));
+}
+
 async function loadChannels() {
-  const list=document.getElementById('channel-list');
-  list.innerHTML='<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
+  const list = document.getElementById('channel-list');
+  list.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
   try {
-    const channels=await sbGet('efed_channels','select=*&order=efed_name.asc');
-    document.getElementById('ch-count').textContent=channels.length?`· ${channels.length}`:'';
-    document.getElementById('stat-channels').textContent=channels.length;
-    if(!channels.length){list.innerHTML='<div class="empty"><div class="empty-icon">📺</div>No channels yet.</div>';return;}
-    list.innerHTML='';
-    channels.forEach(ch=>{
-      const item=document.createElement('div'); item.className='channel-item';
-      item.innerHTML=`
-        <div class="channel-avatar">${(ch.efed_name||'?')[0].toUpperCase()}</div>
-        <div class="channel-info">
+    // Pull registered channels (have YT URL) + all distinct efeds from approved submissions
+    const [channels, subs] = await Promise.all([
+      sbGet('efed_channels', 'select=*&order=efed_name.asc'),
+      sbGet('submissions', 'status=eq.approved&select=efed,date&order=date.desc')
+    ]);
+
+    // Build a map: efed_name (lowercase) → { efed_name, yt_channel_url, id, lastUpload }
+    const map = new Map();
+
+    // Seed from submissions — get last upload per efed
+    const lastUploadMap = {};
+    subs.forEach(s => {
+      if (!s.efed) return;
+      const key = s.efed.trim().toLowerCase();
+      if (!lastUploadMap[key] || s.date > lastUploadMap[key].date) {
+        lastUploadMap[key] = { name: s.efed.trim(), date: s.date };
+      }
+    });
+    Object.values(lastUploadMap).forEach(({ name, date }) => {
+      map.set(name.toLowerCase(), { efed_name: name, yt_channel_url: null, id: null, lastUpload: date });
+    });
+
+    // Overlay registered channels (they have YT URLs and may have better names)
+    channels.forEach(ch => {
+      const key = ch.efed_name.trim().toLowerCase();
+      const existing = map.get(key) || {};
+      map.set(key, {
+        efed_name: ch.efed_name,
+        yt_channel_url: ch.yt_channel_url,
+        id: ch.id,
+        lastUpload: existing.lastUpload || null
+      });
+    });
+
+    // Sort alphabetically by display name
+    const all = Array.from(map.values()).sort((a, b) => a.efed_name.localeCompare(b.efed_name));
+
+    const scanCount = all.filter(ch => {
+      const s = _getScanState();
+      const key = ch.efed_name.toLowerCase();
+      return ch.yt_channel_url && (s[key] !== false);
+    }).length;
+
+    document.getElementById('ch-count').textContent = all.length ? `· ${all.length} feds` : '';
+    document.getElementById('stat-channels').textContent = all.length;
+
+    if (!all.length) { list.innerHTML = '<div class="empty"><div class="empty-icon">📺</div>No feds yet.</div>'; return; }
+
+    // Header row
+    list.innerHTML = '';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:10px;padding:0 4px 10px;border-bottom:1px solid var(--border);margin-bottom:4px;';
+    header.innerHTML = `
+      <div style="width:20px;flex-shrink:0;"></div>
+      <div style="flex:1;font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;">eFed Name</div>
+      <div style="width:110px;text-align:right;font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;flex-shrink:0;">Last Upload</div>
+      <div style="width:80px;text-align:center;font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;flex-shrink:0;">Scan</div>`;
+    list.appendChild(header);
+
+    // Select-all row
+    const selectAllRow = document.createElement('div');
+    selectAllRow.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border);margin-bottom:6px;';
+    const scannable = all.filter(ch => ch.yt_channel_url);
+    const scanState = _getScanState();
+    const allChecked = scannable.every(ch => scanState[ch.efed_name.toLowerCase()] !== false);
+    selectAllRow.innerHTML = `
+      <div style="width:20px;flex-shrink:0;"></div>
+      <div style="flex:1;font-size:.68rem;color:var(--muted);font-style:italic;">${scannable.length} of ${all.length} feds have a registered YT channel and can be scanned. ${all.length - scannable.length} are hub-only (no channel URL).</div>
+      <div style="width:110px;flex-shrink:0;"></div>
+      <div style="width:80px;text-align:center;flex-shrink:0;">
+        <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:.62rem;color:var(--muted);font-weight:600;">
+          <input type="checkbox" id="scan-select-all" ${allChecked?'checked':''} style="width:15px;height:15px;accent-color:var(--gold);cursor:pointer;">
+          All
+        </label>
+      </div>`;
+    list.appendChild(selectAllRow);
+
+    document.getElementById('scan-select-all').addEventListener('change', function() {
+      const checked = this.checked;
+      all.forEach(ch => {
+        if (!ch.yt_channel_url) return;
+        _setScanState(ch.efed_name.toLowerCase(), checked);
+        const cb = document.getElementById('scan-cb-' + ch.efed_name.toLowerCase().replace(/[^a-z0-9]/g,'_'));
+        if (cb) cb.checked = checked;
+      });
+    });
+
+    all.forEach(ch => {
+      const state = _getScanState();
+      const key = ch.efed_name.toLowerCase();
+      const cbKey = key.replace(/[^a-z0-9]/g, '_');
+      const isEnabled = ch.yt_channel_url && (state[key] !== false);
+      const hasUrl = !!ch.yt_channel_url;
+
+      let lastUploadStr = '—';
+      if (ch.lastUpload) {
+        const d = new Date(ch.lastUpload);
+        if (!isNaN(d)) lastUploadStr = d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+      }
+
+      const item = document.createElement('div');
+      item.className = 'channel-item';
+      item.style.cssText = 'display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:6px;transition:border-color .2s;' + (!isEnabled && hasUrl ? 'opacity:.55;' : '');
+
+      item.innerHTML = `
+        <div class="channel-avatar" style="flex-shrink:0;">${(ch.efed_name||'?')[0].toUpperCase()}</div>
+        <div class="channel-info" style="flex:1;min-width:0;">
           <div class="channel-name">${esc(ch.efed_name)}</div>
-          <div class="channel-url">${esc(ch.yt_channel_url)}</div>
+          <div class="channel-url">${hasUrl ? esc(ch.yt_channel_url) : '<span style="color:rgba(255,255,255,.2);font-style:italic;">No channel URL — add one to enable scanning</span>'}</div>
+        </div>
+        <div style="width:110px;text-align:right;flex-shrink:0;">
+          <span style="font-size:.65rem;color:${ch.lastUpload?'var(--gold)':'var(--muted)'};font-family:'JetBrains Mono',monospace;">${lastUploadStr}</span>
+        </div>
+        <div style="width:80px;text-align:center;flex-shrink:0;">
+          ${hasUrl
+            ? `<input type="checkbox" id="scan-cb-${cbKey}" ${isEnabled?'checked':''} style="width:16px;height:16px;accent-color:var(--gold);cursor:pointer;">`
+            : `<span style="font-size:.6rem;color:var(--muted);">—</span>`}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;">
-          <a href="${esc(ch.yt_channel_url)}" target="_blank" class="btn btn-ghost btn-sm">↗ View</a>
-          <button class="btn btn-red btn-sm" onclick="deleteChannel(${ch.id},'${esc(ch.efed_name)}')">✕</button>
+          ${hasUrl ? `<a href="${esc(ch.yt_channel_url)}" target="_blank" class="btn btn-ghost btn-sm">↗</a>` : ''}
+          ${ch.id ? `<button class="btn btn-red btn-sm" onclick="deleteChannel(${ch.id},'${esc(ch.efed_name)}')">✕</button>` : ''}
         </div>`;
       list.appendChild(item);
+
+      if (hasUrl) {
+        const cb = item.querySelector('#scan-cb-' + cbKey);
+        if (cb) {
+          cb.addEventListener('change', function() {
+            _setScanState(key, this.checked);
+            item.style.opacity = this.checked ? '1' : '.55';
+            // Update select-all state
+            const allState = _getScanState();
+            const nowAll = all.filter(c => c.yt_channel_url).every(c => allState[c.efed_name.toLowerCase()] !== false);
+            const saEl = document.getElementById('scan-select-all');
+            if (saEl) saEl.checked = nowAll;
+          });
+        }
+      }
     });
-  } catch(e){list.innerHTML='<div class="empty">Error loading channels.</div>';}
+
+    // Update cost preview based on scan-enabled channels
+    const enabledCount = all.filter(ch => {
+      if (!ch.yt_channel_url) return false;
+      return _getScanState()[ch.efed_name.toLowerCase()] !== false;
+    }).length;
+    const el = document.getElementById('scan-cost-preview');
+    if (el) el.textContent = `Estimated cost: ${enabledCount * 100} YouTube API units (${enabledCount} channel${enabledCount!==1?'s':''} enabled for scan × 100) out of 10,000 daily free quota`;
+
+  } catch(e) { list.innerHTML = '<div class="empty">Error loading channels: ' + esc(e.message) + '</div>'; }
 }
 
 async function addChannel() {
