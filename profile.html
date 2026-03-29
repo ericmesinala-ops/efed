@@ -954,8 +954,9 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 }
 .post-op-name { font-size: .65rem; font-weight: 700; color: rgba(255,255,255,.85); margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
 .post-op-time { font-size: .55rem; color: rgba(255,255,255,.28); font-weight: 400; letter-spacing: .3px; }
-.post-card-with-img { display: flex; align-items: flex-start; gap: 12px; margin-top: 10px; }
-.post-card-with-img .post-card-text { margin-top: 0; flex: 1; min-width: 0; }
+.post-card-with-img { display: flex; align-items: center; gap: 0; margin-top: 10px; }
+.post-card-with-img .post-card-text { margin-top: 0; flex: 1; min-width: 0; padding-right: 14px; }
+.post-card-img-side { flex-shrink: 0; border-left: 1px solid rgba(255,255,255,.07); padding-left: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .post-card-img-wrap { width: 200px; flex-shrink: 0; }
 .post-card-img-wrap .enlarge-hint { font-size: .5rem; color: rgba(255,255,255,.18); letter-spacing: .8px; text-transform: uppercase; text-align: center; margin-bottom: 4px; }
 .post-card-img-wrap img { width: 200px; height: 150px; border-radius: 8px; object-fit: cover; display: block; cursor: pointer; transition: opacity .15s; }
@@ -1297,8 +1298,8 @@ nav.scrolled { background: rgba(7,7,10,.99); }
       </div>
       <button class="pm-close" onclick="_posts.closeModal()">✕</button>
     </div>
-    <textarea class="pm-textarea" id="pm-text" placeholder="What's on your mind…" maxlength="500"
-      oninput="document.getElementById('pm-char').textContent=this.value.length+' / 500'"></textarea>
+    <textarea class="pm-textarea" id="pm-text" placeholder="What's on your mind…" maxlength="360"
+      oninput="_posts.updateCharCount()"></textarea>
     <div class="pm-img-preview" id="pm-img-preview">
       <img id="pm-img-prev-img" src="" alt="">
       <button class="pm-img-remove" onclick="_posts.removeImg()">✕</button>
@@ -1329,7 +1330,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
         <div class="pm-emoji-picker" id="pm-emoji-picker"></div>
       </div>
       <button class="pm-tool-btn" title="GIF" onclick="_posts.openGif()" style="font-size:.7rem;font-weight:700;letter-spacing:.5px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;">GIF</button>
-      <span class="pm-char-count" id="pm-char">0 / 500</span>
+      <span class="pm-char-count" id="pm-char">0 / 360</span>
     </div>
     <button class="pm-submit-btn" id="pm-submit" onclick="_posts.submit()">Post</button>
   </div>
@@ -1362,7 +1363,7 @@ const _posts = (() => {
     const mode = p.post_type==='ooc'?'ooc':'ic';
     const editedLabel = p.edited_at ? ` <span style="font-size:.55rem;color:rgba(255,255,255,.2);">· edited</span>` : '';
     const imgHtml = p.image_url
-      ? `<div class="post-card-img-wrap"><div class="enlarge-hint">click to enlarge</div><img src="${_esc(p.image_url)}" alt="" onclick="_posts.lightbox('${_esc(p.image_url)}')"></div>`
+      ? `<div class="post-card-img-side"><div class="post-card-img-wrap"><div class="enlarge-hint">click to enlarge</div><img src="${_esc(p.image_url)}" alt="" onclick="_posts.lightbox('${_esc(p.image_url)}')"></div></div>`
       : '';
     const textHtml = p.text
       ? `<div class="post-card-text"><span style="margin-right:6px;font-size:1rem;flex-shrink:0;">${mode==='ic'?'🎤':'💬'}</span>${_esc(p.text)}</div>`
@@ -1626,27 +1627,45 @@ const _posts = (() => {
   function _resetModal(){
     _editingId=null;removeImg();
     const ta=document.getElementById('pm-text');if(ta)ta.value='';
-    const charEl=document.getElementById('pm-char');if(charEl)charEl.textContent='0 / 500';
+    const charEl=document.getElementById('pm-char');if(charEl)charEl.textContent='0 / 360';
     const title=document.getElementById('pm-modal-title');if(title)title.textContent='New Post';
     const btn=document.getElementById('pm-submit');if(btn){btn.textContent='Post';btn.onclick=()=>_posts.submit();}
     const sel=document.getElementById('pm-efed-select');if(sel)sel.value='';
     pmCloseEfedDrop();
   }
+  function updateCharCount(){
+    const ta=document.getElementById('pm-text');
+    const limit=_imgData?180:360;
+    const len=ta.value.length;
+    const charEl=document.getElementById('pm-char');
+    if(charEl)charEl.textContent=len+' / '+limit;
+    if(len>limit){ta.value=ta.value.slice(0,limit);charEl.textContent=limit+' / '+limit;}
+    ta.setAttribute('maxlength',limit);
+  }
   function handleImg(e){
     const file=e.target.files[0];if(!file)return;
     const reader=new FileReader();
-    reader.onload=ev=>{openBannerCrop(ev.target.result,800,600,(url)=>{_imgData=url;document.getElementById('pm-img-prev-img').src=url;document.getElementById('pm-img-preview').style.display='block';});};
+    reader.onload=ev=>{openBannerCrop(ev.target.result,800,600,(url)=>{
+      _imgData=url;
+      document.getElementById('pm-img-prev-img').src=url;
+      document.getElementById('pm-img-preview').style.display='block';
+      // Trim text if over new limit
+      const ta=document.getElementById('pm-text');
+      if(ta.value.length>180)ta.value=ta.value.slice(0,180);
+      updateCharCount();
+    });};
     reader.readAsDataURL(file);e.target.value='';
   }
   function removeImg(){
     _imgData=null;
     const p=document.getElementById('pm-img-preview');if(p)p.style.display='none';
     const i=document.getElementById('pm-img-prev-img');if(i)i.src='';
+    updateCharCount();
   }
   const EMOJIS=['😀','😂','😍','🔥','💯','👏','🎉','😎','🤔','💪','❤️','😢','😤','🙌','👀','✅','⚡','🏆','🎭','📺','💥','👊','😈','🤩','🥶','😱','💀','🫡','🔑','💎'];
   function _buildEmojis(){
     const el=document.getElementById('pm-emoji-picker');if(el.children.length)return;
-    EMOJIS.forEach(em=>{const s=document.createElement('span');s.className='pm-emoji';s.textContent=em;s.onclick=()=>{const ta=document.getElementById('pm-text');const pos=ta.selectionStart;ta.value=ta.value.slice(0,pos)+em+ta.value.slice(pos);ta.selectionStart=ta.selectionEnd=pos+em.length;document.getElementById('pm-char').textContent=ta.value.length+' / 500';ta.focus();};el.appendChild(s);});
+    EMOJIS.forEach(em=>{const s=document.createElement('span');s.className='pm-emoji';s.textContent=em;s.onclick=()=>{const ta=document.getElementById('pm-text');const pos=ta.selectionStart;ta.value=ta.value.slice(0,pos)+em+ta.value.slice(pos);ta.selectionStart=ta.selectionEnd=pos+em.length;updateCharCount();ta.focus();};el.appendChild(s);});
   }
   function toggleEmoji(e){e.stopPropagation();document.getElementById('pm-emoji-picker').classList.toggle('open');}
   document.addEventListener('click',()=>{document.getElementById('pm-emoji-picker')?.classList.remove('open');});
@@ -1678,7 +1697,7 @@ const _posts = (() => {
     const p=_items.find(p=>p.id===postId);if(!p)return;
     _editingId=postId;
     const ta=document.getElementById('pm-text');if(ta)ta.value=p.text||'';
-    const charEl=document.getElementById('pm-char');if(charEl)charEl.textContent=(p.text||'').length+' / 500';
+    const charEl=document.getElementById('pm-char');if(charEl)charEl.textContent=(p.text||'').length+' / 360';
     const title=document.getElementById('pm-modal-title');if(title)title.textContent='Edit Post';
     const btn=document.getElementById('pm-submit');if(btn){btn.textContent='Save';btn.onclick=()=>_posts.submitEdit();}
     document.getElementById('post-modal-bg').classList.add('open');
@@ -2004,7 +2023,7 @@ const _posts = (() => {
     } catch(e) {}
   }
 
-  return{load,prev,next,goTo,jumpCurrent,openModal,closeModal,handleImg,removeImg,toggleEmoji,openGif,submit,submitEdit,openEditModal,deletePost,like,lightbox,setMode,openReply,closeReply,openReplyToReply,submitReply,likeReply,deleteReply,toggleReplies};
+  return{load,prev,next,goTo,jumpCurrent,openModal,closeModal,handleImg,removeImg,updateCharCount,toggleEmoji,openGif,submit,submitEdit,openEditModal,deletePost,like,lightbox,setMode,openReply,closeReply,openReplyToReply,submitReply,likeReply,deleteReply,toggleReplies};
 })();
 
 
