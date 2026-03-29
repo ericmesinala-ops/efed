@@ -176,6 +176,7 @@
     <button class="tab-btn" onclick="switchTab('broadcast', this)">📢 Broadcast</button>
     <button class="tab-btn" onclick="switchTab('invites', this)">🎟️ Invite Codes</button>
     <button class="tab-btn" onclick="switchTab('temppass', this)">🔑 Temp Password</button>
+    <button class="tab-btn" onclick="switchTab('banned', this)">🚫 Banned Links</button>
     <button class="tab-btn" onclick="switchTab('maintenance', this)">🔧 Maintenance</button>
 
   </div>
@@ -358,8 +359,41 @@
       </div>
     </div>
     <div class="card">
-      <div class="card-title"><div class="dot"></div>Registered Channels <span id="ch-count" style="font-size:.7rem;color:var(--muted);font-family:'DM Sans';font-weight:400;letter-spacing:0;margin-left:4px;"></span></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+        <div class="card-title" style="margin-bottom:0;"><div class="dot"></div>Registered Channels <span id="ch-count" style="font-size:.7rem;color:var(--muted);font-family:'DM Sans';font-weight:400;letter-spacing:0;margin-left:4px;"></span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;" id="scan-month-btns">
+          <button class="btn btn-ghost btn-sm" id="scan-filter-all" onclick="toggleScanFilter('all')" style="border-color:rgba(200,168,75,.5);color:var(--gold);background:rgba(200,168,75,.08);">All</button>
+          <button class="btn btn-ghost btn-sm" id="scan-filter-current" onclick="toggleScanFilter('current')">This Month</button>
+          <button class="btn btn-ghost btn-sm" id="scan-filter-last" onclick="toggleScanFilter('last')">Last Month</button>
+        </div>
+      </div>
       <div class="channel-list" id="channel-list"><div class="empty"><div class="empty-icon">📺</div>No channels yet.</div></div>
+    </div>
+  </div>
+
+  <!-- BANNED LINKS -->
+  <div class="tab-panel" id="tab-banned">
+    <div class="card" style="background:linear-gradient(135deg,rgba(192,0,14,.07) 0%,rgba(7,7,10,0) 60%);border-color:rgba(192,0,14,.18);">
+      <div class="card-title"><div class="dot" style="background:var(--accent);"></div>Add Banned YouTube Link</div>
+      <div style="font-size:.68rem;color:var(--muted);margin-bottom:14px;line-height:1.6;">Links added here will be blocked from submission on the platform. Paste the full YouTube video or channel URL.</div>
+      <div class="input-row">
+        <div class="input-group" style="flex:3;">
+          <label class="input-label">YouTube URL</label>
+          <input class="input-field" id="ban-url-input" placeholder="https://www.youtube.com/watch?v=..." onkeydown="if(event.key==='Enter')addBannedLink()">
+        </div>
+        <div class="input-group" style="flex:2;">
+          <label class="input-label">Reason (optional)</label>
+          <input class="input-field" id="ban-reason-input" placeholder="e.g. spam, fake eFed" onkeydown="if(event.key==='Enter')addBannedLink()">
+        </div>
+        <button class="btn btn-red" onclick="addBannedLink()" id="ban-add-btn" style="align-self:flex-end;">+ Add</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+        <div class="card-title" style="margin-bottom:0;"><div class="dot" style="background:var(--accent);"></div>Banned Links <span id="ban-count" style="font-size:.7rem;color:var(--muted);font-family:'DM Sans';font-weight:400;letter-spacing:0;margin-left:4px;"></span></div>
+        <input class="input-field" id="ban-search" placeholder="Filter…" style="max-width:200px;padding:7px 12px;" oninput="filterBannedLinks(this.value)">
+      </div>
+      <div id="banned-list"><div class="empty"><div class="empty-icon">⏳</div>Loading…</div></div>
     </div>
   </div>
 
@@ -473,6 +507,7 @@ function switchTab(name, btn) {
   if(name==='broadcast') loadExistingCodes();
   if(name==='invites') loadExistingCodes();
   if(name==='scanner') { loadScanLog(); checkScanLock(); updateCostPreview(); }
+  if(name==='banned') loadBannedLinks();
   if(name==='maintenance') loadMaintenanceAlerts();
 }
 
@@ -967,23 +1002,24 @@ async function loadChannels() {
     // Pull registered channels (have YT URL) + all distinct efeds from approved submissions
     const [channels, subs] = await Promise.all([
       sbGet('efed_channels', 'select=*&order=efed_name.asc'),
-      sbGet('submissions', 'status=eq.approved&select=efed,date&order=date.desc')
+      sbGet('submissions', 'status=eq.approved&select=efed,date,date_ms&order=date_ms.desc')
     ]);
 
-    // Build a map: efed_name (lowercase) → { efed_name, yt_channel_url, id, lastUpload }
+    // Build a map: efed_name (lowercase) → { efed_name, yt_channel_url, id, lastUpload, lastUploadMs }
     const map = new Map();
 
-    // Seed from submissions — get last upload per efed
+    // Seed from submissions — get most recent upload per efed using date_ms
     const lastUploadMap = {};
     subs.forEach(s => {
       if (!s.efed) return;
       const key = s.efed.trim().toLowerCase();
-      if (!lastUploadMap[key] || s.date > lastUploadMap[key].date) {
-        lastUploadMap[key] = { name: s.efed.trim(), date: s.date };
+      const ms = s.date_ms || (s.date ? new Date(s.date).getTime() : 0);
+      if (!lastUploadMap[key] || ms > lastUploadMap[key].ms) {
+        lastUploadMap[key] = { name: s.efed.trim(), date: s.date, ms };
       }
     });
-    Object.values(lastUploadMap).forEach(({ name, date }) => {
-      map.set(name.toLowerCase(), { efed_name: name, yt_channel_url: null, id: null, lastUpload: date });
+    Object.values(lastUploadMap).forEach(({ name, date, ms }) => {
+      map.set(name.toLowerCase(), { efed_name: name, yt_channel_url: null, id: null, lastUpload: date, lastUploadMs: ms });
     });
 
     // Overlay registered channels (they have YT URLs and may have better names)
@@ -994,12 +1030,14 @@ async function loadChannels() {
         efed_name: ch.efed_name,
         yt_channel_url: ch.yt_channel_url,
         id: ch.id,
-        lastUpload: existing.lastUpload || null
+        lastUpload: existing.lastUpload || null,
+        lastUploadMs: existing.lastUploadMs || 0
       });
     });
 
     // Sort alphabetically by display name
     const all = Array.from(map.values()).sort((a, b) => a.efed_name.localeCompare(b.efed_name));
+    window._allChannels = all; // store for month filter
     const scannable = all.filter(ch => ch.yt_channel_url);
 
     document.getElementById('ch-count').textContent = all.length ? `· ${all.length} feds` : '';
@@ -1041,8 +1079,12 @@ async function loadChannels() {
       const hasUrl = !!ch.yt_channel_url;
 
       let lastUploadStr = '—';
-      if (ch.lastUpload) {
-        const d = new Date(ch.lastUpload);
+      if (ch.lastUploadMs) {
+        const d = new Date(ch.lastUploadMs);
+        if (!isNaN(d)) lastUploadStr = d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+      } else if (ch.lastUpload) {
+        // fallback to string date
+        const d = new Date(ch.lastUpload + 'T12:00:00'); // noon to avoid timezone shift
         if (!isNaN(d)) lastUploadStr = d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
       }
 
@@ -1060,7 +1102,7 @@ async function loadChannels() {
           <div class="channel-url">${hasUrl ? esc(ch.yt_channel_url) : '<span style="color:rgba(255,255,255,.25);font-style:italic;font-size:.62rem;">No YT channel — add one to scan</span>'}</div>
         </div>
         <div style="width:120px;text-align:right;flex-shrink:0;">
-          <span style="font-size:.65rem;color:${ch.lastUpload?'var(--gold)':'var(--muted)'};font-family:'JetBrains Mono',monospace;">${lastUploadStr}</span>
+          <span style="font-size:.65rem;color:${ch.lastUploadMs?'var(--gold)':'var(--muted)'};font-family:'JetBrains Mono',monospace;">${lastUploadStr}</span>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;width:60px;justify-content:flex-end;">
           ${hasUrl ? `<a href="${esc(ch.yt_channel_url)}" target="_blank" class="btn btn-ghost btn-sm">↗</a>` : ''}
@@ -1097,6 +1139,70 @@ function updateScanCountLabel(all) {
   // Also update ch-count to show checked breakdown
   const countEl = document.getElementById('ch-count');
   if (countEl) countEl.textContent = all.length ? `· ${all.length} feds (${enabledCount} scanning)` : '';
+}
+
+let _activeScanFilters = new Set(['all']);
+
+function _btnActive(id, on) {
+  const btn = document.getElementById('scan-filter-' + id);
+  if (!btn) return;
+  btn.style.borderColor = on ? 'rgba(200,168,75,.5)' : '';
+  btn.style.color = on ? 'var(--gold)' : '';
+  btn.style.background = on ? 'rgba(200,168,75,.08)' : '';
+}
+
+function toggleScanFilter(mode) {
+  const all = window._allChannels;
+  if (!all) return;
+
+  if (mode === 'all') {
+    _activeScanFilters = new Set(['all']);
+  } else {
+    _activeScanFilters.delete('all');
+    if (_activeScanFilters.has(mode)) {
+      _activeScanFilters.delete(mode);
+      if (_activeScanFilters.size === 0) _activeScanFilters.add('all');
+    } else {
+      _activeScanFilters.add(mode);
+    }
+  }
+
+  _btnActive('all', _activeScanFilters.has('all'));
+  _btnActive('current', _activeScanFilters.has('current'));
+  _btnActive('last', _activeScanFilters.has('last'));
+
+  const now = new Date();
+  const thisMonth = now.getMonth(), thisYear = now.getFullYear();
+  const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonth = lastMonthDate.getMonth(), lastMonthYear = lastMonthDate.getFullYear();
+
+  all.forEach(ch => {
+    if (!ch.yt_channel_url) return;
+    let shouldCheck = false;
+
+    if (_activeScanFilters.has('all')) {
+      shouldCheck = true;
+    } else {
+      const ms = ch.lastUploadMs || 0;
+      if (ms) {
+        const d = new Date(ms);
+        const m = d.getMonth(), y = d.getFullYear();
+        if (_activeScanFilters.has('current') && m === thisMonth && y === thisYear) shouldCheck = true;
+        if (_activeScanFilters.has('last') && m === lastMonth && y === lastMonthYear) shouldCheck = true;
+      }
+    }
+
+    _setScanState(ch.efed_name.toLowerCase(), shouldCheck);
+    const cbKey = ch.efed_name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const cb = document.getElementById('scan-cb-' + cbKey);
+    const item = cb ? cb.closest('.channel-item') : null;
+    if (cb) cb.checked = shouldCheck;
+    if (item) item.style.opacity = shouldCheck ? '1' : '.45';
+  });
+
+  const saEl = document.getElementById('scan-select-all');
+  if (saEl) saEl.checked = all.filter(c => c.yt_channel_url).every(c => _getScanState()[c.efed_name.toLowerCase()] !== false);
+  updateScanCountLabel(all);
 }
 
 async function addChannel() {
@@ -1481,6 +1587,95 @@ async function removeMaintAlert(id) {
     count.textContent = remaining ? '(' + remaining + ' active)' : '';
     if (!remaining) document.getElementById('maint-active-list').innerHTML = '<div class="empty"><div class="empty-icon">✅</div>No active alerts. Site is all good.</div>';
     toast('✅ Alert resolved. Banner removed.');
+  } catch(e) {
+    if (row) row.style.opacity = '1';
+    toast('Error: ' + e.message);
+  }
+}
+
+// ── BANNED LINKS ──
+let _allBanned = [];
+
+async function loadBannedLinks() {
+  const list = document.getElementById('banned-list');
+  const count = document.getElementById('ban-count');
+  list.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
+  try {
+    _allBanned = await sbGet('banned_links', 'order=created_at.desc');
+    renderBannedLinks(_allBanned);
+  } catch(e) {
+    list.innerHTML = '<div class="empty">Could not load banned links.<br><span style="font-size:.65rem;color:var(--muted);">Make sure the <code style="background:rgba(255,255,255,.06);padding:1px 5px;border-radius:4px;">banned_links</code> table exists in Supabase.</span></div>';
+  }
+}
+
+function renderBannedLinks(rows) {
+  const list = document.getElementById('banned-list');
+  const count = document.getElementById('ban-count');
+  if (count) count.textContent = rows.length ? '(' + rows.length + ')' : '';
+  if (!rows.length) { list.innerHTML = '<div class="empty"><div class="empty-icon">✅</div>No banned links yet.</div>'; return; }
+  list.innerHTML = '';
+  rows.forEach(function(b) {
+    const div = document.createElement('div');
+    div.id = 'banrow-' + b.id;
+    div.style.cssText = 'display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06);';
+    const icon = document.createElement('div');
+    icon.style.cssText = 'width:34px;height:34px;border-radius:8px;background:rgba(192,0,14,.1);border:1px solid rgba(192,0,14,.2);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0;margin-top:2px;';
+    icon.textContent = '🚫';
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0;';
+    const dateStr = b.created_at ? new Date(b.created_at).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
+    info.innerHTML = '<div style="font-size:.78rem;font-weight:600;color:#e8e8e8;margin-bottom:3px;word-break:break-all;">' + esc(b.url) + '</div>'
+      + (b.reason ? '<div style="font-size:.65rem;color:var(--accent);margin-bottom:2px;">Reason: ' + esc(b.reason) + '</div>' : '')
+      + '<div style="font-size:.6rem;color:var(--muted);">Banned by @' + esc(b.added_by || ADMIN_USERNAME) + (dateStr ? ' · ' + dateStr : '') + '</div>';
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn btn-ghost btn-sm';
+    removeBtn.textContent = 'Remove';
+    removeBtn.style.flexShrink = '0';
+    removeBtn.onclick = (function(id){ return function(){ removeBannedLink(id); }; })(b.id);
+    div.appendChild(icon);
+    div.appendChild(info);
+    div.appendChild(removeBtn);
+    list.appendChild(div);
+  });
+}
+
+function filterBannedLinks(q) {
+  if (!q) { renderBannedLinks(_allBanned); return; }
+  const lower = q.toLowerCase();
+  renderBannedLinks(_allBanned.filter(function(b){ return (b.url||'').toLowerCase().includes(lower) || (b.reason||'').toLowerCase().includes(lower); }));
+}
+
+async function addBannedLink() {
+  const urlInput = document.getElementById('ban-url-input');
+  const reasonInput = document.getElementById('ban-reason-input');
+  const btn = document.getElementById('ban-add-btn');
+  const url = urlInput.value.trim();
+  if (!url) { toast('Paste a URL first.'); urlInput.focus(); return; }
+  if (!url.startsWith('http')) { toast('Must be a full URL starting with http…'); urlInput.focus(); return; }
+  btn.disabled = true; btn.textContent = 'Adding…';
+  try {
+    const existing = await sbGet('banned_links', 'url=eq.' + encodeURIComponent(url) + '&select=id').catch(function(){ return []; });
+    if (existing.length) { toast('That URL is already banned.'); return; }
+    await sbInsert('banned_links', { url: url, reason: reasonInput.value.trim() || null, added_by: ADMIN_USERNAME, created_at: new Date().toISOString() });
+    urlInput.value = ''; reasonInput.value = '';
+    toast('🚫 Link banned.');
+    loadBannedLinks();
+  } catch(e) { toast('Error: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '+ Add'; }
+}
+
+async function removeBannedLink(id) {
+  if (!await adminConfirm('Remove this link from the ban list?', 'Unban Link')) return;
+  const row = document.getElementById('banrow-' + id);
+  if (row) row.style.opacity = '.4';
+  try {
+    await sbDelete('banned_links', 'id=eq.' + id);
+    if (row) row.remove();
+    _allBanned = _allBanned.filter(function(b){ return b.id !== id; });
+    const count = document.getElementById('ban-count');
+    if (count) count.textContent = _allBanned.length ? '(' + _allBanned.length + ')' : '';
+    if (!_allBanned.length) document.getElementById('banned-list').innerHTML = '<div class="empty"><div class="empty-icon">✅</div>No banned links yet.</div>';
+    toast('Link removed from ban list.');
   } catch(e) {
     if (row) row.style.opacity = '1';
     toast('Error: ' + e.message);
