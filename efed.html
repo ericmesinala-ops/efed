@@ -890,6 +890,20 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 </div>
 
 
+<!-- ── WATCHLIST BUTTON ── -->
+<div id="watchlist-bar" style="display:none;padding:12px 20px;border-bottom:1px solid rgba(192,0,14,.1);background:rgba(192,0,14,.03);">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div>
+      <div style="font-size:.62rem;font-weight:700;color:rgba(255,255,255,.4);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:2px;">My Watchlist</div>
+      <div id="watchlist-bar-label" style="font-size:.72rem;color:rgba(255,255,255,.5);line-height:1.5;">Follow this eFed to see their latest videos on the Hub.</div>
+    </div>
+    <button id="watchlist-btn" onclick="toggleWatchlist()" style="flex-shrink:0;display:flex;align-items:center;gap:7px;padding:8px 16px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);border-radius:20px;color:rgba(255,255,255,.7);font-family:'DM Sans',sans-serif;font-size:.68rem;font-weight:700;letter-spacing:.8px;cursor:pointer;white-space:nowrap;transition:background .2s,border-color .2s,color .2s;">
+      <svg id="watchlist-btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M12 5v14M5 12h14"/></svg>
+      <span id="watchlist-btn-label">Add to Watchlist</span>
+    </button>
+  </div>
+</div>
+
 <!-- ── BIO ── -->
 <div id="efed-bio-section" style="display:none;" class="section">
   <div class="sec-title">About</div>
@@ -1995,6 +2009,8 @@ async function loadProfile() {
     // Signings toggle state
     _signingsOn = !!user.efed_open_signings;
     updateSigningsUI(_signingsOn);
+    // Watchlist button
+    initWatchlistBtn();
     const applyBtn = document.getElementById('signings-apply-btn');
     if (applyBtn && _signingsOn && user.efed_signings_link) {
       applyBtn.href = user.efed_signings_link;
@@ -2089,6 +2105,73 @@ async function loadProfile() {
 }
 
 
+
+// ── WATCHLIST ──
+let _watchlistActive = false;
+
+async function initWatchlistBtn() {
+  const bar = document.getElementById('watchlist-bar');
+  if (!bar) return;
+  const session = getSession();
+  // Don't show to the efed owner on their own page
+  if (!session) { bar.style.display = 'none'; return; }
+  // Hide for the owner of this efed
+  const ownerCheck = await sbGet('users', 'username=eq.' + encodeURIComponent(session.username) + '&select=promo_name');
+  if (ownerCheck.length && ownerCheck[0].promo_name && ownerCheck[0].promo_name.toLowerCase() === EFED_NAME.toLowerCase()) {
+    bar.style.display = 'none'; return;
+  }
+  bar.style.display = '';
+  // Check current status
+  try {
+    const rows = await sbGet('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username) + '&efed_name=eq.' + encodeURIComponent(EFED_NAME));
+    _watchlistActive = rows.length > 0;
+  } catch(e) { _watchlistActive = false; }
+  updateWatchlistUI();
+}
+
+function updateWatchlistUI() {
+  const btn = document.getElementById('watchlist-btn');
+  const icon = document.getElementById('watchlist-btn-icon');
+  const label = document.getElementById('watchlist-btn-label');
+  const barLabel = document.getElementById('watchlist-bar-label');
+  if (!btn) return;
+  if (_watchlistActive) {
+    btn.style.background = 'rgba(192,0,14,.3)';
+    btn.style.borderColor = 'rgba(192,0,14,.6)';
+    btn.style.color = '#fff';
+    icon.innerHTML = '<polyline points="20 6 9 17 4 12"/>';
+    label.textContent = 'On Watchlist';
+    barLabel.textContent = 'This eFed’s latest videos appear in your Watchlist on the Hub.';
+  } else {
+    btn.style.background = 'rgba(192,0,14,.12)';
+    btn.style.borderColor = 'rgba(192,0,14,.3)';
+    btn.style.color = 'rgba(255,255,255,.7)';
+    icon.innerHTML = '<path d="M12 5v14M5 12h14"/>';
+    label.textContent = 'Add to Watchlist';
+    barLabel.textContent = 'Follow this eFed to see their latest videos on the Hub.';
+  }
+}
+
+async function toggleWatchlist() {
+  const session = getSession();
+  if (!session) { alert('Sign in to use Watchlist.'); return; }
+  const btn = document.getElementById('watchlist-btn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '.5'; }
+  try {
+    if (_watchlistActive) {
+      await fetch(SUPABASE_URL + '/rest/v1/efed_watchlist?username=eq.' + encodeURIComponent(session.username) + '&efed_name=eq.' + encodeURIComponent(EFED_NAME),
+        { method: 'DELETE', headers: SB_HEADERS });
+      _watchlistActive = false;
+    } else {
+      await fetch(SUPABASE_URL + '/rest/v1/efed_watchlist',
+        { method: 'POST', headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates' },
+          body: JSON.stringify({ username: session.username, efed_name: EFED_NAME, added_at: new Date().toISOString() }) });
+      _watchlistActive = true;
+    }
+    updateWatchlistUI();
+  } catch(e) { console.error('Watchlist toggle failed', e); }
+  if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+}
 
 function updateSigningsUI(on) {
   const section = document.getElementById('signings-section');

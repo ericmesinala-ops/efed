@@ -2866,6 +2866,25 @@ html, body { overscroll-behavior-y: none; }
     </div>
   </section>
 
+  <!-- ── WATCHLIST ── -->
+  <section class="section" id="section-watchlist" style="display:none;">
+    <div class="sec-head">
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div class="sec-title-wrap">
+          <div class="s-bar" style="background:#c0000e;"></div>
+          <div class="sec-title">Watchlist</div>
+          <span class="sec-count" id="watchlist-count"></span>
+        </div>
+        <div style="font-size:.58rem;color:rgba(255,255,255,.55);letter-spacing:1px;font-style:italic;padding-left:15px;">Latest from your followed eFeds</div>
+      </div>
+    </div>
+    <div class="row-wrap">
+      <button class="pill-arr left hidden" id="watchlist-arr-left" onclick="scrollNamedRow('watchlist',-1)">&#8249;</button>
+      <div class="card-grid" id="row-watchlist"></div>
+      <button class="pill-arr right" id="watchlist-arr-right" onclick="scrollNamedRow('watchlist',1)">&#8250;</button>
+    </div>
+  </section>
+
   <!-- ── BOOKMARKED SHOWS ── -->
   <section class="section" id="section-bookmarks" style="display:none;">
     <div class="sec-head">
@@ -3689,6 +3708,54 @@ async function loadEfedOwnerRow() {
 }
 
 // ── BOOKMARKS ROW ──
+async function loadWatchlistRow() {
+  const session = getSession();
+  const section = document.getElementById('section-watchlist');
+  const grid = document.getElementById('row-watchlist');
+  const countEl = document.getElementById('watchlist-count');
+  if (!section || !grid) return;
+  if (!session) { section.style.display = 'none'; return; }
+  try {
+    // Get user's watchlist efed names
+    const watchRows = await sbGet('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username));
+    if (!watchRows.length) { section.style.display = 'none'; return; }
+    const efedNames = watchRows.map(r => r.efed_name);
+
+    // Get latest videos from those efeds (up to 40, newest first)
+    // PostgREST or() uses dot notation: efed.ilike.X
+    const efedFilters = efedNames.map(n => 'efed.ilike.' + encodeURIComponent(n)).join(',');
+    const subs = await sbGet('submissions', 'status=eq.approved&or=(' + efedFilters + ')&order=date_ms.desc&limit=40');
+    if (!subs.length) { section.style.display = 'none'; return; }
+
+    section.style.display = '';
+    countEl.textContent = ' · ' + subs.length;
+    grid.innerHTML = '';
+
+    subs.forEach(s => {
+      const v = videos.find(v => v.url === s.url) || {
+        url: s.url, show: s.show_name || '', efed: s.efed || '',
+        date: s.date || '', dateMs: s.date_ms || 0,
+        submittedBy: s.submitted_by || '', community: true, status: 'approved',
+        thumb: s.thumb_url || null,
+        tags: Array.isArray(s.tags) ? s.tags : (s.tags ? JSON.parse(s.tags) : [])
+      };
+      const card = makeCard(v);
+      grid.appendChild(card);
+    });
+
+    grid.onscroll = () => {
+      const left = document.getElementById('watchlist-arr-left');
+      const right = document.getElementById('watchlist-arr-right');
+      if (left) left.classList.toggle('hidden', grid.scrollLeft <= 0);
+      if (right) right.classList.toggle('hidden', grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 4);
+    };
+    setTimeout(() => {
+      const right = document.getElementById('watchlist-arr-right');
+      if (right) right.classList.toggle('hidden', grid.scrollWidth <= grid.clientWidth);
+    }, 50);
+  } catch(e) { console.warn('Watchlist row failed', e); }
+}
+
 async function loadBookmarksRow() {
   const session = getSession();
   const section = document.getElementById('section-bookmarks');
@@ -4358,6 +4425,7 @@ async function initHub() {
     buildPills();
     renderGrid();
     loadUpcomingRow();
+    loadWatchlistRow();
     loadBookmarksRow();
     loadEfedOwnerRow();
     buildHeroDots();
@@ -6448,6 +6516,7 @@ function doSubmitPost() {
             renderGrid();
             loadRecentlyAdded(videos);
             loadMostViewed(videos);
+            loadWatchlistRow();
             loadBookmarksRow();
             loadEfedOwnerRow();
             loadVerifiedUsers();
@@ -7323,6 +7392,7 @@ async function toggleExpandBookmark() {
   } catch(e) { console.warn('Bookmark failed', e); }
   loadBookmarksRow();
 }
+
 
 // ── COMMENTS ──
 async function loadExpandComments(url) {
