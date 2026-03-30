@@ -950,13 +950,46 @@ async function startScan() {
 }
 
 async function resolveChannelId(url) {
-  const cM=url.match(/\/channel\/([A-Za-z0-9_-]+)/);
-  if(cM) return cM[1];
-  const hM=url.match(/@([A-Za-z0-9_.-]+)/);
-  if(hM){
-    try{const r=await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${hM[1]}&key=${YT_API_KEY}`);const d=await r.json();return d.items?.[0]?.id||null;}
-    catch{return null;}
+  // Format 1: /channel/UCxxxxx
+  const cM = url.match(/\/channel\/([A-Za-z0-9_-]+)/);
+  if (cM) return cM[1];
+
+  // Format 2: /@handle
+  const hM = url.match(/@([A-Za-z0-9_.-]+)/);
+  if (hM) {
+    try {
+      const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${hM[1]}&key=${YT_API_KEY}`);
+      const d = await r.json();
+      if (d.items?.[0]?.id) return d.items[0].id;
+    } catch {}
   }
+
+  // Format 3: /c/CustomName or /user/Username
+  const cM2 = url.match(/\/(?:c|user)\/([A-Za-z0-9_.-]+)/);
+  if (cM2) {
+    try {
+      const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forUsername=${cM2[1]}&key=${YT_API_KEY}`);
+      const d = await r.json();
+      if (d.items?.[0]?.id) return d.items[0].id;
+    } catch {}
+    // Also try forHandle as fallback for /c/ URLs
+    try {
+      const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${cM2[1]}&key=${YT_API_KEY}`);
+      const d = await r.json();
+      if (d.items?.[0]?.id) return d.items[0].id;
+    } catch {}
+  }
+
+  // Format 4: plain URL with no special path — try search as last resort
+  const plainM = url.match(/youtube\.com\/([A-Za-z0-9_.-]+)\/?$/);
+  if (plainM && !['watch','shorts','playlist','feed'].includes(plainM[1])) {
+    try {
+      const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forUsername=${plainM[1]}&key=${YT_API_KEY}`);
+      const d = await r.json();
+      if (d.items?.[0]?.id) return d.items[0].id;
+    } catch {}
+  }
+
   return null;
 }
 
