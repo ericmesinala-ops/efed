@@ -6531,8 +6531,8 @@ let _expandLikes = {};
 let _expandBookmarks = {};
 
 function openExpand(v) {
-  const tab = document.getElementById('chat-tab');
   cancelAutoNext();
+  const tab = document.getElementById('chat-tab');
   if (tab) tab.style.display = 'none';
   _expandVideo = v;
   const id = extractId(v.url);
@@ -6911,8 +6911,8 @@ function _showTwitchOffline() {
 })();
 
 function closeExpand(fromPopState) {
-  const _chatTab = document.getElementById('chat-tab');
   cancelAutoNext();
+  const _chatTab = document.getElementById('chat-tab');
   if (_chatTab) _chatTab.style.display = '';
   // Clean up URL without adding another history entry
   if (!fromPopState) history.replaceState(null, '', window.location.pathname);
@@ -8355,31 +8355,32 @@ window.addEventListener('message', (e) => {
   if (!e.data || typeof e.data !== 'string') return;
   try {
     const msg = JSON.parse(e.data);
-    if (msg.event !== 'infoDelivery' || !msg.info) return;
-    const state = msg.info.playerState;
-    if (state === undefined) return;
     if (!_expandVideo) return;
     const url = _expandVideo.url;
     const eq = document.getElementById('expand-eq');
+
+    // YouTube fires state via infoDelivery OR onStateChange — handle both
+    let state = undefined;
+    if (msg.event === 'infoDelivery' && msg.info) state = msg.info.playerState;
+    if (msg.event === 'onStateChange' && msg.info) state = msg.info;
+    if (state === undefined) return;
+
     if (state === 1) {
-      // Playing — resume timer
-      if (!_watchTimers[url] && !_watchUnlocked[url]) {
-        startWatchTimer(url);
-      }
+      // Playing
+      if (!_watchTimers[url] && !_watchUnlocked[url]) startWatchTimer(url);
       if (eq) eq.classList.add('playing');
     } else if (state === 2) {
-      // Paused — stop timer
+      // Paused
       stopWatchTimer(url);
       if (eq) eq.classList.remove('playing');
     } else if (state === 0) {
-      // Ended — stop timer, trigger auto-next
+      // Ended — go to next video immediately
       stopWatchTimer(url);
       if (eq) eq.classList.remove('playing');
       startAutoNext();
     }
   } catch(e) {}
 });
-
 function getLatestSorted() {
   if (typeof videos === 'undefined') return [];
   return [...videos]
@@ -8396,13 +8397,14 @@ function startAutoNext() {
   const list = getLatestSorted();
   const idx = list.findIndex(v => v.url === _expandVideo.url);
   const next = list[idx + 1];
-  if (!next) return; // end of list — nothing to play
+  if (!next) return; // end of list
   openExpand(next);
 }
 
 function cancelAutoNext() {
-  // No-op kept for closeExpand/openExpand calls — nothing to cancel anymore
+  // kept as no-op so closeExpand/openExpand calls don't error
 }
+
 // Time is tracked in memory (_watchTimers). DB sync is best-effort only —
 // the unlock fires from local seconds so it works even without watch_time table.
 const WATCH_UNLOCK_SECS = 600; // 10 minutes
