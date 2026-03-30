@@ -176,7 +176,7 @@
     <button class="tab-btn" onclick="switchTab('broadcast', this)">📢 Broadcast</button>
     <button class="tab-btn" onclick="switchTab('invites', this)">🎟️ Invite Codes</button>
     <button class="tab-btn" onclick="switchTab('temppass', this)">🔑 Temp Password</button>
-    <button class="tab-btn" onclick="switchTab('banned', this)">🚫 Banned Links</button>
+    <button class="tab-btn" onclick="switchTab('banned', this)">🚫 Banned</button>
     <button class="tab-btn" onclick="switchTab('maintenance', this)">🔧 Maintenance</button>
 
   </div>
@@ -1098,7 +1098,14 @@ async function loadChannels() {
     header.innerHTML = `
       <div style="width:36px;text-align:center;flex-shrink:0;">
         <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;">
-          <input type="checkbox" id="scan-select-all" ${scannable.every(ch=>_getScanState()[ch.efed_name.toLowerCase()]!==false)?'checked':''} style="width:14px;height:14px;accent-color:var(--gold);cursor:pointer;"> ALL
+          <input type="checkbox" id="scan-select-all" ${scannable.every(ch => {
+            const s = _getScanState(); const k = ch.efed_name.toLowerCase();
+            if (k in s) return s[k] !== false;
+            if (!ch.lastUploadMs) return false;
+            const now = new Date(); const d = new Date(ch.lastUploadMs);
+            const lm = new Date(now.getFullYear(), now.getMonth()-1, 1);
+            return (d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear())||(d.getMonth()===lm.getMonth()&&d.getFullYear()===lm.getFullYear());
+          })?'checked':''} style="width:14px;height:14px;accent-color:var(--gold);cursor:pointer;"> ALL
         </label>
       </div>
       <div style="flex:1;font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;">eFed Name</div>
@@ -1121,8 +1128,23 @@ async function loadChannels() {
       const state = _getScanState();
       const key = ch.efed_name.toLowerCase();
       const cbKey = key.replace(/[^a-z0-9]/g, '_');
-      const isEnabled = state[key] !== false; // default true for everyone
       const hasUrl = !!ch.yt_channel_url;
+
+      // Determine default: auto-check if last upload was current or previous month
+      const now = new Date();
+      const thisMonth = now.getMonth(), thisYear = now.getFullYear();
+      const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastMonth = lastMonthDate.getMonth(), lastMonthYear = lastMonthDate.getFullYear();
+
+      let autoDefault = false;
+      if (ch.lastUploadMs) {
+        const d = new Date(ch.lastUploadMs);
+        const m = d.getMonth(), y = d.getFullYear();
+        autoDefault = (m === thisMonth && y === thisYear) || (m === lastMonth && y === lastMonthYear);
+      }
+
+      // Use stored state only if explicitly set; otherwise use auto-default
+      const isEnabled = key in state ? state[key] !== false : autoDefault;
 
       let lastUploadStr = '—';
       if (ch.lastUploadMs) {
@@ -1145,12 +1167,21 @@ async function loadChannels() {
         <div class="channel-avatar" style="flex-shrink:0;">${(ch.efed_name||'?')[0].toUpperCase()}</div>
         <div class="channel-info" style="flex:1;min-width:0;">
           <div class="channel-name">${esc(ch.efed_name)}</div>
-          <div class="channel-url">${hasUrl ? esc(ch.yt_channel_url) : '<span style="color:rgba(255,255,255,.25);font-style:italic;font-size:.62rem;">No YT channel — add one to scan</span>'}</div>
+          <div id="ch-url-display-${cbKey}" class="channel-url">${hasUrl ? esc(ch.yt_channel_url) : '<span style="color:rgba(255,255,255,.25);font-style:italic;font-size:.62rem;">No YT channel — click ✏️ to add</span>'}</div>
+          <div id="ch-url-edit-${cbKey}" style="display:none;margin-top:6px;">
+            <div style="display:flex;gap:6px;align-items:center;">
+              <input id="ch-url-input-${cbKey}" type="text" value="${hasUrl ? esc(ch.yt_channel_url) : ''}" placeholder="https://www.youtube.com/@ChannelName" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(200,168,75,.4);border-radius:6px;padding:6px 10px;color:#fff;font-family:'JetBrains Mono',monospace;font-size:.65rem;outline:none;">
+              <button onclick="saveChannelUrl('${cbKey}','${esc(ch.efed_name)}',${ch.id||'null'})" style="padding:5px 12px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.4);border-radius:6px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;cursor:pointer;white-space:nowrap;">Save</button>
+              <button onclick="cancelChannelEdit('${cbKey}')" style="padding:5px 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.65rem;cursor:pointer;">✕</button>
+            </div>
+            <div id="ch-url-edit-status-${cbKey}" style="font-size:.62rem;margin-top:4px;display:none;"></div>
+          </div>
         </div>
         <div style="width:120px;text-align:right;flex-shrink:0;">
           <span style="font-size:.65rem;color:${ch.lastUploadMs?'var(--gold)':'var(--muted)'};font-family:'JetBrains Mono',monospace;">${lastUploadStr}</span>
         </div>
-        <div style="display:flex;gap:6px;flex-shrink:0;width:60px;justify-content:flex-end;">
+        <div style="display:flex;gap:6px;flex-shrink:0;width:80px;justify-content:flex-end;">
+          <button onclick="editChannelUrl('${cbKey}')" class="btn btn-ghost btn-sm" title="Edit YouTube URL">✏️</button>
           ${hasUrl ? `<a href="${esc(ch.yt_channel_url)}" target="_blank" class="btn btn-ghost btn-sm">↗</a>` : ''}
           ${ch.id ? `<button class="btn btn-red btn-sm" onclick="deleteChannel(${ch.id},'${esc(ch.efed_name)}')">✕</button>` : ''}
         </div>`;
@@ -1172,17 +1203,27 @@ async function loadChannels() {
 
     updateScanCountLabel(all);
 
-    updateScanCountLabel(all);
-
   } catch(e) { list.innerHTML = '<div class="empty">Error loading channels: ' + esc(e.message) + '</div>'; }
 }
 
 function updateScanCountLabel(all) {
   const state = _getScanState();
-  const enabledCount = all.filter(ch => ch.yt_channel_url && state[ch.efed_name.toLowerCase()] !== false).length;
+  const now = new Date();
+  const thisMonth = now.getMonth(), thisYear = now.getFullYear();
+  const lm = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const lastMonth = lm.getMonth(), lastMonthYear = lm.getFullYear();
+
+  const enabledCount = all.filter(ch => {
+    if (!ch.yt_channel_url) return false;
+    const key = ch.efed_name.toLowerCase();
+    if (key in state) return state[key] !== false;
+    if (!ch.lastUploadMs) return false;
+    const d = new Date(ch.lastUploadMs);
+    return (d.getMonth()===thisMonth&&d.getFullYear()===thisYear)||(d.getMonth()===lastMonth&&d.getFullYear()===lastMonthYear);
+  }).length;
+
   const el = document.getElementById('scan-cost-preview');
   if (el) el.textContent = `Estimated cost: ${enabledCount * 100} YouTube API units (${enabledCount} channel${enabledCount!==1?'s':''} enabled for scan × 100) out of 10,000 daily free quota`;
-  // Also update ch-count to show checked breakdown
   const countEl = document.getElementById('ch-count');
   if (countEl) countEl.textContent = all.length ? `· ${all.length} feds (${enabledCount} scanning)` : '';
 }
@@ -1867,6 +1908,62 @@ async function removeBannedSocial(id) {
     if (row) row.style.opacity = '1';
     toast('Error: ' + e.message);
   }
+}
+
+// ── INLINE CHANNEL URL EDITING ──
+function editChannelUrl(cbKey) {
+  document.getElementById('ch-url-display-' + cbKey).style.display = 'none';
+  const editRow = document.getElementById('ch-url-edit-' + cbKey);
+  editRow.style.display = 'block';
+  const input = document.getElementById('ch-url-input-' + cbKey);
+  if (input) { input.focus(); input.select(); }
+}
+
+function cancelChannelEdit(cbKey) {
+  document.getElementById('ch-url-display-' + cbKey).style.display = 'block';
+  document.getElementById('ch-url-edit-' + cbKey).style.display = 'none';
+  const status = document.getElementById('ch-url-edit-status-' + cbKey);
+  if (status) status.style.display = 'none';
+}
+
+async function saveChannelUrl(cbKey, efedName, existingId) {
+  const input = document.getElementById('ch-url-input-' + cbKey);
+  const status = document.getElementById('ch-url-edit-status-' + cbKey);
+  const url = input ? input.value.trim() : '';
+
+  if (!url) { showChEditStatus(status, '❌ Paste a YouTube URL first.', 'error'); return; }
+  if (!url.includes('youtube.com') && !url.includes('youtu.be')) { showChEditStatus(status, '❌ Must be a YouTube URL.', 'error'); return; }
+
+  showChEditStatus(status, '⏳ Fetching channel name from YouTube…', 'info');
+
+  try {
+    const cid = await resolveChannelId(url);
+    if (!cid) { showChEditStatus(status, '❌ Could not resolve channel. Check the URL.', 'error'); return; }
+    const r = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&id=' + cid + '&key=' + YT_API_KEY);
+    const d = await r.json();
+    const ytName = d.items?.[0]?.snippet?.title || '';
+    if (!ytName) { showChEditStatus(status, '❌ YouTube returned no channel name.', 'error'); return; }
+
+    if (existingId) {
+      // Update existing efed_channels row
+      await sbUpdate('efed_channels', { yt_channel_url: url, efed_name: ytName }, 'id=eq.' + existingId);
+    } else {
+      // No existing row — insert new one
+      await sbInsert('efed_channels', { efed_name: ytName, yt_channel_url: url });
+    }
+
+    showChEditStatus(status, '✓ Saved: ' + ytName, 'success');
+    setTimeout(() => loadChannels(), 1200);
+  } catch(e) {
+    showChEditStatus(status, '❌ Error: ' + e.message, 'error');
+  }
+}
+
+function showChEditStatus(el, msg, type) {
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.style.color = type === 'error' ? '#ff6b6b' : type === 'success' ? '#4caf64' : 'rgba(255,255,255,.5)';
 }
 
 init();
