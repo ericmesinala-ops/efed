@@ -1048,7 +1048,7 @@ async function loadChannels() {
     // Pull registered channels (have YT URL) + all distinct efeds from approved submissions
     const [channels, subs] = await Promise.all([
       sbGet('efed_channels', 'select=*&order=efed_name.asc'),
-      sbGet('submissions', 'status=eq.approved&select=efed,date,date_ms&order=date_ms.desc')
+      sbGet('submissions', 'status=eq.approved&select=efed,date,date_ms,url,show_name&order=date_ms.desc')
     ]);
 
     // Build a map: efed_name (lowercase) → { efed_name, yt_channel_url, id, lastUpload, lastUploadMs }
@@ -1061,11 +1061,11 @@ async function loadChannels() {
       const key = s.efed.trim().toLowerCase();
       const ms = s.date_ms || (s.date ? new Date(s.date).getTime() : 0);
       if (!lastUploadMap[key] || ms > lastUploadMap[key].ms) {
-        lastUploadMap[key] = { name: s.efed.trim(), date: s.date, ms };
+        lastUploadMap[key] = { name: s.efed.trim(), date: s.date, ms, url: s.url, show_name: s.show_name };
       }
     });
-    Object.values(lastUploadMap).forEach(({ name, date, ms }) => {
-      map.set(name.toLowerCase(), { efed_name: name, yt_channel_url: null, id: null, lastUpload: date, lastUploadMs: ms });
+    Object.values(lastUploadMap).forEach(({ name, date, ms, url, show_name }) => {
+      map.set(name.toLowerCase(), { efed_name: name, yt_channel_url: null, id: null, lastUpload: date, lastUploadMs: ms, latestUrl: url, latestShow: show_name });
     });
 
     // Overlay registered channels (they have YT URLs and may have better names)
@@ -1077,7 +1077,9 @@ async function loadChannels() {
         yt_channel_url: ch.yt_channel_url,
         id: ch.id,
         lastUpload: existing.lastUpload || null,
-        lastUploadMs: existing.lastUploadMs || 0
+        lastUploadMs: existing.lastUploadMs || 0,
+        latestUrl: existing.latestUrl || null,
+        latestShow: existing.latestShow || null
       });
     });
 
@@ -1168,6 +1170,7 @@ async function loadChannels() {
         <div class="channel-info" style="flex:1;min-width:0;">
           <div class="channel-name">${esc(ch.efed_name)}</div>
           <div id="ch-url-display-${cbKey}" class="channel-url">${hasUrl ? esc(ch.yt_channel_url) : '<span style="color:rgba(255,255,255,.25);font-style:italic;font-size:.62rem;">No YT channel — click ✏️ to add</span>'}</div>
+          ${ch.latestUrl ? `<div style="margin-top:3px;"><a href="${esc(ch.latestUrl)}" target="_blank" style="font-size:.6rem;color:var(--gold);text-decoration:none;opacity:.8;font-family:'JetBrains Mono',monospace;">▶ ${esc(ch.latestShow || 'Latest Video')} ↗</a></div>` : ''}
           <div id="ch-url-edit-${cbKey}" style="display:none;margin-top:6px;">
             <div style="display:flex;gap:6px;align-items:center;">
               <input id="ch-url-input-${cbKey}" type="text" value="${hasUrl ? esc(ch.yt_channel_url) : ''}" placeholder="https://www.youtube.com/@ChannelName" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(200,168,75,.4);border-radius:6px;padding:6px 10px;color:#fff;font-family:'JetBrains Mono',monospace;font-size:.65rem;outline:none;">
@@ -1183,7 +1186,7 @@ async function loadChannels() {
         <div style="display:flex;gap:6px;flex-shrink:0;width:80px;justify-content:flex-end;">
           <button onclick="editChannelUrl('${cbKey}')" class="btn btn-ghost btn-sm" title="Edit YouTube URL">✏️</button>
           ${hasUrl ? `<a href="${esc(ch.yt_channel_url)}" target="_blank" class="btn btn-ghost btn-sm">↗</a>` : ''}
-          ${ch.id ? `<button class="btn btn-red btn-sm" onclick="deleteChannel(${ch.id},'${esc(ch.efed_name)}')">✕</button>` : ''}
+          <button class="btn btn-red btn-sm" onclick="${ch.id ? `deleteChannel(${ch.id},'${esc(ch.efed_name)}')` : `deleteChannelByName('${esc(ch.efed_name)}')`}">✕</button>
         </div>`;
       list.appendChild(item);
 
@@ -1333,9 +1336,18 @@ async function previewChannelName() {
 }
 
 async function deleteChannel(id,name) {
-  if(!await adminConfirm(`Remove "${name}" from the scanner list?`, 'Remove Channel')) return;
+  if(!await adminConfirm(`Remove "${name}" from the channel list? This only removes the registered channel URL — their videos stay in the hub.`, 'Remove Channel')) return;
   try { await sbDelete('efed_channels',`id=eq.${id}`); toast('Removed.'); loadChannels(); loadStats(); }
   catch(e){toast('Error: '+e.message);}
+}
+
+async function deleteChannelByName(name) {
+  if(!await adminConfirm(`Remove all videos from "${name}" from the hub? This will delete their approved submissions permanently.`, 'Remove eFed')) return;
+  try {
+    await sbDelete('submissions', `efed=eq.${encodeURIComponent(name)}&status=eq.approved`);
+    toast('Removed all videos for ' + name + '.');
+    loadChannels(); loadStats();
+  } catch(e){toast('Error: '+e.message);}
 }
 
 let _confirmResolve = null;
@@ -1792,10 +1804,37 @@ function switchBanSub(sub) {
 let _allBannedSocials = [], _socialPage = 1;
 const SOCIAL_PER_PAGE = 30;
 
+// Pre-loaded blocked X handles — inserted once, skips duplicates
+const BULK_BANNED_X = [
+  'IvyFuckinPage','RealRicoMatos','NuchieDoesK', 'MADDAWG_2K','GarfieldMommyXo',
+  'S4turn2K','BOWprowres','SammyCryptic2K','FEW4EVER','grim43279','MarkoLaurence',
+  'NightmareOfNOLA','SelinaSatoru','CAWChronPodcast','ItsJannaCaw','TheaСMV',
+  'WZW_2K','ThisIsPWE','ThisIsMCW','Deathwish2K','mictheon','ICHIPRO_2K',
+  'MimiDuarte','AZ2k24','DEaTH_S0cIetY'
+];
+
+async function bulkInsertBannedSocials() {
+  try {
+    const existing = await sbGet('banned_socials', 'platform=eq.x&select=handle');
+    const existingSet = new Set(existing.map(r => r.handle.toLowerCase()));
+    const toInsert = BULK_BANNED_X
+      .map(h => h.replace(/^@/,'').toLowerCase())
+      .filter(h => !existingSet.has(h))
+      .map(h => ({ handle: h, platform: 'x', reason: 'Pre-loaded block list', added_by: ADMIN_USERNAME, created_at: new Date().toISOString() }));
+    if (!toInsert.length) return;
+    // Insert in batches of 10
+    for (let i = 0; i < toInsert.length; i += 10) {
+      await sbInsert('banned_socials', toInsert.slice(i, i + 10));
+    }
+    console.log('Bulk inserted ' + toInsert.length + ' banned X handles.');
+  } catch(e) { console.warn('Bulk social ban insert failed:', e.message); }
+}
+
 async function loadBannedSocials() {
   const list = document.getElementById('social-ban-list');
   list.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
   try {
+    await bulkInsertBannedSocials();
     _allBannedSocials = await sbGet('banned_socials', 'order=created_at.desc');
     _socialPage = 1;
     renderBannedSocials(_allBannedSocials);
@@ -1807,7 +1846,7 @@ async function loadBannedSocials() {
 function renderBannedSocials(rows) {
   const list = document.getElementById('social-ban-list');
   const count = document.getElementById('social-ban-count');
-  if (count) count.textContent = rows.length ? '(' + rows.length + ')' : '';
+  if (count) count.textContent = rows.length ? `(${rows.length} total)` : '';
   if (!rows.length) { list.innerHTML = '<div class="empty"><div class="empty-icon">✅</div>No banned social handles yet.</div>'; renderSocialPagination(0); return; }
 
   const totalPages = Math.ceil(rows.length / SOCIAL_PER_PAGE);
