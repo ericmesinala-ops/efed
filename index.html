@@ -4500,13 +4500,11 @@ window.addEventListener('popstate', function(e) {
           } catch(e) {}
           if (el) {
             el.textContent = count + ' online';
-            el.parentElement.style.display = window.innerWidth > 768 ? 'flex' : 'none';
+            el.parentElement.style.display = 'flex';
           }
           const adminOnlineEl = document.getElementById('admin-online-count-label');
           if (adminOnlineEl) adminOnlineEl.textContent = count + (count === 1 ? ' online' : ' online');
           wrap.style.display = window.innerWidth > 768 ? 'flex' : 'none';
-          // Keep hidden on mobile even after resize/rotation
-          window.addEventListener('resize', () => { if (wrap) wrap.style.display = window.innerWidth > 768 ? 'flex' : 'none'; }, { passive: true });
         } else {
           wrap.style.display = 'none';
         }
@@ -6526,6 +6524,7 @@ function showSubmitErr(msg) {
 <script>
 // ── CARD EXPAND ──
 let _expandVideo = null;
+let _autoNextTimer = null;
 const _supportedEfedsCache = new Set(); // eFed names the current user supports
 let _supportCacheLoaded = false;
 let _expandLikes = {};
@@ -6533,6 +6532,7 @@ let _expandBookmarks = {};
 
 function openExpand(v) {
   const tab = document.getElementById('chat-tab');
+  cancelAutoNext();
   if (tab) tab.style.display = 'none';
   _expandVideo = v;
   const id = extractId(v.url);
@@ -6912,6 +6912,7 @@ function _showTwitchOffline() {
 
 function closeExpand(fromPopState) {
   const _chatTab = document.getElementById('chat-tab');
+  cancelAutoNext();
   if (_chatTab) _chatTab.style.display = '';
   // Clean up URL without adding another history entry
   if (!fromPopState) history.replaceState(null, '', window.location.pathname);
@@ -8366,13 +8367,42 @@ window.addEventListener('message', (e) => {
         startWatchTimer(url);
       }
       if (eq) eq.classList.add('playing');
-    } else if (state === 2 || state === 0) {
-      // Paused or ended — stop timer
+    } else if (state === 2) {
+      // Paused — stop timer
       stopWatchTimer(url);
       if (eq) eq.classList.remove('playing');
+    } else if (state === 0) {
+      // Ended — stop timer, trigger auto-next
+      stopWatchTimer(url);
+      if (eq) eq.classList.remove('playing');
+      startAutoNext();
     }
   } catch(e) {}
 });
+
+function getLatestSorted() {
+  if (typeof videos === 'undefined') return [];
+  return [...videos]
+    .filter(v => v.url && v.status === 'approved')
+    .sort((a, b) => {
+      const ta = b.submittedAt || b.dateMs || (b.date ? new Date(b.date).getTime() : 0);
+      const tb = a.submittedAt || a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
+      return ta - tb;
+    });
+}
+
+function startAutoNext() {
+  if (!_expandVideo) return;
+  const list = getLatestSorted();
+  const idx = list.findIndex(v => v.url === _expandVideo.url);
+  const next = list[idx + 1];
+  if (!next) return; // end of list — nothing to play
+  openExpand(next);
+}
+
+function cancelAutoNext() {
+  // No-op kept for closeExpand/openExpand calls — nothing to cancel anymore
+}
 // Time is tracked in memory (_watchTimers). DB sync is best-effort only —
 // the unlock fires from local seconds so it works even without watch_time table.
 const WATCH_UNLOCK_SECS = 600; // 10 minutes
