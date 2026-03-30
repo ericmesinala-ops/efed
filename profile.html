@@ -3061,11 +3061,30 @@ async function saveEditProfile() {
     const twitch = websiteRaw ? 'https://' + websiteRaw : null;
     const avatarSide = document.getElementById('ep-side-right')?.dataset.active === '1' ? 'right' : 'left';
     const bannerDim = parseInt(document.getElementById('ep-dim-slider')?.value) || 0;
-    // ig_handle and x_handle intentionally excluded — locked after registration
-    const updates = { display_name: name, twitch_channel: twitch || null, avatar_side: avatarSide, avatar_banner_dim: bannerDim };
+    const updates = { display_name: name, ig_handle: ig ? '@'+ig : null, x_handle: x ? '@'+x : null, twitch_channel: twitch || null, avatar_side: avatarSide, avatar_banner_dim: bannerDim };
     await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(updates) });
     applyAvatarSide(avatarSide);
     applyBannerDim(bannerDim);
+
+    // ── CHECK IF NEW HANDLES MATCH BAN LIST — alert admin silently ──
+    try {
+      const bannedSocials = await sbGet('banned_socials', 'select=handle,platform');
+      const bannedSet = { x: new Set(), ig: new Set() };
+      bannedSocials.forEach(b => bannedSet[b.platform]?.add(b.handle.toLowerCase()));
+      const alerts = [];
+      if (x && bannedSet.x.has(x.toLowerCase())) alerts.push('X: @' + x);
+      if (ig && bannedSet.ig.has(ig.toLowerCase())) alerts.push('IG: @' + ig);
+      if (alerts.length) {
+        await sbInsert('notifications', {
+          username: ADMIN_USERNAME,
+          type: 'admin',
+          message: '🚨 BANNED SOCIAL DETECTED — @' + session.username + ' just updated their profile with a banned handle: ' + alerts.join(', '),
+          video_url: null,
+          read: false,
+          created_at: Date.now()
+        });
+      }
+    } catch(e) { console.warn('Ban check failed silently', e); }
 
     session.displayName = name; session.igHandle = ig; session.xHandle = x;
     localStorage.setItem('efed_session', JSON.stringify(session));
@@ -4041,18 +4060,18 @@ function triggerInstall() {
         <div id="profile-links-body" style="display:none;flex-direction:column;gap:14px;margin-top:14px;">
 
           <div>
-            <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-bottom:5px;letter-spacing:.5px;">Instagram <span style="color:rgba(200,168,75,.5);font-size:.55rem;letter-spacing:1px;">· LOCKED</span></div>
-            <div style="display:flex;align-items:center;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;overflow:hidden;opacity:.7;" title="Social handles cannot be changed after registration">
+            <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-bottom:5px;letter-spacing:.5px;">Instagram</div>
+            <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
               <span style="padding:10px 8px 10px 12px;color:rgba(255,255,255,.25);font-size:.82rem;">@</span>
-              <input id="ep-ig-input" type="text" placeholder="—" maxlength="40" readonly style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;cursor:not-allowed;">
+              <input id="ep-ig-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
             </div>
           </div>
 
           <div>
-            <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-bottom:5px;letter-spacing:.5px;">X (Twitter) <span style="color:rgba(200,168,75,.5);font-size:.55rem;letter-spacing:1px;">· LOCKED</span></div>
-            <div style="display:flex;align-items:center;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;overflow:hidden;opacity:.7;" title="Social handles cannot be changed after registration">
+            <div style="font-size:.6rem;color:rgba(255,255,255,.35);margin-bottom:5px;letter-spacing:.5px;">X (Twitter)</div>
+            <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
               <span style="padding:10px 8px 10px 12px;color:rgba(255,255,255,.25);font-size:.82rem;">@</span>
-              <input id="ep-x-input" type="text" placeholder="—" maxlength="40" readonly style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;cursor:not-allowed;">
+              <input id="ep-x-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
             </div>
           </div>
 
