@@ -6524,18 +6524,12 @@ function showSubmitErr(msg) {
 <script>
 // ── CARD EXPAND ──
 let _expandVideo = null;
-let _autoNextDone = false;
-let _pollTimer = null;
-let _lastDuration = 0;
 const _supportedEfedsCache = new Set(); // eFed names the current user supports
 let _supportCacheLoaded = false;
 let _expandLikes = {};
 let _expandBookmarks = {};
 
 function openExpand(v) {
-  stopPollTimer();
-  _autoNextDone = false;
-  _lastDuration = 0;
   const tab = document.getElementById('chat-tab');
   if (tab) tab.style.display = 'none';
   _expandVideo = v;
@@ -6915,9 +6909,6 @@ function _showTwitchOffline() {
 })();
 
 function closeExpand(fromPopState) {
-  stopPollTimer();
-  _autoNextDone = false;
-  _lastDuration = 0;
   const _chatTab = document.getElementById('chat-tab');
   if (_chatTab) _chatTab.style.display = '';
   // Clean up URL without adding another history entry
@@ -6961,9 +6952,6 @@ function expandStartVideo() {
   if (bgFrame) { bgFrame.src = ''; bgFrame.style.display = 'none'; }
   const t = extractT(_expandVideo.url);
   const src = `https://www.youtube.com/embed/${id}?autoplay=1&start=${t}&rel=0&modestbranding=1&enablejsapi=1`;
-  _autoNextDone = false;
-  _lastDuration = 0;
-  stopPollTimer();
   document.getElementById('expand-frame').src = src;
   document.getElementById('expand-frame').style.display = 'block';
   document.getElementById('expand-hero-thumb').style.display = 'none';
@@ -8364,87 +8352,32 @@ window.addEventListener('message', (e) => {
   if (!e.data || typeof e.data !== 'string') return;
   try {
     const msg = JSON.parse(e.data);
+    if (msg.event !== 'infoDelivery' || !msg.info) return;
+    const state = msg.info.playerState;
+    if (state === undefined) return;
     if (!_expandVideo) return;
     const url = _expandVideo.url;
     const eq = document.getElementById('expand-eq');
-
-    // Handle time polling response
-    if (msg.event === 'infoDelivery' && msg.info) {
-      const t = msg.info.currentTime;
-      const d = msg.info.duration;
-      if (d > 0) _lastDuration = d;
-      // Trigger next if within 2 seconds of end
-      if (!_autoNextDone && _lastDuration > 0 && t > 0 && (_lastDuration - t) <= 2) {
-        _autoNextDone = true;
-        stopPollTimer();
-        startAutoNext();
-        return;
-      }
-    }
-
-    // State changes
-    let state = undefined;
-    if (msg.event === 'infoDelivery' && msg.info) state = msg.info.playerState;
-    if (msg.event === 'onStateChange' && msg.info !== undefined) state = msg.info;
-    if (state === undefined) return;
-
     if (state === 1) {
-      // Playing
-      if (!_watchTimers[url] && !_watchUnlocked[url]) startWatchTimer(url);
+      // Playing — resume timer
+      if (!_watchTimers[url] && !_watchUnlocked[url]) {
+        startWatchTimer(url);
+      }
       if (eq) eq.classList.add('playing');
-      startPollTimer(); // begin polling current time
     } else if (state === 2) {
-      // Paused
+      // Paused — stop timer
       stopWatchTimer(url);
-      stopPollTimer();
       if (eq) eq.classList.remove('playing');
     } else if (state === 0) {
-      // Ended event (backup — poll should catch it first)
+      // Ended — stop timer, auto-open rating if unlocked
       stopWatchTimer(url);
-      stopPollTimer();
       if (eq) eq.classList.remove('playing');
-      if (!_autoNextDone) { _autoNextDone = true; startAutoNext(); }
+      if (_watchUnlocked[url]) {
+        setTimeout(() => openRatingModal(), 600);
+      }
     }
   } catch(e) {}
 });
-
-function startPollTimer() {
-  if (_pollTimer) return;
-  const frame = document.getElementById('expand-frame');
-  _pollTimer = setInterval(() => {
-    if (!frame || !frame.contentWindow) return;
-    try {
-      frame.contentWindow.postMessage(JSON.stringify({ event: 'listening' }), '*');
-      frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getVideoData', args: [] }), '*');
-    } catch(e) {}
-  }, 2000);
-}
-
-function stopPollTimer() {
-  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
-}
-function getLatestSorted() {
-  if (typeof videos === 'undefined') return [];
-  return [...videos]
-    .filter(v => v.url && v.status === 'approved')
-    .sort((a, b) => {
-      const ta = b.submittedAt || b.dateMs || (b.date ? new Date(b.date).getTime() : 0);
-      const tb = a.submittedAt || a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
-      return ta - tb;
-    });
-}
-
-function startAutoNext() {
-  if (!_expandVideo) return;
-  const list = getLatestSorted();
-  const idx = list.findIndex(v => v.url === _expandVideo.url);
-  const next = list[idx + 1];
-  if (!next) return;
-  openExpand(next);
-}
-
-function cancelAutoNext() {}
-
 // Time is tracked in memory (_watchTimers). DB sync is best-effort only —
 // the unlock fires from local seconds so it works even without watch_time table.
 const WATCH_UNLOCK_SECS = 600; // 10 minutes
