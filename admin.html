@@ -1416,49 +1416,45 @@ async function updateQueueBadge() {
   } catch(e){}
 }
 
-// Track which destination pills are selected per queue item: { [id]: Set('latest'|'matches') }
+// Track which destination pill is selected per queue item: { [id]: 'latest'|'matches'|'upcoming'|null }
 const _queuePillState = {};
 
 function _calcDefaultDest(r) {
+  if (r.is_upcoming) return 'upcoming';
   const fw=['episode','tryout','tryouts','full show','part 1','part 2','part 3','network','supershow','season'];
   const mw=[' vs ',' vs.','v. ',' match','full match','1v1','2v2','championship'];
   const t=(r.title||'').toLowerCase();
-  if(r.is_upcoming) return new Set(['latest']);
-  if(r.duration_seconds>0&&r.duration_seconds<900) return new Set(['matches']);
-  if(r.duration_seconds>0&&r.duration_seconds<1800&&!fw.some(w=>t.includes(w))&&mw.some(w=>t.includes(w))) return new Set(['matches']);
-  return new Set(['latest']);
+  if(r.duration_seconds>0&&r.duration_seconds<900) return 'matches';
+  if(r.duration_seconds>0&&r.duration_seconds<1800&&!fw.some(w=>t.includes(w))&&mw.some(w=>t.includes(w))) return 'matches';
+  return 'latest';
 }
 
 function _updateSubmitBtn(id) {
   const btn = document.getElementById('q-submit-'+id);
   if (!btn) return;
-  const sel = _queuePillState[id];
-  const hasSelection = sel && sel.size > 0;
+  const hasSelection = !!_queuePillState[id];
   btn.disabled = !hasSelection;
   btn.style.opacity = hasSelection ? '1' : '.38';
   btn.style.cursor = hasSelection ? 'pointer' : 'not-allowed';
 }
 
-function _toggleQueuePill(id, pill) {
-  if (!_queuePillState[id]) _queuePillState[id] = new Set();
-  const sel = _queuePillState[id];
-  if (sel.has(pill)) { sel.delete(pill); } else { sel.add(pill); }
-  // Re-render pill appearances
-  ['latest','matches'].forEach(p => {
+function _selectQueuePill(id, pill) {
+  _queuePillState[id] = pill;
+  // Re-render all three pill appearances
+  const pillDefs = {
+    latest:  { bg: 'rgba(255,255,255,.18)', bgOff: 'rgba(255,255,255,.06)', border: 'rgba(255,255,255,.5)',  borderOff: 'rgba(255,255,255,.15)', color: '#fff',    colorOff: 'rgba(255,255,255,.45)', shadow: '0 0 0 1px rgba(255,255,255,.15)' },
+    matches: { bg: 'rgba(192,0,14,.22)',    bgOff: 'rgba(192,0,14,.07)',    border: 'rgba(192,0,14,.6)',     borderOff: 'rgba(192,0,14,.2)',     color: '#ff8080', colorOff: 'rgba(255,107,107,.45)', shadow: '0 0 0 1px rgba(192,0,14,.2)' },
+    upcoming:{ bg: 'rgba(200,168,75,.22)',  bgOff: 'rgba(200,168,75,.06)', border: 'rgba(200,168,75,.6)',   borderOff: 'rgba(200,168,75,.18)', color: 'var(--gold)', colorOff: 'rgba(200,168,75,.4)', shadow: '0 0 0 1px rgba(200,168,75,.15)' }
+  };
+  ['latest','matches','upcoming'].forEach(p => {
     const el = document.getElementById('q-pill-'+p+'-'+id);
     if (!el) return;
-    const active = sel.has(p);
-    if (p === 'latest') {
-      el.style.background = active ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.06)';
-      el.style.borderColor = active ? 'rgba(255,255,255,.5)' : 'rgba(255,255,255,.15)';
-      el.style.color = active ? '#fff' : 'rgba(255,255,255,.45)';
-      el.style.boxShadow = active ? '0 0 0 1px rgba(255,255,255,.15)' : 'none';
-    } else {
-      el.style.background = active ? 'rgba(192,0,14,.22)' : 'rgba(192,0,14,.07)';
-      el.style.borderColor = active ? 'rgba(192,0,14,.6)' : 'rgba(192,0,14,.2)';
-      el.style.color = active ? '#ff8080' : 'rgba(255,107,107,.45)';
-      el.style.boxShadow = active ? '0 0 0 1px rgba(192,0,14,.2)' : 'none';
-    }
+    const active = _queuePillState[id] === p;
+    const d = pillDefs[p];
+    el.style.background    = active ? d.bg      : d.bgOff;
+    el.style.borderColor   = active ? d.border  : d.borderOff;
+    el.style.color         = active ? d.color   : d.colorOff;
+    el.style.boxShadow     = active ? d.shadow  : 'none';
   });
   _updateSubmitBtn(id);
 }
@@ -1471,44 +1467,39 @@ function _buildQueueItem(r) {
   const defaultSel = _calcDefaultDest(r);
   _queuePillState[r.id] = defaultSel;
 
-  const pillLatestActive = defaultSel.has('latest');
-  const pillMatchesActive = defaultSel.has('matches');
-
-  const pillLatestStyle = `cursor:pointer;font-size:.6rem;font-weight:700;letter-spacing:.8px;border-radius:20px;padding:3px 10px;border:1px solid;transition:all .15s;
-    background:${pillLatestActive?'rgba(255,255,255,.18)':'rgba(255,255,255,.06)'};
-    border-color:${pillLatestActive?'rgba(255,255,255,.5)':'rgba(255,255,255,.15)'};
-    color:${pillLatestActive?'#fff':'rgba(255,255,255,.45)'};
-    box-shadow:${pillLatestActive?'0 0 0 1px rgba(255,255,255,.15)':'none'};`;
-
-  const pillMatchesStyle = `cursor:pointer;font-size:.6rem;font-weight:700;letter-spacing:.8px;border-radius:20px;padding:3px 10px;border:1px solid;transition:all .15s;
-    background:${pillMatchesActive?'rgba(192,0,14,.22)':'rgba(192,0,14,.07)'};
-    border-color:${pillMatchesActive?'rgba(192,0,14,.6)':'rgba(192,0,14,.2)'};
-    color:${pillMatchesActive?'#ff8080':'rgba(255,107,107,.45)'};
-    box-shadow:${pillMatchesActive?'0 0 0 1px rgba(192,0,14,.2)':'none'};`;
-
-  const hasSelection = defaultSel.size > 0;
+  function _pillStyle(p) {
+    const active = defaultSel === p;
+    const defs = {
+      latest:  { bg: active?'rgba(255,255,255,.18)':'rgba(255,255,255,.06)', border: active?'rgba(255,255,255,.5)':'rgba(255,255,255,.15)', color: active?'#fff':'rgba(255,255,255,.45)', shadow: active?'0 0 0 1px rgba(255,255,255,.15)':'none' },
+      matches: { bg: active?'rgba(192,0,14,.22)':'rgba(192,0,14,.07)', border: active?'rgba(192,0,14,.6)':'rgba(192,0,14,.2)', color: active?'#ff8080':'rgba(255,107,107,.45)', shadow: active?'0 0 0 1px rgba(192,0,14,.2)':'none' },
+      upcoming:{ bg: active?'rgba(200,168,75,.22)':'rgba(200,168,75,.06)', border: active?'rgba(200,168,75,.6)':'rgba(200,168,75,.18)', color: active?'var(--gold)':'rgba(200,168,75,.4)', shadow: active?'0 0 0 1px rgba(200,168,75,.15)':'none' }
+    };
+    const d = defs[p];
+    return \`cursor:pointer;font-size:.6rem;font-weight:700;letter-spacing:.8px;border-radius:20px;padding:3px 10px;border:1px solid;transition:all .15s;background:\${d.bg};border-color:\${d.border};color:\${d.color};box-shadow:\${d.shadow};\`;
+  }
 
   const item = document.createElement('div');
   item.className = 'result-item'; item.id = 'q-'+r.id;
-  item.innerHTML = `
-    <div class="result-thumb"><img src="${esc(r.thumb_url||'')}" alt="" onerror="this.style.display='none'"></div>
+  item.innerHTML = \`
+    <div class="result-thumb"><img src="\${esc(r.thumb_url||'')}" alt="" onerror="this.style.display='none'"></div>
     <div class="result-info">
-      <div class="result-title">${esc(r.title||'')}</div>
-      <div class="result-meta" style="margin-bottom:6px;">${esc(r.efed)} · ${r.date}</div>
+      <div class="result-title">\${esc(r.title||'')}</div>
+      <div class="result-meta" style="margin-bottom:6px;">\${esc(r.efed)} · \${r.date}</div>
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-        ${durStr}
+        \${durStr}
         <span style="font-size:.55rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:600;margin-left:2px;">Send to:</span>
-        <button id="q-pill-latest-${r.id}" style="${pillLatestStyle}" onclick="_toggleQueuePill(${r.id},'latest')">📺 Latest Video</button>
-        <button id="q-pill-matches-${r.id}" style="${pillMatchesStyle}" onclick="_toggleQueuePill(${r.id},'matches')">🥊 Best Matches</button>
+        <button id="q-pill-latest-\${r.id}"   style="\${_pillStyle('latest')}"   onclick="_selectQueuePill(\${r.id},'latest')">📺 Latest Video</button>
+        <button id="q-pill-matches-\${r.id}"  style="\${_pillStyle('matches')}"  onclick="_selectQueuePill(\${r.id},'matches')">🥊 Best Matches</button>
+        <button id="q-pill-upcoming-\${r.id}" style="\${_pillStyle('upcoming')}" onclick="_selectQueuePill(\${r.id},'upcoming')">⏰ Upcoming</button>
       </div>
       <div class="result-actions">
-        <button id="q-submit-${r.id}" class="btn btn-green btn-sm" onclick="approveQueued(${r.id})"
-          style="opacity:${hasSelection?'1':'.38'};cursor:${hasSelection?'pointer':'not-allowed'};"
-          ${hasSelection?'':'disabled'}>✓ Submit to Hub</button>
-        <button class="btn btn-red btn-sm" onclick="removeQueued(${r.id})">Remove</button>
-        <a href="${esc(r.url)}" target="_blank" class="btn btn-ghost btn-sm">▶ Watch</a>
+        <button id="q-submit-\${r.id}" class="btn btn-green btn-sm" onclick="approveQueued(\${r.id})"
+          style="opacity:\${defaultSel?'1':'.38'};cursor:\${defaultSel?'pointer':'not-allowed'};"
+          \${defaultSel?'':'disabled'}>✓ Submit to Hub</button>
+        <button class="btn btn-red btn-sm" onclick="removeQueued(\${r.id})">Remove</button>
+        <a href="\${esc(r.url)}" target="_blank" class="btn btn-ghost btn-sm">▶ Watch</a>
       </div>
-    </div>`;
+    </div>\`;
   return item;
 }
 
@@ -1534,15 +1525,17 @@ async function approveQueued(id) {
   try {
     const rows=await sbGet('scan_results','id=eq.'+id);
     const r=rows[0]; if(!r) return;
-    const sel=_queuePillState[id]||new Set();
-    const hasLatest=sel.has('latest'), hasMatches=sel.has('matches');
-    const section_override=hasLatest&&hasMatches?'both':hasMatches?'matches':hasLatest?'latest':null;
-    await sbInsert('submissions',{url:r.url,video_id:r.video_id,show_name:r.title,efed:r.efed,date:r.date,date_ms:r.date_ms||Date.now(),submitted_by:ADMIN_USERNAME,submitted_at:Date.now(),community:true,status:r.is_upcoming?'upcoming':'approved',thumb_url:r.thumb_url||null,duration_seconds:r.duration_seconds||null,section_override});
+    const dest=_queuePillState[id]; // 'latest' | 'matches' | 'upcoming'
+    // Upcoming pill overrides DB status to 'upcoming'; others go 'approved'
+    const status=dest==='upcoming'?'upcoming':'approved';
+    const section_override=dest==='upcoming'?null:dest; // 'latest' or 'matches'; upcoming uses status field
+    await sbInsert('submissions',{url:r.url,video_id:r.video_id,show_name:r.title,efed:r.efed,date:r.date,date_ms:r.date_ms||Date.now(),submitted_by:ADMIN_USERNAME,submitted_at:Date.now(),community:true,status,thumb_url:r.thumb_url||null,duration_seconds:r.duration_seconds||null,section_override});
     await sbUpdate('scan_results',{status:'approved'},'id=eq.'+id);
     // Remove from list entirely — submitted videos don't come back
     if(row){ row.style.transition='opacity .25s'; row.style.opacity='0'; setTimeout(()=>{ row.remove(); _checkQueueEmpty(); },260); }
     delete _queuePillState[id];
-    toast('✅ Submitted to Hub!'); loadStats(); updateQueueBadge();
+    const label=dest==='upcoming'?'⏰ Added to Upcoming!':dest==='matches'?'🥊 Added to Best Matches!':'📺 Added to Latest Videos!';
+    toast(label); loadStats(); updateQueueBadge();
   } catch(e){if(btn){btn.disabled=false;btn.textContent='✓ Submit to Hub';}toast('Error: '+e.message);}
 }
 
