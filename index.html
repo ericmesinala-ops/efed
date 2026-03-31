@@ -1898,6 +1898,7 @@ html, body { overscroll-behavior-y: none; }
   .expand-action-btn.liked { color: #c8a84b; border-color: rgba(200,168,75,.4); background: rgba(200,168,75,.1); }
   .expand-action-btn.bookmarked { color: #c8a84b; border-color: rgba(200,168,75,.4); background: rgba(200,168,75,.1); }
   .expand-action-btn.supported { color: #4caf8a; border-color: rgba(76,175,138,.4); background: rgba(76,175,138,.1); }
+  .expand-action-btn.watchlisted { color: #c8a84b; border-color: rgba(200,168,75,.4); background: rgba(200,168,75,.1); }
   .expand-btn-label { display: none; }
   .expand-action-btn { position: relative; }
   .expand-action-btn::after { content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: rgba(20,20,24,.97); color: #e8e8e8; font-size: .63rem; font-weight: 600; white-space: nowrap; padding: 4px 10px; border-radius: 6px; pointer-events: none; opacity: 0; transition: opacity .18s; font-family: 'DM Sans', sans-serif; z-index: 9999; border: 1px solid rgba(255,255,255,.12); box-shadow: 0 4px 12px rgba(0,0,0,.5); }
@@ -3059,6 +3060,11 @@ html, body { overscroll-behavior-y: none; }
 
       <!-- Add to eFed -->
       
+
+      <!-- Watch List -->
+      <button class="expand-action-btn" id="expand-watchlist-btn" onclick="openWatchlistInfo()" data-tip="Watch List">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
 
       <!-- Repost -->
       <button class="expand-action-btn" id="expand-repost-btn" onclick="openRepostModal()" data-tip="Repost" style="display:none;">
@@ -6661,6 +6667,7 @@ const _supportedEfedsCache = new Set(); // eFed names the current user supports
 let _supportCacheLoaded = false;
 let _expandLikes = {};
 let _expandBookmarks = {};
+let _expandWatchlist = {};
 
 function openExpand(v) {
   const tab = document.getElementById('chat-tab');
@@ -6823,6 +6830,23 @@ function openExpand(v) {
         .then(rows => {
           _expandBookmarks[bKey] = rows.length > 0;
           bookmarkBtn.classList.toggle('bookmarked', _expandBookmarks[bKey]);
+        })
+        .catch(() => {});
+    }
+  }
+
+  // Watchlist button - check if current video's eFed is in user's watch list
+  const watchlistBtn = document.getElementById('expand-watchlist-btn');
+  watchlistBtn.classList.remove('watchlisted');
+  if (session && v.efed) {
+    const wKey = v.efed.toLowerCase();
+    if (_expandWatchlist[wKey] !== undefined) {
+      watchlistBtn.classList.toggle('watchlisted', !!_expandWatchlist[wKey]);
+    } else {
+      sbGet('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username) + '&efed_name=ilike.' + encodeURIComponent(v.efed))
+        .then(rows => {
+          _expandWatchlist[wKey] = rows.length > 0;
+          watchlistBtn.classList.toggle('watchlisted', _expandWatchlist[wKey]);
         })
         .catch(() => {});
     }
@@ -7520,6 +7544,83 @@ async function toggleExpandBookmark() {
   loadBookmarksRow();
 }
 
+
+// ── WATCH LIST POPUP ──
+function openWatchlistInfo() {
+  const existing = document.getElementById('watchlist-info-popup');
+  if (existing) { existing.remove(); return; }
+  const popup = document.createElement('div');
+  popup.id = 'watchlist-info-popup';
+  popup.style.cssText = `
+    position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+    z-index:99999;width:min(340px,88vw);
+    background:linear-gradient(160deg,rgba(20,20,26,.98),rgba(12,12,16,.99));
+    border:1px solid rgba(200,168,75,.25);border-radius:16px;
+    padding:28px 24px;box-shadow:0 24px 60px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.05);
+    font-family:'DM Sans',sans-serif;
+  `;
+  popup.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;">
+      <div style="width:36px;height:36px;border-radius:10px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </div>
+      <div>
+        <div style="font-size:.85rem;font-weight:700;color:#fff;margin-bottom:3px;">Watch List</div>
+        <div style="font-size:.7rem;color:rgba(200,168,75,.8);letter-spacing:.5px;">Follow an eFed's content</div>
+      </div>
+    </div>
+    <div style="font-size:.78rem;color:rgba(255,255,255,.7);line-height:1.7;margin-bottom:20px;">
+      Adding an eFed to your <strong style="color:#fff;">Watch List</strong> creates a dedicated row on the home page showing all of their latest videos — so you never miss a show.<br><br>
+      You can also view and manage your Watch List from your <strong style="color:#fff;">profile page</strong>, with filters to jump between the eFeds you follow.
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="document.getElementById('watchlist-info-popup').remove();document.getElementById('watchlist-overlay-bg').remove();" style="flex:1;padding:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.7);font-size:.78rem;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .2s;" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">Close</button>
+      <button onclick="document.getElementById('watchlist-info-popup').remove();document.getElementById('watchlist-overlay-bg').remove();toggleExpandWatchlist();" style="flex:1;padding:10px;background:#c8a84b;border:1px solid rgba(200,168,75,.6);border-radius:8px;color:#000;font-size:.78rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .2s;" onmouseover="this.style.background='#d4b45a'" onmouseout="this.style.background='#c8a84b'" id="watchlist-info-add-btn">Add to Watch List</button>
+    </div>
+  `;
+  const overlay = document.createElement('div');
+  overlay.id = 'watchlist-overlay-bg';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.55);backdrop-filter:blur(3px);';
+  overlay.onclick = () => { popup.remove(); overlay.remove(); };
+  document.body.appendChild(overlay);
+  document.body.appendChild(popup);
+  // If already watchlisted, change button label
+  const wBtn = document.getElementById('expand-watchlist-btn');
+  if (wBtn && wBtn.classList.contains('watchlisted')) {
+    const addBtn = document.getElementById('watchlist-info-add-btn');
+    if (addBtn) { addBtn.textContent = 'Remove from Watch List'; addBtn.style.background = 'rgba(192,0,14,.7)'; addBtn.style.color = '#fff'; addBtn.style.borderColor = 'rgba(192,0,14,.5)'; }
+  }
+}
+
+// ── TOGGLE WATCH LIST ──
+async function toggleExpandWatchlist() {
+  const session = getSession();
+  if (!session) { showToast('Sign in to use Watch List.'); return; }
+  if (!_expandVideo || !_expandVideo.efed) { showToast('No eFed associated with this video.'); return; }
+  const efedName = _expandVideo.efed;
+  const wKey = efedName.toLowerCase();
+  const btn = document.getElementById('expand-watchlist-btn');
+  const isWatchlisted = btn.classList.contains('watchlisted');
+
+  try {
+    if (isWatchlisted) {
+      await sbDelete('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username) + '&efed_name=ilike.' + encodeURIComponent(efedName));
+      btn.classList.remove('watchlisted');
+      _expandWatchlist[wKey] = false;
+      showToast('Removed from Watch List.');
+    } else {
+      await sbInsert('efed_watchlist', { username: session.username, efed_name: efedName, added_at: Date.now() });
+      btn.classList.add('watchlisted');
+      _expandWatchlist[wKey] = true;
+      showToast('Added to Watch List! Find it on the home page.');
+    }
+  } catch(e) {
+    // May already exist — try a remove if insert fails
+    console.warn('Watchlist toggle failed', e);
+    showToast('Could not update Watch List. Try again.');
+  }
+  loadWatchlistRow();
+}
 
 // ── COMMENTS ──
 async function loadExpandComments(url) {

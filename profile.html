@@ -29,6 +29,11 @@
     if (!r.ok) throw new Error(await r.text());
     const txt = await r.text(); return txt ? JSON.parse(txt) : [];
   }
+  async function sbInsert(table, data) {
+    const r = await fetch(SUPABASE_URL+'/rest/v1/'+table, { method: 'POST', headers: SB_HEADERS, body: JSON.stringify(data) });
+    if (!r.ok) throw new Error(await r.text());
+    const txt = await r.text(); return txt ? JSON.parse(txt) : [];
+  }
 
   // ── STORAGE UPLOAD HELPER ──
   // Converts a dataUrl to a Blob and uploads to Supabase Storage.
@@ -382,6 +387,11 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .prof-pill-arr { width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.6);font-size:.9rem;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .2s,color .2s; }
 .prof-pill-arr:hover { background:var(--accent);border-color:var(--accent);color:#fff; }
 .prof-pill-arr.hidden { opacity:.15;pointer-events:none; }
+.wl-pill { display:inline-flex;align-items:center;gap:6px;padding:5px 12px 5px 10px;border-radius:20px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.7);font-size:.7rem;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .2s,border-color .2s,color .2s;white-space:nowrap;flex-shrink:0; }
+.wl-pill:hover { background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:#fff; }
+.wl-pill.active { background:rgba(200,168,75,.12);border-color:rgba(200,168,75,.35);color:#c8a84b; }
+.wl-pill-remove { display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.08);color:rgba(255,255,255,.4);font-size:.6rem;line-height:1;transition:background .2s,color .2s;flex-shrink:0; }
+.wl-pill:hover .wl-pill-remove { background:rgba(192,0,14,.25);color:#ff6b6b; }
 .prof-jump-btn { width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.5);font-size:.6rem;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .2s,color .2s;letter-spacing:-1px;font-family:'DM Sans',sans-serif; }
 .prof-jump-btn:hover { background:var(--accent);border-color:var(--accent);color:#fff; }
 .prof-jump-btn.hidden { opacity:.15;pointer-events:none; }
@@ -2136,6 +2146,30 @@ const _posts = (() => {
   </div>
 </div>
 
+<!-- ── WATCH LIST ── -->
+<div class="section" id="watchlist-section" style="display:none;">
+  <div style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+    <div class="sec-title" style="margin-bottom:0;">Watch List</div>
+    <a href="index.html" style="font-size:.65rem;color:rgba(200,168,75,.7);text-decoration:none;letter-spacing:.5px;font-weight:600;white-space:nowrap;transition:color .2s;" onmouseover="this.style.color='#c8a84b'" onmouseout="this.style.color='rgba(200,168,75,.7)'">View on Home →</a>
+  </div>
+  <!-- eFed pills -->
+  <div style="display:flex;align-items:center;gap:6px;margin-bottom:14px;">
+    <button class="prof-pill-arr hidden" id="wl-pills-arr-left" onclick="scrollWlPills(-1)">&#8249;</button>
+    <div id="wl-pills-wrap" style="display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;scroll-behavior:smooth;flex:1;padding:2px 0;"></div>
+    <button class="prof-pill-arr hidden" id="wl-pills-arr-right" onclick="scrollWlPills(1)">&#8250;</button>
+  </div>
+  <!-- Video row -->
+  <div style="display:flex;align-items:center;gap:0;">
+    <div class="prof-arr-col">
+      <button class="prof-pill-arr hidden" id="wl-arr-left" onclick="scrollWlRow(-1)">&#8249;</button>
+    </div>
+    <div class="vid-row" id="wl-video-row" style="flex:1;"><div class="empty">No videos yet.</div></div>
+    <div class="prof-arr-col">
+      <button class="prof-pill-arr hidden" id="wl-arr-right" onclick="scrollWlRow(1)">&#8250;</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── SUBMITTED VIDEOS ── -->
 <div class="section" id="submitted-section" style="display:none;">
   <div style="margin-bottom:16px;">
@@ -3811,6 +3845,10 @@ async function loadProfile() {
     if (supEfedList) supEfedList.innerHTML = '<div class="empty">Could not load.</div>';
   }
 
+  // Watch List — visible to everyone (public section)
+  const _wlTargetUser = targetUser;
+  loadWatchlistSection(_wlTargetUser);
+
   // Bookmarks — only load for owner or admin
   const bmRow = document.getElementById('bookmarks-row');
   const _canSeeBookmarks = _isOwnProfile || session.username.toLowerCase() === ADMIN_USERNAME;
@@ -3859,6 +3897,134 @@ async function loadProfile() {
     if (_pvEl) _pvEl.textContent = _pvFmt;
     if (_pvPill) _pvPill.style.display = '';
   } catch(e) {}
+}
+
+// ── WATCH LIST (PROFILE) ──
+let _wlAllSubs = [];
+let _wlActiveEfed = 'all';
+
+async function loadWatchlistSection(targetUser) {
+  const session = getSession();
+  const sec = document.getElementById('watchlist-section');
+  const videoRow = document.getElementById('wl-video-row');
+  if (!sec || !videoRow) return;
+
+  try {
+    const watchRows = await sbGet('efed_watchlist', 'username=eq.' + encodeURIComponent(targetUser));
+    if (!watchRows.length) { sec.style.display = 'none'; return; }
+
+    const efedNames = watchRows.map(r => r.efed_name);
+    const efedFilters = efedNames.map(n => 'efed.ilike.' + encodeURIComponent(n)).join(',');
+    const subs = await sbGet('submissions', 'status=eq.approved&or=(' + efedFilters + ')&order=date_ms.desc&limit=60');
+    if (!subs.length) { sec.style.display = 'none'; return; }
+
+    _wlAllSubs = subs;
+    sec.style.display = '';
+
+    // Build pills
+    const pillsWrap = document.getElementById('wl-pills-wrap');
+    const efedWithVideos = [...new Set(subs.map(s => s.efed).filter(Boolean))];
+    const isOwn = session && targetUser.toLowerCase() === session.username.toLowerCase();
+
+    pillsWrap.innerHTML = '';
+
+    // "All" pill
+    const allPill = document.createElement('button');
+    allPill.className = 'wl-pill active';
+    allPill.dataset.wefed = 'all';
+    allPill.textContent = 'All';
+    allPill.onclick = () => setWlFilter('all');
+    pillsWrap.appendChild(allPill);
+
+    efedWithVideos.forEach(efed => {
+      const pill = document.createElement('button');
+      pill.className = 'wl-pill';
+      pill.dataset.wefed = efed.toLowerCase();
+
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = efed;
+      pill.appendChild(nameSpan);
+
+      // Remove button — only shown on own profile
+      if (isOwn) {
+        const removeBtn = document.createElement('span');
+        removeBtn.className = 'wl-pill-remove';
+        removeBtn.title = 'Remove from Watch List';
+        removeBtn.innerHTML = '&times;';
+        removeBtn.onclick = async (e) => {
+          e.stopPropagation();
+          try {
+            await sbDelete('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username) + '&efed_name=ilike.' + encodeURIComponent(efed));
+            // Remove videos from allSubs and re-render
+            _wlAllSubs = _wlAllSubs.filter(s => (s.efed||'').toLowerCase() !== efed.toLowerCase());
+            pill.remove();
+            if (_wlActiveEfed === efed.toLowerCase()) setWlFilter('all');
+            else renderWlVideos(_wlActiveEfed === 'all' ? _wlAllSubs : _wlAllSubs.filter(s => (s.efed||'').toLowerCase() === _wlActiveEfed));
+            // Hide section if nothing left
+            const remainingPills = pillsWrap.querySelectorAll('.wl-pill[data-wefed]:not([data-wefed="all"])');
+            if (!remainingPills.length) sec.style.display = 'none';
+          } catch(err) { console.warn('Remove watchlist failed', err); }
+        };
+        pill.appendChild(removeBtn);
+      }
+
+      pill.onclick = (e) => { if (e.target.classList.contains('wl-pill-remove')) return; setWlFilter(efed.toLowerCase()); };
+      pillsWrap.appendChild(pill);
+    });
+
+    // Pill scroll arrows
+    setTimeout(() => {
+      const left = document.getElementById('wl-pills-arr-left');
+      const right = document.getElementById('wl-pills-arr-right');
+      if (right) right.classList.toggle('hidden', pillsWrap.scrollWidth <= pillsWrap.clientWidth);
+      if (left) left.classList.add('hidden');
+    }, 50);
+    pillsWrap.onscroll = () => {
+      const left = document.getElementById('wl-pills-arr-left');
+      const right = document.getElementById('wl-pills-arr-right');
+      if (left) left.classList.toggle('hidden', pillsWrap.scrollLeft <= 0);
+      if (right) right.classList.toggle('hidden', pillsWrap.scrollLeft + pillsWrap.clientWidth >= pillsWrap.scrollWidth - 4);
+    };
+
+    renderWlVideos(subs);
+
+  } catch(e) { console.warn('Watch List section failed', e); }
+}
+
+function setWlFilter(efed) {
+  _wlActiveEfed = efed;
+  document.querySelectorAll('#wl-pills-wrap .wl-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.wefed === efed || (efed === 'all' && p.dataset.wefed === 'all'));
+  });
+  const filtered = efed === 'all' ? _wlAllSubs : _wlAllSubs.filter(s => (s.efed||'').toLowerCase() === efed);
+  renderWlVideos(filtered);
+}
+
+function renderWlVideos(subs) {
+  const videoRow = document.getElementById('wl-video-row');
+  if (!videoRow) return;
+  if (!subs.length) { videoRow.innerHTML = '<div class="empty">No videos for this eFed yet.</div>'; return; }
+  videoRow.innerHTML = subs.map(s => makeVidCard(s.url, s.show_name, s.date, s.thumb_url)).join('');
+  videoRow.onscroll = () => {
+    const left = document.getElementById('wl-arr-left');
+    const right = document.getElementById('wl-arr-right');
+    if (left) left.classList.toggle('hidden', videoRow.scrollLeft <= 0);
+    if (right) right.classList.toggle('hidden', videoRow.scrollLeft + videoRow.clientWidth >= videoRow.scrollWidth - 4);
+  };
+  setTimeout(() => {
+    const right = document.getElementById('wl-arr-right');
+    if (right) right.classList.toggle('hidden', videoRow.scrollWidth <= videoRow.clientWidth);
+  }, 50);
+}
+
+function scrollWlPills(dir) {
+  const wrap = document.getElementById('wl-pills-wrap');
+  if (wrap) wrap.scrollBy({ left: dir * 140, behavior: 'smooth' });
+}
+
+function scrollWlRow(dir) {
+  const row = document.getElementById('wl-video-row');
+  if (row) row.scrollBy({ left: dir * 320, behavior: 'smooth' });
 }
 
 if (document.readyState === 'loading') {
