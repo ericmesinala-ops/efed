@@ -3053,17 +3053,22 @@ html, body { overscroll-behavior-y: none; }
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
       </button>
 
+      <!-- Part of Roster -->
+      <button class="expand-action-btn" id="expand-partof-btn" onclick="handlePartOfClick()" data-tip="Roster" style="display:none;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span id="expand-partof-label">Roster</span>
+      </button>
+
       <!-- Support -->
       <button class="expand-action-btn" id="expand-support-btn" onclick="openSupportConfirm()" data-tip="Support">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+        <span id="expand-support-label">Support</span>
       </button>
-
-      <!-- Add to eFed -->
-      
 
       <!-- Watch List -->
       <button class="expand-action-btn" id="expand-watchlist-btn" onclick="openWatchlistInfo()" data-tip="Watch List">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span id="expand-watchlist-label">Watch List</span>
       </button>
 
       <!-- Repost -->
@@ -3359,6 +3364,10 @@ function sortByDate(arr) {
 }
 
 function isMatch(v) {
+  // Admin override takes priority
+  if (v.sectionOverride === 'matches') return true;
+  if (v.sectionOverride === 'latest') return false;
+  // 'both' falls through so auto-logic runs (video appears in both rows)
   const secs = v.durationSecs || 0;
   if (!secs) return false;
   const title = (v.show || '').toLowerCase();
@@ -3374,9 +3383,15 @@ function isMatch(v) {
   }
   return false;
 }
+function isLatest(v) {
+  if (v.sectionOverride === 'latest') return true;
+  if (v.sectionOverride === 'both') return true;
+  if (v.sectionOverride === 'matches') return false;
+  return !isMatch(v);
+}
 function filteredVideos() {
   const list = activeFilter === 'all' ? [...videos] : videos.filter(v => v.efed === activeFilter);
-  return sortByDate(list.filter(v => !isMatch(v)));
+  return sortByDate(list.filter(v => isLatest(v)));
 }
 function buildPills() {
   const efeds = [...new Set(videos.map(v => v.efed).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -4045,19 +4060,20 @@ function confirmMoveCategory() {
   const v = _moveCatVideo; const btn = _moveCatBtn;
   if (!v) return;
   const curMatch = isMatch(v);
-  const newDuration = curMatch ? 99999 : 60;
+  // Use section_override instead of duration hack
+  const newOverride = curMatch ? 'latest' : 'matches';
   const confirmBtn = document.getElementById('move-cat-confirm-btn');
   confirmBtn.disabled = true; confirmBtn.textContent = 'Moving…';
   fetch(SUPABASE_URL + '/rest/v1/submissions?url=eq.' + encodeURIComponent(v.url), {
     method: 'PATCH', headers: SB_HEADERS,
-    body: JSON.stringify({ duration_seconds: newDuration })
+    body: JSON.stringify({ section_override: newOverride })
   }).then(r => {
     if (r.ok) {
-      v.durationSecs = newDuration;
+      v.sectionOverride = newOverride;
       closeMoveModal();
       showToast(curMatch ? '✅ Moved to Full Episodes' : '✅ Moved to Best Matches');
       buildPills(); renderGrid(); loadBestMatches(videos);
-      if (btn) btn.title = curMatch ? 'Move to Best Matches' : 'Move to Full Episodes';
+      if (btn) btn.title = isMatch(v) ? 'Move to Full Episodes' : 'Move to Best Matches';
     } else {
       showToast('Could not move. Try again.');
       confirmBtn.disabled = false; confirmBtn.textContent = 'Move';
@@ -4236,7 +4252,7 @@ function sbGetWithTimeout(table, filters, ms = 5000) {
 async function loadMostViewed(allVideos) {
   try {
     // Get all approved video IDs
-    const toFetch = allVideos.filter(v => v.url && !isMatch(v));
+    const toFetch = allVideos.filter(v => v.url && isLatest(v));
     if (!toFetch.length) return;
 
     // Extract YouTube video IDs
@@ -4300,7 +4316,7 @@ function loadRecentlyAdded(allVideos) {
 
     // Sort by submittedAt desc (most recently submitted to the hub)
     const sorted = [...allVideos]
-      .filter(v => v.url && !isMatch(v))
+      .filter(v => v.url && isLatest(v))
       .sort((a, b) => {
         const ta = b.submittedAt || b.dateMs || (b.date ? new Date(b.date).getTime() : 0);
         const tb = a.submittedAt || a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
@@ -4462,12 +4478,12 @@ async function initHub() {
   // Fetch durations first so isMatch() works before any row builds
   (async () => {
     try {
-      const dbDurRows = await sbGet('submissions', 'status=eq.approved&select=url,duration_seconds').catch(() => []);
+      const dbDurRows = await sbGet('submissions', 'status=eq.approved&select=url,duration_seconds,section_override').catch(() => []);
       dbDurRows.forEach(r => {
-        if (r.duration_seconds) {
-          const v = videos.find(v => v.url === r.url);
-          if (v) v.durationSecs = r.duration_seconds;
-        }
+        const v = videos.find(v => v.url === r.url);
+        if (!v) return;
+        if (r.duration_seconds) v.durationSecs = r.duration_seconds;
+        if (r.section_override) v.sectionOverride = r.section_override;
       });
       const stillNeed = videos.filter(v => v.url && !v.durationSecs && !v.url.includes('twitch'));
       for (let i = 0; i < stillNeed.length; i += 50) {
@@ -6838,16 +6854,20 @@ function openExpand(v) {
 
   // Watchlist button - check if current video's eFed is in user's watch list
   const watchlistBtn = document.getElementById('expand-watchlist-btn');
+  const watchlistLbl = document.getElementById('expand-watchlist-label');
   watchlistBtn.classList.remove('watchlisted');
+  if (watchlistLbl) watchlistLbl.textContent = 'Watch List';
   if (session && v.efed) {
     const wKey = v.efed.toLowerCase();
     if (_expandWatchlist[wKey] !== undefined) {
       watchlistBtn.classList.toggle('watchlisted', !!_expandWatchlist[wKey]);
+      if (watchlistLbl) watchlistLbl.textContent = _expandWatchlist[wKey] ? 'Watching' : 'Watch List';
     } else {
       sbGet('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username) + '&efed_name=eq.' + encodeURIComponent(v.efed))
         .then(rows => {
           _expandWatchlist[wKey] = rows.length > 0;
           watchlistBtn.classList.toggle('watchlisted', _expandWatchlist[wKey]);
+          if (watchlistLbl) watchlistLbl.textContent = _expandWatchlist[wKey] ? 'Watching' : 'Watch List';
         })
         .catch(() => {});
     }
@@ -7603,20 +7623,22 @@ async function toggleExpandWatchlist() {
   const btn = document.getElementById('expand-watchlist-btn');
   const isWatchlisted = btn.classList.contains('watchlisted');
 
+  const lbl = document.getElementById('expand-watchlist-label');
   try {
     if (isWatchlisted) {
       await sbDelete('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username) + '&efed_name=eq.' + encodeURIComponent(efedName));
       btn.classList.remove('watchlisted');
       _expandWatchlist[wKey] = false;
+      if (lbl) lbl.textContent = 'Watch List';
       showToast('Removed from Watch List.');
     } else {
       await sbInsert('efed_watchlist', { username: session.username, efed_name: efedName, added_at: Date.now() });
       btn.classList.add('watchlisted');
       _expandWatchlist[wKey] = true;
+      if (lbl) lbl.textContent = 'Watching';
       showToast('Added to Watch List! Find it on the home page.');
     }
   } catch(e) {
-    // May already exist — try a remove if insert fails
     console.warn('Watchlist toggle failed', e);
     showToast('Could not update Watch List. Try again.');
   }

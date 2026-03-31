@@ -1416,52 +1416,156 @@ async function updateQueueBadge() {
   } catch(e){}
 }
 
+// Track which destination pills are selected per queue item: { [id]: Set('latest'|'matches') }
+const _queuePillState = {};
+
+function _calcDefaultDest(r) {
+  const fw=['episode','tryout','tryouts','full show','part 1','part 2','part 3','network','supershow','season'];
+  const mw=[' vs ',' vs.','v. ',' match','full match','1v1','2v2','championship'];
+  const t=(r.title||'').toLowerCase();
+  if(r.is_upcoming) return new Set(['latest']);
+  if(r.duration_seconds>0&&r.duration_seconds<900) return new Set(['matches']);
+  if(r.duration_seconds>0&&r.duration_seconds<1800&&!fw.some(w=>t.includes(w))&&mw.some(w=>t.includes(w))) return new Set(['matches']);
+  return new Set(['latest']);
+}
+
+function _updateSubmitBtn(id) {
+  const btn = document.getElementById('q-submit-'+id);
+  if (!btn) return;
+  const sel = _queuePillState[id];
+  const hasSelection = sel && sel.size > 0;
+  btn.disabled = !hasSelection;
+  btn.style.opacity = hasSelection ? '1' : '.38';
+  btn.style.cursor = hasSelection ? 'pointer' : 'not-allowed';
+}
+
+function _toggleQueuePill(id, pill) {
+  if (!_queuePillState[id]) _queuePillState[id] = new Set();
+  const sel = _queuePillState[id];
+  if (sel.has(pill)) { sel.delete(pill); } else { sel.add(pill); }
+  // Re-render pill appearances
+  ['latest','matches'].forEach(p => {
+    const el = document.getElementById('q-pill-'+p+'-'+id);
+    if (!el) return;
+    const active = sel.has(p);
+    if (p === 'latest') {
+      el.style.background = active ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.06)';
+      el.style.borderColor = active ? 'rgba(255,255,255,.5)' : 'rgba(255,255,255,.15)';
+      el.style.color = active ? '#fff' : 'rgba(255,255,255,.45)';
+      el.style.boxShadow = active ? '0 0 0 1px rgba(255,255,255,.15)' : 'none';
+    } else {
+      el.style.background = active ? 'rgba(192,0,14,.22)' : 'rgba(192,0,14,.07)';
+      el.style.borderColor = active ? 'rgba(192,0,14,.6)' : 'rgba(192,0,14,.2)';
+      el.style.color = active ? '#ff8080' : 'rgba(255,107,107,.45)';
+      el.style.boxShadow = active ? '0 0 0 1px rgba(192,0,14,.2)' : 'none';
+    }
+  });
+  _updateSubmitBtn(id);
+}
+
+function _buildQueueItem(r) {
+  const durStr = r.duration_seconds>0
+    ? '<span style="font-size:.6rem;font-family:monospace;color:rgba(255,255,255,.5);background:rgba(255,255,255,.06);border-radius:4px;padding:2px 7px;">'+Math.floor(r.duration_seconds/60)+'m'+String(r.duration_seconds%60).padStart(2,'0')+'s</span>'
+    : '';
+
+  const defaultSel = _calcDefaultDest(r);
+  _queuePillState[r.id] = defaultSel;
+
+  const pillLatestActive = defaultSel.has('latest');
+  const pillMatchesActive = defaultSel.has('matches');
+
+  const pillLatestStyle = `cursor:pointer;font-size:.6rem;font-weight:700;letter-spacing:.8px;border-radius:20px;padding:3px 10px;border:1px solid;transition:all .15s;
+    background:${pillLatestActive?'rgba(255,255,255,.18)':'rgba(255,255,255,.06)'};
+    border-color:${pillLatestActive?'rgba(255,255,255,.5)':'rgba(255,255,255,.15)'};
+    color:${pillLatestActive?'#fff':'rgba(255,255,255,.45)'};
+    box-shadow:${pillLatestActive?'0 0 0 1px rgba(255,255,255,.15)':'none'};`;
+
+  const pillMatchesStyle = `cursor:pointer;font-size:.6rem;font-weight:700;letter-spacing:.8px;border-radius:20px;padding:3px 10px;border:1px solid;transition:all .15s;
+    background:${pillMatchesActive?'rgba(192,0,14,.22)':'rgba(192,0,14,.07)'};
+    border-color:${pillMatchesActive?'rgba(192,0,14,.6)':'rgba(192,0,14,.2)'};
+    color:${pillMatchesActive?'#ff8080':'rgba(255,107,107,.45)'};
+    box-shadow:${pillMatchesActive?'0 0 0 1px rgba(192,0,14,.2)':'none'};`;
+
+  const hasSelection = defaultSel.size > 0;
+
+  const item = document.createElement('div');
+  item.className = 'result-item'; item.id = 'q-'+r.id;
+  item.innerHTML = `
+    <div class="result-thumb"><img src="${esc(r.thumb_url||'')}" alt="" onerror="this.style.display='none'"></div>
+    <div class="result-info">
+      <div class="result-title">${esc(r.title||'')}</div>
+      <div class="result-meta" style="margin-bottom:6px;">${esc(r.efed)} · ${r.date}</div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+        ${durStr}
+        <span style="font-size:.55rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:600;margin-left:2px;">Send to:</span>
+        <button id="q-pill-latest-${r.id}" style="${pillLatestStyle}" onclick="_toggleQueuePill(${r.id},'latest')">📺 Latest Video</button>
+        <button id="q-pill-matches-${r.id}" style="${pillMatchesStyle}" onclick="_toggleQueuePill(${r.id},'matches')">🥊 Best Matches</button>
+      </div>
+      <div class="result-actions">
+        <button id="q-submit-${r.id}" class="btn btn-green btn-sm" onclick="approveQueued(${r.id})"
+          style="opacity:${hasSelection?'1':'.38'};cursor:${hasSelection?'pointer':'not-allowed'};"
+          ${hasSelection?'':'disabled'}>✓ Submit to Hub</button>
+        <button class="btn btn-red btn-sm" onclick="removeQueued(${r.id})">Remove</button>
+        <a href="${esc(r.url)}" target="_blank" class="btn btn-ghost btn-sm">▶ Watch</a>
+      </div>
+    </div>`;
+  return item;
+}
+
 async function loadQueue() {
   const list=document.getElementById('queue-list');
   const countEl=document.getElementById('queue-count');
   list.innerHTML='<div class="empty"><div class="empty-icon">⏳</div>Loading...</div>';
   try {
+    // Only load undecided (pending) items — submitted and skipped are excluded
     const rows=await sbGet('scan_results','status=eq.pending&order=scanned_at.desc');
     if(countEl) countEl.textContent=rows.length?'· '+rows.length+' pending':'';
     if(!rows.length){list.innerHTML='<div class="empty"><div class="empty-icon">🗂️</div>Queue is empty.</div>';return;}
     list.innerHTML='';
-    rows.forEach(r=>{
-      const fw=['episode','tryout','tryouts','full show','part 1','part 2','part 3','network','supershow','season'];
-      const mw=[' vs ',' vs.','v. ',' match','full match','1v1','2v2','championship'];
-      const t=(r.title||'').toLowerCase();
-      const durStr=r.duration_seconds>0?('<span style="font-size:.6rem;font-family:monospace;color:rgba(255,255,255,.5);background:rgba(255,255,255,.06);border-radius:4px;padding:2px 7px;">'+Math.floor(r.duration_seconds/60)+'m'+String(r.duration_seconds%60).padStart(2,'0')+'s</span>'):'';
-      const dest=r.is_upcoming?'<span style="font-size:.6rem;font-weight:700;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);color:var(--gold);border-radius:4px;padding:2px 8px;">⏰ UPCOMING</span>':(r.duration_seconds>0&&r.duration_seconds<900)?'<span style="font-size:.6rem;font-weight:700;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;border-radius:4px;padding:2px 8px;">🥊 BEST MATCHES</span>':(r.duration_seconds>0&&r.duration_seconds<1800&&!fw.some(w=>t.includes(w))&&mw.some(w=>t.includes(w)))?'<span style="font-size:.6rem;font-weight:700;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;border-radius:4px;padding:2px 8px;">🥊 BEST MATCHES</span>':'<span style="font-size:.6rem;font-weight:700;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.5);border-radius:4px;padding:2px 8px;">📺 LATEST VIDEOS</span>';
-      const item=document.createElement('div');
-      item.className='result-item';item.id='q-'+r.id;
-      item.innerHTML='<div class="result-thumb"><img src="'+esc(r.thumb_url||'')+'" alt="" onerror="this.style.display=&quot;none&quot;"></div><div class="result-info"><div class="result-title">'+esc(r.title||'')+'</div><div class="result-meta" style="margin-bottom:5px;">'+esc(r.efed)+' · '+r.date+'</div><div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">'+durStr+' '+dest+'</div><div class="result-actions"><button class="btn btn-green btn-sm" onclick="approveQueued('+r.id+')">✓ Add to Hub</button><button class="btn btn-red btn-sm" onclick="skipQueued('+r.id+')">Skip</button><a href="'+esc(r.url)+'" target="_blank" class="btn btn-ghost btn-sm">▶ Watch</a></div></div>';
-      list.appendChild(item);
-    });
+    rows.forEach(r=>list.appendChild(_buildQueueItem(r)));
     updateQueueBadge();
   } catch(e){list.innerHTML='<div class="empty">Error loading queue.</div>';}
 }
 
 async function approveQueued(id) {
   const row=document.getElementById('q-'+id);
-  const btn=row?row.querySelector('.btn-green'):null;
-  if(btn){btn.disabled=true;btn.textContent='Adding...';}
+  const btn=document.getElementById('q-submit-'+id);
+  if(btn){btn.disabled=true;btn.textContent='Submitting...';}
   try {
     const rows=await sbGet('scan_results','id=eq.'+id);
     const r=rows[0]; if(!r) return;
-    await sbInsert('submissions',{url:r.url,video_id:r.video_id,show_name:r.title,efed:r.efed,date:r.date,date_ms:r.date_ms||Date.now(),submitted_by:ADMIN_USERNAME,submitted_at:Date.now(),community:true,status:r.is_upcoming?'upcoming':'approved',thumb_url:r.thumb_url||null,duration_seconds:r.duration_seconds||null});
+    const sel=_queuePillState[id]||new Set();
+    const hasLatest=sel.has('latest'), hasMatches=sel.has('matches');
+    const section_override=hasLatest&&hasMatches?'both':hasMatches?'matches':hasLatest?'latest':null;
+    await sbInsert('submissions',{url:r.url,video_id:r.video_id,show_name:r.title,efed:r.efed,date:r.date,date_ms:r.date_ms||Date.now(),submitted_by:ADMIN_USERNAME,submitted_at:Date.now(),community:true,status:r.is_upcoming?'upcoming':'approved',thumb_url:r.thumb_url||null,duration_seconds:r.duration_seconds||null,section_override});
     await sbUpdate('scan_results',{status:'approved'},'id=eq.'+id);
-    if(row){row.style.opacity='.3';row.style.pointerEvents='none';}
-    if(btn) btn.textContent='✓ Added';
-    toast('Added to Hub!'); loadStats(); updateQueueBadge();
-  } catch(e){if(btn){btn.disabled=false;btn.textContent='✓ Add to Hub';}toast('Error: '+e.message);}
+    // Remove from list entirely — submitted videos don't come back
+    if(row){ row.style.transition='opacity .25s'; row.style.opacity='0'; setTimeout(()=>{ row.remove(); _checkQueueEmpty(); },260); }
+    delete _queuePillState[id];
+    toast('✅ Submitted to Hub!'); loadStats(); updateQueueBadge();
+  } catch(e){if(btn){btn.disabled=false;btn.textContent='✓ Submit to Hub';}toast('Error: '+e.message);}
 }
 
-async function skipQueued(id) {
+async function removeQueued(id) {
   try {
     await sbUpdate('scan_results',{status:'skipped'},'id=eq.'+id);
     const el=document.getElementById('q-'+id);
-    if(el){el.style.opacity='.25';el.style.pointerEvents='none';}
+    if(el){ el.style.transition='opacity .2s'; el.style.opacity='0'; setTimeout(()=>{ el.remove(); _checkQueueEmpty(); },220); }
+    delete _queuePillState[id];
     updateQueueBadge();
   } catch(e){toast('Error: '+e.message);}
+}
+
+function _checkQueueEmpty() {
+  const list=document.getElementById('queue-list');
+  const countEl=document.getElementById('queue-count');
+  if(list&&!list.querySelector('.result-item')){
+    list.innerHTML='<div class="empty"><div class="empty-icon">🗂️</div>Queue is empty.</div>';
+    if(countEl) countEl.textContent='';
+  } else if(list&&countEl) {
+    const n=list.querySelectorAll('.result-item').length;
+    countEl.textContent=n?'· '+n+' pending':'';
+  }
 }
 
 async function clearQueue() {
