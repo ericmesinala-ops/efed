@@ -3742,8 +3742,9 @@ async function loadWatchlistRow() {
     if (!watchRows.length) { section.style.display = 'none'; return; }
     const efedNames = watchRows.map(r => r.efed_name);
 
-    const efedFilters = efedNames.map(n => 'efed.ilike.' + encodeURIComponent(n)).join(',');
-    const subs = await sbGet('submissions', 'status=eq.approved&or=(' + efedFilters + ')&order=date_ms.desc&limit=40');
+    // Use efed=in.("name1","name2") — quoted so spaces work, case handled client-side
+    const efedInList = efedNames.map(n => '"' + n.replace(/"/g, '') + '"').join(',');
+    const subs = await sbGet('submissions', 'status=eq.approved&efed=in.(' + efedInList + ')&order=date_ms.desc&limit=40');
     if (!subs.length) { section.style.display = 'none'; return; }
 
     section.style.display = '';
@@ -3801,7 +3802,7 @@ async function loadWatchlistRow() {
     section._renderWatchlist = renderWatchlistCards;
     renderWatchlistCards(subs);
 
-  } catch(e) { console.warn('Watchlist row failed', e); }
+  } catch(e) { console.error('Watchlist row failed:', e?.message || e); }
 }
 
 function setWatchlistFilter(efed, btn) {
@@ -6843,7 +6844,7 @@ function openExpand(v) {
     if (_expandWatchlist[wKey] !== undefined) {
       watchlistBtn.classList.toggle('watchlisted', !!_expandWatchlist[wKey]);
     } else {
-      sbGet('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username) + '&efed_name=ilike.' + encodeURIComponent(v.efed))
+      sbGet('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username) + '&efed_name=eq.' + encodeURIComponent(v.efed))
         .then(rows => {
           _expandWatchlist[wKey] = rows.length > 0;
           watchlistBtn.classList.toggle('watchlisted', _expandWatchlist[wKey]);
@@ -7604,7 +7605,7 @@ async function toggleExpandWatchlist() {
 
   try {
     if (isWatchlisted) {
-      await sbDelete('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username) + '&efed_name=ilike.' + encodeURIComponent(efedName));
+      await sbDelete('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username) + '&efed_name=eq.' + encodeURIComponent(efedName));
       btn.classList.remove('watchlisted');
       _expandWatchlist[wKey] = false;
       showToast('Removed from Watch List.');
