@@ -2750,6 +2750,36 @@ html, body { overscroll-behavior-y: none; }
     <div class="empty-state" id="empty-state">No videos match that filter yet.</div>
   </section>
 
+  <!-- ── WATCHLIST ── -->
+  <section class="section" id="section-watchlist" style="display:none;">
+    <div class="sec-head">
+      <div style="display:flex;flex-direction:column;gap:2px;">
+        <div class="swipe-hint" style="padding-left:13px;display:none;">Swipe to view more</div>
+        <div class="sec-title-wrap">
+          <div class="s-bar" style="background:#c8a84b;"></div>
+          <div class="sec-title">Watchlist</div>
+          <span class="sec-count" id="watchlist-count"></span>
+        </div>
+      </div>
+      <div style="font-size:.6rem;color:var(--muted);letter-spacing:1px;text-transform:uppercase;">Your Followed eFeds</div>
+    </div>
+    <div class="filter-outer" id="watchlist-filter-outer">
+      <button class="pill active filter-all-fixed" id="watchlist-filter-all" onclick="setWatchlistFilter('all',this)">All</button>
+      <button class="pill-arr left" id="watchlist-pills-arr-left" onclick="scrollWatchlistPills(-1)">&#8249;</button>
+      <div class="filter-wrap" id="watchlist-filter-wrap"></div>
+      <button class="pill-arr right" id="watchlist-pills-arr-right" onclick="scrollWatchlistPills(1)">&#8250;</button>
+    </div>
+    <div class="row-wrap">
+      <div class="arr-col left">
+        <button class="pill-arr left hidden" id="watchlist-arr-left" onclick="scrollNamedRow('watchlist',-1)">&#8249;</button>
+      </div>
+      <div class="card-grid" id="row-watchlist"></div>
+      <div class="arr-col right">
+        <button class="pill-arr right" id="watchlist-arr-right" onclick="scrollNamedRow('watchlist',1)">&#8250;</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ── MOST VIEWED ── -->
   <section class="section" id="section-most-viewed" style="display:none;">
     <div class="sec-head">
@@ -2870,24 +2900,6 @@ html, body { overscroll-behavior-y: none; }
   </section>
 
   <!-- ── WATCHLIST ── -->
-  <section class="section" id="section-watchlist" style="display:none;">
-    <div class="sec-head">
-      <div style="display:flex;flex-direction:column;gap:4px;">
-        <div class="sec-title-wrap">
-          <div class="s-bar" style="background:#c0000e;"></div>
-          <div class="sec-title">Watchlist</div>
-          <span class="sec-count" id="watchlist-count"></span>
-        </div>
-        <div style="font-size:.58rem;color:rgba(255,255,255,.55);letter-spacing:1px;font-style:italic;padding-left:15px;">Latest from your followed eFeds</div>
-      </div>
-    </div>
-    <div class="row-wrap">
-      <button class="pill-arr left hidden" id="watchlist-arr-left" onclick="scrollNamedRow('watchlist',-1)">&#8249;</button>
-      <div class="card-grid" id="row-watchlist"></div>
-      <button class="pill-arr right" id="watchlist-arr-right" onclick="scrollNamedRow('watchlist',1)">&#8250;</button>
-    </div>
-  </section>
-
   <!-- ── BOOKMARKED SHOWS ── -->
   <section class="section" id="section-bookmarks" style="display:none;">
     <div class="sec-head">
@@ -3720,44 +3732,87 @@ async function loadWatchlistRow() {
   if (!section || !grid) return;
   if (!session) { section.style.display = 'none'; return; }
   try {
-    // Get user's watchlist efed names
     const watchRows = await sbGet('efed_watchlist', 'username=eq.' + encodeURIComponent(session.username));
     if (!watchRows.length) { section.style.display = 'none'; return; }
     const efedNames = watchRows.map(r => r.efed_name);
 
-    // Get latest videos from those efeds (up to 40, newest first)
-    // PostgREST or() uses dot notation: efed.ilike.X
     const efedFilters = efedNames.map(n => 'efed.ilike.' + encodeURIComponent(n)).join(',');
     const subs = await sbGet('submissions', 'status=eq.approved&or=(' + efedFilters + ')&order=date_ms.desc&limit=40');
     if (!subs.length) { section.style.display = 'none'; return; }
 
     section.style.display = '';
-    countEl.textContent = ' · ' + subs.length;
-    grid.innerHTML = '';
 
-    subs.forEach(s => {
-      const v = videos.find(v => v.url === s.url) || {
-        url: s.url, show: s.show_name || '', efed: s.efed || '',
-        date: s.date || '', dateMs: s.date_ms || 0,
-        submittedBy: s.submitted_by || '', community: true, status: 'approved',
-        thumb: s.thumb_url || null,
-        tags: Array.isArray(s.tags) ? s.tags : (s.tags ? JSON.parse(s.tags) : [])
+    // Build pill list from followed eFeds that actually have videos
+    const efedWithVideos = [...new Set(subs.map(s => s.efed).filter(Boolean))];
+    const pillWrap = document.getElementById('watchlist-filter-wrap');
+    if (pillWrap) {
+      pillWrap.innerHTML = efedWithVideos.map(name =>
+        `<button class="pill" data-wfilter="${_esc(name)}" onclick="setWatchlistFilter('${_esc(name)}',this)">${_esc(name)}</button>`
+      ).join('');
+      // Update pill slider visibility
+      setTimeout(() => {
+        const left = document.getElementById('watchlist-pills-arr-left');
+        const right = document.getElementById('watchlist-pills-arr-right');
+        if (right) right.classList.toggle('hidden', pillWrap.scrollWidth <= pillWrap.clientWidth);
+        if (left) left.classList.add('hidden');
+      }, 50);
+      pillWrap.onscroll = () => {
+        const left = document.getElementById('watchlist-pills-arr-left');
+        const right = document.getElementById('watchlist-pills-arr-right');
+        if (left) left.classList.toggle('hidden', pillWrap.scrollLeft <= 0);
+        if (right) right.classList.toggle('hidden', pillWrap.scrollLeft + pillWrap.clientWidth >= pillWrap.scrollWidth - 4);
       };
-      const card = makeCard(v);
-      grid.appendChild(card);
-    });
+    }
 
-    grid.onscroll = () => {
-      const left = document.getElementById('watchlist-arr-left');
-      const right = document.getElementById('watchlist-arr-right');
-      if (left) left.classList.toggle('hidden', grid.scrollLeft <= 0);
-      if (right) right.classList.toggle('hidden', grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 4);
-    };
-    setTimeout(() => {
-      const right = document.getElementById('watchlist-arr-right');
-      if (right) right.classList.toggle('hidden', grid.scrollWidth <= grid.clientWidth);
-    }, 50);
+    // Store all subs for filtering
+    section._allSubs = subs;
+
+    function renderWatchlistCards(filtered) {
+      grid.innerHTML = '';
+      countEl.textContent = ' · ' + filtered.length;
+      filtered.forEach(s => {
+        const v = videos.find(v => v.url === s.url) || {
+          url: s.url, show: s.show_name || '', efed: s.efed || '',
+          date: s.date || '', dateMs: s.date_ms || 0,
+          submittedBy: s.submitted_by || '', community: true, status: 'approved',
+          thumb: s.thumb_url || null,
+          tags: Array.isArray(s.tags) ? s.tags : (s.tags ? JSON.parse(s.tags) : [])
+        };
+        grid.appendChild(makeCard(v));
+      });
+      grid.onscroll = () => {
+        const left = document.getElementById('watchlist-arr-left');
+        const right = document.getElementById('watchlist-arr-right');
+        if (left) left.classList.toggle('hidden', grid.scrollLeft <= 0);
+        if (right) right.classList.toggle('hidden', grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 4);
+      };
+      setTimeout(() => {
+        const right = document.getElementById('watchlist-arr-right');
+        if (right) right.classList.toggle('hidden', grid.scrollWidth <= grid.clientWidth);
+      }, 50);
+    }
+
+    section._renderWatchlist = renderWatchlistCards;
+    renderWatchlistCards(subs);
+
   } catch(e) { console.warn('Watchlist row failed', e); }
+}
+
+function setWatchlistFilter(efed, btn) {
+  const section = document.getElementById('section-watchlist');
+  if (!section || !section._allSubs) return;
+  // Update pill active states
+  document.getElementById('watchlist-filter-all')?.classList.toggle('active', efed === 'all');
+  document.querySelectorAll('#watchlist-filter-wrap .pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.wfilter === efed);
+  });
+  const filtered = efed === 'all' ? section._allSubs : section._allSubs.filter(s => (s.efed||'').toLowerCase() === efed.toLowerCase());
+  if (section._renderWatchlist) section._renderWatchlist(filtered);
+}
+
+function scrollWatchlistPills(dir) {
+  const wrap = document.getElementById('watchlist-filter-wrap');
+  if (wrap) wrap.scrollBy({ left: dir * 300, behavior: 'smooth' });
 }
 
 async function loadBookmarksRow() {
