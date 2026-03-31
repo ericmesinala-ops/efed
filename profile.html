@@ -4341,9 +4341,10 @@ function triggerInstall() {
 <!-- ── SETTINGS MODAL ── -->
 <div id="settings-bg" style="position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.7);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s;padding:20px;" onclick="handleSettingsBgClick(event)">
   <div id="settings-modal" style="width:100%;max-width:360px;background:#111115;border:1px solid rgba(255,255,255,.09);border-radius:16px;overflow:hidden;transform:scale(.96) translateY(6px);transition:transform .25s cubic-bezier(.16,1,.3,1);box-shadow:0 32px 80px rgba(0,0,0,.7);position:relative;max-height:90vh;display:flex;flex-direction:column;">
-    <div style="padding:20px 22px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;">
-      <span id="settings-title" style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:3px;color:#fff;">Settings</span>
-      <button onclick="closeSettings()" style="background:none;border:none;color:rgba(255,255,255,.5);cursor:pointer;padding:4px;font-size:.9rem;">✕</button>
+    <div style="padding:20px 22px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <button id="settings-back-btn" onclick="settingsBack()" style="display:none;background:none;border:none;color:rgba(255,255,255,.5);cursor:pointer;padding:4px;font-size:.9rem;flex-shrink:0;">←</button>
+      <span id="settings-title" style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:3px;color:#fff;flex:1;">Settings</span>
+      <button onclick="closeSettings()" style="background:none;border:none;color:rgba(255,255,255,.5);cursor:pointer;padding:4px;font-size:.9rem;flex-shrink:0;">✕</button>
     </div>
     <div style="padding:20px 22px 24px;overflow-y:auto;flex:1;">
       <div id="settings-menu">
@@ -4413,6 +4414,8 @@ function handleSettingsBgClick(e) {
 function settingsNav(panel) {
   document.getElementById('settings-menu').style.display = 'none';
   document.getElementById('settings-title').textContent = panel === 'password' ? 'Change Password' : 'Request Removal';
+  const backBtn = document.getElementById('settings-back-btn');
+  if (backBtn) backBtn.style.display = 'flex';
   ['password','removal'].forEach(p => {
     document.getElementById('settings-panel-' + p).style.display = p === panel ? 'block' : 'none';
   });
@@ -4432,6 +4435,8 @@ function settingsBack() {
   });
   document.getElementById('settings-menu').style.display = 'block';
   document.getElementById('settings-title').textContent = 'Settings';
+  const backBtn = document.getElementById('settings-back-btn');
+  if (backBtn) backBtn.style.display = 'none';
 }
 async function savePassword() {
   const session = getSession();
@@ -5319,239 +5324,6 @@ function copyCode(btn, code) {
   });
 }
 
-
-// ── SETTINGS ──
-async function openSettings() {
-  const session = getSession();
-  if (!session) return;
-  const displayName = session.displayName || session.username;
-
-  // Reset to menu view
-  settingsBack();
-  clearSettingsMsgs();
-  document.getElementById('settings-bg').classList.add('open');
-  document.body.style.overflow = 'hidden';
-}
-
-function settingsNav(panel) {
-  document.getElementById('settings-menu').style.display = 'none';
-  document.getElementById('settings-back-btn').style.display = 'flex';
-  const titles = { password: 'Change Password', removal: 'Request Removal' };
-  document.getElementById('settings-title').textContent = titles[panel] || 'Settings';
-  ['password','removal'].forEach(p => {
-    const el = document.getElementById('settings-panel-' + p);
-    if (el) el.style.display = p === panel ? 'block' : 'none';
-  });
-  // Inject password fields on demand
-  if (panel === 'password') {
-    document.getElementById('settings-pass-section').innerHTML = `
-      <label class="settings-label">Change Password</label>
-      <input class="settings-input" id="settings-cur-pass" type="password" placeholder="Current password" style="margin-bottom:8px" autocomplete="off">
-      <input class="settings-input" id="settings-new-pass" type="password" placeholder="New password (min 6 chars)" style="margin-bottom:8px" autocomplete="off">
-      <input class="settings-input" id="settings-confirm-pass" type="password" placeholder="Confirm new password" autocomplete="off">
-      <div class="settings-msg" id="settings-pass-msg"></div>
-      <button class="settings-save-btn" onclick="savePassword()">Update Password</button>`;
-  }
-}
-
-function settingsBack() {
-  ['password','removal'].forEach(p => {
-    const el = document.getElementById('settings-panel-' + p);
-    if (el) el.style.display = 'none';
-  });
-  document.getElementById('settings-menu').style.display = 'block';
-  document.getElementById('settings-back-btn').style.display = 'none';
-  document.getElementById('settings-title').textContent = 'Settings';
-}
-
-function closeSettings() {
-  document.getElementById('settings-bg').classList.remove('open');
-  document.body.style.overflow = '';
-}
-
-async function submitRemovalRequest() {
-  const session = getSession();
-  if (!session) return;
-  const url = document.getElementById('removal-url').value.trim();
-  const reason = document.getElementById('removal-reason').value;
-  const msg = document.getElementById('removal-msg');
-
-  if (!url) { msg.textContent = 'Please enter a YouTube URL.'; msg.style.color = '#ff6b6b'; msg.style.display = 'block'; return; }
-  if (!reason) { msg.textContent = 'Please select a reason.'; msg.style.color = '#ff6b6b'; msg.style.display = 'block'; return; }
-
-  try {
-    await sendNotification(
-      ADMIN_USERNAME,
-      'removal',
-      `🗑 Removal request from @${session.username}\n📎 ${url}\n📝 ${reason}`,
-      url
-    );
-    msg.textContent = '✅ Request sent. We\'ll review it shortly.';
-    msg.style.color = '#4caf64';
-    msg.style.display = 'block';
-    document.getElementById('removal-url').value = '';
-    document.getElementById('removal-reason').value = '';
-    setTimeout(() => { msg.style.display = 'none'; }, 4000);
-  } catch(e) {
-    msg.textContent = 'Could not send request. Try again.';
-    msg.style.color = '#ff6b6b';
-    msg.style.display = 'block';
-  }
-}
-
-function handleSettingsBgClick(e) {
-  if (e.target === document.getElementById('settings-bg')) closeSettings();
-}
-
-function clearSettingsMsgs() {
-  ['settings-pass-msg'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) { el.className = 'settings-msg'; el.textContent = ''; }
-  });
-}
-
-
-
-async function handleAvatarFile(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const session = getSession();
-  if (!session) return;
-  const msg = document.getElementById('settings-avatar-msg');
-  msg.textContent = 'Processing…';
-  msg.className = 'settings-msg';
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    const img = new Image();
-    img.onload = async () => {
-      const MAX = 200;
-      const canvas = document.createElement('canvas');
-      const scale = Math.min(MAX / img.width, MAX / img.height, 1);
-      canvas.width  = Math.round(img.width  * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-      // Update previews
-      const imgHtml = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
-      const preview = document.getElementById('settings-avatar-preview');
-      const previewMini = document.getElementById('settings-avatar-preview-mini');
-      if (preview) preview.innerHTML = imgHtml;
-      if (previewMini) previewMini.innerHTML = imgHtml;
-      document.getElementById('settings-avatar-remove-btn').style.display = 'block';
-      // Update nav
-      const navImg = document.getElementById('nav-avatar-img');
-      const navInitials = document.getElementById('nav-initials');
-      if (navImg) { navImg.src = dataUrl; navImg.style.display = 'block'; }
-      if (navInitials) navInitials.style.display = 'none';
-      // Save via Storage
-      try {
-        const storagePath = 'avatars/' + session.username + '_avatar';
-        const publicUrl = await uploadToStorage(dataUrl, 'avatars', storagePath);
-        await sbUpdate('users', { avatar_url: publicUrl }, `username=eq.${encodeURIComponent(session.username)}`);
-        session.avatarUrl = publicUrl;
-        localStorage.setItem('efed_session', JSON.stringify(session));
-        if (navImg) navImg.src = publicUrl;
-        showSettingsMsg('settings-avatar-msg', 'Photo saved!', 'success');
-      } catch(err) {
-        showSettingsMsg('settings-avatar-msg', 'Could not save. Try again.', 'error');
-      }
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-  event.target.value = '';
-}
-
-async function removeAvatar() {
-  const session = getSession();
-  if (!session) return;
-  try {
-    await sbUpdate('users', { avatar_url: null }, `username=eq.${encodeURIComponent(session.username)}`);
-    const initial = (session.displayName || session.username || '?')[0].toUpperCase();
-    const initHtml = `<span>${initial}</span>`;
-    const preview = document.getElementById('settings-avatar-preview');
-    const previewMini = document.getElementById('settings-avatar-preview-mini');
-    const fullSpan = document.getElementById('settings-avatar-initial-full');
-    const miniSpan = document.getElementById('settings-avatar-initial');
-    if (preview) { preview.innerHTML = ''; if (fullSpan) preview.appendChild(fullSpan); }
-    if (previewMini) { previewMini.innerHTML = ''; if (miniSpan) previewMini.appendChild(miniSpan); }
-    document.getElementById('settings-avatar-remove-btn').style.display = 'none';
-    const navImg = document.getElementById('nav-avatar-img');
-    const navInitials = document.getElementById('nav-initials');
-    if (navImg) { navImg.src = ''; navImg.style.display = 'none'; }
-    if (navInitials) navInitials.style.display = '';
-    session.avatarUrl = null;
-    localStorage.setItem('efed_session', JSON.stringify(session));
-    showSettingsMsg('settings-avatar-msg', 'Photo removed.', 'success');
-  } catch(e) {
-    showSettingsMsg('settings-avatar-msg', 'Could not remove. Try again.', 'error');
-  }
-}
-
-// Also restore avatar in comments
-function getAvatarHtml(avatarUrl, username) {
-  const initial = (username || '?')[0].toUpperCase();
-  if (avatarUrl) {
-    return `<img src="${avatarUrl}" style="width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.outerHTML='<div class=expand-comment-avatar>${initial}</div>'">`;
-  }
-  return `<div class="expand-comment-avatar">${initial}</div>`;
-}
-
-function showSettingsMsg(id, msg, type) {
-  const el = document.getElementById(id);
-  el.textContent = msg;
-  el.className = 'settings-msg ' + type;
-}
-
-async function saveDisplayName() {
-  const session = getSession();
-  if (!session) return;
-  const name = document.getElementById('settings-name').value.trim();
-  if (!name) return showSettingsMsg('settings-name-msg', 'Please enter a name.', 'error');
-  if (name.length > 24) return showSettingsMsg('settings-name-msg', 'Max 24 characters.', 'error');
-
-  try {
-    await sbUpdate('users', { display_name: name }, `username=eq.${encodeURIComponent(session.username)}`);
-    session.displayName = name;
-    localStorage.setItem('efed_session', JSON.stringify(session));
-    const nameEl = document.getElementById('nav-user-name');
-    const ddName = document.getElementById('dd-name');
-    if (nameEl) nameEl.textContent = name;
-    if (ddName) ddName.textContent = name;
-    showSettingsMsg('settings-name-msg', 'Name updated!', 'success');
-  } catch(err) {
-    showSettingsMsg('settings-name-msg', 'Could not save. Try again.', 'error');
-  }
-}
-
-async function savePassword() {
-  const session = getSession();
-  if (!session) return;
-  const curPass = document.getElementById('settings-cur-pass').value;
-  const newPass = document.getElementById('settings-new-pass').value;
-  const confirmPass = document.getElementById('settings-confirm-pass')?.value || '';
-  if (!curPass || !newPass) return showSettingsMsg('settings-pass-msg', 'Fill in all fields.', 'error');
-  if (newPass.length < 6) return showSettingsMsg('settings-pass-msg', 'New password must be at least 6 characters.', 'error');
-  if (newPass !== confirmPass) return showSettingsMsg('settings-pass-msg', 'New passwords do not match.', 'error');
-
-  async function hash(str) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-  }
-
-  try {
-    const users = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
-    if (!users.length) throw new Error('User not found');
-    if (users[0].password_hash !== await hash(curPass)) return showSettingsMsg('settings-pass-msg', 'Current password is incorrect.', 'error');
-    await sbUpdate('users', { password_hash: await hash(newPass) }, `username=eq.${encodeURIComponent(session.username)}`);
-    document.getElementById('settings-cur-pass').value = '';
-    document.getElementById('settings-new-pass').value = '';
-    const cf = document.getElementById('settings-confirm-pass'); if (cf) cf.value = '';
-    showSettingsMsg('settings-pass-msg', 'Password updated!', 'success');
-  } catch(err) {
-    showSettingsMsg('settings-pass-msg', 'Could not save. Try again.', 'error');
-  }
-}
 </script>
 
 <!-- ── SUBMIT MODAL ── -->
