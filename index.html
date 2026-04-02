@@ -2881,15 +2881,14 @@ html, body { overscroll-behavior-y: none; }
 
   <!-- ── MORE TOGGLE ── -->
   <div id="more-rows-toggle" onclick="toggleMoreRows()" style="display:flex;align-items:center;gap:10px;padding:0 56px;margin:8px 0;cursor:pointer;user-select:none;">
-    <div style="flex:1;height:1px;background:rgba(200,168,75,.2);"></div>
-    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 18px;border:1px solid rgba(200,168,75,.3);border-radius:20px;background:rgba(200,168,75,.06);transition:background .2s;" onmouseenter="this.style.background='rgba(200,168,75,.12)'" onmouseleave="this.style.background='rgba(200,168,75,.06)'">
+    <div style="flex:1;height:1px;background:rgba(255,255,255,.08);"></div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 18px;border:1px solid rgba(255,255,255,.15);border-radius:20px;background:rgba(255,255,255,.05);transition:background .2s;" onmouseenter="this.style.background='rgba(255,255,255,.1)'" onmouseleave="this.style.background='rgba(255,255,255,.05)'">
       <div style="display:flex;align-items:center;gap:6px;">
-        <span id="more-rows-label" style="font-size:.65rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;">More</span>
-        <svg id="more-rows-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2.5" stroke-linecap="round" style="transition:transform .25s;opacity:.7;"><polyline points="6 9 12 15 18 9"/></svg>
+        <span id="more-rows-label" style="font-size:.65rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.8);font-weight:700;">More Categories</span>
+        <svg id="more-rows-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.7)" stroke-width="2.5" stroke-linecap="round" style="transition:transform .25s;"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
-      <div style="font-size:.52rem;letter-spacing:1px;color:rgba(200,168,75,.5);text-transform:uppercase;">Showcases · Promos · Podcasts · My eFed · Bookmarks</div>
     </div>
-    <div style="flex:1;height:1px;background:rgba(200,168,75,.2);"></div>
+    <div style="flex:1;height:1px;background:rgba(255,255,255,.08);"></div>
   </div>
 
   <!-- ── COLLAPSIBLE MORE ROWS ── -->
@@ -4046,7 +4045,7 @@ function toggleMoreRows() {
   const open = wrap.style.display !== 'none';
   wrap.style.display = open ? 'none' : 'block';
   if (arrow) arrow.style.transform = open ? '' : 'rotate(180deg)';
-  if (label) label.textContent = open ? 'More' : 'Less';
+  if (label) label.textContent = open ? 'More Categories' : 'Less Categories';
 }
 
 function scrollNamedRow(name, dir) {
@@ -5762,30 +5761,22 @@ const _soSearch = (() => {
         const imgEl = document.getElementById('nav-avatar-img');
         if (imgEl) { imgEl.src = user.avatar_url; imgEl.style.display = 'block'; if (initialsEl) initialsEl.style.display = 'none'; }
       }
-      // Show eFed owner label + My eFed button
+      // Show eFed owner label
       if (ddEmail) {
         if ((user.is_efed_owner || user.role === 'owner') && user.promo_name) {
           ddEmail.textContent = 'Owner of ' + user.promo_name;
           ddEmail.style.color = '#c8a84b';
-          // Store in session for card claim button
           session.is_efed_owner = true;
           session.promo_name = user.promo_name;
           session.role = user.role;
           localStorage.setItem('efed_session', JSON.stringify(session));
-          // My eFed button — show for all efed owners
-          const myEfedBtn = document.getElementById('my-efed-btn');
-          if (myEfedBtn) {
-            myEfedBtn.style.display = 'flex';
-            myEfedBtn.onclick = () => { toggleDropdown(true); window.location.href = 'efed.html?e=' + encodeURIComponent(user.promo_name); };
-          }
         } else {
           ddEmail.textContent = 'EFED Member';
           ddEmail.style.color = '';
-          const myEfedBtn = document.getElementById('my-efed-btn');
-          if (myEfedBtn) myEfedBtn.style.display = 'none';
-          if (session.promoName) { delete session.promoName; localStorage.setItem('efed_session', JSON.stringify(session)); }
         }
       }
+      // My eFed button — show for owners AND roster members
+      loadMyEfedBtn();
     }
   } catch(_) {} // non-critical — nav still works from local session
   loadMyEfedsRow();
@@ -5838,13 +5829,88 @@ async function confirmClaim() {
   }
 }
 
+// ── MY EFED BUTTON — shared logic ──
+let _myEfedList = []; // cached list for current session
+
+async function loadMyEfedBtn() {
+  const session = getSession();
+  if (!session) return;
+  const btn = document.getElementById('my-efed-btn');
+  if (!btn) return;
+
+  try {
+    const [userRows, rosterRows] = await Promise.all([
+      sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
+      sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&select=efed,status`)
+    ]);
+    const user = userRows[0];
+    const efeds = [];
+    const seen = new Set();
+
+    if ((user?.is_efed_owner || user?.role === 'owner') && user?.promo_name) {
+      seen.add(user.promo_name.toLowerCase());
+      efeds.push(user.promo_name);
+    }
+    for (const r of (rosterRows || []).filter(r => r.status === 'approved' && r.efed)) {
+      if (!seen.has(r.efed.toLowerCase())) {
+        seen.add(r.efed.toLowerCase());
+        efeds.push(r.efed);
+      }
+    }
+
+    _myEfedList = efeds;
+
+    if (!efeds.length) { btn.style.display = 'none'; return; }
+
+    btn.style.display = 'flex';
+    btn.onclick = () => {
+      toggleDropdown(true);
+      if (efeds.length === 1) {
+        window.location.href = 'efed.html?e=' + encodeURIComponent(efeds[0]);
+      } else {
+        openMyEfedPicker(efeds);
+      }
+    };
+  } catch(e) {
+    const btn2 = document.getElementById('my-efed-btn');
+    if (btn2) btn2.style.display = 'none';
+  }
+}
+
+function openMyEfedPicker(efeds) {
+  let modal = document.getElementById('myefed-picker-bg');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'myefed-picker-bg';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.7);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:20px;';
+    modal.innerHTML = `
+      <div onclick="event.stopPropagation()" style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:340px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.7);">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#fff;margin-bottom:4px;">My eFeds</div>
+        <div style="font-size:.72rem;color:#8a8a9a;margin-bottom:18px;">Choose which eFed to visit</div>
+        <div id="myefed-picker-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+        <button onclick="document.getElementById('myefed-picker-bg').style.display='none'" style="width:100%;margin-top:16px;padding:10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:600;cursor:pointer;">Cancel</button>
+      </div>`;
+    modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+    document.body.appendChild(modal);
+  }
+
+  const list = document.getElementById('myefed-picker-list');
+  list.innerHTML = efeds.map(name => `
+    <a href="efed.html?e=${encodeURIComponent(name)}"
+       style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;text-decoration:none;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;transition:background .15s;"
+       onmouseenter="this.style.background='rgba(255,255,255,.09)'" onmouseleave="this.style.background='rgba(255,255,255,.04)'">
+      <div style="width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c8a84b;flex-shrink:0;">${name[0].toUpperCase()}</div>
+      ${_esc(name)}
+    </a>`).join('');
+
+  modal.style.display = 'flex';
+}
+
 async function goToMyEfed() {
   toggleDropdown(true);
   const session = getSession();
   const name = session?.promo_name || session?.promoName || '';
   if (!name) { window.location.href = 'efed.html'; return; }
-
-  // Always show welcome on first visit — check if videos exist to tailor the message
   try {
     const existing = await sbGet('submissions', `efed=eq.${encodeURIComponent(name)}&status=eq.approved&select=id&limit=1`);
     const hasVids = existing.length > 0 ? '1' : '0';
