@@ -2926,6 +2926,29 @@ html, body { overscroll-behavior-y: none; }
   </section>
 
   <!-- ── EFED OWNER ROW ── -->
+  <!-- ── PODCAST ROW ── -->
+  <section class="section" id="section-podcast" style="display:none;">
+    <div class="sec-head">
+      <div class="sec-title-wrap">
+        <div class="s-bar" style="background:#2ecc71;"></div>
+        <div>
+          <div class="sec-title" style="line-height:1;margin-bottom:3px;">Podcasts</div>
+          <div style="font-size:.65rem;letter-spacing:3px;text-transform:uppercase;color:#2ecc71;font-weight:700;line-height:1;">TALK SHOWS &amp; DISCUSSIONS</div>
+        </div>
+        <span class="sec-count" id="podcast-count"></span>
+      </div>
+    </div>
+    <div class="row-wrap">
+      <div class="arr-col left">
+        <button class="pill-arr left hidden" id="podcast-arr-left" onclick="scrollNamedRow('podcast',-1)">&#8249;</button>
+      </div>
+      <div class="card-grid" id="row-podcast"></div>
+      <div class="arr-col right">
+        <button class="pill-arr right" id="podcast-arr-right" onclick="scrollNamedRow('podcast',1)">&#8250;</button>
+      </div>
+    </div>
+  </section>
+
   <section class="section" id="section-efed-owner" style="display:none;">
     <div class="sec-head">
       <div style="display:flex;flex-direction:column;gap:4px;">
@@ -3407,6 +3430,7 @@ function isMatch(v) {
   if (v.submission_type === 'show') return false;
   if (v.submission_type === 'showcase') return false;
   if (v.submission_type === 'promo') return false;
+  if (v.submission_type === 'podcast') return false;
   // Admin override takes priority
   if (v.sectionOverride === 'matches') return true;
   if (v.sectionOverride === 'latest') return false;
@@ -3428,9 +3452,10 @@ function isMatch(v) {
 function isLatest(v) {
   // Upcoming videos never appear in latest row
   if (v.sectionOverride === 'upcoming' || v.status === 'upcoming') return false;
-  // Showcase/Promo types don't show in latest
+  // Showcase/Promo/Podcast types don't show in latest
   if (v.submission_type === 'showcase') return false;
   if (v.submission_type === 'promo') return false;
+  if (v.submission_type === 'podcast') return false;
   if (v.sectionOverride === 'latest') return true;
   if (v.sectionOverride === 'matches') return false;
   return !isMatch(v);
@@ -4087,12 +4112,14 @@ const _MOVE_DESTINATIONS = {
   latest:   { label: 'Episode or PLE',  color: 'rgba(192,0,14,.15)',    border: 'rgba(192,0,14,.4)',    text: '#ff6b6b',    override: 'latest',   type: null },
   matches:  { label: 'Match Only',      color: 'rgba(200,168,75,.15)',  border: 'rgba(200,168,75,.4)', text: 'var(--gold)', override: 'matches',  type: 'match' },
   showcase: { label: 'Showcase',        color: 'rgba(155,89,182,.15)',  border: 'rgba(155,89,182,.4)', text: '#b98be0',     override: null,       type: 'showcase' },
-  promo:    { label: 'Promo',           color: 'rgba(230,126,34,.15)',  border: 'rgba(230,126,34,.4)', text: '#e6923e',     override: null,       type: 'promo' }
+  promo:    { label: 'Promo',           color: 'rgba(230,126,34,.15)',  border: 'rgba(230,126,34,.4)', text: '#e6923e',     override: null,       type: 'promo' },
+  podcast:  { label: 'Podcast',         color: 'rgba(46,204,113,.15)',  border: 'rgba(46,204,113,.4)', text: '#2ecc71',     override: null,       type: 'podcast' }
 };
 
 function _getCurrentSection(v) {
   if (v.submission_type === 'showcase') return 'showcase';
   if (v.submission_type === 'promo') return 'promo';
+  if (v.submission_type === 'podcast') return 'podcast';
   if (isMatch(v)) return 'matches';
   return 'latest';
 }
@@ -4158,6 +4185,7 @@ function confirmMoveCategory(destKey) {
       loadBestMatches(videos);
       loadShowcaseRow(videos);
       loadPromosRow(videos);
+    loadPodcastRow(videos);
       loadRecentlyAdded(videos);
     } else {
       showToast('Could not move. Try again.');
@@ -4550,6 +4578,33 @@ function loadPromosRow(allVideos) {
   } catch(e) { console.error('Promos row failed:', e); }
 }
 
+function loadPodcastRow(allVideos) {
+  try {
+    const section = document.getElementById('section-podcast');
+    const grid = document.getElementById('row-podcast');
+    const count = document.getElementById('podcast-count');
+    if (!section || !grid) return;
+    const items = allVideos
+      .filter(v => v.url && v.submission_type === 'podcast' && v.status !== 'upcoming')
+      .sort((a, b) => {
+        const ta = b.submittedAt || b.dateMs || 0;
+        const tb = a.submittedAt || a.dateMs || 0;
+        return ta - tb;
+      });
+    if (!items.length) { section.style.display = 'none'; return; }
+    grid.innerHTML = '';
+    items.forEach(v => grid.appendChild(makeCard(v)));
+    if (count) count.textContent = ' · ' + items.length + ' video' + (items.length !== 1 ? 's' : '');
+    section.style.display = '';
+    setTimeout(() => {
+      const left = document.getElementById('podcast-arr-left');
+      const right = document.getElementById('podcast-arr-right');
+      if (left) left.classList.toggle('hidden', grid.scrollLeft <= 0);
+      if (right) right.classList.toggle('hidden', grid.scrollWidth <= grid.clientWidth);
+    }, 100);
+  } catch(e) { console.error('Podcast row failed:', e); }
+}
+
 async function initHub() {
   showSkeletons(8);
   buildPills();
@@ -4661,6 +4716,7 @@ async function initHub() {
     loadBestMatches(videos);
     loadShowcaseRow(videos);
     loadPromosRow(videos);
+    loadPodcastRow(videos);
   })();
   // ?play= param handled before initHub for instant open
 }
@@ -6234,6 +6290,7 @@ async function savePassword() {
             <div onclick="selectSubmitCat('match','Match Only','Best Matches')"        style="padding:11px 14px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.86rem;font-weight:600;cursor:pointer;border-top:1px solid rgba(255,255,255,.06);transition:background .1s;" onmouseenter="this.style.background='rgba(255,255,255,.07)'" onmouseleave="this.style.background=''">Match Only</div>
             <div onclick="selectSubmitCat('showcase','Showcase','Showcases')"          style="padding:11px 14px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.86rem;font-weight:600;cursor:pointer;border-top:1px solid rgba(255,255,255,.06);transition:background .1s;" onmouseenter="this.style.background='rgba(255,255,255,.07)'" onmouseleave="this.style.background=''">Showcase</div>
             <div onclick="selectSubmitCat('promo','Promo','Promos')"                   style="padding:11px 14px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.86rem;font-weight:600;cursor:pointer;border-top:1px solid rgba(255,255,255,.06);transition:background .1s;" onmouseenter="this.style.background='rgba(255,255,255,.07)'" onmouseleave="this.style.background=''">Promo</div>
+            <div onclick="selectSubmitCat('podcast','Podcast','Podcasts')"              style="padding:11px 14px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.86rem;font-weight:600;cursor:pointer;border-top:1px solid rgba(255,255,255,.06);transition:background .1s;" onmouseenter="this.style.background='rgba(255,255,255,.07)'" onmouseleave="this.style.background=''">Podcast</div>
           </div>
         </div>
         <div id="submit-cat-placement" style="display:none;font-size:.72rem;color:rgba(255,255,255,.45);margin-top:8px;letter-spacing:.2px;"></div>
@@ -6356,7 +6413,7 @@ function screenVideo(title, channel) {
   // Hard block — definitely not eFed
   const blockKeywords = [
     'mrbeast','ksi','pewdiepie','mkbhd','logan paul','jake paul','sidemen',
-    'reaction video','reacts to','podcast','episode review',
+    'reaction video','reacts to','episode review',
     'top 10','top 5','tier list',
     'vlog','prank','unboxing','tutorial','how to guide',
     'minecraft','fortnite','call of duty','gta','valorant','apex legends','fifa',
@@ -6772,6 +6829,7 @@ function doSubmitPost(submissionType) {
             loadBestMatches(videos);
             loadShowcaseRow(videos);
             loadPromosRow(videos);
+    loadPodcastRow(videos);
             window._heroFirstLoad = true;
             heroIdx = 0;
             buildHeroDots();
