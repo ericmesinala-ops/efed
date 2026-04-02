@@ -2645,12 +2645,10 @@ html, body { overscroll-behavior-y: none; }
 <!-- ── MOVE CATEGORY MODAL ── -->
 <div id="move-cat-modal-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.7);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeMoveModal()">
   <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:360px;padding:28px 24px;box-shadow:0 24px 60px rgba(0,0,0,.7);">
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#fff;margin-bottom:8px;" id="move-cat-title"></div>
-    <div style="font-size:.75rem;color:#8a8a9a;line-height:1.6;margin-bottom:24px;" id="move-cat-hint"></div>
-    <div style="display:flex;gap:10px;">
-      <button onclick="closeMoveModal()" style="flex:1;padding:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">Cancel</button>
-      <button id="move-cat-confirm-btn" onclick="confirmMoveCategory()" style="flex:1;padding:11px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.4);border-radius:10px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(200,168,75,.25)'" onmouseout="this.style.background='rgba(200,168,75,.15)'">Move</button>
-    </div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#fff;margin-bottom:4px;" id="move-cat-title">Move To…</div>
+    <div style="font-size:.72rem;color:#8a8a9a;line-height:1.6;margin-bottom:20px;" id="move-cat-hint"></div>
+    <div id="move-cat-options" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;"></div>
+    <button onclick="closeMoveModal()" style="width:100%;padding:10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:600;cursor:pointer;">Cancel</button>
   </div>
 </div>
 
@@ -2851,7 +2849,7 @@ html, body { overscroll-behavior-y: none; }
         <div class="s-bar" style="background:#9b59b6;"></div>
         <div>
           <div class="sec-title" style="line-height:1;margin-bottom:3px;">Showcases</div>
-          <div style="font-size:.65rem;letter-spacing:3px;text-transform:uppercase;color:#9b59b6;font-weight:700;line-height:1;">HIGHLIGHT REELS</div>
+          <div style="font-size:.65rem;letter-spacing:3px;text-transform:uppercase;color:#9b59b6;font-weight:700;line-height:1;">WRESTLER SPOTLIGHTS</div>
         </div>
       </div>
       <span class="sec-count" id="showcase-count"></span>
@@ -2874,7 +2872,7 @@ html, body { overscroll-behavior-y: none; }
         <div class="s-bar" style="background:#e67e22;"></div>
         <div>
           <div class="sec-title" style="line-height:1;margin-bottom:3px;">Promos</div>
-          <div style="font-size:.65rem;letter-spacing:3px;text-transform:uppercase;color:#e67e22;font-weight:700;line-height:1;">ON THE MIC</div>
+          <div style="font-size:.65rem;letter-spacing:3px;text-transform:uppercase;color:#e67e22;font-weight:700;line-height:1;">CUTS &amp; STORYLINES</div>
         </div>
       </div>
       <span class="sec-count" id="promos-count"></span>
@@ -4084,17 +4082,45 @@ function scrollPills(dir) {
 
 let _moveCatVideo = null, _moveCatBtn = null;
 
+// All possible move destinations with display config
+const _MOVE_DESTINATIONS = {
+  latest:   { label: '📺  Latest Videos',  color: 'rgba(192,0,14,.15)',    border: 'rgba(192,0,14,.4)',    text: '#ff6b6b',    override: 'latest',   type: null },
+  matches:  { label: '🥊  Best Matches',   color: 'rgba(200,168,75,.15)',  border: 'rgba(200,168,75,.4)', text: 'var(--gold)', override: 'matches',  type: 'match' },
+  showcase: { label: '🎬  Showcases',      color: 'rgba(155,89,182,.15)',  border: 'rgba(155,89,182,.4)', text: '#b98be0',     override: null,       type: 'showcase' },
+  promo:    { label: '🎤  Promos',         color: 'rgba(230,126,34,.15)',  border: 'rgba(230,126,34,.4)', text: '#e6923e',     override: null,       type: 'promo' }
+};
+
+function _getCurrentSection(v) {
+  if (v.submission_type === 'showcase') return 'showcase';
+  if (v.submission_type === 'promo') return 'promo';
+  if (isMatch(v)) return 'matches';
+  return 'latest';
+}
+
 function openMoveCategoryModal(v, btn) {
   _moveCatVideo = v;
   _moveCatBtn = btn;
-  const curMatch = isMatch(v);
-  document.getElementById('move-cat-title').textContent = curMatch ? 'Move to Full Episodes' : 'Move to Best Matches';
-  document.getElementById('move-cat-hint').textContent = curMatch
-    ? 'This will treat the video as a full show and remove it from Best Matches.'
-    : 'This will treat the video as a match and move it to Best Matches.';
-  document.getElementById('move-cat-confirm-btn').textContent = curMatch ? 'Move to Episodes' : 'Move to Matches';
-  const bg = document.getElementById('move-cat-modal-bg');
-  bg.style.display = 'flex';
+
+  const curSection = _getCurrentSection(v);
+  const hintEl = document.getElementById('move-cat-hint');
+  const optionsEl = document.getElementById('move-cat-options');
+
+  hintEl.textContent = 'Currently in: ' + _MOVE_DESTINATIONS[curSection].label.replace(/^[^\s]+\s+/, '');
+  optionsEl.innerHTML = '';
+
+  // Show all destinations except current
+  Object.entries(_MOVE_DESTINATIONS).forEach(([key, dest]) => {
+    if (key === curSection) return;
+    const btn2 = document.createElement('button');
+    btn2.style.cssText = `width:100%;padding:11px 14px;background:${dest.color};border:1px solid ${dest.border};border-radius:10px;color:${dest.text};font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;text-align:left;transition:opacity .15s;letter-spacing:.3px;`;
+    btn2.textContent = dest.label;
+    btn2.onmouseenter = () => btn2.style.opacity = '.75';
+    btn2.onmouseleave = () => btn2.style.opacity = '1';
+    btn2.onclick = () => confirmMoveCategory(key);
+    optionsEl.appendChild(btn2);
+  });
+
+  document.getElementById('move-cat-modal-bg').style.display = 'flex';
   document.body.style.overflow = 'hidden';
 }
 
@@ -4104,29 +4130,43 @@ function closeMoveModal() {
   _moveCatVideo = null; _moveCatBtn = null;
 }
 
-function confirmMoveCategory() {
+function confirmMoveCategory(destKey) {
   const v = _moveCatVideo; const btn = _moveCatBtn;
-  if (!v) return;
-  const curMatch = isMatch(v);
-  // Use section_override instead of duration hack
-  const newOverride = curMatch ? 'latest' : 'matches';
-  const confirmBtn = document.getElementById('move-cat-confirm-btn');
-  confirmBtn.disabled = true; confirmBtn.textContent = 'Moving…';
+  if (!v || !destKey) return;
+  const dest = _MOVE_DESTINATIONS[destKey];
+
+  // Disable all option buttons while saving
+  const optBtns = document.querySelectorAll('#move-cat-options button');
+  optBtns.forEach(b => { b.disabled = true; b.style.opacity = '.4'; });
+
+  const patchData = {};
+  // Set submission_type for showcase/promo, clear it for latest/matches
+  patchData.submission_type = dest.type || null;
+  // Set section_override for latest/matches, clear it for showcase/promo
+  patchData.section_override = dest.override || null;
+
   fetch(SUPABASE_URL + '/rest/v1/submissions?url=eq.' + encodeURIComponent(v.url), {
     method: 'PATCH', headers: SB_HEADERS,
-    body: JSON.stringify({ section_override: newOverride })
+    body: JSON.stringify(patchData)
   }).then(r => {
     if (r.ok) {
-      v.sectionOverride = newOverride;
+      v.submission_type = dest.type || null;
+      v.sectionOverride = dest.override || null;
       closeMoveModal();
-      showToast(curMatch ? '✅ Moved to Full Episodes' : '✅ Moved to Best Matches');
-      buildPills(); renderGrid(); loadBestMatches(videos);
-      if (btn) btn.title = isMatch(v) ? 'Move to Full Episodes' : 'Move to Best Matches';
+      showToast('✅ Moved to ' + dest.label.replace(/^[^\s]+\s+/, ''));
+      buildPills(); renderGrid();
+      loadBestMatches(videos);
+      loadShowcaseRow(videos);
+      loadPromosRow(videos);
+      loadRecentlyAdded(videos);
     } else {
       showToast('Could not move. Try again.');
-      confirmBtn.disabled = false; confirmBtn.textContent = 'Move';
+      optBtns.forEach(b => { b.disabled = false; b.style.opacity = '1'; });
     }
-  }).catch(() => { showToast('Could not move. Try again.'); confirmBtn.disabled = false; confirmBtn.textContent = 'Move'; });
+  }).catch(() => {
+    showToast('Could not move. Try again.');
+    optBtns.forEach(b => { b.disabled = false; b.style.opacity = '1'; });
+  });
 }
 
 function makeCard(v) {
@@ -4223,7 +4263,7 @@ function makeCard(v) {
     if (_mIsAdmin || _mIsPoster) {
       const moveBtn = document.createElement('button');
       moveBtn.className = 'card-move-btn';
-      moveBtn.title = v.durationSecs && isMatch(v) ? 'Move to Full Episodes' : 'Move to Best Matches';
+      moveBtn.title = 'Move to another section';
       moveBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>';
       moveBtn.onclick = (e) => {
         e.stopPropagation();
@@ -6172,17 +6212,14 @@ async function savePassword() {
 
     <!-- Category selector (shown after screening passes) -->
     <div id="submit-category-wrap" style="display:none;margin-bottom:16px;">
-      <label style="display:block;font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.5);font-weight:600;margin-bottom:8px;">What type of content is this?</label>
-      <select id="submit-category-select"
-        onchange="onSubmitCategorySelect(this.value)"
-        style="width:100%;padding:11px 14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.88rem;font-weight:600;outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right 14px center;">
-        <option value="" style="background:#111;">— Pick one —</option>
-        <option value="show" style="background:#111;">📺  Show — full episode or event</option>
-        <option value="match" style="background:#111;">🥊  Match — single match clip</option>
-        <option value="showcase" style="background:#111;">🎬  Showcase — highlight reel or montage</option>
-        <option value="promo" style="background:#111;">🎤  Promo — promo cut or mic work</option>
-      </select>
-      <div style="font-size:.62rem;color:rgba(255,255,255,.3);margin-top:7px;letter-spacing:.3px;">Will auto-submit as soon as you pick. Can be reassigned later if you make a mistake.</div>
+      <label style="display:block;font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.5);font-weight:600;margin-bottom:10px;">What type of content is this?</label>
+      <div style="display:flex;flex-direction:column;gap:7px;">
+        <button type="button" onclick="onSubmitCategorySelect('show')" style="width:100%;padding:11px 14px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);border-radius:9px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;text-align:left;transition:opacity .15s;letter-spacing:.3px;" onmouseenter="this.style.opacity='.75'" onmouseleave="this.style.opacity='1'">📺 &nbsp;Show &mdash; full episode or event</button>
+        <button type="button" onclick="onSubmitCategorySelect('match')" style="width:100%;padding:11px 14px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);border-radius:9px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;text-align:left;transition:opacity .15s;letter-spacing:.3px;" onmouseenter="this.style.opacity='.75'" onmouseleave="this.style.opacity='1'">🥊 &nbsp;Match &mdash; single match clip</button>
+        <button type="button" onclick="onSubmitCategorySelect('showcase')" style="width:100%;padding:11px 14px;background:rgba(155,89,182,.12);border:1px solid rgba(155,89,182,.3);border-radius:9px;color:#b98be0;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;text-align:left;transition:opacity .15s;letter-spacing:.3px;" onmouseenter="this.style.opacity='.75'" onmouseleave="this.style.opacity='1'">🎬 &nbsp;Showcase &mdash; focus on a specific wrestler</button>
+        <button type="button" onclick="onSubmitCategorySelect('promo')" style="width:100%;padding:11px 14px;background:rgba(230,126,34,.12);border:1px solid rgba(230,126,34,.3);border-radius:9px;color:#e6923e;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;text-align:left;transition:opacity .15s;letter-spacing:.3px;" onmouseenter="this.style.opacity='.75'" onmouseleave="this.style.opacity='1'">🎤 &nbsp;Promo &mdash; promo cut or storyline</button>
+      </div>
+      <div style="font-size:.62rem;color:rgba(255,255,255,.3);margin-top:8px;letter-spacing:.3px;">Submits immediately on selection. Can be reassigned later if needed.</div>
     </div>
 
     <!-- Event date input (shown after preview loads) -->
@@ -6241,8 +6278,6 @@ function openSubmitModal() {
   document.getElementById('submit-ok').style.display = 'none';
   const catWrap = document.getElementById('submit-category-wrap');
   if (catWrap) catWrap.style.display = 'none';
-  const catSel = document.getElementById('submit-category-select');
-  if (catSel) catSel.value = '';
 }
 
 function closeSubmitModal() {
@@ -6283,8 +6318,6 @@ function clearSubmitPreview() {
   document.getElementById('submit-ok').style.display = 'none';
   const catWrap = document.getElementById('submit-category-wrap');
   if (catWrap) catWrap.style.display = 'none';
-  const catSel = document.getElementById('submit-category-select');
-  if (catSel) catSel.value = '';
   const overrideBtn = document.getElementById('submit-override-btn');
   const notifyBtn = document.getElementById('submit-notify-btn');
   if (overrideBtn) overrideBtn.style.display = 'none';
@@ -6404,8 +6437,6 @@ async function fetchSubmitPreview() {
       showSubmitStatus('✅ Twitch content verified — choose a category below.', 'success');
       const catWrap = document.getElementById('submit-category-wrap');
       if (catWrap) catWrap.style.display = 'block';
-      const catSel = document.getElementById('submit-category-select');
-      if (catSel) { catSel.value = ''; setTimeout(() => catSel.focus(), 100); }
     } catch(e) {
       showSubmitStatus('', '');
       console.warn('Twitch preview failed', e);
@@ -6509,8 +6540,6 @@ async function fetchSubmitPreview() {
     // Show category dropdown — auto-submits on selection
     const catWrap = document.getElementById('submit-category-wrap');
     if (catWrap) catWrap.style.display = 'block';
-    const catSel = document.getElementById('submit-category-select');
-    if (catSel) { catSel.value = ''; setTimeout(() => catSel.focus(), 100); }
 
     // Pre-fill date if available
     // uploadDate stored in _fetchedMeta for submission
@@ -6567,8 +6596,6 @@ async function overrideAndSubmit() {
 
   const catWrap = document.getElementById('submit-category-wrap');
   if (catWrap) catWrap.style.display = 'block';
-  const catSel = document.getElementById('submit-category-select');
-  if (catSel) { catSel.value = ''; setTimeout(() => catSel.focus(), 100); }
 }
 
 function doSubmitPost(submissionType) {
