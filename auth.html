@@ -130,7 +130,7 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
 .stage {
   position:relative; z-index:2; min-height:100vh;
   display:flex; flex-direction:column; align-items:center; justify-content:center;
-  padding:28px 16px;
+  padding:28px 48px;
 }
 
 .logo { display:flex; flex-direction:column; align-items:center; margin-bottom:24px; }
@@ -324,9 +324,10 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
 
 @keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
 
-/* ── Desktop — give the card real room ── */
+/* ── Desktop — proportionally wider card and stage ── */
 @media(min-width:768px){
-  .card { max-width:560px; padding:44px 52px; }
+  .stage { padding:28px 80px; }
+  .card { max-width:600px; padding:44px 56px; }
   .panel-title { font-size:1.2rem; }
   .panel-sub { font-size:.84rem; }
   .field label { font-size:.74rem; }
@@ -337,7 +338,7 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
 
 /* ── Mobile overrides ── */
 @media(max-width:480px){
-  .card { padding:28px 18px; border-radius:16px; }
+  .card { padding:28px 26px; border-radius:16px; }
   .auth-logo-main { font-size:1.65rem !important; }
   .panel-title { font-size:1.05rem !important; }
   .panel-sub { font-size:.84rem !important; }
@@ -573,8 +574,8 @@ const SB_URL  = 'https://osbarvhklizidsffytye.supabase.co/rest/v1';
 const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
 const SB_HEAD = { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
 
-async function sbGet(table, query='') {
-  const r = await fetch(`${SB_URL}/${table}?${query}`, { headers: SB_HEAD });
+async function sbGet(table, query='', signal) {
+  const r = await fetch(`${SB_URL}/${table}?${query}`, { headers: SB_HEAD, signal });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -960,33 +961,17 @@ document.getElementById('auth-flavor').style.opacity = '1';
   // ── Fetch all approved YouTube video IDs from Supabase ──
   async function initHeroPool() {
     try {
-      const r = await fetch(
-        'https://osbarvhklizidsffytye.supabase.co/rest/v1/submissions?status=eq.approved&select=url',
-        {
-          headers: {
-            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM',
-            'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM'
-          }
-        }
-      );
-      if (r.ok) {
-        const rows = await r.json();
-        const ids = [];
-        rows.forEach(row => {
-          const id = extractYtId(row.url);
-          if (id) ids.push(id);
-        });
-        if (ids.length >= 5) {
-          pool = shuffle(ids);
-          console.log('[AuthHero] Loaded', pool.length, 'videos from Supabase');
-        } else {
-          throw new Error('Not enough results: ' + ids.length);
-        }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000); // 4s timeout
+      const rows = await sbGet('submissions', 'status=eq.approved&select=url', controller.signal);
+      clearTimeout(timeout);
+      const ids = rows.map(row => extractYtId(row.url)).filter(Boolean);
+      if (ids.length >= 5) {
+        pool = shuffle(ids);
       } else {
-        throw new Error('HTTP ' + r.status);
+        pool = shuffle(FALLBACK_IDS);
       }
     } catch(e) {
-      console.warn('[AuthHero] Falling back to hardcoded pool:', e.message);
       pool = shuffle(FALLBACK_IDS);
     }
     showNextHero();
