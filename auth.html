@@ -341,7 +341,7 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
 
 <div class="bg-layer">
   <div class="bg-hero-iframe-wrap">
-    <iframe id="auth-hero-iframe" src="" frameborder="0" allow="autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+    <iframe id="auth-hero-iframe" src="https://www.youtube.com/embed/P-q7UGmFeJc?autoplay=1&mute=1&start=20&loop=1&playlist=P-q7UGmFeJc&controls=0&disablekb=1&modestbranding=1&showinfo=0&rel=0&iv_load_policy=3&enablejsapi=1&playsinline=1" frameborder="0" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>
   </div>
   <div class="bg-hero-thumb" id="auth-hero-thumb"></div>
   <div class="bg-hero-fade" id="auth-hero-fade"></div>
@@ -1014,21 +1014,19 @@ document.getElementById('auth-flavor').style.opacity = '1';
     'alXOdewaemU','26o2oK-LOOc','nLdYNTxPK4g','kgxCddYL2Yo','pd7280pJGUY',
     'YSQlFynBMrE','r3Db2WTYLnY','xmh9ZOVxTt0','9mmCAFwKAMw','P6S0zC7nA9U'
   ];
-  const SKIP     = 20;
-  const isMobile = window.innerWidth <= 768;
-  const SHOW_MS  = isMobile ? 20000 : 8000;
-  const BLACK_MS = isMobile ? 5000  : 2000;
-  const FADE_MS  = isMobile ? 1000  : 800;
+  const SKIP   = 20;
+  const DUR_MS = 20000; // 20s per video then swap
 
   const iframe = document.getElementById('auth-hero-iframe');
   const thumb  = document.getElementById('auth-hero-thumb');
   const fade   = document.getElementById('auth-hero-fade');
   if (!iframe || !thumb || !fade) return;
 
-  fade.style.transition = 'opacity ' + (FADE_MS/1000) + 's ease';
-  fade.classList.add('active');
+  // First video already playing via hardcoded src — just fade in
+  fade.style.transition = 'opacity 1.2s ease';
+  setTimeout(() => fade.classList.remove('active'), 800);
 
-  let pool = [], idx = 0, timer = null;
+  let pool = [], idx = 1, timer = null; // start at 1 since idx 0 is hardcoded
 
   function shuffle(arr) {
     const a = arr.slice();
@@ -1049,49 +1047,28 @@ document.getElementById('auth-flavor').style.opacity = '1';
       + '?autoplay=1&mute=1&start=' + SKIP
       + '&loop=1&playlist=' + id
       + '&controls=0&disablekb=1&modestbranding=1'
-      + '&showinfo=0&rel=0&iv_load_policy=3&playsinline=1&enablejsapi=1';
+      + '&showinfo=0&rel=0&iv_load_policy=3&enablejsapi=1&playsinline=1';
   }
 
-  // postMessage play command — kicks the video if autoplay was suppressed
-  function forcePlay() {
-    try {
-      iframe.contentWindow.postMessage(JSON.stringify({
-        event: 'command', func: 'playVideo', args: []
-      }), '*');
-    } catch(e) {}
-  }
-
-  function showNextHero() {
+  function swapVideo() {
     if (!pool.length) return;
     const id = pool[idx % pool.length]; idx++;
 
+    // Show thumb of next video, fade to black, swap, fade back in
     thumb.style.backgroundImage = 'url(' + thumbUrl(id) + ')';
     thumb.classList.remove('hidden');
-
-    // Swap src
-    iframe.src = heroSrc(id);
-
-    // Force play after brief delay (catches cases where autoplay was blocked)
-    setTimeout(forcePlay, 1500);
-    setTimeout(forcePlay, 3000);
-
-    // Reveal — give the video 1s head start before fading in
-    setTimeout(() => {
-      fade.classList.remove('active');
-      setTimeout(() => thumb.classList.add('hidden'), 2000);
-    }, 1000);
-
-    clearTimeout(timer);
-    timer = setTimeout(fadeToBlack, SHOW_MS);
-  }
-
-  function fadeToBlack() {
     fade.classList.add('active');
+
+    setTimeout(() => {
+      iframe.src = heroSrc(id);
+      setTimeout(() => {
+        fade.classList.remove('active');
+        setTimeout(() => thumb.classList.add('hidden'), 1500);
+      }, 400);
+    }, 800);
+
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      iframe.src = '';
-      showNextHero();
-    }, BLACK_MS + FADE_MS);
+    timer = setTimeout(swapVideo, DUR_MS);
   }
 
   const SB_URL = 'https://osbarvhklizidsffytye.supabase.co/rest/v1';
@@ -1100,19 +1077,20 @@ document.getElementById('auth-flavor').style.opacity = '1';
   async function initHeroPool() {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 4000);
+      setTimeout(() => controller.abort(), 4000);
       const r = await fetch(SB_URL + '/submissions?status=eq.approved&select=url', {
         headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY },
         signal: controller.signal
       });
-      clearTimeout(timeout);
       const rows = await r.json();
       const ids = rows.map(row => extractYtId(row.url)).filter(Boolean);
       pool = shuffle(ids.length >= 5 ? ids : FALLBACK_IDS);
     } catch(e) {
       pool = shuffle(FALLBACK_IDS);
     }
-    showNextHero();
+    // Kick off cycling after first video has had time to play
+    clearTimeout(timer);
+    timer = setTimeout(swapVideo, DUR_MS);
   }
 
   if (document.readyState === 'complete') initHeroPool();
