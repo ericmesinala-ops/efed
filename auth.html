@@ -40,6 +40,39 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
   50%{background-position:-8px 18px} 75%{background-position:14px 8px}
   100%{background-position:-18px -4px}
 }
+
+/* ── Hero video background ── */
+.bg-hero-iframe-wrap {
+  position:absolute; inset:0; z-index:1; pointer-events:none; overflow:hidden;
+}
+.bg-hero-iframe-wrap iframe {
+  position:absolute; top:50%; left:50%;
+  width:177.78vh; height:100vh;
+  min-width:100%; min-height:56.25vw;
+  transform:translate(-50%,-50%) scale(1.08);
+  opacity:.22; pointer-events:none; border:none;
+  filter: blur(20px) saturate(55%);
+}
+.bg-hero-thumb {
+  position:absolute; inset:0; z-index:2;
+  background-size:cover; background-position:center;
+  transition:opacity 1.4s ease;
+}
+.bg-hero-thumb.hidden { opacity:0; pointer-events:none; }
+.bg-hero-fade {
+  position:absolute; inset:0; z-index:3;
+  background:#000; opacity:0; pointer-events:none;
+  transition:opacity 1.2s ease;
+}
+.bg-hero-fade.active { opacity:1; }
+.bg-hero-vignette {
+  position:absolute; inset:0; z-index:4; pointer-events:none;
+  background:
+    radial-gradient(ellipse 40% 72% at 50% 50%, rgba(7,7,10,.08) 0%, rgba(7,7,10,.65) 55%, rgba(7,7,10,.97) 100%),
+    linear-gradient(to right, rgba(7,7,10,1) 0%, rgba(7,7,10,1) 18%, rgba(7,7,10,.6) 32%, rgba(7,7,10,.6) 68%, rgba(7,7,10,1) 82%, rgba(7,7,10,1) 100%),
+    linear-gradient(to top, rgba(7,7,10,1) 0%, rgba(7,7,10,.82) 28%, rgba(7,7,10,.35) 58%, transparent 82%),
+    linear-gradient(to bottom, rgba(7,7,10,1) 0%, rgba(7,7,10,.82) 28%, rgba(7,7,10,.35) 58%, transparent 82%);
+}
 .scan {
   position:fixed; left:0; right:0; height:1px;
   background:linear-gradient(to right,transparent,rgba(192,0,14,.4),transparent);
@@ -302,7 +335,14 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
 </head>
 <body>
 
-<div class="bg-layer"></div>
+<div class="bg-layer">
+  <div class="bg-hero-iframe-wrap">
+    <iframe id="auth-hero-iframe" src="" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+  </div>
+  <div class="bg-hero-thumb" id="auth-hero-thumb"></div>
+  <div class="bg-hero-fade" id="auth-hero-fade"></div>
+  <div class="bg-hero-vignette"></div>
+</div>
 <div class="scan"></div>
 
 <div class="stage">
@@ -960,6 +1000,96 @@ document.getElementById('auth-flavor').style.opacity = '1';
 </script>
 </body>
 </html>
+
+<script>
+// ── HERO BACKGROUND: cycling YouTube videos ──
+(function() {
+  const FALLBACK_IDS = [
+    'P-q7UGmFeJc','hDOSqrSs5qc','tYCvQRDdap0','QnS_KW8Sqyo','4rOkRxtj-18',
+    'CB1gizSwLpU','tpH5WJU1xhE','vOusl_rKiFQ','mXuGkA8w-mw','7VmYD7CH60E',
+    'alXOdewaemU','26o2oK-LOOc','nLdYNTxPK4g','kgxCddYL2Yo','pd7280pJGUY',
+    'YSQlFynBMrE','r3Db2WTYLnY','xmh9ZOVxTt0','9mmCAFwKAMw','P6S0zC7nA9U'
+  ];
+  const SKIP    = 20;
+  const SHOW_MS = 12000;
+  const BLACK_MS= 5000;
+  const FADE_MS = 1200;
+
+  const iframe = document.getElementById('auth-hero-iframe');
+  const thumb  = document.getElementById('auth-hero-thumb');
+  const fade   = document.getElementById('auth-hero-fade');
+  if (!iframe || !thumb || !fade) return;
+
+  fade.style.transition = 'opacity ' + (FADE_MS/1000) + 's ease';
+
+  let pool = [], idx = 0, timer = null;
+
+  function extractYtId(url) {
+    if (!url) return null;
+    const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/);
+    return m ? m[1] : null;
+  }
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length-1; i > 0; i--) {
+      const j = Math.floor(Math.random()*(i+1));
+      [a[i],a[j]] = [a[j],a[i]];
+    }
+    return a;
+  }
+  function heroSrc(id) {
+    return 'https://www.youtube.com/embed/' + id
+      + '?autoplay=1&mute=1&start=' + SKIP
+      + '&loop=1&playlist=' + id
+      + '&controls=0&disablekb=1&modestbranding=1&showinfo=0&rel=0&iv_load_policy=3&playsinline=1';
+  }
+  function thumbUrl(id) { return 'https://i.ytimg.com/vi/' + id + '/maxresdefault.jpg'; }
+
+  function showNextHero() {
+    if (!pool.length) return;
+    const id = pool[idx % pool.length]; idx++;
+    thumb.style.backgroundImage = 'url(' + thumbUrl(id) + ')';
+    thumb.classList.remove('hidden');
+    iframe.src = heroSrc(id);
+    setTimeout(() => {
+      fade.classList.remove('active');
+      setTimeout(() => { thumb.classList.add('hidden'); }, 2000);
+    }, 80);
+    clearTimeout(timer);
+    timer = setTimeout(fadeToBlack, SHOW_MS);
+  }
+  function fadeToBlack() {
+    fade.classList.add('active');
+    clearTimeout(timer);
+    timer = setTimeout(() => { iframe.src = ''; showNextHero(); }, BLACK_MS + FADE_MS);
+  }
+
+  const SB_URL = 'https://osbarvhklizidsffytye.supabase.co/rest/v1';
+  const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
+
+  async function initHeroPool() {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const r = await fetch(SB_URL + '/submissions?status=eq.approved&select=url', {
+        headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY },
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+      const rows = await r.json();
+      const ids = rows.map(row => extractYtId(row.url)).filter(Boolean);
+      pool = shuffle(ids.length >= 5 ? ids : FALLBACK_IDS);
+    } catch(e) {
+      pool = shuffle(FALLBACK_IDS);
+    }
+    showNextHero();
+  }
+
+  fade.classList.add('active');
+  if (document.readyState === 'complete') initHeroPool();
+  else window.addEventListener('load', initHeroPool);
+})();
+</script>
 
 <script>
 (function(){
