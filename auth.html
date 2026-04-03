@@ -24,32 +24,51 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
 
 .bg-layer {
   position:fixed; inset:0; z-index:0;
-  overflow:hidden;
+  overflow:hidden; background:#07070a;
 }
-/* Hero image layers — two for crossfade */
-.bg-hero-img {
-  position:absolute; inset:0;
-  background-size:cover; background-position:center center;
-  transition:opacity 1.2s ease;
+/* Muted iframe stretches to cover full screen */
+.bg-hero-iframe-wrap {
+  position:absolute; inset:0; z-index:1; pointer-events:none; overflow:hidden;
 }
-.bg-hero-img.fade-out { opacity:0; }
-/* Cinematic overlays on top of hero */
-.bg-hero-overlay {
-  position:absolute; inset:0;
+.bg-hero-iframe-wrap iframe {
+  position:absolute; top:50%; left:50%;
+  width:177.78vh; height:100vh;
+  min-width:100%; min-height:56.25vw;
+  transform:translate(-50%,-50%);
+  opacity:.55; pointer-events:none; border:none;
+}
+/* Thumbnail shown while iframe loads */
+.bg-hero-thumb {
+  position:absolute; inset:0; z-index:2;
+  background-size:cover; background-position:center;
+  transition:opacity 1.4s ease;
+}
+.bg-hero-thumb.hidden { opacity:0; pointer-events:none; }
+/* Black fade for transitions */
+.bg-hero-fade {
+  position:absolute; inset:0; z-index:3;
+  background:#000; opacity:0; pointer-events:none;
+  transition:opacity .6s ease;
+}
+.bg-hero-fade.active { opacity:1; }
+/* Grain */
+.bg-hero-grain {
+  position:absolute; inset:0; z-index:4; opacity:.035; pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-size:200px; animation:grain 1s steps(2) infinite;
+}
+/* Vignette */
+.bg-hero-vignette {
+  position:absolute; inset:0; z-index:5; pointer-events:none;
   background:
-    linear-gradient(to bottom, rgba(7,7,10,.55) 0%, transparent 30%, transparent 60%, rgba(7,7,10,.82) 100%),
-    linear-gradient(to right, rgba(7,7,10,.45) 0%, transparent 50%),
-    radial-gradient(ellipse 70% 50% at 50% -5%, rgba(192,0,14,.18) 0%, transparent 65%);
-}
-.bg-layer::after {
-  content:''; position:absolute; inset:0; opacity:.035; pointer-events:none; z-index:1;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size:180px; animation:grain .8s steps(2) infinite;
+    linear-gradient(to right, rgba(7,7,10,.6) 0%, rgba(7,7,10,.15) 50%, transparent 100%),
+    linear-gradient(to top, rgba(7,7,10,.85) 0%, rgba(7,7,10,.1) 35%, transparent 60%),
+    linear-gradient(to bottom, rgba(7,7,10,.5) 0%, transparent 25%);
 }
 @keyframes grain {
-  0%{background-position:0 0} 25%{background-position:18px -14px}
-  50%{background-position:-8px 18px} 75%{background-position:14px 8px}
-  100%{background-position:-18px -4px}
+  0%{background-position:0 0} 25%{background-position:20px -15px}
+  50%{background-position:-10px 20px} 75%{background-position:15px 10px}
+  100%{background-position:-20px -5px}
 }
 .scan {
   position:fixed; left:0; right:0; height:1px;
@@ -308,9 +327,13 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
 <body>
 
 <div class="bg-layer">
-  <div class="bg-hero-img" id="hero-layer-a"></div>
-  <div class="bg-hero-img" id="hero-layer-b"></div>
-  <div class="bg-hero-overlay"></div>
+  <div class="bg-hero-iframe-wrap">
+    <iframe id="auth-hero-iframe" src="" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+  </div>
+  <div class="bg-hero-thumb" id="auth-hero-thumb"></div>
+  <div class="bg-hero-fade" id="auth-hero-fade"></div>
+  <div class="bg-hero-grain"></div>
+  <div class="bg-hero-vignette"></div>
 </div>
 <div class="scan"></div>
 
@@ -937,14 +960,33 @@ document.getElementById('auth-discover').style.opacity = '1';
 document.getElementById('auth-flavor').textContent = 'Over 650 Hours of eFed Content';
 document.getElementById('auth-flavor').style.opacity = '1';
 
-// ── HERO BACKGROUND: random cycling thumbnails from the hub's video pool ──
+// ── HERO BACKGROUND: muted YouTube iframe cycling through hub videos ──
 (function() {
-  const HERO_POOL = [
-    'P-q7UGmFeJc','hDOSqrSs5qc','tYCvQRDdap0','QnS_KW8Sqyo','4rOkRxtj-18',
-    'CB1gizSwLpU','tpH5WJU1xhE','vOusl_rKiFQ','mXuGkA8w-mw','7VmYD7CH60E',
-    'alXOdewaemU','26o2oK-LOOc','nLdYNTxPK4g','kgxCddYL2Yo','pd7280pJGUY',
-    'YSQlFynBMrE','r3Db2WTYLnY','xmh9ZOVxTt0','9mmCAFwKAMw','P6S0zC7nA9U'
+  const HERO_VIDEOS = [
+    { id: 'P-q7UGmFeJc' },
+    { id: 'hDOSqrSs5qc' },
+    { id: 'tYCvQRDdap0' },
+    { id: 'QnS_KW8Sqyo' },
+    { id: '4rOkRxtj-18' },
+    { id: 'CB1gizSwLpU' },
+    { id: 'tpH5WJU1xhE' },
+    { id: 'vOusl_rKiFQ' },
+    { id: 'mXuGkA8w-mw' },
+    { id: '7VmYD7CH60E' },
+    { id: 'alXOdewaemU' },
+    { id: '26o2oK-LOOc' },
+    { id: 'nLdYNTxPK4g' },
+    { id: 'kgxCddYL2Yo' },
+    { id: 'pd7280pJGUY' },
+    { id: 'YSQlFynBMrE' },
+    { id: 'r3Db2WTYLnY' },
+    { id: 'xmh9ZOVxTt0' },
+    { id: '9mmCAFwKAMw' },
+    { id: 'P6S0zC7nA9U' }
   ];
+
+  const SKIP = 20;   // seconds into video to start (skip intros)
+  const DUR  = 22000; // ms before cycling to next video
 
   function shuffle(arr) {
     const a = arr.slice();
@@ -955,50 +997,56 @@ document.getElementById('auth-flavor').style.opacity = '1';
     return a;
   }
 
-  const layerA = document.getElementById('hero-layer-a');
-  const layerB = document.getElementById('hero-layer-b');
-  const pool = shuffle(HERO_POOL);
-  let idx = 0;
-  let useA = true; // which layer is currently visible (front)
+  const pool  = shuffle(HERO_VIDEOS);
+  let idx     = 0;
+  let timer   = null;
+
+  const iframe = document.getElementById('auth-hero-iframe');
+  const thumb  = document.getElementById('auth-hero-thumb');
+  const fade   = document.getElementById('auth-hero-fade');
+
+  function heroSrc(id) {
+    return 'https://www.youtube.com/embed/' + id
+      + '?autoplay=1&mute=1&start=' + SKIP
+      + '&loop=1&playlist=' + id
+      + '&controls=0&disablekb=1&modestbranding=1'
+      + '&showinfo=0&rel=0&iv_load_policy=3&playsinline=1';
+  }
 
   function thumbUrl(id) {
     return 'https://i.ytimg.com/vi/' + id + '/maxresdefault.jpg';
   }
 
-  function preloadThumb(id, cb) {
-    const img = new Image();
-    img.onload = function() { cb(thumbUrl(id)); };
-    img.onerror = function() {
-      // maxres failed, try hq
-      const img2 = new Image();
-      img2.onload = function() { cb('https://i.ytimg.com/vi/' + id + '/hqdefault.jpg'); };
-      img2.onerror = function() { cb(null); };
-      img2.src = 'https://i.ytimg.com/vi/' + id + '/hqdefault.jpg';
-    };
-    img.src = thumbUrl(id);
-  }
-
-  function nextHero() {
-    const id = pool[idx % pool.length];
+  function loadHero(first) {
+    const vid = pool[idx % pool.length];
     idx++;
-    preloadThumb(id, function(url) {
-      if (!url) { nextHero(); return; }
-      const incoming = useA ? layerA : layerB;
-      const outgoing = useA ? layerB : layerA;
-      incoming.style.backgroundImage = 'url(' + url + ')';
-      incoming.style.opacity = '1';
-      outgoing.style.opacity = '0';
-      useA = !useA;
-    });
+
+    // Set thumbnail immediately
+    thumb.style.backgroundImage = 'url(' + thumbUrl(vid.id) + ')';
+    thumb.classList.remove('hidden');
+
+    if (first) {
+      // First load: no fade, just load iframe directly
+      iframe.src = heroSrc(vid.id);
+      // Once iframe is playing, fade out the thumb
+      setTimeout(() => { thumb.classList.add('hidden'); }, 2200);
+    } else {
+      // Transition: fade to black, swap, fade back
+      fade.classList.add('active');
+      setTimeout(() => {
+        iframe.src = heroSrc(vid.id);
+        setTimeout(() => {
+          fade.classList.remove('active');
+          setTimeout(() => { thumb.classList.add('hidden'); }, 1800);
+        }, 400);
+      }, 600);
+    }
+
+    clearTimeout(timer);
+    timer = setTimeout(() => loadHero(false), DUR);
   }
 
-  // Set first hero immediately (start with layer A)
-  layerA.style.opacity = '1';
-  layerB.style.opacity = '0';
-  nextHero();
-
-  // Cycle every 6 seconds
-  setInterval(nextHero, 6000);
+  loadHero(true);
 })();
 </script>
 </body>
