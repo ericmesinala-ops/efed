@@ -49,10 +49,9 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
 .bg-hero-iframe-wrap {
   position:absolute; inset:0; z-index:1; pointer-events:none; overflow:hidden;
 }
-.bg-hero-iframe-wrap iframe,
-.bg-hero-iframe-wrap #auth-hero-player {
+.bg-hero-iframe-wrap iframe {
   position:absolute; top:50%; left:50%;
-  width:177.78vh !important; height:100vh !important;
+  width:177.78vh; height:100vh;
   min-width:100%; min-height:56.25vw;
   transform:translate(-50%,-50%) scale(1.08);
   opacity:.22; pointer-events:none; border:none;
@@ -342,7 +341,7 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
 
 <div class="bg-layer">
   <div class="bg-hero-iframe-wrap">
-    <div id="auth-hero-player"></div>
+    <iframe id="auth-hero-iframe" src="" frameborder="0" allow="autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
   </div>
   <div class="bg-hero-thumb" id="auth-hero-thumb"></div>
   <div class="bg-hero-fade" id="auth-hero-fade"></div>
@@ -1007,10 +1006,7 @@ document.getElementById('auth-flavor').style.opacity = '1';
 </html>
 
 <script>
-// ── HERO BACKGROUND: YouTube IFrame API ──
-// The IFrame API is the only reliable way to guarantee autoplay+mute on modern browsers.
-// A plain iframe src with autoplay=1 is frequently blocked; the API's playVideo() call
-// after the player is READY bypasses that restriction.
+// ── HERO BACKGROUND ──
 (function() {
   const FALLBACK_IDS = [
     'P-q7UGmFeJc','hDOSqrSs5qc','tYCvQRDdap0','QnS_KW8Sqyo','4rOkRxtj-18',
@@ -1024,14 +1020,15 @@ document.getElementById('auth-flavor').style.opacity = '1';
   const BLACK_MS = isMobile ? 5000  : 2000;
   const FADE_MS  = isMobile ? 1000  : 800;
 
-  const thumb = document.getElementById('auth-hero-thumb');
-  const fade  = document.getElementById('auth-hero-fade');
-  if (!thumb || !fade) return;
+  const iframe = document.getElementById('auth-hero-iframe');
+  const thumb  = document.getElementById('auth-hero-thumb');
+  const fade   = document.getElementById('auth-hero-fade');
+  if (!iframe || !thumb || !fade) return;
 
   fade.style.transition = 'opacity ' + (FADE_MS/1000) + 's ease';
   fade.classList.add('active');
 
-  let pool = [], idx = 0, timer = null, player = null, playerReady = false;
+  let pool = [], idx = 0, timer = null;
 
   function shuffle(arr) {
     const a = arr.slice();
@@ -1047,25 +1044,42 @@ document.getElementById('auth-flavor').style.opacity = '1';
     return m ? m[1] : null;
   }
   function thumbUrl(id) { return 'https://i.ytimg.com/vi/' + id + '/maxresdefault.jpg'; }
+  function heroSrc(id) {
+    return 'https://www.youtube.com/embed/' + id
+      + '?autoplay=1&mute=1&start=' + SKIP
+      + '&loop=1&playlist=' + id
+      + '&controls=0&disablekb=1&modestbranding=1'
+      + '&showinfo=0&rel=0&iv_load_policy=3&playsinline=1&enablejsapi=1';
+  }
+
+  // postMessage play command — kicks the video if autoplay was suppressed
+  function forcePlay() {
+    try {
+      iframe.contentWindow.postMessage(JSON.stringify({
+        event: 'command', func: 'playVideo', args: []
+      }), '*');
+    } catch(e) {}
+  }
 
   function showNextHero() {
-    if (!pool.length || !playerReady) return;
+    if (!pool.length) return;
     const id = pool[idx % pool.length]; idx++;
 
-    // Show thumbnail immediately while video loads
     thumb.style.backgroundImage = 'url(' + thumbUrl(id) + ')';
     thumb.classList.remove('hidden');
 
-    // Load and play via API — this actually works unlike iframe src autoplay
-    player.loadVideoById({ videoId: id, startSeconds: SKIP });
-    player.mute();
-    player.playVideo();
+    // Swap src
+    iframe.src = heroSrc(id);
 
+    // Force play after brief delay (catches cases where autoplay was blocked)
+    setTimeout(forcePlay, 1500);
+    setTimeout(forcePlay, 3000);
+
+    // Reveal — give the video 1s head start before fading in
     setTimeout(() => {
       fade.classList.remove('active');
-      // Hide thumb after video has had time to start
-      setTimeout(() => thumb.classList.add('hidden'), 2500);
-    }, 300);
+      setTimeout(() => thumb.classList.add('hidden'), 2000);
+    }, 1000);
 
     clearTimeout(timer);
     timer = setTimeout(fadeToBlack, SHOW_MS);
@@ -1075,49 +1089,10 @@ document.getElementById('auth-flavor').style.opacity = '1';
     fade.classList.add('active');
     clearTimeout(timer);
     timer = setTimeout(() => {
-      if (player && playerReady) player.stopVideo();
+      iframe.src = '';
       showNextHero();
     }, BLACK_MS + FADE_MS);
   }
-
-  // Called by YouTube API when script loads
-  window.onYouTubeIframeAPIReady = function() {
-    player = new YT.Player('auth-hero-player', {
-      width: '100%',
-      height: '100%',
-      playerVars: {
-        autoplay: 1,
-        mute: 1,
-        controls: 0,
-        disablekb: 1,
-        modestbranding: 1,
-        showinfo: 0,
-        rel: 0,
-        iv_load_policy: 3,
-        playsinline: 1,
-        start: SKIP
-      },
-      events: {
-        onReady: function(e) {
-          playerReady = true;
-          e.target.mute();
-          if (pool.length) showNextHero();
-        },
-        onStateChange: function(e) {
-          // If video ends or errors, move to next
-          if (e.data === YT.PlayerState.ENDED || e.data === YT.PlayerState.UNSTARTED) {
-            clearTimeout(timer);
-            fadeToBlack();
-          }
-        }
-      }
-    });
-  };
-
-  // Load IFrame API script
-  const tag = document.createElement('script');
-  tag.src = 'https://www.youtube.com/iframe_api';
-  document.head.appendChild(tag);
 
   const SB_URL = 'https://osbarvhklizidsffytye.supabase.co/rest/v1';
   const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
@@ -1137,8 +1112,7 @@ document.getElementById('auth-flavor').style.opacity = '1';
     } catch(e) {
       pool = shuffle(FALLBACK_IDS);
     }
-    // If player is already ready, start immediately
-    if (playerReady) showNextHero();
+    showNextHero();
   }
 
   if (document.readyState === 'complete') initHeroPool();
