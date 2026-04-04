@@ -5697,6 +5697,633 @@ async function savePassword() {
 </style>
 
 <script>
+let _fetchedMeta = null;
+let _fetchedMeta_broadcastStatus = null;
+let _fetchedMeta_scheduledMs = null;
+
+function openSubmitModal() {
+  const session = getSession();
+  if (!session) {
+    window.location.replace('auth.html');
+    return;
+  }
+  document.getElementById('submit-modal-bg').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  document.getElementById('submit-url').value = '';
+  _fetchedMeta = null;
+  _fetchedMeta_broadcastStatus = null;
+  _fetchedMeta_scheduledMs = null;
+  clearSubmitPreview();
+  document.getElementById('submit-err').style.display = 'none';
+  document.getElementById('submit-ok').style.display = 'none';
+}
+
+function closeSubmitModal() {
+  document.getElementById('submit-modal-bg').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function handleSubmitBgClick(e) {
+  if (e.target === document.getElementById('submit-modal-bg')) closeSubmitModal();
+}
+
+
+function showSubmitStatus(msg, type) {
+  const el = document.getElementById('submit-screening');
+  if (!el) return;
+  if (!msg) { el.style.display = 'none'; return; }
+  el.textContent = msg;
+  el.style.display = 'block';
+  if (type === 'info') {
+    el.style.background = 'rgba(255,255,255,.04)';
+    el.style.border = '1px solid rgba(255,255,255,.1)';
+    el.style.color = 'rgba(255,255,255,.6)';
+  } else if (type === 'success') {
+    el.style.background = 'rgba(76,175,138,.08)';
+    el.style.border = '1px solid rgba(76,175,138,.25)';
+    el.style.color = '#4caf8a';
+  } else if (type === 'error') {
+    el.style.background = 'rgba(192,0,14,.1)';
+    el.style.border = '1px solid rgba(192,0,14,.3)';
+    el.style.color = '#ff6b6b';
+  }
+}
+
+function resetSubmitCatDropdown() {
+  const catWrap = document.getElementById('submit-category-wrap');
+  if (catWrap) { catWrap.style.display = 'none'; catWrap.style.pointerEvents = ''; }
+  const menu = document.getElementById('submit-cat-menu');
+  if (menu) menu.style.display = 'none';
+  const arrow = document.getElementById('submit-cat-arrow');
+  if (arrow) arrow.style.transform = '';
+  const label = document.getElementById('submit-cat-label');
+  if (label) { label.textContent = '— Pick one —'; label.parentElement.style.color = 'rgba(255,255,255,.45)'; }
+  const placement = document.getElementById('submit-cat-placement');
+  if (placement) { placement.style.display = 'none'; placement.textContent = ''; }
+}
+
+function clearSubmitPreview() {
+  document.getElementById('submit-preview').style.display = 'none';
+  document.getElementById('submit-screening').style.display = 'none';
+  document.getElementById('submit-err').style.display = 'none';
+  document.getElementById('submit-ok').style.display = 'none';
+  resetSubmitCatDropdown();
+  const overrideBtn = document.getElementById('submit-override-btn');
+  const notifyBtn = document.getElementById('submit-notify-btn');
+  if (overrideBtn) overrideBtn.style.display = 'none';
+  if (notifyBtn) notifyBtn.style.display = 'none';
+  const btn = document.getElementById('submit-post-btn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '.35'; btn.style.cursor = 'not-allowed'; btn.textContent = 'Submit to Hub'; }
+}
+
+// ── SCREENING ENGINE (swap this function body for an API call when key available) ──
+function screenVideo(title, channel) {
+  const t = (title || '').toLowerCase();
+  const c = (channel || '').toLowerCase();
+  const combined = t + ' ' + c;
+
+  // Hard block — definitely not eFed
+  const blockKeywords = [
+    'mrbeast','ksi','pewdiepie','mkbhd','logan paul','jake paul','sidemen',
+    'reaction video','reacts to','episode review',
+    'top 10','top 5','tier list',
+    'vlog','prank','unboxing','tutorial','how to guide',
+    'minecraft','fortnite','call of duty','gta','valorant','apex legends','fifa',
+    'madden',"let's play",'speedrun',
+    'music video','official audio','lyrics','album','mixtape',
+    'nfl highlights','nba highlights','mlb highlights','nhl highlights',
+    'wwe raw','wwe smackdown','aew dynamite','aew rampage',
+    'njpw','roh ring of honor','impact wrestling',
+    'tiktok compilation','shorts compilation','meme compilation'
+  ];
+
+  for (const kw of blockKeywords) {
+    if (combined.includes(kw)) {
+      return { approved: false, reason: `This doesn't appear to be an eFed show (detected: ${kw}).` };
+    }
+  }
+
+  // Must have at least one eFed signal
+  const efedKeywords = [
+    'efed','e-fed','caw','create a wrestler','create-a-wrestler',
+    'wrestling federation','wrestling promotion','wrestling show','wrestling ep',
+    'episode','ep.','ep ','season','event','ppv','pay per view','pay-per-view',
+    'championship','title match','vs','vs.','versus','superstar','roster','ple',
+    'wwe 2k','wwe2k','2k25','2k26','2k24','2k23','universe mode','my universe','fire pro','no mercy','here comes the pain','svr',
+    'smackdown vs raw','wrestling universe','wrestling network',
+    'wrestling hub','wrestling tv','wrestling weekly','wrestling'
+  ];
+
+  const hasSignal = efedKeywords.some(kw => combined.includes(kw));
+  if (!hasSignal) {
+    return { approved: false, reason: 'Could not verify this as an eFed show. Make sure it\'s a CAW wrestling show.' };
+  }
+
+  return { approved: true, reason: 'Verified eFed show.' };
+}
+
+
+let _fetchDebounce = null;
+function debounceFetchPreview() {
+  clearTimeout(_fetchDebounce);
+  const delay = ('ontouchstart' in window) ? 900 : 600;
+  _fetchDebounce = setTimeout(fetchSubmitPreview, delay);
+}
+
+async function fetchSubmitPreview() {
+  const url = document.getElementById('submit-url').value.trim();
+  if (!url) return;
+
+  const isTwitch = url.includes('twitch.tv');
+  const isVod = isTwitch && url.includes('twitch.tv/videos/');
+  const isLive = isTwitch && !isVod && /twitch\.tv\/[^/?#]+/.test(url);
+  const twitchId = isVod ? url.match(/twitch\.tv\/videos\/(\d+)/)?.[1] : null;
+  const twitchChannel = isLive ? url.match(/twitch\.tv\/([^/?#]+)/)?.[1] : null;
+  const vidId = !isTwitch ? url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/)?.[1] : null;
+
+  if (!vidId && !twitchId && !twitchChannel) return;
+
+  const btn = document.getElementById('submit-post-btn');
+  showSubmitStatus('🔍 Looking up video…', 'info');
+
+  // ── TWITCH PATH ──
+  if (isTwitch) {
+    try {
+      let title = '', channel = '', thumbUrl = '', uploadDate = '', uploadDateMs = Date.now();
+      // Twitch oEmbed — works without auth for public VODs and channels
+      const oembedUrl = isVod
+        ? `https://www.twitch.tv/videos/${twitchId}`
+        : `https://www.twitch.tv/${twitchChannel}`;
+      const oRes = await fetch(`https://api.twitch.tv/v5/oembed?url=${encodeURIComponent(oembedUrl)}`).catch(()=>null);
+      // Fall back to noembed
+      const nbRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`).catch(()=>null);
+      if (nbRes && nbRes.ok) {
+        const nd = await nbRes.json();
+        if (nd && !nd.error) {
+          title = nd.title || '';
+          channel = nd.author_name || '';
+          thumbUrl = nd.thumbnail_url || '';
+        }
+      }
+      // Fallbacks if noembed gave nothing
+      if (!title) title = isLive ? ('🔴 ' + (twitchChannel || 'Live Stream')) : ('Twitch VOD ' + twitchId);
+      if (!channel) channel = twitchChannel || (isVod ? 'Twitch' : '');
+      // Thumb fallback for VOD
+      if (!thumbUrl && isVod) thumbUrl = `https://static-cdn.jtvnw.net/cf_vods/${twitchId}/thumb/thumb0-320x180.jpg`;
+      if (!thumbUrl && isLive) thumbUrl = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${twitchChannel}-320x180.jpg`;
+
+      const embedId = isVod ? twitchId : twitchChannel;
+      _fetchedMeta = {
+        title, channel,
+        vidId: embedId,
+        uploadDate, uploadDateMs,
+        isUpcoming: false, scheduledMs: null,
+        isTwitch: true, isLive,
+        twitchThumb: thumbUrl
+      };
+      document.getElementById('submit-preview-title').textContent = title;
+      document.getElementById('submit-preview-channel').textContent = (channel || 'Twitch') + (isLive ? '  ·  🔴 LIVE' : '');
+      document.getElementById('submit-preview').style.display = 'block';
+      showSubmitStatus('✅ Twitch content verified — choose a category below.', 'success');
+      const catWrap = document.getElementById('submit-category-wrap');
+      if (catWrap) catWrap.style.display = 'block';
+    } catch(e) {
+      showSubmitStatus('', '');
+      console.warn('Twitch preview failed', e);
+    }
+    return;
+  }
+
+  try {
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${vidId}&format=json`;
+    const oRes = await fetch(oembedUrl);
+    let oData = {};
+    if (oRes.ok) {
+      oData = await oRes.json();
+    }
+
+    // If oEmbed gave no title (e.g. live stream), fall back to YT API title below
+
+    // Check banned_links table (dynamic — managed from admin panel)
+    const dynamicBanReason = isUrlBanned(url, oData.author_name || '');
+    if (dynamicBanReason) {
+      showSubmitErr(dynamicBanReason || 'This video or channel is not permitted on the EFED Streaming Hub.');
+      btn.textContent = 'Submit to Hub';
+      return;
+    }
+
+    // Get upload date via YouTube Data API v3
+    let uploadDate = '';
+    let uploadDateMs = null;
+    try {
+      const ytApiRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,liveStreamingDetails&id=${vidId}&key=${YT_API_KEY}`);
+      if (ytApiRes.ok) {
+        const ytApiData = await ytApiRes.json();
+        const item = ytApiData.items?.[0];
+        const publishedAt = item?.snippet?.publishedAt;
+        if (publishedAt) {
+          const parsed = new Date(publishedAt);
+          if (!isNaN(parsed)) {
+            uploadDateMs = parsed.getTime();
+            uploadDate = parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          }
+        }
+        // If it's a scheduled stream, use the actual scheduled start time for accurate countdown
+        const broadcastStatus = item?.snippet?.liveBroadcastContent;
+        const scheduledStart = item?.liveStreamingDetails?.scheduledStartTime;
+        if (broadcastStatus === 'upcoming' && scheduledStart) {
+          const scheduled = new Date(scheduledStart);
+          if (!isNaN(scheduled)) {
+            uploadDateMs = scheduled.getTime();
+            uploadDate = scheduled.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          }
+        }
+        _fetchedMeta_broadcastStatus = broadcastStatus || null;
+        _fetchedMeta_scheduledMs = (broadcastStatus === 'upcoming' && uploadDateMs) ? uploadDateMs : null;
+
+        // Fallback title/channel from YT API if oEmbed failed (e.g. live stream)
+        if (!oData.title && item?.snippet?.title) oData.title = item.snippet.title;
+        if (!oData.author_name && item?.snippet?.channelTitle) oData.author_name = item.snippet.channelTitle;
+      }
+    } catch(e) { console.warn('YT API date fetch failed', e); }
+
+    _fetchedMeta = { title: oData.title || '', channel: oData.author_name || '', vidId, uploadDate, uploadDateMs, isUpcoming: _fetchedMeta_broadcastStatus === 'upcoming', scheduledMs: _fetchedMeta_scheduledMs || null };
+
+    document.getElementById('submit-preview-title').textContent = _fetchedMeta.title;
+    document.getElementById('submit-preview-channel').textContent = _fetchedMeta.channel + (_fetchedMeta.uploadDate ? '  ·  ' + _fetchedMeta.uploadDate : '');
+    document.getElementById('submit-preview').style.display = 'block';
+    
+
+    // ── SCREENING — keyword-based (swap screenVideo() for API call when key is available) ──
+    showSubmitStatus('🛡️ Screening for eFed content…', 'info');
+    const screenEl = document.getElementById('submit-screening');
+
+    const result = screenVideo(_fetchedMeta.title, _fetchedMeta.channel);
+    if (!result.approved) {
+      screenEl.textContent = '❌ ' + result.reason;
+      screenEl.style.display = 'block';
+      screenEl.style.background = 'rgba(192,0,14,.1)';
+      screenEl.style.border = '1px solid rgba(192,0,14,.3)';
+      screenEl.style.color = '#ff6b6b';
+      btn.textContent = 'Submit to Hub';
+      btn.disabled = true;
+      btn.style.opacity = '.4';
+      btn.style.cursor = 'not-allowed';
+      // Don't null _fetchedMeta — admin override needs it (date, title, etc.)
+      // Show override for admin only
+      const _sess = getSession();
+      if (_sess && _sess.username.toLowerCase() === ADMIN_USERNAME) {
+        const _ob = document.getElementById('submit-override-btn');
+        if (_ob) _ob.style.display = 'block';
+      } else {
+        const _nb = document.getElementById('submit-notify-btn');
+        if (_nb) { _nb.style.display = 'block'; _nb.dataset.reason = result.reason; }
+      }
+      return;
+    }
+    screenEl.textContent = '✅ Verified eFed content — choose a category below.';
+    screenEl.style.display = 'block';
+    screenEl.style.background = 'rgba(76,175,138,.08)';
+    screenEl.style.border = '1px solid rgba(76,175,138,.25)';
+    screenEl.style.color = '#4caf8a';
+
+    // Show category dropdown — auto-submits on selection
+    const catWrap = document.getElementById('submit-category-wrap');
+    if (catWrap) catWrap.style.display = 'block';
+
+    // Pre-fill date if available
+    // uploadDate stored in _fetchedMeta for submission
+  } catch(e) {
+    console.warn('Preview fetch failed', e);
+    showSubmitStatus('', '');
+  }
+}
+
+async function notifyAdminScreening() {
+  const session = getSession();
+  if (!session) return;
+  const btn = document.getElementById('submit-notify-btn');
+  const urlInput = document.getElementById('submit-url');
+  const titleEl = document.getElementById('submit-preview-title');
+  const url = urlInput ? urlInput.value.trim() : '';
+  const title = titleEl ? titleEl.textContent : url;
+  const reason = btn ? btn.dataset.reason : '';
+  btn.textContent = 'Sending…'; btn.disabled = true;
+  try {
+    await sbInsert('notifications', {
+      username: 'derrick_maximus',
+      type: 'flag',
+      message: `📣 ${session.displayName || session.username} wants to submit a video that failed screening.
+
+Title: ${title}
+URL: ${url}
+Reason: ${reason}`,
+      video_url: url,
+      read: false,
+      created_at: Date.now()
+    });
+    btn.textContent = '✓ Admin notified!';
+    btn.style.color = '#4caf8a';
+    btn.style.borderColor = 'rgba(76,175,138,.3)';
+  } catch(e) {
+    btn.textContent = 'Could not send — try again';
+    btn.disabled = false;
+  }
+}
+
+async function overrideAndSubmit() {
+  const overrideBtn = document.getElementById('submit-override-btn');
+  if (overrideBtn) overrideBtn.style.display = 'none';
+
+  const screenEl = document.getElementById('submit-screening');
+  if (screenEl) {
+    screenEl.textContent = '⚡ Admin override — choose a category below.';
+    screenEl.style.background = 'rgba(200,168,75,.08)';
+    screenEl.style.border = '1px solid rgba(200,168,75,.25)';
+    screenEl.style.color = '#c8a84b';
+    screenEl.style.display = 'block';
+  }
+
+  const catWrap = document.getElementById('submit-category-wrap');
+  if (catWrap) catWrap.style.display = 'block';
+}
+
+function doSubmitPost(submissionType) {
+  console.log('[submit] doSubmitPost fired, type=', submissionType, '_fetchedMeta=', _fetchedMeta, 'session=', getSession());
+  const session = getSession();
+  if (!session) { showSubmitErr('Not logged in.'); return; }
+  const url = document.getElementById('submit-url').value.trim();
+  if (!url) { showSubmitErr('Please paste a YouTube link.'); return; }
+  const btn = document.getElementById('submit-post-btn');
+
+  // If preview hasn't loaded yet, cancel any pending debounce and fetch+post in one shot
+  if (!_fetchedMeta || !_fetchedMeta.title) {
+    clearTimeout(_fetchDebounce);
+    fetchSubmitPreview().catch(e => showSubmitErr('Preview error: ' + e.message));
+    return;
+  }
+
+  showSubmitStatus('⏳ Posting to the Hub…', 'info');
+
+  (async () => {
+    try {
+      // Check duplicate by video_id (catches different URL formats for same video)
+      let existing;
+      try {
+        const _submitVidId = extractId(url);
+        existing = _submitVidId
+          ? await sbGet('submissions', `video_id=eq.${encodeURIComponent(_submitVidId)}`)
+          : await sbGet('submissions', `url=eq.${encodeURIComponent(url)}`);
+      }
+      catch(dbErr) {
+        const el = document.getElementById('submit-err');
+        el.textContent = 'DB Error (read): ' + dbErr.message;
+        el.style.display = 'block';
+        btn.textContent = 'Submit to Hub'; btn.disabled = false; btn.style.opacity = '1';
+        return;
+      }
+      if (existing.length) {
+        const userRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+        const user = userRows[0];
+        const isCreator = user?.is_creator;
+        const ytChannel = (user?.yt_channel || '').toLowerCase();
+        const videoChannel = (_fetchedMeta.channel || '').toLowerCase();
+        const channelMatch = ytChannel && (
+          videoChannel.includes(ytChannel.replace('https://youtube.com/@','').replace('@','')) ||
+          ytChannel.includes(videoChannel)
+        );
+        if (isCreator && channelMatch && !existing[0].claimed_by) {
+          showClaimPrompt(existing[0], _fetchedMeta.title, session.username);
+          btn.disabled = false; btn.style.opacity = '1'; btn.textContent = 'Submit to Hub';
+          return;
+        }
+        showSubmitErr('This video has already been posted.');
+        btn.disabled = false;
+        return;
+      }
+
+      // Use upload date from YouTube API
+      const dateStr = _fetchedMeta.uploadDate || '';
+      const dateMs = _fetchedMeta.uploadDateMs || Date.now();
+      const submitStatus = (_fetchedMeta.isUpcoming && _fetchedMeta.scheduledMs) ? 'upcoming' : 'approved';
+
+      let thumbUrl;
+      if (_fetchedMeta.isTwitch) {
+        thumbUrl = _fetchedMeta.twitchThumb || (
+          _fetchedMeta.isLive
+            ? `https://static-cdn.jtvnw.net/previews-ttv/live_user_${_fetchedMeta.vidId}-320x180.jpg`
+            : `https://static-cdn.jtvnw.net/cf_vods/${_fetchedMeta.vidId}/thumb/thumb0-320x180.jpg`
+        );
+      } else {
+        thumbUrl = 'https://i.ytimg.com/vi/' + _fetchedMeta.vidId + '/mqdefault.jpg';
+      }
+
+      // Determine eFed — check if submitter's registered yt_channel matches video channel
+      // Use YouTube channel name directly as the eFed name
+      const assignedEfed = (_fetchedMeta.channel && _fetchedMeta.channel.trim()) ? _fetchedMeta.channel.trim() : '';
+
+      let inserted;
+      try {
+        inserted = await sbInsert('submissions', {
+          url,
+          video_id: extractId(url),
+          show_name: _fetchedMeta.title,
+          efed: assignedEfed,
+          date: dateStr,
+          date_ms: dateMs,
+          submitted_by: session.username,
+          submitted_at: Date.now(),
+          community: true,
+          status: submitStatus,
+          thumb_url: thumbUrl || null,
+          submission_type: submissionType || null
+        });
+      } catch(insertErr) {
+        const el = document.getElementById('submit-err');
+        el.textContent = 'DB Error: ' + insertErr.message;
+        el.style.display = 'block';
+        btn.textContent = 'Submit to Hub'; btn.disabled = false; btn.style.opacity = '1';
+        return;
+      }
+
+      // Get display name for card label
+      let posterDisplayName = session.username;
+      try {
+        const uRows = await sbGet('users', 'username=eq.' + encodeURIComponent(session.username) + '&select=display_name');
+        if (uRows[0]?.display_name) posterDisplayName = uRows[0].display_name;
+      } catch(e) {}
+
+      if (submitStatus === 'upcoming') {
+          // Add to upcoming row with countdown
+          upcomingVideos.push({
+            url,
+            show: _fetchedMeta.title,
+            efed: assignedEfed,
+            date: dateStr,
+            dateMs,
+            submittedBy: session.username,
+            community: true,
+            status: 'upcoming',
+            thumb: thumbUrl,
+            dbId: inserted[0]?.id
+          });
+          loadUpcomingRow();
+          document.getElementById('submit-ok').style.display = 'block';
+          document.getElementById('submit-ok').textContent = '⏰ Added to Upcoming Shows with countdown!';
+          triggerSubmitCelebration();
+          setTimeout(() => closeSubmitModal(), 2200);
+        } else {
+          videos.push({
+            url,
+            show: _fetchedMeta.title,
+            efed: assignedEfed,
+            date: dateStr,
+            dateMs,
+            submittedAt: Date.now(),
+            submittedBy: session.username,
+            displayName: posterDisplayName,
+            community: true,
+            status: 'approved',
+            new: true,
+            thumb: thumbUrl,
+            dbId: inserted[0]?.id,
+            submission_type: submissionType || null
+          });
+
+          try {
+            buildPills();
+            renderGrid();
+            loadRecentlyAdded(videos);
+            loadMostViewed(videos);
+            loadWatchlistRow();
+            loadBookmarksRow();
+            loadEfedOwnerRow();
+            loadVerifiedUsers();
+            loadBestMatches(videos);
+            loadShowcaseRow(videos);
+            loadPromosRow(videos);
+    loadPodcastRow(videos);
+            window._heroFirstLoad = true;
+            heroIdx = 0;
+            buildHeroDots();
+            loadSlide();
+          } catch(refreshErr) { console.warn('Page refresh error after submit:', refreshErr); }
+
+          document.getElementById('submit-ok').style.display = 'block';
+          document.getElementById('submit-ok').textContent = '🎉 Your show is now live on the Hub!';
+          triggerSubmitCelebration();
+
+          // After modal closes, scroll to the new card and flash it
+          const _newUrl = url;
+          setTimeout(() => {
+            closeSubmitModal();
+            setTimeout(() => {
+              const grid = document.getElementById('card-grid');
+              if (!grid) return;
+              const cards = grid.querySelectorAll('.card');
+              let target = null;
+              cards.forEach(c => { if (c._videoUrl === _newUrl) target = c; });
+              if (target) {
+                // Scroll the section into view
+                const section = grid.closest('.section') || grid.parentElement;
+                if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                // Scroll the row to show the card
+                setTimeout(() => {
+                  target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+                  target.style.transition = 'box-shadow .3s, outline .3s';
+                  target.style.outline = '2px solid rgba(200,168,75,.8)';
+                  target.style.boxShadow = '0 0 0 4px rgba(200,168,75,.15)';
+                  setTimeout(() => {
+                    target.style.outline = '';
+                    target.style.boxShadow = '';
+                  }, 2000);
+                }, 400);
+              }
+            }, 100);
+          }, 2200);
+          return; // skip the timeout below
+        } // end else (approved)
+
+    } catch(e) {
+      console.error('Post failed:', e);
+      const errMsg = 'Could not post: ' + (e.message || 'Unknown error');
+      const el = document.getElementById('submit-err');
+      if (el) { el.textContent = errMsg; el.style.display = 'block'; }
+
+    }
+  })();
+}
+
+
+function validateSubmitDate() {}
+
+function toggleSubmitCatDropdown(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('submit-cat-menu');
+  const arrow = document.getElementById('submit-cat-arrow');
+  if (!menu) return;
+  const open = menu.style.display === 'block';
+  menu.style.display = open ? 'none' : 'block';
+  if (arrow) arrow.style.transform = open ? '' : 'rotate(180deg)';
+}
+
+function selectSubmitCat(type, label, rowName) {
+  // Close menu
+  const menu = document.getElementById('submit-cat-menu');
+  const arrow = document.getElementById('submit-cat-arrow');
+  const trigger = document.getElementById('submit-cat-label');
+  const placement = document.getElementById('submit-cat-placement');
+  if (menu) menu.style.display = 'none';
+  if (arrow) arrow.style.transform = '';
+  if (trigger) { trigger.textContent = label; trigger.parentElement.style.color = '#fff'; }
+  if (placement) { placement.textContent = 'This clip will appear on ' + rowName + '.'; placement.style.display = 'block'; }
+  onSubmitCategorySelect(type);
+}
+
+function onSubmitCategorySelect(type) {
+  if (!type) return;
+  const catWrap = document.getElementById('submit-category-wrap');
+  if (catWrap) catWrap.style.pointerEvents = 'none';
+  showSubmitStatus('⏳ Posting to the Hub…', 'info');
+  doSubmitPost(type);
+}
+
+// Close custom dropdown when clicking outside of it (but stay inside modal)
+document.addEventListener('click', function(e) {
+  const dd = document.getElementById('submit-cat-dropdown');
+  const modalBg = document.getElementById('submit-modal-bg');
+  if (!dd) return;
+  // If click is outside the dropdown but still inside the modal, just close the menu
+  if (!dd.contains(e.target)) {
+    const menu = document.getElementById('submit-cat-menu');
+    const arrow = document.getElementById('submit-cat-arrow');
+    if (menu) menu.style.display = 'none';
+    if (arrow) arrow.style.transform = '';
+  }
+});
+function checkSubmitDateReady() {
+  // Date is auto-fetched, just enable the button if screening passed
+  const btn = document.getElementById('submit-post-btn');
+  const screenEl = document.getElementById('submit-screening');
+  const screeningPassed = screenEl && screenEl.style.color === 'rgb(76, 175, 138)';
+  if (screeningPassed) {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    btn.textContent = 'Submit to Hub';
+  }
+}
+
+function showSubmitErr(msg) {
+  const el = document.getElementById('submit-err');
+  el.textContent = msg;
+  el.style.display = 'block';
+  document.getElementById('submit-post-btn').disabled = false;
+  document.getElementById('submit-post-btn').textContent = 'Submit to Hub';
+}
+</script>
+
+<script>
 </script>
 <!-- ── INVITE MODAL ── -->
 <div class="invite-modal-bg" id="invite-modal-bg" onclick="handleInviteBgClick(event)">
