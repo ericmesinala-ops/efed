@@ -912,8 +912,6 @@ html.day-mode .pm-mode-btn.active-ooc { background: rgba(80,140,255,.1) !importa
 html.day-mode .pm-emoji-picker { background: #ffffff !important; border-color: rgba(0,0,0,.12) !important; box-shadow: 0 -8px 32px rgba(0,0,0,.12) !important; }
 html.day-mode .pm-emoji:hover { background: rgba(0,0,0,.08) !important; }
 /* efed dropdown in compose */
-html.day-mode #pm-efed-display { background: rgba(0,0,0,.04) !important; border-color: rgba(0,0,0,.1) !important; color: rgba(0,0,0,.6) !important; }
-html.day-mode #pm-efed-display:hover { background: rgba(0,0,0,.08) !important; border-color: rgba(0,0,0,.18) !important; }
 html.day-mode .pm-efed-opt { color: rgba(0,0,0,.65) !important; }
 html.day-mode .pm-efed-opt:hover { background: rgba(0,0,0,.05) !important; color: #111118 !important; }
 html.day-mode .pm-efed-opt.selected { background: rgba(192,0,14,.07) !important; color: #111118 !important; }
@@ -1725,7 +1723,6 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
 .pm-efed-opt:hover { background: rgba(255,255,255,.07); color: #fff; }
 .pm-efed-opt.selected { color: #fff; font-weight: 600; background: rgba(192,0,14,.1); }
 .pm-efed-opt + .pm-efed-opt { border-top: 1px solid rgba(255,255,255,.06); }
-#pm-efed-display:hover { border-color: rgba(255,255,255,.18); background: rgba(255,255,255,.06); }
 .pm-emoji-picker {
   display: none; position: absolute; bottom: 100%; left: 0;
   background: #1a1a22; border: 1px solid rgba(255,255,255,.12);
@@ -1804,22 +1801,7 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
       <img id="pm-img-prev-img" src="" alt="">
       <button class="pm-img-remove" onclick="_posts.removeImg()">✕</button>
     </div>
-    <!-- eFed broadcast row — hidden if user has no efeds -->
-    <div id="pm-efed-row" style="display:none;align-items:center;gap:10px;padding:4px 0 2px;border-top:1px solid rgba(255,255,255,.06);margin-top:2px;">
-      <span style="font-size:.62rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;white-space:nowrap;letter-spacing:.3px;">Posting to</span>
-      <div id="pm-efed-wrap" style="position:relative;flex:1;">
-        <div id="pm-efed-display" onclick="pmToggleEfedDrop()" style="display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;cursor:pointer;transition:border-color .15s,background .15s;user-select:none;">
-          <span id="pm-efed-label" style="font-size:.78rem;color:rgba(255,255,255,.65);font-family:'DM Sans',sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">My profile only</span>
-          <svg id="pm-efed-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="2.5" stroke-linecap="round" style="flex-shrink:0;transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-        <div id="pm-efed-drop" style="display:none;position:absolute;bottom:calc(100% + 6px);left:0;right:0;background:#111116;border:1px solid rgba(255,255,255,.12);border-radius:12px;overflow:hidden;box-shadow:0 -16px 40px rgba(0,0,0,.8);z-index:99;">
-          <div class="pm-efed-opt" data-value="" onclick="pmPickEfed(this)">My profile only</div>
-        </div>
-        <select id="pm-efed-select" style="display:none;">
-          <option value="">My profile only</option>
-        </select>
-      </div>
-    </div>
+
     <div class="pm-toolbar" style="position:relative;">
       <button class="pm-tool-btn" title="Add image" onclick="document.getElementById('pm-img-input').click()">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -2106,59 +2088,8 @@ const _posts = (() => {
     _editingId=null;_resetModal();setMode('ooc');
     document.getElementById('post-modal-bg').classList.add('open');
     document.getElementById('pm-text').focus();_buildEmojis();
-    // Populate efed dropdown
-    _loadMyEfeds().then(efeds => {
-      const row = document.getElementById('pm-efed-row');
-      const drop = document.getElementById('pm-efed-drop');
-      const sel = document.getElementById('pm-efed-select');
-      const display = document.getElementById('pm-efed-display');
-      if (!row || !drop || !sel) return;
-
-      if (!efeds.length) {
-        // No efeds — hide row, post to profile only
-        row.style.display = 'none';
-        sel.value = '';
-        return;
-      }
-
-      if (efeds.length === 1) {
-        // Exactly one — auto-select silently, hide the dropdown trigger
-        sel.value = efeds[0];
-        const label = document.getElementById('pm-efed-label');
-        if (label) label.textContent = efeds[0];
-        drop.innerHTML = '';
-        sel.innerHTML = `<option value="${efeds[0]}">${efeds[0]}</option>`;
-        // Show as a plain label, not a clickable dropdown
-        if (display) { display.style.cursor = 'default'; display.onclick = null; }
-        const chevron = document.getElementById('pm-efed-chevron');
-        if (chevron) chevron.style.display = 'none';
-        row.style.display = 'flex';
-        return;
-      }
-
-      // 2+ efeds — show dropdown with efed choices only (no profile-only option)
-      drop.innerHTML = '';
-      sel.innerHTML = '';
-      efeds.forEach((e, i) => {
-        const opt = document.createElement('div');
-        opt.className = 'pm-efed-opt' + (i === 0 ? ' selected' : '');
-        opt.dataset.value = e;
-        opt.textContent = e;
-        opt.onclick = function() { pmPickEfed(this); };
-        drop.appendChild(opt);
-        const selOpt = document.createElement('option');
-        selOpt.value = e; selOpt.textContent = e;
-        sel.appendChild(selOpt);
-      });
-      // Auto-select first
-      sel.value = efeds[0];
-      const label = document.getElementById('pm-efed-label');
-      if (label) label.textContent = efeds[0];
-      if (display) { display.style.cursor = 'pointer'; display.onclick = pmToggleEfedDrop; }
-      const chevron = document.getElementById('pm-efed-chevron');
-      if (chevron) chevron.style.display = '';
-      row.style.display = 'flex';
-    });
+    // Pre-cache efeds (used in submit to broadcast to all)
+    _loadMyEfeds();
   }
   let _editingId=null,_imgData=null;
 
@@ -2219,18 +2150,25 @@ const _posts = (() => {
     if(!text&&!_imgData)return;
     const btn=document.getElementById('pm-submit');
     btn.disabled=true;btn.textContent='Posting…';
-    const selectedEfed=(document.getElementById('pm-efed-select')?.value||'').trim()||null;
+    // Auto-broadcast to all efeds the user belongs to
+    const efeds = await _loadMyEfeds();
+    const targets = efeds.length ? efeds : [null];
     try{
-      const payload={username:session.username,text:text||null,image_url:_imgData||null,post_type:_mode,likes:0,created_at:new Date().toISOString(),reply_to:null,efed:selectedEfed||null};
-      const r=await fetch(SUPABASE_URL+'/rest/v1/posts',{method:'POST',headers:SB_HEADERS,body:JSON.stringify(payload)});
-      if(!r.ok)throw new Error('HTTP '+r.status);
-      let saved=null;try{const arr=await r.json();saved=arr[0]||arr;}catch(e){}
+      let firstSaved=null;
+      for(let i=0;i<targets.length;i++){
+        const efed=targets[i];
+        const payload={username:session.username,text:text||null,image_url:_imgData||null,post_type:_mode,likes:0,created_at:new Date().toISOString(),reply_to:null,efed:efed||null};
+        const r=await fetch(SUPABASE_URL+'/rest/v1/posts',{method:'POST',headers:SB_HEADERS,body:JSON.stringify(payload)});
+        if(!r.ok)throw new Error('HTTP '+r.status);
+        if(i===0){try{const arr=await r.json();firstSaved=arr[0]||arr;}catch(e){}}
+      }
       let avUrl=null,dName=session.username;
       try{const u=await sbGet('users',`username=eq.${encodeURIComponent(session.username)}&select=avatar_url,display_name`);if(u[0]){avUrl=u[0].avatar_url;dName=u[0].display_name||session.username;}}catch(e){}
-      const enriched={...(saved||payload),id:saved?.id||payload.created_at,avatar_url:avUrl,display_name:dName,_liked:false};
+      const ts=new Date().toISOString();
+      const enriched={...(firstSaved||{username:session.username,text:text||null,image_url:_imgData||null,post_type:_mode,likes:0,created_at:ts,reply_to:null,efed:targets[0]||null}),id:firstSaved?.id||ts,avatar_url:avUrl,display_name:dName,_liked:false};
       closeModal();
       _items.unshift(enriched);_idx=0;_fullRender();
-      showToast(selectedEfed ? `Posted to ${selectedEfed}!` : 'Posted!');
+      showToast('Posted!');
     }catch(err){showToast('Failed: '+err.message);btn.disabled=false;btn.textContent='Post';return;}
     btn.disabled=false;btn.textContent='Post';
   }
@@ -3765,34 +3703,6 @@ function applyBannerDim(pct) {
   if (el) el.style.background = pct > 0 ? `rgba(0,0,0,${pct/100})` : 'rgba(0,0,0,0)';
 }
 
-// ── EFED DROPDOWN ──
-function pmToggleEfedDrop() {
-  const drop = document.getElementById('pm-efed-drop');
-  const chevron = document.getElementById('pm-efed-chevron');
-  if (!drop) return;
-  const open = drop.style.display === 'block';
-  drop.style.display = open ? 'none' : 'block';
-  if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
-}
-function pmCloseEfedDrop() {
-  const drop = document.getElementById('pm-efed-drop');
-  const chevron = document.getElementById('pm-efed-chevron');
-  if (drop) drop.style.display = 'none';
-  if (chevron) chevron.style.transform = '';
-}
-function pmPickEfed(el) {
-  const val = el.dataset.value;
-  const label = document.getElementById('pm-efed-label');
-  const sel = document.getElementById('pm-efed-select');
-  if (label) label.textContent = val || 'My profile only';
-  if (sel) sel.value = val;
-  // Mark selected
-  document.querySelectorAll('.pm-efed-opt').forEach(o => o.classList.toggle('selected', o === el));
-  pmCloseEfedDrop();
-}
-document.addEventListener('click', e => {
-  if (!e.target.closest('#pm-efed-wrap')) pmCloseEfedDrop();
-});
 
 function epPreviewDim(val) {
   document.getElementById('ep-dim-label').textContent = val + '%';
