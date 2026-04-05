@@ -881,11 +881,11 @@ html.day-mode .efed-posts-float-jump { color: rgba(0,0,0,.25) !important; }
   animation: slideUp .3s cubic-bezier(.32,.72,0,1);
 }
 @keyframes slideUp { from { transform: translateY(60px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-#efed-post-modal { transition: none; }
-#efed-post-modal.mode-ic  { background: #13131a; border-color: rgba(255,255,255,.1); }
-#efed-post-modal.mode-ooc { background: #13131a; border-color: rgba(255,255,255,.1); }
-#efed-post-modal.mode-ic  .efed-pm-textarea:focus { border-color: rgba(192,0,14,.4); }
-#efed-post-modal.mode-ooc .efed-pm-textarea:focus { border-color: rgba(192,0,14,.4); }
+#efed-post-modal { transition: background .35s; }
+#efed-post-modal.mode-ic  { background: #0d1610; border-color: rgba(34,197,94,.18); }
+#efed-post-modal.mode-ooc { background: #0f1219; border-color: rgba(80,140,255,.18); }
+#efed-post-modal.mode-ic  .efed-pm-textarea:focus { border-color: rgba(34,197,94,.4); }
+#efed-post-modal.mode-ooc .efed-pm-textarea:focus { border-color: rgba(80,140,255,.4); }
 .efed-pm-header { display: flex; align-items: center; justify-content: space-between; }
 .efed-pm-title { font-family: 'Bebas Neue', sans-serif; font-size: 1.2rem; letter-spacing: 3px; color: #fff; }
 .efed-pm-close { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); color: #fff; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-size: 1rem; display: flex; align-items: center; justify-content: center; transition: background .15s; }
@@ -1421,6 +1421,10 @@ html.day-mode #settings-modal button[style*="rgba(255,255,255"] { background: rg
         </div>
       </div>
     </div>
+    <div id="ev-matches-display" style="display:none;padding:0 20px;margin-top:10px;">
+      <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:8px;">Match Card</div>
+      <div id="ev-matches-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
   </div>
   <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
 </div>
@@ -1453,6 +1457,11 @@ html.day-mode #settings-modal button[style*="rgba(255,255,255"] { background: rg
       <div>
         <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:6px;">Hype Video <span style="color:rgba(255,255,255,.25);text-transform:none;letter-spacing:0;font-size:.6rem;">(YouTube URL)</span></div>
         <input id="ev-hype-input" type="url" maxlength="120" placeholder="https://youtube.com/watch?v=..." style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+      <div>
+        <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:10px;">Match Card</div>
+        <div id="ev-matches-editor" style="display:flex;flex-direction:column;gap:10px;"></div>
+        <button onclick="evAddMatch()" style="margin-top:8px;width:100%;padding:9px;background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;transition:background .15s,color .15s;" onmouseover="this.style.background='rgba(255,255,255,.08)';this.style.color='rgba(255,255,255,.8)'" onmouseout="this.style.background='rgba(255,255,255,.04)';this.style.color='rgba(255,255,255,.45)'">+ Add Match</button>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
         <button onclick="clearEvent()" style="flex:1;padding:11px;background:none;border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.78rem;cursor:pointer;">Clear</button>
@@ -2098,6 +2107,101 @@ function efedToggleLinks() {
 
 // ── UPCOMING EVENT ──
 let _evTba = false;
+let _evMatches = []; // [{label,championship,type,teams:[[],...]}]
+
+const EV_MATCH_TYPES = [
+  { val:'none',    label:'— None —',        teams:0 },
+  { val:'singles', label:'Singles',          teams:2 },
+  { val:'tag',     label:'Tag Team',         teams:2, tag:true },
+  { val:'triple',  label:'Triple Threat',    teams:3 },
+  { val:'fatal4',  label:'Fatal 4-Way',      teams:4 },
+  { val:'6man',    label:'6-Man Tag',        teams:2, tag:true, size:3 },
+  { val:'battle',  label:'Battle Royal',     teams:0, freeform:true },
+];
+
+function _evMatchTypeInfo(val) { return EV_MATCH_TYPES.find(t=>t.val===val)||EV_MATCH_TYPES[0]; }
+
+function evAddMatch(data) {
+  _evMatches.push(data || { label:'', championship:'', type:'none', teams:[[''],['']] });
+  _evRenderEditor();
+}
+
+function evRemoveMatch(i) {
+  _evMatches.splice(i,1);
+  _evRenderEditor();
+}
+
+function evMatchTypeChange(i, val) {
+  const info = _evMatchTypeInfo(val);
+  const m = _evMatches[i];
+  m.type = val;
+  if (info.freeform) { m.teams = [['']]; }
+  else if (info.teams === 0) { m.teams = [[],[]]; }
+  else if (info.tag) {
+    const size = info.size || 2;
+    m.teams = Array.from({length:2}, () => Array.from({length:size}, ()=>''));
+  } else {
+    m.teams = Array.from({length:info.teams}, () => ['']);
+  }
+  _evRenderEditor();
+}
+
+function evUpdateField(i, field, val) { _evMatches[i][field] = val; }
+function evUpdateParticipant(i, ti, pi, val) { _evMatches[i].teams[ti][pi] = val; }
+
+function _evRenderEditor() {
+  const wrap = document.getElementById('ev-matches-editor'); if (!wrap) return;
+  const inp = (placeholder, val, onchange, style='') =>
+    `<input type="text" maxlength="60" placeholder="${placeholder}" value="${(val||'').replace(/"/g,'&quot;')}" oninput="${onchange}" style="flex:1;min-width:0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:7px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;outline:none;box-sizing:border-box;${style}">`;
+
+  wrap.innerHTML = _evMatches.map((m,i) => {
+    const info = _evMatchTypeInfo(m.type||'none');
+    const typeOpts = EV_MATCH_TYPES.map(t=>`<option value="${t.val}"${m.type===t.val?' selected':''}>${t.label}</option>`).join('');
+
+    let participantsHtml = '';
+    if (info.val !== 'none' && !info.freeform) {
+      if (info.tag) {
+        const size = info.size || 2;
+        const teamRows = m.teams.map((team,ti) => {
+          const slots = Array.from({length:size}, (_,pi) =>
+            inp(`Participant ${pi+1}`, team[pi]||'', `evUpdateParticipant(${i},${ti},${pi},this.value)`)
+          ).join('');
+          return `<div style="display:flex;flex-direction:column;gap:4px;">${slots}</div>`;
+        });
+        participantsHtml = `<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;margin-top:6px;">
+          ${teamRows[0]}
+          <div style="font-size:.6rem;font-weight:700;color:rgba(255,255,255,.3);text-align:center;">VS</div>
+          ${teamRows[1]||''}
+        </div>`;
+      } else {
+        const slots = m.teams.map((_,ti) =>
+          inp(`Participant ${ti+1}`, m.teams[ti][0]||'', `evUpdateParticipant(${i},${ti},0,this.value)`)
+        ).join(`<div style="font-size:.6rem;font-weight:700;color:rgba(255,255,255,.3);text-align:center;padding:2px 0;">VS</div>`);
+        participantsHtml = `<div style="display:flex;flex-direction:column;gap:4px;margin-top:6px;">${slots}</div>`;
+      }
+    } else if (info.freeform) {
+      participantsHtml = `<div style="margin-top:6px;">${inp('Participants (e.g. 20-man battle royal)', m.teams[0][0]||'', `evUpdateParticipant(${i},0,0,this.value)`, 'width:100%;')}</div>`;
+    }
+
+    return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div style="font-size:.55rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;">Match ${i+1}</div>
+        <button onclick="evRemoveMatch(${i})" style="background:none;border:none;color:rgba(255,255,255,.25);cursor:pointer;font-size:.7rem;padding:2px 4px;transition:color .12s;" onmouseover="this.style.color='#c0000e'" onmouseout="this.style.color='rgba(255,255,255,.25)'">✕</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:6px;">
+        ${inp('Match label (e.g. Main Event, Opener)', m.label||'', `evUpdateField(${i},'label',this.value)`, 'flex:1;')}
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:6px;">
+        ${inp('Championship (optional)', m.championship||'', `evUpdateField(${i},'championship',this.value)`, 'flex:1;')}
+      </div>
+      <select onchange="evMatchTypeChange(${i},this.value)" style="width:100%;background:#1a1a24;border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:7px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;outline:none;cursor:pointer;">
+        ${typeOpts}
+      </select>
+      ${participantsHtml}
+    </div>`;
+  }).join('');
+}
+
 function openEventModal() {
   const bg = document.getElementById('event-modal-bg'); if (!bg) return;
   document.getElementById('ev-title-input').value = document.getElementById('ev-display-title')?.textContent.replace('No event scheduled','') || '';
@@ -2108,6 +2212,9 @@ function openEventModal() {
   document.getElementById('ev-hype-input').value = document.getElementById('ev-hype-iframe')?.dataset.srcUrl || '';
   _evTba = dateText === 'TBA'; _evUpdateTbaBtn();
   document.getElementById('ev-msg').textContent = '';
+  // Load existing matches
+  try { const raw = document.getElementById('ev-matches-display')?.dataset.matches; _evMatches = raw ? JSON.parse(raw) : []; } catch(e) { _evMatches = []; }
+  _evRenderEditor();
   bg.style.display = 'flex';
 }
 function closeEventModal() { document.getElementById('event-modal-bg').style.display = 'none'; }
@@ -2129,19 +2236,20 @@ async function saveEvent() {
   const loc=document.getElementById('ev-location-input').value.trim();
   const main=document.getElementById('ev-mainevent-input').value.trim();
   const hype=document.getElementById('ev-hype-input').value.trim();
+  const matchesJson = JSON.stringify(_evMatches.filter(m => m.label || m.type !== 'none'));
   const msg=document.getElementById('ev-msg');
   if (!title) { msg.textContent='Event title is required.'; msg.style.color='#ff6b6b'; return; }
   try {
-    const r=await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_title:title,efed_event_date:date||null,efed_event_location:loc||null,efed_event_main:main||null,efed_event_hype:hype||null})});
+    const r=await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_title:title,efed_event_date:date||null,efed_event_location:loc||null,efed_event_main:main||null,efed_event_hype:hype||null,efed_event_matches:matchesJson||null})});
     if (!r.ok) throw new Error('HTTP '+r.status);
-    renderEvent({title,date:date||null,location:loc||null,main:main||null,hype:hype||null});
+    renderEvent({title,date:date||null,location:loc||null,main:main||null,hype:hype||null,matches:_evMatches});
     msg.textContent='Saved!'; msg.style.color='#4caf64'; setTimeout(closeEventModal,800);
   } catch(e) { msg.textContent='Save failed: '+e.message; msg.style.color='#ff6b6b'; }
 }
 async function clearEvent() {
   const session=getSession(); if (!session) return;
   try {
-    await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_title:null,efed_event_date:null,efed_event_location:null,efed_event_main:null,efed_event_hype:null})});
+    await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_title:null,efed_event_date:null,efed_event_location:null,efed_event_main:null,efed_event_hype:null,efed_event_matches:null})});
     document.getElementById('upcoming-event-section').style.display='none'; closeEventModal();
   } catch(e) {}
 }
@@ -2161,6 +2269,7 @@ function renderEvent(ev) {
       document.getElementById('ev-display-location').style.display = 'none';
       document.getElementById('ev-display-mainevent').style.display = 'none';
       document.getElementById('ev-hype-wrap').style.display = 'none';
+      document.getElementById('ev-matches-display').style.display = 'none';
     }
     const editBtn = document.getElementById('event-edit-btn');
     if (editBtn && isOwnerOrAdmin) editBtn.style.display = 'block';
@@ -2185,6 +2294,40 @@ function renderEvent(ev) {
   } else if (hypeWrap) {
     hypeWrap.style.display = 'none';
     if (hypeFrame) { hypeFrame.src = ''; hypeFrame.dataset.srcUrl = ''; }
+  }
+  // Matches
+  const matchesWrap = document.getElementById('ev-matches-display');
+  const matchesList = document.getElementById('ev-matches-list');
+  let matches = ev.matches || [];
+  if (!Array.isArray(matches)) { try { matches = JSON.parse(matches); } catch(e) { matches = []; } }
+  matches = matches.filter(m => m && (m.label || (m.type && m.type !== 'none')));
+  if (matchesWrap) matchesWrap.dataset.matches = JSON.stringify(matches);
+  if (matches.length && matchesList && matchesWrap) {
+    matchesWrap.style.display = 'block';
+    matchesList.innerHTML = matches.map((m,i) => {
+      const isFirst = i === 0;
+      const info = EV_MATCH_TYPES.find(t=>t.val===m.type)||EV_MATCH_TYPES[0];
+      const labelHtml = m.label ? `<div style="font-size:.55rem;letter-spacing:1.5px;text-transform:uppercase;color:${isFirst?'#c8a84b':'rgba(255,255,255,.35)'};font-weight:700;margin-bottom:3px;">${_esc(m.label)}</div>` : '';
+      const champHtml = m.championship ? `<div style="font-size:.62rem;color:var(--gold);font-weight:600;margin-bottom:4px;">🏆 ${_esc(m.championship)}</div>` : '';
+      let matchupHtml = '';
+      if (info.val !== 'none' && !info.freeform && m.teams) {
+        if (info.tag) {
+          const teamStrs = m.teams.map(team => team.filter(Boolean).join(' &amp; '));
+          matchupHtml = `<div style="font-size:.82rem;font-weight:700;color:#e8e8e8;letter-spacing:.3px;">${teamStrs.filter(Boolean).join(' <span style="color:rgba(255,255,255,.3);font-weight:400;font-size:.7rem;"> vs </span>')}</div>`;
+        } else {
+          const parts = m.teams.map(t => t[0]).filter(Boolean);
+          matchupHtml = `<div style="font-size:.82rem;font-weight:700;color:#e8e8e8;letter-spacing:.3px;">${parts.join(' <span style="color:rgba(255,255,255,.3);font-weight:400;font-size:.7rem;"> vs </span>')}</div>`;
+        }
+      } else if (info.freeform && m.teams?.[0]?.[0]) {
+        matchupHtml = `<div style="font-size:.82rem;color:#e8e8e8;">${_esc(m.teams[0][0])}</div>`;
+      }
+      const typeHtml = info.val !== 'none' ? `<div style="font-size:.58rem;color:rgba(255,255,255,.3);margin-top:3px;letter-spacing:.5px;">${_esc(info.label)}</div>` : '';
+      return `<div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,${isFirst?'.12':'.06'});border-radius:10px;padding:12px 14px;${isFirst?'border-left:3px solid #c8a84b;':''}">
+        ${labelHtml}${champHtml}${matchupHtml}${typeHtml}
+      </div>`;
+    }).join('');
+  } else if (matchesWrap) {
+    matchesWrap.style.display = 'none';
   }
   const editBtn = document.getElementById('event-edit-btn');
   if (editBtn && isOwnerOrAdmin) editBtn.style.display = 'block';
@@ -2503,7 +2646,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_event_matches&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
@@ -2619,7 +2762,7 @@ async function loadProfile() {
     if (user.efed_banner_dim) efedApplyBannerDim(parseInt(user.efed_banner_dim));
 
     // Upcoming event
-    renderEvent({ title: user.efed_event_title, date: user.efed_event_date, location: user.efed_event_location, main: user.efed_event_main, hype: user.efed_event_hype });
+    renderEvent({ title: user.efed_event_title, date: user.efed_event_date, location: user.efed_event_location, main: user.efed_event_main, hype: user.efed_event_hype, matches: user.efed_event_matches });
 
     // Signings toggle state
     _signingsOn = !!user.efed_open_signings;
@@ -6648,11 +6791,10 @@ const _efedFeed = (() => {
               reposted · ${_timeAgo(p.created_at)}
             </div>
           </div>
-          ${deleteBtn}
         </div>
         ${commentHtml}${videoCard}
         <div class="efed-post-card-footer">
-          <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}${repostShareBtn}</div>
+          <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}${repostShareBtn}${deleteBtn}</div>
         </div>
         <div class="efed-post-replies-wrap">
           <button class="efed-post-replies-toggle" id="efed-replies-toggle-${p.id}" onclick="_efedFeed.toggleReplies('${p.id}',this)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg> Replies <span class="efed-reply-tab-count" id="efed-replies-label-${p.id}"></span></button>
@@ -6702,11 +6844,10 @@ const _efedFeed = (() => {
           <div class="efed-post-op-time">${_timeAgo(p.created_at)}${editedLabel}</div>
         </div>
         <span class="efed-post-card-mode-badge ${mode}"></span>
-        ${deleteBtn}
       </div>
       ${bodyHtml}
       <div class="efed-post-card-footer">
-        <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}${shareBtn}</div>
+        <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}${shareBtn}${deleteBtn}</div>
         ${efedTag}
       </div>
       <div class="efed-post-replies-wrap">
