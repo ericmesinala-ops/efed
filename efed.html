@@ -2148,19 +2148,27 @@ function evMatchTypeChange(i, val) {
   const info = _evMatchTypeInfo(val);
   const m = _evMatches[i];
   m.type = val;
-  if (info.freeform || info.battle) { m.teams = [[info.battle ? '20' : '']]; }
-  else if (info.teams === 0) { m.teams = [[],[]]; }
+  if (info.freeform || info.battle) { m.teams = [[info.battle ? '20' : '']]; m.champs = [[false]]; }
+  else if (info.teams === 0) { m.teams = [[],[]]; m.champs = [[],[]]; }
   else if (info.tag) {
     const size = info.size || 2;
     m.teams = Array.from({length:2}, () => Array.from({length:size}, ()=>''));
+    m.champs = Array.from({length:2}, () => Array.from({length:size}, ()=>false));
   } else {
     m.teams = Array.from({length:info.teams}, () => ['']);
+    m.champs = Array.from({length:info.teams}, () => [false]);
   }
   _evRenderEditor();
 }
 
 function evUpdateField(i, field, val) { _evMatches[i][field] = val; }
 function evUpdateParticipant(i, ti, pi, val) { _evMatches[i].teams[ti][pi] = val; }
+function evToggleChamp(i, ti, pi) {
+  if (!_evMatches[i].champs) _evMatches[i].champs = [];
+  if (!_evMatches[i].champs[ti]) _evMatches[i].champs[ti] = [];
+  _evMatches[i].champs[ti][pi] = !_evMatches[i].champs[ti][pi];
+  _evRenderEditor();
+}
 
 function _evRenderEditor() {
   const wrap = document.getElementById('ev-matches-editor'); if (!wrap) return;
@@ -2176,9 +2184,13 @@ function _evRenderEditor() {
       if (info.tag) {
         const size = info.size || 2;
         const teamRows = m.teams.map((team,ti) => {
-          const slots = Array.from({length:size}, (_,pi) =>
-            inp(`Participant ${pi+1}`, team[pi]||'', `evUpdateParticipant(${i},${ti},${pi},this.value)`)
-          ).join('');
+          const slots = Array.from({length:size}, (_,pi) => {
+            const isChamp = m.champs?.[ti]?.[pi] || false;
+            return `<div style="display:flex;align-items:center;gap:5px;">
+              ${inp(`Participant ${pi+1}`, team[pi]||'', `evUpdateParticipant(${i},${ti},${pi},this.value)`)}
+              <button type="button" onclick="evToggleChamp(${i},${ti},${pi})" title="Mark as Champion" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:1rem;padding:2px 4px;opacity:${isChamp?'1':'.2'};filter:${isChamp?'drop-shadow(0 0 4px #c8a84b)':'none'};transition:opacity .15s,filter .15s;">🏆</button>
+            </div>`;
+          }).join('');
           return `<div style="display:flex;flex-direction:column;gap:4px;">${slots}</div>`;
         });
         participantsHtml = `<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;margin-top:6px;">
@@ -2187,9 +2199,13 @@ function _evRenderEditor() {
           ${teamRows[1]||''}
         </div>`;
       } else {
-        const slots = m.teams.map((_,ti) =>
-          inp(`Participant ${ti+1}`, m.teams[ti][0]||'', `evUpdateParticipant(${i},${ti},0,this.value)`)
-        ).join(`<div style="font-size:.6rem;font-weight:700;color:rgba(255,255,255,.3);text-align:center;padding:2px 0;">VS</div>`);
+        const slots = m.teams.map((_,ti) => {
+          const isChamp = m.champs?.[ti]?.[0] || false;
+          return `<div style="display:flex;align-items:center;gap:5px;">
+            ${inp(`Participant ${ti+1}`, m.teams[ti][0]||'', `evUpdateParticipant(${i},${ti},0,this.value)`)}
+            <button type="button" onclick="evToggleChamp(${i},${ti},0)" title="Mark as Champion" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:1rem;padding:2px 4px;opacity:${isChamp?'1':'.2'};filter:${isChamp?'drop-shadow(0 0 4px #c8a84b)':'none'};transition:opacity .15s,filter .15s;">🏆</button>
+          </div>`;
+        }).join(`<div style="font-size:.6rem;font-weight:700;color:rgba(255,255,255,.3);text-align:center;padding:2px 0;">VS</div>`);
         participantsHtml = `<div style="display:flex;flex-direction:column;gap:4px;margin-top:6px;">${slots}</div>`;
       }
     } else if (info.battle) {
@@ -2370,13 +2386,23 @@ function renderEvent(ev) {
 
       // Build names inline with VS
       let namesHtml = '';
+      const beltIcon = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2" stroke-linecap="round" style="flex-shrink:0;vertical-align:middle;margin-right:3px;"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>`;
       if (info.val !== 'none' && !info.freeform && m.teams) {
         if (info.tag) {
-          const teamStrs = m.teams.map(team => team.filter(Boolean).join(' &amp; ')).filter(Boolean);
-          namesHtml = teamStrs.map((t,ti) => `<span style="color:#e8e8e8;font-weight:700;font-size:.82rem;">${t}</span>${ti < teamStrs.length-1 ? '<span style="color:#c8a84b;font-size:.58rem;font-weight:800;letter-spacing:2px;margin:0 5px;">VS</span>' : ''}`).join('');
+          const teamStrs = m.teams.map((team,ti) => {
+            return team.map((n,pi) => {
+              if (!n) return '';
+              const isChamp = m.champs?.[ti]?.[pi];
+              return (isChamp ? beltIcon : '') + `<span style="color:#e8e8e8;font-weight:700;font-size:.82rem;">${_esc(n)}</span>`;
+            }).filter(Boolean).join(' &amp; ');
+          }).filter(Boolean);
+          namesHtml = teamStrs.map((t,ti) => `<span style="display:inline-flex;align-items:center;">${t}</span>${ti < teamStrs.length-1 ? '<span style="color:#c8a84b;font-size:.58rem;font-weight:800;letter-spacing:2px;margin:0 5px;">VS</span>' : ''}`).join('');
         } else {
-          const parts = m.teams.map(t=>t[0]).filter(Boolean);
-          namesHtml = parts.map((n,pi) => `<span style="color:#e8e8e8;font-weight:700;font-size:.82rem;">${_esc(n)}</span>${pi < parts.length-1 ? '<span style="color:#c8a84b;font-size:.58rem;font-weight:800;letter-spacing:2px;margin:0 5px;">VS</span>' : ''}`).join('');
+          namesHtml = m.teams.map((team,ti) => {
+            const n = team[0]; if (!n) return '';
+            const isChamp = m.champs?.[ti]?.[0];
+            return `<span style="display:inline-flex;align-items:center;">${isChamp ? beltIcon : ''}<span style="color:#e8e8e8;font-weight:700;font-size:.82rem;">${_esc(n)}</span></span>`;
+          }).filter(Boolean).join('<span style="color:#c8a84b;font-size:.58rem;font-weight:800;letter-spacing:2px;margin:0 5px;">VS</span>');
         }
       } else if (info.battle && m.teams?.[0]?.[0]) {
         namesHtml = `<span style="color:rgba(255,255,255,.7);font-size:.8rem;">${_esc(m.teams[0][0])}-Man Battle Royal</span>`;
