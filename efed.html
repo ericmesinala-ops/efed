@@ -1417,6 +1417,8 @@ html.day-mode #settings-modal button[style*="rgba(255,255,255"] { background: rg
         </div>
       </div>
     </div>
+    <!-- Match card from planner -->
+    <div id="ev-matches-display" style="display:none;margin-top:10px;padding-top:4px;"></div>
   </div>
   <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
 </div>
@@ -2191,6 +2193,41 @@ function renderEvent(ev) {
     hypeWrap.style.display = 'none';
     if (hypeFrame) { hypeFrame.src = ''; hypeFrame.dataset.srcUrl = ''; }
   }
+  // ── MATCH CARD ──
+  const matchWrap = document.getElementById('ev-matches-display');
+  if (matchWrap) {
+    const matches = ev.matches || [];
+    const align = ev.align || 'center';
+    if (matches.length) {
+      matchWrap.style.display = 'block';
+      matchWrap.dataset.align = align;
+      matchWrap.innerHTML = matches.map(function(m) {
+        if (!m || m.type === 'none') return '';
+        const teams = m.teams || [];
+        let vsHtml = '';
+        if (m.type === 'singles' && teams.length === 2) {
+          vsHtml = '<span style="font-weight:700;color:#fff;">' + _esc(teams[0][0]||'') + '</span>'
+            + '<span style="color:rgba(255,255,255,.3);font-size:.65rem;margin:0 6px;">vs</span>'
+            + '<span style="font-weight:700;color:#fff;">' + _esc(teams[1][0]||'') + '</span>';
+        } else if (m.type === 'triple' || m.type === 'fatal4') {
+          vsHtml = teams.map(function(t){ return '<span style="font-weight:700;color:#fff;">'+_esc(t[0]||'')+'</span>'; }).join('<span style="color:rgba(255,255,255,.3);font-size:.65rem;margin:0 5px;">vs</span>');
+        } else if (m.type === 'tag') {
+          vsHtml = teams.map(function(t){ return '<span style="font-weight:700;color:#fff;">'+t.map(function(n){return _esc(n);}).join(' &amp; ')+'</span>'; }).join('<span style="color:rgba(255,255,255,.3);font-size:.65rem;margin:0 6px;">vs</span>');
+        } else {
+          vsHtml = '<span style="font-weight:700;color:#fff;">' + _esc((teams[0]||[])[0]||'') + '</span>';
+        }
+        return '<div style="display:flex;flex-direction:column;gap:3px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);">'
+          + (m.championship ? '<div style="font-size:.55rem;letter-spacing:1.5px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:2px;">'+_esc(m.championship)+'</div>' : '')
+          + '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;justify-content:'+align+';">'+vsHtml+'</div>'
+          + (m.matchType ? '<div style="font-size:.6rem;color:rgba(255,255,255,.3);margin-top:1px;text-align:'+align+';">'+_esc(m.matchType)+'</div>' : '')
+          + '</div>';
+      }).filter(Boolean).join('');
+    } else {
+      matchWrap.style.display = 'none';
+      matchWrap.innerHTML = '';
+    }
+  }
+
   const editBtn = document.getElementById('event-edit-btn');
   if (editBtn && isOwnerOrAdmin) editBtn.style.display = 'block';
 }
@@ -2508,7 +2545,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_event_matches,efed_event_align&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
@@ -2624,7 +2661,15 @@ async function loadProfile() {
     if (user.efed_banner_dim) efedApplyBannerDim(parseInt(user.efed_banner_dim));
 
     // Upcoming event
-    renderEvent({ title: user.efed_event_title, date: user.efed_event_date, location: user.efed_event_location, main: user.efed_event_main, hype: user.efed_event_hype });
+    renderEvent({
+      title: user.efed_event_title,
+      date: user.efed_event_date,
+      location: user.efed_event_location,
+      main: user.efed_event_main,
+      hype: user.efed_event_hype,
+      matches: user.efed_event_matches ? (typeof user.efed_event_matches === 'string' ? JSON.parse(user.efed_event_matches) : user.efed_event_matches) : null,
+      align: user.efed_event_align || 'center'
+    });
 
     // Signings toggle state
     _signingsOn = !!user.efed_open_signings;
