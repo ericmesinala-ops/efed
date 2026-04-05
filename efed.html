@@ -2169,10 +2169,25 @@ function evCycleChampState(i) {
   _evRenderEditor();
 }
 
-function evToggleChamp(i, ti, pi) {
+function evToggleChamp(i, ti, pi, btnEl) {
   if (!_evMatches[i].champs) _evMatches[i].champs = [];
   if (!_evMatches[i].champs[ti]) _evMatches[i].champs[ti] = [];
-  _evMatches[i].champs[ti][pi] = !_evMatches[i].champs[ti][pi];
+  const cur = _evMatches[i].champs[ti][pi] || 0;
+  const next = (cur + 1) % 3;
+  _evMatches[i].champs[ti][pi] = next;
+  const labels = ['Non-Title', 'Challenger', 'Champion'];
+  // Show fleeting popup
+  const btn = btnEl || event?.target?.closest('button');
+  if (btn) {
+    const popup = document.createElement('div');
+    popup.textContent = labels[next];
+    popup.style.cssText = 'position:absolute;background:rgba(20,20,28,.95);color:#e8e8e8;font-size:.6rem;font-weight:600;letter-spacing:1px;padding:3px 8px;border-radius:6px;pointer-events:none;white-space:nowrap;z-index:9999;transform:translateX(-50%);opacity:1;transition:opacity .4s;font-family:DM Sans,sans-serif;';
+    const rect = btn.getBoundingClientRect();
+    popup.style.left = (rect.left + rect.width/2 + window.scrollX) + 'px';
+    popup.style.top = (rect.top - 28 + window.scrollY) + 'px';
+    document.body.appendChild(popup);
+    setTimeout(() => { popup.style.opacity = '0'; setTimeout(() => popup.remove(), 400); }, 700);
+  }
   _evRenderEditor();
 }
 
@@ -2191,10 +2206,12 @@ function _evRenderEditor() {
         const size = info.size || 2;
         const teamRows = m.teams.map((team,ti) => {
           const slots = Array.from({length:size}, (_,pi) => {
-            const isChamp = m.champs?.[ti]?.[pi] || false;
+            const state = m.champs?.[ti]?.[pi] || 0;
+            const opacity = state === 0 ? '0.15' : state === 1 ? '0.45' : '1';
+            const glow = state === 2 ? 'drop-shadow(0 0 4px #c8a84b)' : 'none';
             return `<div style="display:flex;align-items:center;gap:5px;">
               ${inp(`Participant ${pi+1}`, team[pi]||'', `evUpdateParticipant(${i},${ti},${pi},this.value)`)}
-              <button type="button" onclick="evToggleChamp(${i},${ti},${pi})" title="Mark as Champion" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:1rem;padding:2px 4px;opacity:${isChamp?'1':'.2'};filter:${isChamp?'drop-shadow(0 0 4px #c8a84b)':'none'};transition:opacity .15s,filter .15s;">🏆</button>
+              <button type="button" onclick="evToggleChamp(${i},${ti},${pi},this)" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:1rem;padding:2px 4px;opacity:${opacity};filter:${glow};transition:opacity .15s,filter .15s;">🏆</button>
             </div>`;
           }).join('');
           return `<div style="display:flex;flex-direction:column;gap:4px;">${slots}</div>`;
@@ -2206,10 +2223,12 @@ function _evRenderEditor() {
         </div>`;
       } else {
         const slots = m.teams.map((_,ti) => {
-          const isChamp = m.champs?.[ti]?.[0] || false;
+          const state = m.champs?.[ti]?.[0] || 0;
+          const opacity = state === 0 ? '0.15' : state === 1 ? '0.45' : '1';
+          const glow = state === 2 ? 'drop-shadow(0 0 4px #c8a84b)' : 'none';
           return `<div style="display:flex;align-items:center;gap:5px;">
             ${inp(`Participant ${ti+1}`, m.teams[ti][0]||'', `evUpdateParticipant(${i},${ti},0,this.value)`)}
-            <button type="button" onclick="evToggleChamp(${i},${ti},0)" title="Mark as Champion" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:1rem;padding:2px 4px;opacity:${isChamp?'1':'.2'};filter:${isChamp?'drop-shadow(0 0 4px #c8a84b)':'none'};transition:opacity .15s,filter .15s;">🏆</button>
+            <button type="button" onclick="evToggleChamp(${i},${ti},0,this)" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:1rem;padding:2px 4px;opacity:${opacity};filter:${glow};transition:opacity .15s,filter .15s;">🏆</button>
           </div>`;
         }).join(`<div style="font-size:.6rem;font-weight:700;color:rgba(255,255,255,.3);text-align:center;padding:2px 0;">VS</div>`);
         participantsHtml = `<div style="display:flex;flex-direction:column;gap:4px;margin-top:6px;">${slots}</div>`;
@@ -2227,10 +2246,6 @@ function _evRenderEditor() {
     }
 
       const cs = m.champState || 0;
-      const csEmoji = cs === 0 ? '🚫' : '🏆';
-      const csOpacity = cs === 0 ? '1' : cs === 1 ? '0.3' : '1';
-      const csFilter = cs === 2 ? 'drop-shadow(0 0 5px #c8a84b)' : 'none';
-      const csTitle = cs === 0 ? 'No title match' : cs === 1 ? 'Vacant title / all challengers' : 'Title match — mark champion with 🏆';
       return `<div class="ev-match-row" draggable="true" data-idx="${i}" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:12px;cursor:default;transition:opacity .15s,border-color .15s;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
         <div style="display:flex;align-items:center;gap:8px;">
@@ -2244,9 +2259,8 @@ function _evRenderEditor() {
       <div style="display:flex;gap:6px;margin-bottom:6px;">
         ${inp('Match label (e.g. Main Event, Opener)', m.label||'', `evUpdateField(${i},'label',this.value)`, 'flex:1;')}
       </div>
-      <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
-        <button type="button" onclick="evCycleChampState(${i})" title="${csTitle}" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:1.1rem;padding:2px;opacity:${csOpacity};filter:${csFilter};transition:opacity .15s,filter .15s;">${csEmoji}</button>
-        ${inp('Championship name', m.championship||'', `evUpdateField(${i},'championship',this.value)`, `flex:1;opacity:${cs===0?'.3':'1'};`)}
+      <div style="display:flex;gap:6px;margin-bottom:6px;">
+        ${inp('Championship name (optional)', m.championship||'', `evUpdateField(${i},'championship',this.value)`, 'flex:1;')}
       </div>
       <select onchange="evMatchTypeChange(${i},this.value)" style="width:100%;background:#1a1a24;border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:7px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;outline:none;cursor:pointer;">
         ${typeOpts}
@@ -2398,28 +2412,26 @@ function renderEvent(ev) {
 
       // Build names with role label based on champState
       // 0 = no title (no labels), 1 = vacant (all Challenger), 2 = title match (marked=Champion, others=Challenger)
-      const cs = m.champState || 0;
       let namesHtml = '';
-      const nameBlock = (n, isChamp) => {
-        let role = '';
-        if (cs === 1) role = 'Challenger';
-        else if (cs === 2) role = isChamp ? 'Champion' : 'Challenger';
+      const nameBlock = (n, state) => {
+        const role = state === 2 ? 'Champion' : state === 1 ? 'Challenger' : '';
+        const roleColor = state === 2 ? '#c8a84b' : 'rgba(255,255,255,.28)';
         return `<div style="display:inline-flex;flex-direction:column;align-items:flex-start;">
           <span style="color:#e8e8e8;font-weight:700;font-size:.82rem;line-height:1.2;">${_esc(n)}</span>
-          ${role ? `<span style="font-size:.42rem;letter-spacing:1.5px;text-transform:uppercase;color:${isChamp&&cs===2?'#c8a84b':'rgba(255,255,255,.28)'};font-weight:600;line-height:1.4;">${role}</span>` : ''}
+          ${role ? `<span style="font-size:.42rem;letter-spacing:1.5px;text-transform:uppercase;color:${roleColor};font-weight:600;line-height:1.4;">${role}</span>` : ''}
         </div>`;
       };
       if (info.val !== 'none' && !info.freeform && m.teams) {
         const vsSpan = '<span style="color:#c8a84b;font-size:.58rem;font-weight:800;letter-spacing:2px;margin:0 6px;align-self:center;">VS</span>';
         if (info.tag) {
           const teamBlocks = m.teams.map((team,ti) => {
-            const names = team.map((n,pi) => { if (!n) return ''; return nameBlock(n, m.champs?.[ti]?.[pi]); }).filter(Boolean);
+            const names = team.map((n,pi) => { if (!n) return ''; return nameBlock(n, m.champs?.[ti]?.[pi] || 0); }).filter(Boolean);
             if (!names.length) return '';
             return `<div style="display:inline-flex;flex-direction:column;gap:3px;">${names.join('')}</div>`;
           }).filter(Boolean);
           namesHtml = `<div style="display:flex;align-items:flex-start;flex-wrap:wrap;gap:4px;">${teamBlocks.join(vsSpan)}</div>`;
         } else {
-          const blocks = m.teams.map((team,ti) => { const n = team[0]; if (!n) return ''; return nameBlock(n, m.champs?.[ti]?.[0]); }).filter(Boolean);
+          const blocks = m.teams.map((team,ti) => { const n = team[0]; if (!n) return ''; return nameBlock(n, m.champs?.[ti]?.[0] || 0); }).filter(Boolean);
           namesHtml = `<div style="display:flex;align-items:flex-start;flex-wrap:wrap;gap:4px;">${blocks.join(vsSpan)}</div>`;
         }
       } else if (info.battle && m.teams?.[0]?.[0]) {
@@ -2432,7 +2444,7 @@ function renderEvent(ev) {
         <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;">
           <div style="min-width:0;flex:1;">
             ${m.label ? `<div style="font-size:.48rem;letter-spacing:2px;text-transform:uppercase;color:${isFirst?'#c8a84b':'rgba(255,255,255,.3)'};font-weight:700;margin-bottom:3px;">${_esc(m.label)}</div>` : ''}
-            ${m.championship && cs > 0 ? `<div style="font-size:.6rem;color:rgba(255,255,255,.5);font-weight:500;margin-bottom:3px;letter-spacing:.3px;">${_esc(m.championship)}</div>` : ''}
+            ${m.championship ? `<div style="font-size:.6rem;color:rgba(255,255,255,.5);font-weight:500;margin-bottom:3px;letter-spacing:.3px;">${_esc(m.championship)}</div>` : ''}
             <div style="display:flex;align-items:baseline;flex-wrap:wrap;gap:2px;">${namesHtml}</div>
           </div>
           ${info.val !== 'none' && info.val !== 'freetext' ? `<div style="flex-shrink:0;font-size:.45rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.18);font-weight:600;text-align:right;white-space:nowrap;">${_esc(info.label)}</div>` : ''}
