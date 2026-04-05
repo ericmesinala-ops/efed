@@ -503,36 +503,47 @@ async function plannerSave() {
   var session = getSession(); if (!session) return;
   saveCurFields();
   var cur = _cur();
-  // Stringify JSON fields so Supabase accepts them
-  var payload = {
-    username: session.username,
-    roster: JSON.stringify(_roster),
-    tabs: JSON.stringify(_tabs),
-    show_name: cur.show_name || '',
-    episode: cur.episode || '',
-    cards: JSON.stringify(cur.cards),
-    updated_at: new Date().toISOString()
-  };
   try {
-    var resp;
+    var resp, result;
     if (_dbId) {
-      resp = await fetch(SUPABASE_URL+'/rest/v1/show_planner?id=eq.'+encodeURIComponent(_dbId), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(payload) });
+      // PATCH: only send data fields, not username or updated_at
+      var patchPayload = {
+        show_name: cur.show_name || '',
+        episode: cur.episode || '',
+        roster: _roster,
+        tabs: _tabs,
+        cards: cur.cards
+      };
+      resp = await fetch(SUPABASE_URL+'/rest/v1/show_planner?id=eq.'+encodeURIComponent(_dbId), {
+        method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(patchPayload)
+      });
     } else {
-      resp = await fetch(SUPABASE_URL+'/rest/v1/show_planner', { method:'POST', headers:SB_HEADERS, body:JSON.stringify(payload) });
+      // INSERT: include username
+      var insertPayload = {
+        username: session.username,
+        show_name: cur.show_name || '',
+        episode: cur.episode || '',
+        roster: _roster,
+        tabs: _tabs,
+        cards: cur.cards
+      };
+      resp = await fetch(SUPABASE_URL+'/rest/v1/show_planner', {
+        method: 'POST', headers: SB_HEADERS, body: JSON.stringify(insertPayload)
+      });
     }
     if (!resp.ok) {
       var errText = await resp.text();
-      showToast('Save failed (' + resp.status + '): ' + errText.slice(0, 80));
+      showToast('Save failed (' + resp.status + '): ' + errText.slice(0, 120));
+      console.error('Planner save error:', errText);
       return;
     }
-    var result = null;
     try { var arr = await resp.json(); result = Array.isArray(arr) ? arr[0] : arr; } catch(e) {}
     if (!_dbId && result && result.id) _dbId = result.id;
     showToast('Planner saved!');
     var btn = document.getElementById('pln-post-btn');
     if (btn) btn.classList.add('ready');
     renderTabs();
-  } catch(e) { showToast('Save failed: ' + e.message); }
+  } catch(e) { showToast('Save error: ' + e.message); console.error(e); }
 }
 
 async function plannerPost() {
