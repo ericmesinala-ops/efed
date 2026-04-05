@@ -8604,19 +8604,38 @@ async function submitRepost() {
   const thumb = v.thumb || (id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '');
   try {
     const videoMeta = JSON.stringify({ url: v.url, thumb, title: v.show || '', efed_name: v.efed || '' });
-    await sbInsert('posts', {
+
+    // Get user's own eFeds (owned + approved roster)
+    const [userRows, rosterRows] = await Promise.all([
+      sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
+      sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
+    ]);
+    const u = userRows[0];
+    const myEfeds = [];
+    if ((u?.is_efed_owner || u?.role === 'owner') && u?.promo_name) myEfeds.push(u.promo_name);
+    rosterRows.forEach(r => { if (r.efed && !myEfeds.map(e=>e.toLowerCase()).includes(r.efed.toLowerCase())) myEfeds.push(r.efed); });
+
+    // Post to each of user's own efeds + once with efed:null for profile feed
+    const targets = myEfeds.length ? myEfeds : [];
+    const basePayload = {
       username: session.username,
       text: text || null,
       image_url: videoMeta,
       post_type: 'repost',
       likes: 0,
       created_at: new Date().toISOString(),
-      reply_to: null,
-      efed: v.efed || null
-    });
+      reply_to: null
+    };
+    // Profile post (no efed)
+    await sbInsert('posts', { ...basePayload, efed: null });
+    // Each own efed
+    for (const efed of targets) {
+      await sbInsert('posts', { ...basePayload, efed });
+    }
+
     btn.style.display = 'none';
     const msg = document.getElementById('repost-posted-msg');
-    msg.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4caf8a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Posted on <strong>${_esc(v.efed || 'eFed')}</strong>`;
+    msg.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4caf8a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Reposted to your profile${targets.length ? ' &amp; eFed' + (targets.length > 1 ? 's' : '') : ''}`;
     msg.style.display = 'flex';
     setTimeout(() => closeRepostModal(), 2800);
   } catch(e) {
