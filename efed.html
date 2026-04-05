@@ -6614,6 +6614,8 @@ const _efedFeed = (() => {
   function _renderCard(p) {
     const session = getSession();
     const mode = p.post_type === 'ooc' ? 'ooc' : 'ic';
+    const isOwn = session && (session.username === p.username || session.username.toLowerCase() === ADMIN_USERNAME);
+    const deleteBtn = isOwn ? `<button class="efed-post-action-btn" onclick="_efedFeed.deletePost('${p.id}')" title="Delete" style="margin-left:auto;opacity:.5;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.5'"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg></button>` : '';
 
     // ── REPOST CARD ──
     if (p.post_type === 'repost') {
@@ -6642,7 +6644,7 @@ const _efedFeed = (() => {
         </div>
         ${commentHtml}${videoCard}
         <div class="efed-post-card-footer">
-          <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}</div>
+          <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}${deleteBtn}</div>
         </div>
         <div class="efed-post-replies-wrap">
           <button class="efed-post-replies-toggle" id="efed-replies-toggle-${p.id}" onclick="_efedFeed.toggleReplies('${p.id}',this)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg> Replies <span class="efed-reply-tab-count" id="efed-replies-label-${p.id}"></span></button>
@@ -6690,7 +6692,7 @@ const _efedFeed = (() => {
       </div>
       ${bodyHtml}
       <div class="efed-post-card-footer">
-        <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}</div>
+        <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}${deleteBtn}</div>
         ${efedTag}
       </div>
       <div class="efed-post-replies-wrap">
@@ -7080,7 +7082,22 @@ const _efedFeed = (() => {
     } catch(e) {}
   }
 
-  return { load, prev, next, goTo, jumpCurrent, like, lightbox, toggleReplies, openReply, closeReply, openReplyToReply, submitReply, likeReply, deleteReply };
+  async function deletePost(id) {
+    const ok = await showConfirm('Delete Post', 'Are you sure you want to delete this post?', 'Delete');
+    if (!ok) return;
+    const session = getSession(); if (!session) return;
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/posts?id=eq.' + encodeURIComponent(id), { method: 'DELETE', headers: SB_HEADERS });
+      _items = _items.filter(p => p.id !== id);
+      if (_idx >= _items.length) _idx = Math.max(0, _items.length - 1);
+      _fullRender();
+      showToast('Deleted.');
+    } catch(e) { showToast('Delete failed.'); }
+  }
+
+  function prepend(item) { _items.unshift(item); _idx = 0; _fullRender(); }
+
+  return { load, prev, next, goTo, jumpCurrent, like, lightbox, toggleReplies, openReply, closeReply, openReplyToReply, submitReply, likeReply, deleteReply, deletePost, prepend };
 })();
 const EFED_WRESTLING_EMOJIS = [
   '🪑','🏆','🔔','🩸','💀','🔥','⚡','💪','👊','🤜','🤛','🦵',
@@ -7855,12 +7872,18 @@ async function efedFeedSubmitPost() {
       body: JSON.stringify(payload)
     });
     if (!r.ok) throw new Error("HTTP " + r.status);
+    let saved = null;
+    try { const arr = await r.json(); saved = arr[0] || arr; } catch(e) {}
+    // Fetch avatar/display name
+    let avUrl = null, dName = session.username;
+    try { const u = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=avatar_url,display_name`); if(u[0]){ avUrl=u[0].avatar_url; dName=u[0].display_name||session.username; } } catch(e) {}
+    const enriched = { ...(saved || { username: session.username, text: text||null, image_url: _efedFeedImgData||null, post_type: _efedFeedMode, likes: 0, created_at: new Date().toISOString(), reply_to: null, efed: EFED_NAME||null }), avatar_url: avUrl, display_name: dName, _liked: false };
     if (ta) ta.value = "";
     efedFeedRemoveImg();
     efedFeedUpdateCharCount();
     efedFeedCloseModal();
+    _efedFeed.prepend(enriched);
     showToast("Posted!");
-    _efedFeed.load();
   } catch(e) {
     showToast("Post failed: " + e.message);
   }
