@@ -7788,6 +7788,15 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // ── SHOW PLANNER ──
+const _PLN_URL = 'https://osbarvhklizidsffytye.supabase.co';
+const _PLN_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
+const _PLN_HDR = { 'apikey': _PLN_KEY, 'Authorization': 'Bearer ' + _PLN_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+async function _plnGet(table, filters) { const r = await fetch(_PLN_URL+'/rest/v1/'+table+'?'+(filters||''), {headers:_PLN_HDR}); return r.json(); }
+async function _plnPatch(table, filters, data) { return fetch(_PLN_URL+'/rest/v1/'+table+'?'+filters, {method:'PATCH',headers:_PLN_HDR,body:JSON.stringify(data)}); }
+async function _plnInsert(table, data) { const r = await fetch(_PLN_URL+'/rest/v1/'+table, {method:'POST',headers:_PLN_HDR,body:JSON.stringify(data)}); return r.json(); }
+function _plnSession() { try { return JSON.parse(localStorage.getItem('efed_session')); } catch { return null; } }
+function _plnToast(msg) { if (typeof showToast === 'function') showToast(msg); else alert(msg); }
+function _plnEsc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 let _plannerData = { show_name:'', episode:'', roster:[], cards:[] };
 let _plannerDirty = false;
 let _plannerDragName = null;
@@ -7808,9 +7817,9 @@ function closePlanner() {
 }
 
 async function plannerLoad() {
-  const session = getSession(); if (!session) return;
+  const session = _plnSession(); if (!session) return;
   try {
-    const rows = await sbGet('show_planner', 'username=eq.'+encodeURIComponent(session.username)+'&order=updated_at.desc&limit=1');
+    const rows = await _plnGet('show_planner', 'username=eq.'+encodeURIComponent(session.username)+'&order=updated_at.desc&limit=1');
     if (rows.length) {
       _plannerData = rows[0];
       document.getElementById('planner-show-name').value = _plannerData.show_name || '';
@@ -7831,7 +7840,7 @@ function _plannerDefaultCards() {
 }
 
 async function plannerSave() {
-  const session = getSession(); if (!session) return;
+  const session = _plnSession(); if (!session) return;
   _plannerData.show_name = document.getElementById('planner-show-name').value.trim();
   _plannerData.episode = document.getElementById('planner-episode').value.trim();
   _plannerData.updated_at = Date.now();
@@ -7839,16 +7848,16 @@ async function plannerSave() {
   _plannerData.efed = EFED_NAME || '';
   try {
     if (_plannerData.id) {
-      await fetch(SUPABASE_URL+'/rest/v1/show_planner?id=eq.'+encodeURIComponent(_plannerData.id), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify(_plannerData)});
+      await _plnPatch('show_planner', 'id=eq.'+encodeURIComponent(_plannerData.id), _plannerData);
     } else {
-      const r = await sbInsert('show_planner', _plannerData);
+      const r = await _plnInsert('show_planner', _plannerData);
       if (r && r[0]) _plannerData.id = r[0].id;
     }
-    showToast('Planner saved!');
+    _plnToast('Planner saved!');
     _plannerDirty = false;
     const postBtn = document.getElementById('planner-post-btn');
     if (postBtn) { postBtn.disabled = false; postBtn.style.opacity = '1'; postBtn.style.cursor = 'pointer'; postBtn.textContent = 'Post to eFed'; }
-  } catch(e) { showToast('Save failed: '+e.message); }
+  } catch(e) { _plnToast('Save failed: '+e.message); }
 }
 
 function plannerAddRoster() {
@@ -7874,7 +7883,7 @@ function plannerRenderRoster() {
   const usedIds = new Set(_plannerData.cards.flatMap(function(c){ return c.names.map(function(n){ return n.id; }); }));
   list.innerHTML = _plannerData.roster.map(function(r) {
     const used = usedIds.has(r.id);
-    return '<div class="planner-pill'+(used?' used':'')+'" draggable="true" ondragstart="plannerRosterDragStart(event,\''+r.id+'\')" ondragend="plannerRosterDragEnd(event)"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_esc(r.name)+'</span><button class="planner-chip-remove" onclick="plannerRemoveRoster(\''+r.id+'\')">✕</button></div>';
+    return '<div class="planner-pill'+(used?' used':'')+'" draggable="true" ondragstart="plannerRosterDragStart(event,\''+r.id+'\')" ondragend="plannerRosterDragEnd(event)"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_plnEsc(r.name)+'</span><button class="planner-chip-remove" onclick="plannerRemoveRoster(\''+r.id+'\')">✕</button></div>';
   }).join('');
 }
 
@@ -7935,7 +7944,7 @@ function plannerRenderCards() {
     if (nameCount === 0) {
       dropContent = '<span style="color:rgba(255,255,255,.18);font-size:.6rem;font-style:italic;">Drag a name here…</span>';
     } else {
-      const chips = names.map(function(n){ return '<div class="planner-name-chip">'+_esc(n.name)+'<button class="planner-chip-remove" onclick="plannerRemoveNameFromCard('+idx+',\''+n.id+'\')">✕</button></div>'; }).join('');
+      const chips = names.map(function(n){ return '<div class="planner-name-chip">'+_plnEsc(n.name)+'<button class="planner-chip-remove" onclick="plannerRemoveNameFromCard('+idx+',\''+n.id+'\')">✕</button></div>'; }).join('');
       dropContent = chips;
       if (nameCount < 4) dropContent += '<div style="font-size:.5rem;color:rgba(255,255,255,.15);font-style:italic;width:100%;text-align:center;margin-top:2px;">You may drag more names here</div>';
     }
@@ -7965,7 +7974,7 @@ function plannerRenderCards() {
     el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
       + '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">'
       + '<div style="cursor:grab;color:rgba(255,255,255,.2);flex-shrink:0;"><svg width="10" height="8" viewBox="0 0 10 8" fill="currentColor"><rect width="10" height="1.5" rx=".75"/><rect y="3" width="10" height="1.5" rx=".75"/><rect y="6" width="10" height="1.5" rx=".75"/></svg></div>'
-      + '<input value="'+_esc(card.title||'')+'" oninput="plannerUpdateCardField('+idx+',\'title\',this.value)" style="background:none;border:none;color:#e8e8e8;font-family:Bebas Neue,sans-serif;font-size:.95rem;letter-spacing:2px;outline:none;min-width:0;flex:1;" maxlength="40">'
+      + '<input value="'+_plnEsc(card.title||'')+'" oninput="plannerUpdateCardField('+idx+',\'title\',this.value)" style="background:none;border:none;color:#e8e8e8;font-family:Bebas Neue,sans-serif;font-size:.95rem;letter-spacing:2px;outline:none;min-width:0;flex:1;" maxlength="40">'
       + '</div>'
       + '<div style="display:flex;align-items:center;gap:8px;">'
       + '<input type="checkbox" class="planner-done-cb" '+(done?'checked':'')+' onchange="plannerToggleDone('+idx+')" title="Mark done">'
@@ -7975,8 +7984,8 @@ function plannerRenderCards() {
       + dropContent + '</div>'
       + formatHtml
       + '<div style="display:flex;gap:6px;margin-top:6px;">'
-      + '<input class="planner-inp" placeholder="Match type…" value="'+_esc(card.matchType||'')+'" oninput="plannerUpdateCardField('+idx+',\'matchType\',this.value)" style="flex:1;font-size:.72rem;padding:6px 8px;">'
-      + '<input class="planner-inp" placeholder="Championship…" value="'+_esc(card.championship||'')+'" oninput="plannerUpdateCardField('+idx+',\'championship\',this.value)" style="flex:1;font-size:.72rem;padding:6px 8px;">'
+      + '<input class="planner-inp" placeholder="Match type…" value="'+_plnEsc(card.matchType||'')+'" oninput="plannerUpdateCardField('+idx+',\'matchType\',this.value)" style="flex:1;font-size:.72rem;padding:6px 8px;">'
+      + '<input class="planner-inp" placeholder="Championship…" value="'+_plnEsc(card.championship||'')+'" oninput="plannerUpdateCardField('+idx+',\'championship\',this.value)" style="flex:1;font-size:.72rem;padding:6px 8px;">'
       + '</div>';
 
     el.addEventListener('dragstart', function(e) {
@@ -8047,7 +8056,7 @@ function plannerUpdateProgress() {
 }
 
 async function plannerPostToEfed() {
-  const session = getSession(); if (!session) return;
+  const session = _plnSession(); if (!session) return;
   const btn = document.getElementById('planner-post-btn');
   if (btn && btn.disabled) return;
 
@@ -8082,20 +8091,24 @@ async function plannerPostToEfed() {
   const alignVal = _evAlign || 'center';
   const matchesJson = JSON.stringify(matches);
 
+  const _SB_URL = 'https://osbarvhklizidsffytye.supabase.co';
+  const _SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
+  const _SB_HDR = { 'apikey': _SB_KEY, 'Authorization': 'Bearer ' + _SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+
   if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
   try {
-    const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
-      method:'PATCH', headers:SB_HEADERS,
+    const r = await fetch(_SB_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
+      method:'PATCH', headers:_SB_HDR,
       body:JSON.stringify({ efed_event_matches: matchesJson, efed_event_align: alignVal,
         efed_event_title: title, efed_event_date: date||null,
         efed_event_location: loc||null, efed_event_main: main||null, efed_event_hype: hype||null })
     });
     if (!r.ok) throw new Error('HTTP '+r.status);
     renderEvent({ title, date:date||null, location:loc||null, main:main||null, hype:hype||null, matches, align:alignVal });
-    showToast('Posted to eFed!');
+    _plnToast('Posted to eFed!');
     closePlanner();
   } catch(e) {
-    showToast('Post failed: '+e.message);
+    _plnToast('Post failed: '+e.message);
     if (btn) { btn.disabled = false; btn.textContent = 'Post to eFed'; }
   }
 }
