@@ -1230,10 +1230,6 @@ html.day-mode #settings-modal button[style*="rgba(255,255,255"] { background: rg
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           My eFed
         </button>
-        <button class="dropdown-item" id="dd-invite-btn" style="display:none !important;" onclick="toggleDropdown(true); openInvite()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="9" y1="10" x2="15" y2="10"/><line x1="12" y1="7" x2="12" y2="13"/></svg>
-          Invite
-        </button>
         <button class="dropdown-item" onclick="toggleDropdown(true); openSettings()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           Settings
@@ -7797,7 +7793,11 @@ let _plannerDirty = false;
 let _plannerDragName = null;
 let _plannerDragCardIdx = null;
 
-function plannerDirty() { _plannerDirty = true; }
+function plannerDirty() {
+  _plannerDirty = true;
+  const btn = document.getElementById('planner-post-btn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '.35'; btn.style.cursor = 'default'; }
+}
 
 function openPlanner() {
   document.getElementById('planner-bg').classList.add('open');
@@ -7846,6 +7846,8 @@ async function plannerSave() {
     }
     showToast('Planner saved!');
     _plannerDirty = false;
+    const postBtn = document.getElementById('planner-post-btn');
+    if (postBtn) { postBtn.disabled = false; postBtn.style.opacity = '1'; postBtn.style.cursor = 'pointer'; postBtn.textContent = 'Post to eFed'; }
   } catch(e) { showToast('Save failed: '+e.message); }
 }
 
@@ -8046,15 +8048,16 @@ function plannerUpdateProgress() {
 
 async function plannerPostToEfed() {
   const session = getSession(); if (!session) return;
-  // First save the planner
-  await plannerSave();
+  const btn = document.getElementById('planner-post-btn');
+  if (btn && btn.disabled) return;
+
   // Map planner cards to event matches format
   const matches = _plannerData.cards.map(function(card) {
     const names = card.names || [];
     const fmt = card.matchFormat || '';
-    // Build teams array based on format and names
     let type = 'none', teams = [];
-    if (names.length === 1) { type = 'freetext'; teams = [[names[0].name]]; }
+    if (names.length === 0) { type = 'none'; }
+    else if (names.length === 1) { type = 'freetext'; teams = [[names[0].name]]; }
     else if (names.length === 2) {
       if (fmt === 'promo') { type = 'freetext'; teams = [[names.map(function(n){return n.name;}).join(' & ')]]; }
       else { type = 'singles'; teams = [[names[0].name],[names[1].name]]; }
@@ -8067,10 +8070,11 @@ async function plannerPostToEfed() {
       else { type = 'fatal4'; teams = names.slice(0,4).map(function(n){return [n.name];}); }
     }
     return { label: card.title||'', championship: card.championship||'', type: type, teams: teams, champs: [], matchType: card.matchType||'' };
-  }).filter(function(m){ return m.type !== 'none' || m.label; });
+  }).filter(function(m){ return m.type !== 'none'; });
 
-  // Read existing event data from display
-  const title = document.getElementById('ev-display-title')?.textContent.replace('No event scheduled','').trim() || '';
+  // Read existing event data — use planner show name as fallback title
+  const existingTitle = document.getElementById('ev-display-title')?.textContent.replace('No event scheduled','').trim() || '';
+  const title = existingTitle || _plannerData.show_name || 'Upcoming Show';
   const date = document.getElementById('ev-display-date-text')?.textContent.trim() || '';
   const loc = document.getElementById('ev-display-location-text')?.textContent.trim() || '';
   const main = document.getElementById('ev-display-mainevent')?.textContent.trim() || '';
@@ -8078,18 +8082,22 @@ async function plannerPostToEfed() {
   const alignVal = _evAlign || 'center';
   const matchesJson = JSON.stringify(matches);
 
+  if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
   try {
     const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
       method:'PATCH', headers:SB_HEADERS,
       body:JSON.stringify({ efed_event_matches: matchesJson, efed_event_align: alignVal,
-        efed_event_title: title||null, efed_event_date: date||null,
+        efed_event_title: title, efed_event_date: date||null,
         efed_event_location: loc||null, efed_event_main: main||null, efed_event_hype: hype||null })
     });
     if (!r.ok) throw new Error('HTTP '+r.status);
     renderEvent({ title, date:date||null, location:loc||null, main:main||null, hype:hype||null, matches, align:alignVal });
     showToast('Posted to eFed!');
     closePlanner();
-  } catch(e) { showToast('Post failed: '+e.message); }
+  } catch(e) {
+    showToast('Post failed: '+e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Post to eFed'; }
+  }
 }
 
 
@@ -8258,7 +8266,7 @@ async function efedFeedSubmitPost() {
       </div>
       <div style="display:flex;align-items:center;gap:10px;">
         <button onclick="plannerSave()" style="padding:8px 18px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.8'" onmouseout="this.style.opacity='1'">Save</button>
-        <button onclick="plannerPostToEfed()" style="padding:8px 18px;background:#c0000e;border:none;border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.8'" onmouseout="this.style.opacity='1'">Post to eFed</button>
+        <button onclick="plannerPostToEfed()" id="planner-post-btn" disabled style="padding:8px 18px;background:#c0000e;border:none;border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:opacity .15s;opacity:.35;" onmouseover="if(!this.disabled)this.style.opacity='.8'" onmouseout="if(!this.disabled)this.style.opacity='1'">Post to eFed</button>
         <button onclick="closePlanner()" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:.9rem;display:flex;align-items:center;justify-content:center;">✕</button>
       </div>
     </div>
