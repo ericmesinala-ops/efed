@@ -442,14 +442,21 @@ function showToast(msg) {
 }
 
 // ── LOAD ──
+function _parseField(val, fallback) {
+  if (!val) return fallback;
+  if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return fallback; } }
+  return val;
+}
 async function plannerLoad() {
   var session = getSession(); if (!session) return;
   try {
     var rows = await sbGet('show_planner', 'username=eq.'+encodeURIComponent(session.username)+'&order=updated_at.desc&limit=1');
     if (rows && rows.length && !rows.error) {
       var d = rows[0]; _dbId = d.id;
-      _roster = d.roster || [];
-      _tabs = (d.tabs && Array.isArray(d.tabs)) ? d.tabs : [{ show_name:d.show_name||'', episode:d.episode||'', cards:d.cards||_defaultCards() }];
+      _roster = _parseField(d.roster, []);
+      var parsedTabs = _parseField(d.tabs, null);
+      var parsedCards = _parseField(d.cards, _defaultCards());
+      _tabs = (parsedTabs && Array.isArray(parsedTabs)) ? parsedTabs : [{ show_name:d.show_name||'', episode:d.episode||'', cards:parsedCards }];
     } else {
       _tabs = [{ show_name:'', episode:'', cards:_defaultCards() }]; _roster = []; _dbId = null;
     }
@@ -496,15 +503,31 @@ async function plannerSave() {
   var session = getSession(); if (!session) return;
   saveCurFields();
   var cur = _cur();
-  var payload = { username: session.username, roster: _roster, tabs: _tabs,
-    show_name: cur.show_name, episode: cur.episode, cards: cur.cards, updated_at: new Date().toISOString() };
+  // Stringify JSON fields so Supabase accepts them
+  var payload = {
+    username: session.username,
+    roster: JSON.stringify(_roster),
+    tabs: JSON.stringify(_tabs),
+    show_name: cur.show_name || '',
+    episode: cur.episode || '',
+    cards: JSON.stringify(cur.cards),
+    updated_at: new Date().toISOString()
+  };
   try {
+    var resp;
     if (_dbId) {
-      await sbPatch('show_planner', 'id=eq.'+encodeURIComponent(_dbId), payload);
+      resp = await fetch(SUPABASE_URL+'/rest/v1/show_planner?id=eq.'+encodeURIComponent(_dbId), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(payload) });
     } else {
-      var r = await sbInsert('show_planner', payload);
-      if (r && r[0]) _dbId = r[0].id;
+      resp = await fetch(SUPABASE_URL+'/rest/v1/show_planner', { method:'POST', headers:SB_HEADERS, body:JSON.stringify(payload) });
     }
+    if (!resp.ok) {
+      var errText = await resp.text();
+      showToast('Save failed (' + resp.status + '): ' + errText.slice(0, 80));
+      return;
+    }
+    var result = null;
+    try { var arr = await resp.json(); result = Array.isArray(arr) ? arr[0] : arr; } catch(e) {}
+    if (!_dbId && result && result.id) _dbId = result.id;
     showToast('Planner saved!');
     var btn = document.getElementById('pln-post-btn');
     if (btn) btn.classList.add('ready');
