@@ -7791,327 +7791,215 @@ document.addEventListener("DOMContentLoaded", () => {
 const _PLN_URL = 'https://osbarvhklizidsffytye.supabase.co';
 const _PLN_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
 const _PLN_HDR = { 'apikey': _PLN_KEY, 'Authorization': 'Bearer ' + _PLN_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
-async function _plnGet(table, filters) { const r = await fetch(_PLN_URL+'/rest/v1/'+table+'?'+(filters||''), {headers:_PLN_HDR}); return r.json(); }
-async function _plnPatch(table, filters, data) { return fetch(_PLN_URL+'/rest/v1/'+table+'?'+filters, {method:'PATCH',headers:_PLN_HDR,body:JSON.stringify(data)}); }
-async function _plnInsert(table, data) { const r = await fetch(_PLN_URL+'/rest/v1/'+table, {method:'POST',headers:_PLN_HDR,body:JSON.stringify(data)}); return r.json(); }
-function _plnSession() { try { return JSON.parse(localStorage.getItem('efed_session')); } catch { return null; } }
-function _plnToast(msg) { if (typeof showToast === 'function') showToast(msg); else alert(msg); }
-function _plnEsc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-let _plannerData = { show_name:'', episode:'', roster:[], cards:[] };
-let _plannerDirty = false;
-let _plannerDragName = null;
-let _plannerDragCardIdx = null;
+async function _plnGet(t,f){const r=await fetch(_PLN_URL+'/rest/v1/'+t+'?'+(f||''),{headers:_PLN_HDR});return r.json();}
+async function _plnPatch(t,f,d){return fetch(_PLN_URL+'/rest/v1/'+t+'?'+f,{method:'PATCH',headers:_PLN_HDR,body:JSON.stringify(d)});}
+async function _plnInsert(t,d){const r=await fetch(_PLN_URL+'/rest/v1/'+t,{method:'POST',headers:_PLN_HDR,body:JSON.stringify(d)});return r.json();}
+function _plnSession(){try{return JSON.parse(localStorage.getItem('efed_session'));}catch{return null;}}
+function _plnToast(msg){if(typeof showToast==='function')showToast(msg);else alert(msg);}
+function _plnEsc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
-function plannerDirty() {
-  _plannerDirty = true;
-  const btn = document.getElementById('planner-post-btn');
-  if (btn) { btn.disabled = true; btn.style.opacity = '.35'; btn.style.cursor = 'default'; }
+var _plannerTabs=[{show_name:'',episode:'',cards:[]}];
+var _plannerTabIdx=0;
+var _plannerRoster=[];
+var _plannerDbId=null;
+var _plannerDragName=null;
+var _plannerDragCardIdx=null;
+function _plannerCurrent(){return _plannerTabs[_plannerTabIdx];}
+
+function plannerDirty(){
+  var btn=document.getElementById('planner-post-btn');
+  if(btn){btn.disabled=true;btn.style.opacity='.35';btn.style.cursor='default';}
 }
-
-function openPlanner() {
+function openPlanner(){
   document.getElementById('planner-bg').classList.add('open');
+  document.body.classList.add('planner-open');
   plannerLoad();
 }
-function closePlanner() {
+function closePlanner(){
   document.getElementById('planner-bg').classList.remove('open');
+  document.body.classList.remove('planner-open');
 }
-
-async function plannerLoad() {
-  const session = _plnSession(); if (!session) return;
-  try {
-    const rows = await _plnGet('show_planner', 'username=eq.'+encodeURIComponent(session.username)+'&order=updated_at.desc&limit=1');
-    if (rows.length) {
-      _plannerData = rows[0];
-      document.getElementById('planner-show-name').value = _plannerData.show_name || '';
-      document.getElementById('planner-episode').value = _plannerData.episode || '';
-      if (!_plannerData.roster) _plannerData.roster = [];
-      if (!_plannerData.cards) _plannerData.cards = [];
-    } else {
-      _plannerData = { show_name:'', episode:'', roster:[], cards: _plannerDefaultCards() };
-    }
-  } catch(e) { _plannerData = { show_name:'', episode:'', roster:[], cards: _plannerDefaultCards() }; }
-  plannerRenderRoster();
-  plannerRenderCards();
-  plannerUpdateProgress();
+async function plannerLoad(){
+  var session=_plnSession();if(!session)return;
+  try{
+    var rows=await _plnGet('show_planner','username=eq.'+encodeURIComponent(session.username)+'&order=updated_at.desc&limit=1');
+    if(rows&&rows.length&&!rows.error){
+      var d=rows[0];_plannerDbId=d.id;_plannerRoster=d.roster||[];
+      _plannerTabs=(d.tabs&&Array.isArray(d.tabs))?d.tabs:[{show_name:d.show_name||'',episode:d.episode||'',cards:d.cards||_plannerDefaultCards()}];
+    }else{_plannerTabs=[{show_name:'',episode:'',cards:_plannerDefaultCards()}];_plannerRoster=[];_plannerDbId=null;}
+  }catch(e){_plannerTabs=[{show_name:'',episode:'',cards:_plannerDefaultCards()}];_plannerRoster=[];}
+  _plannerTabIdx=0;plannerRenderTabs();plannerLoadTab();
 }
-
-function _plannerDefaultCards() {
-  return Array.from({length:5}, function(_,i){ return { title:'Match '+String.fromCharCode(65+i), names:[], matchType:'', championship:'', done:false }; });
+function plannerLoadTab(){
+  var tab=_plannerCurrent();
+  document.getElementById('planner-show-name').value=tab.show_name||'';
+  document.getElementById('planner-episode').value=tab.episode||'';
+  plannerRenderRoster();plannerRenderCards();plannerUpdateProgress();
 }
-
-async function plannerSave() {
-  const session = _plnSession(); if (!session) return;
-  _plannerData.show_name = document.getElementById('planner-show-name').value.trim();
-  _plannerData.episode = document.getElementById('planner-episode').value.trim();
-  _plannerData.updated_at = Date.now();
-  _plannerData.username = session.username;
-  _plannerData.efed = EFED_NAME || '';
-  try {
-    if (_plannerData.id) {
-      await _plnPatch('show_planner', 'id=eq.'+encodeURIComponent(_plannerData.id), _plannerData);
-    } else {
-      const r = await _plnInsert('show_planner', _plannerData);
-      if (r && r[0]) _plannerData.id = r[0].id;
-    }
+function plannerRenderTabs(){
+  var row=document.getElementById('planner-tabs-row');if(!row)return;
+  row.innerHTML=_plannerTabs.map(function(t,i){
+    return '<button class="planner-tab'+(i===_plannerTabIdx?' active':'')+'" onclick="plannerSwitchTab('+i+')">'+_plnEsc(t.show_name||('Show '+(i+1)))+'</button>';
+  }).join('')+'<button class="planner-tab-add" onclick="plannerNewTab()">+ New</button>';
+}
+function plannerSwitchTab(i){
+  var cur=_plannerCurrent();cur.show_name=document.getElementById('planner-show-name').value.trim();cur.episode=document.getElementById('planner-episode').value.trim();
+  _plannerTabIdx=i;plannerRenderTabs();plannerLoadTab();plannerDirty();
+}
+function plannerNewTab(){
+  var cur=_plannerCurrent();cur.show_name=document.getElementById('planner-show-name').value.trim();cur.episode=document.getElementById('planner-episode').value.trim();
+  _plannerTabs.push({show_name:'',episode:'',cards:_plannerDefaultCards()});_plannerTabIdx=_plannerTabs.length-1;
+  plannerRenderTabs();plannerLoadTab();plannerDirty();
+}
+function _plannerDefaultCards(){
+  return Array.from({length:5},function(_,i){return{title:'Match '+String.fromCharCode(65+i),names:[],matchType:'',championship:'',done:false};});
+}
+async function plannerSave(){
+  var session=_plnSession();if(!session)return;
+  var cur=_plannerCurrent();cur.show_name=document.getElementById('planner-show-name').value.trim();cur.episode=document.getElementById('planner-episode').value.trim();
+  var efedName='';try{efedName=EFED_NAME||'';}catch(e){}
+  var payload={username:session.username,efed:efedName,roster:_plannerRoster,tabs:_plannerTabs,show_name:cur.show_name,episode:cur.episode,cards:cur.cards,updated_at:Date.now()};
+  try{
+    if(_plannerDbId){await _plnPatch('show_planner','id=eq.'+encodeURIComponent(_plannerDbId),payload);}
+    else{var r=await _plnInsert('show_planner',payload);if(r&&r[0])_plannerDbId=r[0].id;}
     _plnToast('Planner saved!');
-    _plannerDirty = false;
-    const postBtn = document.getElementById('planner-post-btn');
-    if (postBtn) { postBtn.disabled = false; postBtn.style.opacity = '1'; postBtn.style.cursor = 'pointer'; postBtn.textContent = 'Post to eFed'; }
-  } catch(e) { _plnToast('Save failed: '+e.message); }
+    var postBtn=document.getElementById('planner-post-btn');
+    if(postBtn){postBtn.disabled=false;postBtn.style.opacity='1';postBtn.style.cursor='pointer';postBtn.textContent='Post to eFed';}
+    plannerRenderTabs();
+  }catch(e){_plnToast('Save failed: '+e.message);}
 }
-
-function plannerAddRoster() {
-  const inp = document.getElementById('planner-name-inp');
-  const name = inp.value.trim(); if (!name) return;
-  _plannerData.roster.push({ name:name, id: Date.now()+'_'+Math.random().toString(36).slice(2) });
-  inp.value = '';
-  plannerRenderRoster();
-  plannerDirty();
+function plannerAddRoster(){
+  var inp=document.getElementById('planner-name-inp');var name=inp.value.trim();if(!name)return;
+  _plannerRoster.push({name:name,id:Date.now()+'_'+Math.random().toString(36).slice(2)});inp.value='';
+  plannerRenderRoster();plannerDirty();
 }
-
-function plannerRemoveRoster(id) {
-  _plannerData.roster = _plannerData.roster.filter(function(r){ return r.id !== id; });
-  _plannerData.cards.forEach(function(c){ c.names = c.names.filter(function(n){ return n.id !== id; }); });
-  plannerRenderRoster();
-  plannerRenderCards();
-  plannerUpdateProgress();
-  plannerDirty();
+function plannerRemoveRoster(id){
+  _plannerRoster=_plannerRoster.filter(function(r){return r.id!==id;});
+  _plannerTabs.forEach(function(tab){tab.cards.forEach(function(c){c.names=c.names.filter(function(n){return n.id!==id;});});});
+  plannerRenderRoster();plannerRenderCards();plannerUpdateProgress();plannerDirty();
 }
-
-function plannerRenderRoster() {
-  const list = document.getElementById('planner-roster-list'); if (!list) return;
-  const usedIds = new Set(_plannerData.cards.flatMap(function(c){ return c.names.map(function(n){ return n.id; }); }));
-  list.innerHTML = _plannerData.roster.map(function(r) {
-    const used = usedIds.has(r.id);
-    return '<div class="planner-pill'+(used?' used':'')+'" draggable="true" ondragstart="plannerRosterDragStart(event,\''+r.id+'\')" ondragend="plannerRosterDragEnd(event)"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+_plnEsc(r.name)+'</span><button class="planner-chip-remove" onclick="plannerRemoveRoster(\''+r.id+'\')">✕</button></div>';
+function plannerRenderRoster(){
+  var list=document.getElementById('planner-roster-list');if(!list)return;
+  var cur=_plannerCurrent();
+  var usedIds=new Set(cur.cards.flatMap(function(c){return c.names.map(function(n){return n.id;});}));
+  list.innerHTML=_plannerRoster.map(function(r){
+    var used=usedIds.has(r.id);
+    return '<div class="planner-pill'+(used?' used':'')+'" draggable="true" ondragstart="plannerRosterDragStart(event,\'' +r.id+ '\')" ondragend="plannerRosterDragEnd()"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:text;-webkit-user-select:text;">'+_plnEsc(r.name)+'</span><button class="planner-chip-remove" onclick="plannerRemoveRoster(\'' +r.id+ '\')">&#x2715;</button></div>';
   }).join('');
 }
-
-function plannerAddCard() {
-  const idx = _plannerData.cards.length;
-  _plannerData.cards.push({ title:'Match '+String.fromCharCode(65+idx), names:[], matchType:'', championship:'', done:false });
-  plannerRenderCards();
-  plannerUpdateProgress();
-  plannerDirty();
+function plannerAddCard(){
+  var cur=_plannerCurrent();var idx=cur.cards.length;
+  cur.cards.push({title:'Match '+String.fromCharCode(65+idx),names:[],matchType:'',championship:'',done:false});
+  plannerRenderCards();plannerUpdateProgress();plannerDirty();
 }
-
-function plannerDeleteCard(idx) {
-  _plannerData.cards.splice(idx,1);
-  plannerRenderCards();
-  plannerRenderRoster();
-  plannerUpdateProgress();
-  plannerDirty();
+function plannerDeleteCard(idx){
+  var cur=_plannerCurrent();cur.cards.splice(idx,1);
+  plannerRenderCards();plannerRenderRoster();plannerUpdateProgress();plannerDirty();
 }
-
-function plannerToggleDone(idx) {
-  _plannerData.cards[idx].done = !_plannerData.cards[idx].done;
-  plannerRenderCards();
-  plannerUpdateProgress();
-  plannerDirty();
+function plannerToggleDone(idx){
+  var cur=_plannerCurrent();cur.cards[idx].done=!cur.cards[idx].done;
+  plannerRenderCards();plannerUpdateProgress();plannerDirty();
 }
-
-function plannerUpdateCardField(idx, field, val) {
-  _plannerData.cards[idx][field] = val;
-  plannerDirty();
+function plannerUpdateCardField(idx,field,val){_plannerCurrent().cards[idx][field]=val;plannerDirty();}
+function plannerRemoveNameFromCard(cardIdx,nameId){
+  var cur=_plannerCurrent();cur.cards[cardIdx].names=cur.cards[cardIdx].names.filter(function(n){return n.id!==nameId;});
+  plannerRenderCards();plannerRenderRoster();plannerUpdateProgress();plannerDirty();
 }
-
-function plannerRemoveNameFromCard(cardIdx, nameId) {
-  _plannerData.cards[cardIdx].names = _plannerData.cards[cardIdx].names.filter(function(n){ return n.id !== nameId; });
-  plannerRenderCards();
-  plannerRenderRoster();
-  plannerUpdateProgress();
-  plannerDirty();
-}
-
-function plannerSetMatchFormat(cardIdx, fmt) {
-  _plannerData.cards[cardIdx].matchFormat = fmt;
-  plannerRenderCards();
-  plannerDirty();
-}
-
-function plannerRenderCards() {
-  const wrap = document.getElementById('planner-cards'); if (!wrap) return;
-  wrap.innerHTML = '';
-  wrap.style.display = 'flex';
-  wrap.style.flexDirection = 'column';
-  wrap.style.gap = '10px';
-  _plannerData.cards.forEach(function(card, idx) {
-    const names = card.names || [];
-    const nameCount = names.length;
-    const done = card.done;
-
-    let dropContent = '';
-    if (nameCount === 0) {
-      dropContent = '<span style="color:rgba(255,255,255,.18);font-size:.6rem;font-style:italic;">Drag a name here…</span>';
-    } else {
-      const chips = names.map(function(n){ return '<div class="planner-name-chip">'+_plnEsc(n.name)+'<button class="planner-chip-remove" onclick="plannerRemoveNameFromCard('+idx+',\''+n.id+'\')">✕</button></div>'; }).join('');
-      dropContent = chips;
-      if (nameCount < 4) dropContent += '<div style="font-size:.5rem;color:rgba(255,255,255,.15);font-style:italic;width:100%;text-align:center;margin-top:2px;">You may drag more names here</div>';
+function plannerSetMatchFormat(cardIdx,fmt){_plannerCurrent().cards[cardIdx].matchFormat=fmt;plannerRenderCards();plannerDirty();}
+function plannerRenderCards(){
+  var wrap=document.getElementById('planner-cards');if(!wrap)return;
+  var cur=_plannerCurrent();wrap.innerHTML='';
+  cur.cards.forEach(function(card,idx){
+    var names=card.names||[],nc=names.length,done=card.done,fmt=card.matchFormat||'';
+    var dropContent='';
+    if(nc===0){dropContent='<span style="color:rgba(255,255,255,.18);font-size:.55rem;font-style:italic;pointer-events:none;">Drag a name here…</span>';}
+    else{
+      var chips=names.map(function(n){return '<div class="planner-name-chip">'+_plnEsc(n.name)+'<button class="planner-chip-remove" onclick="plannerRemoveNameFromCard('+idx+',\'' +n.id+ '\')">&#x2715;</button></div>';}).join('');
+      dropContent=chips+(nc<4?'<div style="font-size:.44rem;color:rgba(255,255,255,.12);font-style:italic;width:100%;text-align:center;margin-top:2px;pointer-events:none;">You may drag more names here</div>':'');
     }
-
-    let formatHtml = '';
-    if (nameCount === 2) {
-      const fmt = card.matchFormat || 'singles';
-      formatHtml = '<div style="display:flex;gap:5px;margin-bottom:8px;flex-wrap:wrap;">'
-        + [['Singles','singles'],['Promo','promo']].map(function(pair){ const l=pair[0],v=pair[1]; return '<button onclick="plannerSetMatchFormat('+idx+',\''+v+'\')" style="padding:3px 10px;border-radius:14px;border:1px solid '+(fmt===v?'rgba(200,168,75,.5)':'rgba(255,255,255,.1)')+';background:'+(fmt===v?'rgba(200,168,75,.12)':'rgba(255,255,255,.04)')+';color:'+(fmt===v?'#c8a84b':'rgba(255,255,255,.5)')+';font-size:.62rem;font-weight:600;cursor:pointer;font-family:DM Sans,sans-serif;">'+l+'</button>'; }).join('')
-        + '</div>';
-    } else if (nameCount === 3) {
-      const fmt = card.matchFormat || 'triple';
-      formatHtml = '<div style="display:flex;gap:5px;margin-bottom:8px;flex-wrap:wrap;">'
-        + [['Triple Threat','triple'],['2 vs 1','2v1'],['1 vs 2','1v2']].map(function(pair){ const l=pair[0],v=pair[1]; return '<button onclick="plannerSetMatchFormat('+idx+',\''+v+'\')" style="padding:3px 10px;border-radius:14px;border:1px solid '+(fmt===v?'rgba(200,168,75,.5)':'rgba(255,255,255,.1)')+';background:'+(fmt===v?'rgba(200,168,75,.12)':'rgba(255,255,255,.04)')+';color:'+(fmt===v?'#c8a84b':'rgba(255,255,255,.5)')+';font-size:.62rem;font-weight:600;cursor:pointer;font-family:DM Sans,sans-serif;">'+l+'</button>'; }).join('')
-        + '</div>';
-    } else if (nameCount >= 4) {
-      const fmt = card.matchFormat || 'fatal4';
-      formatHtml = '<div style="display:flex;gap:5px;margin-bottom:8px;flex-wrap:wrap;">'
-        + [['Fatal 4-Way','fatal4'],['2 vs 2','2v2']].map(function(pair){ const l=pair[0],v=pair[1]; return '<button onclick="plannerSetMatchFormat('+idx+',\''+v+'\')" style="padding:3px 10px;border-radius:14px;border:1px solid '+(fmt===v?'rgba(200,168,75,.5)':'rgba(255,255,255,.1)')+';background:'+(fmt===v?'rgba(200,168,75,.12)':'rgba(255,255,255,.04)')+';color:'+(fmt===v?'#c8a84b':'rgba(255,255,255,.5)')+';font-size:.62rem;font-weight:600;cursor:pointer;font-family:DM Sans,sans-serif;">'+l+'</button>'; }).join('')
-        + '</div>';
-    }
-
-    const el = document.createElement('div');
-    el.className = 'planner-card' + (done?' done':'');
-    el.dataset.idx = idx;
-    el.draggable = true;
-    el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
-      + '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">'
-      + '<div style="cursor:grab;color:rgba(255,255,255,.2);flex-shrink:0;"><svg width="10" height="8" viewBox="0 0 10 8" fill="currentColor"><rect width="10" height="1.5" rx=".75"/><rect y="3" width="10" height="1.5" rx=".75"/><rect y="6" width="10" height="1.5" rx=".75"/></svg></div>'
-      + '<input value="'+_plnEsc(card.title||'')+'" oninput="plannerUpdateCardField('+idx+',\'title\',this.value)" style="background:none;border:none;color:#e8e8e8;font-family:Bebas Neue,sans-serif;font-size:.95rem;letter-spacing:2px;outline:none;min-width:0;flex:1;" maxlength="40">'
-      + '</div>'
-      + '<div style="display:flex;align-items:center;gap:8px;">'
-      + '<input type="checkbox" class="planner-done-cb" '+(done?'checked':'')+' onchange="plannerToggleDone('+idx+')" title="Mark done">'
-      + '<button onclick="plannerDeleteCard('+idx+')" style="background:none;border:none;color:rgba(255,255,255,.2);cursor:pointer;font-size:.75rem;padding:2px;transition:color .12s;" onmouseenter="this.style.color=String.fromCharCode(35)+\'c0000e\'" onmouseleave="this.style.color=\'rgba(255,255,255,.2)\'">✕</button>'
-      + '</div></div>'
-      + '<div class="planner-drop-zone'+(nameCount>0?' has-names':'')+'" id="planner-dropzone-'+idx+'" ondragover="plannerCardDragOver(event,'+idx+')" ondragleave="plannerCardDragLeave(event,'+idx+')" ondrop="plannerCardDrop(event,'+idx+')">'
-      + dropContent + '</div>'
-      + formatHtml
-      + '<div style="display:flex;gap:6px;margin-top:6px;">'
-      + '<input class="planner-inp" placeholder="Match type…" value="'+_plnEsc(card.matchType||'')+'" oninput="plannerUpdateCardField('+idx+',\'matchType\',this.value)" style="flex:1;font-size:.72rem;padding:6px 8px;">'
-      + '<input class="planner-inp" placeholder="Championship…" value="'+_plnEsc(card.championship||'')+'" oninput="plannerUpdateCardField('+idx+',\'championship\',this.value)" style="flex:1;font-size:.72rem;padding:6px 8px;">'
-      + '</div>';
-
-    el.addEventListener('dragstart', function(e) {
-      if (e.target.closest && e.target.closest('.planner-drop-zone')) return;
-      if (_plannerDragName !== null) return;
-      _plannerDragCardIdx = idx; el.style.opacity = '.5'; e.dataTransfer.effectAllowed = 'move';
-    });
-    el.addEventListener('dragend', function() { el.style.opacity = '1'; _plannerDragCardIdx = null; });
-    el.addEventListener('dragover', function(e) {
-      if (_plannerDragCardIdx !== null && _plannerDragCardIdx !== idx && _plannerDragName === null) { e.preventDefault(); el.style.borderColor='rgba(200,168,75,.4)'; }
-    });
-    el.addEventListener('dragleave', function() { el.style.borderColor = done ? 'rgba(76,175,100,.3)' : 'rgba(255,255,255,.08)'; });
-    el.addEventListener('drop', function(e) {
-      if (_plannerDragCardIdx !== null && _plannerDragCardIdx !== idx && _plannerDragName === null) {
-        e.preventDefault();
-        const moved = _plannerData.cards.splice(_plannerDragCardIdx,1)[0];
-        _plannerData.cards.splice(idx,0,moved);
-        _plannerDragCardIdx = null;
-        plannerRenderCards(); plannerDirty();
-      }
-    });
+    var fmtOpts=nc===2?[['Singles','singles'],['Promo','promo']]:nc===3?[['Triple','triple'],['2v1','2v1'],['1v2','1v2']]:nc>=4?[['Fatal 4','fatal4'],['2v2','2v2']]:null;
+    var fmtHtml=fmtOpts?('<div style="display:flex;gap:3px;margin-bottom:5px;flex-wrap:wrap;">'+fmtOpts.map(function(p){var a=fmt===p[1];return '<button onclick="plannerSetMatchFormat('+idx+',\'' +p[1]+ '\')" style="padding:2px 7px;border-radius:10px;border:1px solid '+(a?'rgba(200,168,75,.5)':'rgba(255,255,255,.1)')+';background:'+(a?'rgba(200,168,75,.12)':'rgba(255,255,255,.04)')+';color:'+(a?'#c8a84b':'rgba(255,255,255,.5)')+';font-size:.55rem;font-weight:600;cursor:pointer;font-family:DM Sans,sans-serif;">'+p[0]+'</button>';}).join('')+'</div>'):'';
+    var el=document.createElement('div');
+    el.className='planner-card'+(done?' done':'');el.dataset.idx=idx;el.draggable=true;
+    el.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">'
+      +'<div style="display:flex;align-items:center;gap:5px;flex:1;min-width:0;">'
+      +'<svg width="8" height="7" viewBox="0 0 8 7" fill="rgba(255,255,255,.2)" style="flex-shrink:0;cursor:grab;" draggable="false"><rect width="8" height="1.4" rx=".7"/><rect y="2.8" width="8" height="1.4" rx=".7"/><rect y="5.6" width="8" height="1.4" rx=".7"/></svg>'
+      +'<input value="'+_plnEsc(card.title||'')+'" oninput="plannerUpdateCardField('+idx+',\'title\',this.value)" style="background:none;border:none;color:#e8e8e8;font-family:Bebas Neue,sans-serif;font-size:.82rem;letter-spacing:2px;outline:none;min-width:0;flex:1;user-select:text;-webkit-user-select:text;cursor:text;" maxlength="40">'
+      +'</div><div style="display:flex;align-items:center;gap:5px;">'
+      +'<input type="checkbox" class="planner-done-cb" '+(done?'checked':'')+' onchange="plannerToggleDone('+idx+')">'
+      +'<button onclick="plannerDeleteCard('+idx+')" style="background:none;border:none;color:rgba(255,255,255,.2);cursor:pointer;font-size:.65rem;padding:1px 2px;">&#x2715;</button>'
+      +'</div></div>'
+      +'<div class="planner-drop-zone'+(nc>0?' has-names':'')+'" id="planner-dropzone-'+idx+'" ondragover="plannerCardDragOver(event,'+idx+')" ondragleave="plannerCardDragLeave(event,'+idx+')" ondrop="plannerCardDrop(event,'+idx+')">'+dropContent+'</div>'
+      +fmtHtml
+      +'<div style="display:flex;gap:4px;margin-top:4px;">'
+      +'<input class="planner-inp" placeholder="Match type…" value="'+_plnEsc(card.matchType||'')+'" oninput="plannerUpdateCardField('+idx+',\'matchType\',this.value)" style="flex:1;font-size:.64rem;padding:4px 7px;">'
+      +'<input class="planner-inp" placeholder="Championship…" value="'+_plnEsc(card.championship||'')+'" oninput="plannerUpdateCardField('+idx+',\'championship\',this.value)" style="flex:1;font-size:.64rem;padding:4px 7px;">'
+      +'</div>';
+    el.addEventListener('dragstart',function(e){if(e.target.closest&&e.target.closest('.planner-drop-zone'))return;if(_plannerDragName!==null)return;if(e.target.tagName==='INPUT'||e.target.tagName==='BUTTON'){e.preventDefault();return;}_plannerDragCardIdx=idx;el.style.opacity='.5';e.dataTransfer.effectAllowed='move';});
+    el.addEventListener('dragend',function(){el.style.opacity='1';_plannerDragCardIdx=null;});
+    el.addEventListener('dragover',function(e){if(_plannerDragCardIdx!==null&&_plannerDragCardIdx!==idx&&_plannerDragName===null){e.preventDefault();el.style.borderColor='rgba(200,168,75,.4)';}});
+    el.addEventListener('dragleave',function(){el.style.borderColor=done?'rgba(76,175,100,.3)':'rgba(255,255,255,.08)';});
+    el.addEventListener('drop',function(e){if(_plannerDragCardIdx!==null&&_plannerDragCardIdx!==idx&&_plannerDragName===null){e.preventDefault();var c=_plannerCurrent();var m=c.cards.splice(_plannerDragCardIdx,1)[0];c.cards.splice(idx,0,m);_plannerDragCardIdx=null;plannerRenderCards();plannerDirty();}});
     wrap.appendChild(el);
   });
 }
-
-function plannerRosterDragStart(e, id) {
-  const r = _plannerData.roster.find(function(r){ return r.id === id; });
-  if (!r) return;
-  _plannerDragName = r;
-  _plannerDragCardIdx = null;
-  e.dataTransfer.effectAllowed = 'copy';
+function plannerRosterDragStart(e,id){var r=_plannerRoster.find(function(r){return r.id===id;});if(!r)return;_plannerDragName=r;_plannerDragCardIdx=null;e.dataTransfer.effectAllowed='copy';}
+function plannerRosterDragEnd(){_plannerDragName=null;plannerRenderRoster();}
+function plannerCardDragOver(e,idx){if(_plannerDragName){e.preventDefault();e.stopPropagation();var z=document.getElementById('planner-dropzone-'+idx);if(z)z.classList.add('drag-over-zone');}}
+function plannerCardDragLeave(e,idx){var z=document.getElementById('planner-dropzone-'+idx);if(z)z.classList.remove('drag-over-zone');}
+function plannerCardDrop(e,idx){
+  e.preventDefault();e.stopPropagation();
+  var z=document.getElementById('planner-dropzone-'+idx);if(z)z.classList.remove('drag-over-zone');
+  if(!_plannerDragName)return;
+  var cur=_plannerCurrent();var card=cur.cards[idx];
+  if(card.names.find(function(n){return n.id===_plannerDragName.id;}))return;
+  if(card.names.length>=6)return;
+  card.names.push({name:_plannerDragName.name,id:_plannerDragName.id});
+  if(card.names.length===2)card.matchFormat='singles';
+  else if(card.names.length===3)card.matchFormat='triple';
+  else if(card.names.length>=4)card.matchFormat='fatal4';
+  _plannerDragName=null;plannerRenderCards();plannerRenderRoster();plannerUpdateProgress();plannerDirty();
 }
-function plannerRosterDragEnd(e) {
-  _plannerDragName = null;
-  plannerRenderRoster();
+function plannerUpdateProgress(){
+  var cur=_plannerCurrent();var cards=cur.cards||[];
+  if(!cards.length){document.getElementById('planner-prog-fill').style.width='0%';document.getElementById('planner-progress-pct').textContent='0%';return;}
+  var done=cards.filter(function(c){return c.done;}).length;
+  var pct=Math.round((done/cards.length)*100);
+  document.getElementById('planner-prog-fill').style.width=pct+'%';document.getElementById('planner-progress-pct').textContent=pct+'%';
 }
-function plannerCardDragOver(e, idx) {
-  if (_plannerDragName) { e.preventDefault(); e.stopPropagation(); const z = document.getElementById('planner-dropzone-'+idx); if(z) z.classList.add('drag-over-zone'); }
-}
-function plannerCardDragLeave(e, idx) {
-  const z = document.getElementById('planner-dropzone-'+idx); if(z) z.classList.remove('drag-over-zone');
-}
-function plannerCardDrop(e, idx) {
-  e.preventDefault(); e.stopPropagation();
-  const z = document.getElementById('planner-dropzone-'+idx); if(z) z.classList.remove('drag-over-zone');
-  if (!_plannerDragName) return;
-  const card = _plannerData.cards[idx];
-  if (card.names.find(function(n){ return n.id === _plannerDragName.id; })) return;
-  if (card.names.length >= 6) return;
-  card.names.push({name:_plannerDragName.name, id:_plannerDragName.id});
-  if (card.names.length === 2) card.matchFormat = 'singles';
-  else if (card.names.length === 3) card.matchFormat = 'triple';
-  else if (card.names.length >= 4) card.matchFormat = 'fatal4';
-  _plannerDragName = null;
-  plannerRenderCards();
-  plannerRenderRoster();
-  plannerUpdateProgress();
-  plannerDirty();
-}
-
-function plannerUpdateProgress() {
-  const cards = _plannerData.cards || [];
-  if (!cards.length) { document.getElementById('planner-prog-fill').style.width='0%'; document.getElementById('planner-progress-pct').textContent='0%'; return; }
-  const done = cards.filter(function(c){ return c.done; }).length;
-  const pct = Math.round((done/cards.length)*100);
-  document.getElementById('planner-prog-fill').style.width = pct+'%';
-  document.getElementById('planner-progress-pct').textContent = pct+'%';
-}
-
-async function plannerPostToEfed() {
-  const session = _plnSession(); if (!session) return;
-  const btn = document.getElementById('planner-post-btn');
-  if (btn && btn.disabled) return;
-
-  // Map planner cards to event matches format
-  const matches = _plannerData.cards.map(function(card) {
-    const names = card.names || [];
-    const fmt = card.matchFormat || '';
-    let type = 'none', teams = [];
-    if (names.length === 0) { type = 'none'; }
-    else if (names.length === 1) { type = 'freetext'; teams = [[names[0].name]]; }
-    else if (names.length === 2) {
-      if (fmt === 'promo') { type = 'freetext'; teams = [[names.map(function(n){return n.name;}).join(' & ')]]; }
-      else { type = 'singles'; teams = [[names[0].name],[names[1].name]]; }
-    } else if (names.length === 3) {
-      if (fmt === '2v1') { type = 'tag'; teams = [[names[0].name,names[1].name],[names[2].name]]; }
-      else if (fmt === '1v2') { type = 'tag'; teams = [[names[0].name],[names[1].name,names[2].name]]; }
-      else { type = 'triple'; teams = [[names[0].name],[names[1].name],[names[2].name]]; }
-    } else if (names.length >= 4) {
-      if (fmt === '2v2') { type = 'tag'; teams = [[names[0].name,names[1].name],[names[2].name,names[3].name]]; }
-      else { type = 'fatal4'; teams = names.slice(0,4).map(function(n){return [n.name];}); }
-    }
-    return { label: card.title||'', championship: card.championship||'', type: type, teams: teams, champs: [], matchType: card.matchType||'' };
-  }).filter(function(m){ return m.type !== 'none'; });
-
-  // Use planner show name + episode as title, fallback to existing event title
-  const existingTitle = document.getElementById('ev-display-title')?.textContent.replace('No event scheduled','').trim() || '';
-  const title = _plannerData.show_name || existingTitle || 'Upcoming Show';
-  const date = document.getElementById('ev-display-date-text')?.textContent.trim() || '';
-  const loc = document.getElementById('ev-display-location-text')?.textContent.trim() || '';
-  const main = document.getElementById('ev-display-mainevent')?.textContent.trim() || '';
-  const hype = document.getElementById('ev-hype-iframe')?.dataset.srcUrl || '';
-  const alignVal = (document.getElementById('ev-matches-display')?.dataset.align) || 'center';
-  const matchesJson = JSON.stringify(matches);
-
-  const _SB_URL = 'https://osbarvhklizidsffytye.supabase.co';
-  const _SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
-  const _SB_HDR = { 'apikey': _SB_KEY, 'Authorization': 'Bearer ' + _SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
-
-  if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
-  try {
-    const r = await fetch(_SB_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
-      method:'PATCH', headers:_SB_HDR,
-      body:JSON.stringify({ efed_event_matches: matchesJson, efed_event_align: alignVal,
-        efed_event_title: title, efed_event_date: date||null,
-        efed_event_location: loc||null, efed_event_main: main||null, efed_event_hype: hype||null })
-    });
-    if (!r.ok) throw new Error('HTTP '+r.status);
-    try { renderEvent({ title, date:date||null, location:loc||null, main:main||null, hype:hype||null, matches, align:alignVal }); } catch(re) { console.warn('renderEvent failed:', re); }
-    _plnToast('Posted to eFed!');
-    closePlanner();
-  } catch(e) {
+async function plannerPostToEfed(){
+  var session=_plnSession();if(!session)return;
+  var btn=document.getElementById('planner-post-btn');if(btn&&btn.disabled)return;
+  var cur=_plannerCurrent();
+  var matches=cur.cards.map(function(card){
+    var names=card.names||[],fmt=card.matchFormat||'',type='none',teams=[];
+    if(!names.length){type='none';}
+    else if(names.length===1){type='freetext';teams=[[names[0].name]];}
+    else if(names.length===2){if(fmt==='promo'){type='freetext';teams=[[names.map(function(n){return n.name;}).join(' & ')]];}else{type='singles';teams=[[names[0].name],[names[1].name]];}}
+    else if(names.length===3){if(fmt==='2v1'){type='tag';teams=[[names[0].name,names[1].name],[names[2].name]];}else if(fmt==='1v2'){type='tag';teams=[[names[0].name],[names[1].name,names[2].name]];}else{type='triple';teams=[[names[0].name],[names[1].name],[names[2].name]];}}
+    else{if(fmt==='2v2'){type='tag';teams=[[names[0].name,names[1].name],[names[2].name,names[3].name]];}else{type='fatal4';teams=names.slice(0,4).map(function(n){return[n.name];});}}
+    return{label:card.title||'',championship:card.championship||'',type:type,teams:teams,champs:[],matchType:card.matchType||''};
+  }).filter(function(m){return m.type!=='none';});
+  var existingTitle=(document.getElementById('ev-display-title')||{}).textContent||'';
+  existingTitle=existingTitle.replace('No event scheduled','').trim();
+  var title=cur.show_name||existingTitle||'Upcoming Show';
+  var date=((document.getElementById('ev-display-date-text')||{}).textContent||'').trim();
+  var loc=((document.getElementById('ev-display-location-text')||{}).textContent||'').trim();
+  var main=((document.getElementById('ev-display-mainevent')||{}).textContent||'').trim();
+  var hypeEl=document.getElementById('ev-hype-iframe');var hype=hypeEl?hypeEl.dataset.srcUrl||'':'';
+  var alignEl=document.getElementById('ev-matches-display');var alignVal=alignEl?alignEl.dataset.align||'center':'center';
+  if(btn){btn.disabled=true;btn.textContent='Posting…';}
+  try{
+    var r=await fetch(_PLN_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:_PLN_HDR,body:JSON.stringify({efed_event_matches:JSON.stringify(matches),efed_event_align:alignVal,efed_event_title:title,efed_event_date:date||null,efed_event_location:loc||null,efed_event_main:main||null,efed_event_hype:hype||null})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    try{renderEvent({title:title,date:date||null,location:loc||null,main:main||null,hype:hype||null,matches:matches,align:alignVal});}catch(re){console.warn('renderEvent:',re);}
+    _plnToast('Posted to eFed!');closePlanner();
+  }catch(e){
     _plnToast('Post failed: '+e.message);
-    if (btn) { btn.disabled = false; btn.textContent = 'Post to eFed'; }
+    if(btn){btn.disabled=false;btn.style.opacity='1';btn.style.cursor='pointer';btn.textContent='Post to eFed';}
   }
 }
+
 
 
 let _efedFeedMode = "ic";
@@ -8240,67 +8128,65 @@ async function efedFeedSubmitPost() {
 <style>
 #planner-bg { position:fixed;left:0;right:0;bottom:0;top:60px;z-index:9997;background:#07070a;display:flex;flex-direction:column;transform:translateY(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);pointer-events:none; }
 #planner-bg.open { transform:translateY(0);pointer-events:all; }
-#planner-modal { background:transparent;border:none;border-radius:0;width:100%;flex:1;display:flex;flex-direction:column;overflow:hidden;box-shadow:none;max-width:900px;margin:0 auto; }
-#planner-header { display:flex;align-items:center;justify-content:space-between;padding:14px 28px;border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;background:#0f0f14;max-width:900px;margin:0 auto;width:100%; }
-#planner-body { display:flex;flex:1;overflow:hidden;min-height:0;max-width:900px;margin:0 auto;width:100%; }
-#planner-left { width:260px;flex-shrink:0;border-right:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;overflow:hidden; }
-#planner-right { flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px; }
-#planner-roster-list { flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:5px; }
-.planner-pill { display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:20px;cursor:grab;font-size:.75rem;font-weight:600;color:#e8e8e8;font-family:'DM Sans',sans-serif;user-select:none;transition:opacity .2s,border-color .2s; }
-.planner-pill:active { cursor:grabbing; }
-.planner-pill.used { opacity:.3;border-color:rgba(255,255,255,.05); }
-.planner-pill.dragging { opacity:.4; }
-.planner-card { background:#111118;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:14px;position:relative;transition:border-color .2s; }
-.planner-card.done { border-color:rgba(76,175,100,.3);background:#0d1410; }
-.planner-card.drag-over { border-color:rgba(200,168,75,.5);background:rgba(200,168,75,.04); }
-.planner-drop-zone { min-height:48px;border:1px dashed rgba(255,255,255,.1);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.62rem;color:rgba(255,255,255,.2);font-family:'DM Sans',sans-serif;margin-bottom:8px;transition:border-color .2s,background .2s;position:relative;flex-wrap:wrap;gap:6px;padding:8px; }
+body.planner-open { overflow:hidden; }
+#planner-modal { width:100%;flex:1;display:flex;flex-direction:column;overflow:hidden; }
+#planner-header { display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;background:#0f0f14;max-width:920px;margin:0 auto;width:100%;box-sizing:border-box; }
+#planner-body { display:flex;flex:1;overflow:hidden;min-height:0;max-width:920px;margin:0 auto;width:100%; }
+#planner-left { width:185px;flex-shrink:0;border-right:1px solid rgba(255,255,255,.06);display:flex;flex-direction:column;overflow:hidden; }
+#planner-right { flex:1;overflow-y:auto;padding:12px; }
+#planner-cards { display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px; }
+@media(max-width:620px){#planner-cards{grid-template-columns:1fr;}}
+#planner-roster-list { flex:1;overflow-y:auto;padding:7px 9px;display:flex;flex-direction:column;gap:4px; }
+.planner-pill { display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:18px;cursor:grab;font-size:.68rem;font-weight:600;color:#e8e8e8;font-family:'DM Sans',sans-serif;user-select:none;transition:opacity .2s; }
+.planner-pill.used { opacity:.28; }
+.planner-card { background:#111118;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px;transition:border-color .2s; }
+.planner-card.done { border-color:rgba(76,175,100,.28);background:#0d1410; }
+.planner-drop-zone { min-height:38px;border:1px dashed rgba(255,255,255,.1);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:.55rem;color:rgba(255,255,255,.2);font-family:'DM Sans',sans-serif;margin-bottom:6px;transition:border-color .2s,background .2s;flex-wrap:wrap;gap:4px;padding:6px; }
 .planner-drop-zone.has-names { border-style:solid;border-color:rgba(255,255,255,.08); }
 .planner-drop-zone.drag-over-zone { border-color:rgba(200,168,75,.5);background:rgba(200,168,75,.04); }
-.planner-name-chip { display:inline-flex;align-items:center;gap:5px;padding:4px 8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:14px;font-size:.72rem;font-weight:600;color:#e8e8e8;font-family:'DM Sans',sans-serif;cursor:default; }
-.planner-chip-remove { background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:.7rem;padding:0 2px;line-height:1; }
+.planner-name-chip { display:inline-flex;align-items:center;gap:3px;padding:2px 7px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:12px;font-size:.65rem;font-weight:600;color:#e8e8e8;font-family:'DM Sans',sans-serif;user-select:text;-webkit-user-select:text; }
+.planner-chip-remove { background:none;border:none;color:rgba(255,255,255,.28);cursor:pointer;font-size:.6rem;padding:0 1px;line-height:1; }
 .planner-chip-remove:hover { color:#c0000e; }
-.planner-progress-bar { height:3px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;flex-shrink:0; }
+.planner-progress-bar { height:3px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;flex-shrink:0;width:70px; }
 .planner-progress-fill { height:100%;background:linear-gradient(90deg,#c0000e,#c8a84b);border-radius:2px;transition:width .4s; }
-.planner-inp { width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;outline:none;box-sizing:border-box; }
-.planner-inp:focus { border-color:rgba(200,168,75,.4); }
-.planner-match-type-row { display:flex;gap:6px;margin-top:8px; }
-.planner-type-select { flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:6px 8px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.72rem;outline:none; }
-.planner-done-cb { width:16px;height:16px;accent-color:#4caf64;cursor:pointer;flex-shrink:0; }
-#planner-progress-pct { font-size:.6rem;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;text-align:right;padding:4px 22px 2px; }
+.planner-inp { background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:7px;padding:6px 8px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.73rem;outline:none;box-sizing:border-box;width:100%; }
+.planner-inp:focus { border-color:rgba(200,168,75,.35); }
+.planner-done-cb { width:13px;height:13px;accent-color:#4caf64;cursor:pointer;flex-shrink:0; }
+.planner-tab { padding:4px 10px;border-radius:5px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03);color:rgba(255,255,255,.38);font-family:'DM Sans',sans-serif;font-size:.6rem;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s; }
+.planner-tab.active { background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.18);color:#fff; }
+.planner-tab-add { padding:4px 9px;border-radius:5px;border:1px dashed rgba(255,255,255,.1);background:none;color:rgba(255,255,255,.25);font-family:'DM Sans',sans-serif;font-size:.6rem;cursor:pointer; }
+.planner-card input { user-select:text !important;-webkit-user-select:text !important;cursor:text; }
 </style>
 
 <div id="planner-bg">
   <div id="planner-modal">
     <div id="planner-header">
-      <div style="display:flex;align-items:center;gap:14px;flex:1;min-width:0;">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;flex-shrink:0;">Show Planner</div>
-        <input id="planner-show-name" class="planner-inp" placeholder="Show name…" style="max-width:180px;" oninput="plannerDirty()">
-        <input id="planner-episode" class="planner-inp" placeholder="Episode / #…" style="max-width:120px;" oninput="plannerDirty()">
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <button onclick="plannerSave()" style="padding:8px 18px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.8'" onmouseout="this.style.opacity='1'">Save</button>
-        <button onclick="plannerPostToEfed()" id="planner-post-btn" disabled style="padding:8px 18px;background:#c0000e;border:none;border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:opacity .15s;opacity:.35;" onmouseover="if(!this.disabled)this.style.opacity='.8'" onmouseout="if(!this.disabled)this.style.opacity='1'">Post to eFed</button>
-        <button onclick="closePlanner()" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:.9rem;display:flex;align-items:center;justify-content:center;">✕</button>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:3px;color:#fff;flex-shrink:0;">Planner</div>
+      <div id="planner-tabs-row" style="display:flex;align-items:center;gap:4px;flex:1;overflow-x:auto;padding:0 8px;scrollbar-width:none;-ms-overflow-style:none;"></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <input id="planner-show-name" class="planner-inp" placeholder="Show name…" style="width:130px;" oninput="plannerDirty()">
+        <input id="planner-episode" class="planner-inp" placeholder="Ep / #…" style="width:70px;" oninput="plannerDirty()">
+        <span id="planner-progress-pct" style="font-size:.58rem;color:rgba(255,255,255,.3);white-space:nowrap;">0%</span>
+        <div class="planner-progress-bar"><div class="planner-progress-fill" id="planner-prog-fill" style="width:0%"></div></div>
+        <button onclick="plannerSave()" style="padding:6px 13px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:7px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.68rem;font-weight:700;cursor:pointer;">Save</button>
+        <button onclick="plannerPostToEfed()" id="planner-post-btn" disabled style="padding:6px 13px;background:#c0000e;border:none;border-radius:7px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.68rem;font-weight:700;cursor:default;opacity:.35;">Post to eFed</button>
+        <button onclick="closePlanner()" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.5);width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:.8rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;">✕</button>
       </div>
     </div>
-    <div id="planner-progress-pct">0%</div>
-    <div class="planner-progress-bar" style="margin:0 22px 0;"><div class="planner-progress-fill" id="planner-prog-fill" style="width:0%"></div></div>
     <div id="planner-body">
-      <!-- LEFT: Roster -->
       <div id="planner-left">
-        <div style="padding:12px 12px 8px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0;">
-          <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:8px;">Roster</div>
-          <div style="display:flex;gap:6px;">
-            <input id="planner-name-inp" class="planner-inp" placeholder="Wrestler name…" style="flex:1;" onkeydown="if(event.key==='Enter')plannerAddRoster()" maxlength="40">
-            <button onclick="plannerAddRoster()" style="padding:7px 10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.6);cursor:pointer;font-size:.8rem;white-space:nowrap;">+</button>
+        <div style="padding:9px 10px 7px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0;">
+          <div style="font-size:.46rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.28);font-weight:700;margin-bottom:6px;">Roster</div>
+          <div style="display:flex;gap:5px;">
+            <input id="planner-name-inp" class="planner-inp" placeholder="Wrestler name…" style="flex:1;font-size:.68rem;padding:5px 7px;" onkeydown="if(event.key==='Enter')plannerAddRoster()" maxlength="40">
+            <button onclick="plannerAddRoster()" style="padding:5px 8px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.5);cursor:pointer;font-size:.75rem;">+</button>
           </div>
         </div>
         <div id="planner-roster-list"></div>
       </div>
-      <!-- RIGHT: Match cards -->
       <div id="planner-right">
         <div id="planner-cards"></div>
-        <button onclick="plannerAddCard()" style="padding:10px;background:rgba(255,255,255,.03);border:1px dashed rgba(255,255,255,.12);border-radius:10px;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='rgba(255,255,255,.03)'">+ Add Slot</button>
+        <button onclick="plannerAddCard()" style="padding:9px;background:rgba(255,255,255,.02);border:1px dashed rgba(255,255,255,.1);border-radius:9px;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.68rem;cursor:pointer;width:100%;" onmouseover="this.style.background='rgba(255,255,255,.06)'" onmouseout="this.style.background='rgba(255,255,255,.02)'">+ Add Slot</button>
       </div>
     </div>
   </div>
