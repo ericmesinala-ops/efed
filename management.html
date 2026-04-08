@@ -362,6 +362,13 @@ html.day-mode #fsw-body {
 /* Add-row btn */
 .add-row-btn { position: sticky; top: 10px; float: right; background: var(--accent-blue); color: #000; border: none; padding: 8px 16px; font-size: 12px; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; transition: all 0.2s; white-space: nowrap; z-index: 10; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 4px 12px rgba(200,168,75,0.3); }
 .add-row-btn:hover { background: var(--accent-blue-hover); transform: translateY(-1px); }
+
+/* Drag handle */
+.section-drag-handle { cursor: grab !important; touch-action: none; user-select: none; }
+.section-drag-handle:active { cursor: grabbing !important; }
+.section-container.drag-dragging { opacity: 0.35; outline: 2px dashed var(--accent-blue); }
+.section-container.drag-over { outline: 2px solid var(--accent-blue); background: rgba(200,168,75,0.05); }
+.drag-ghost { position: fixed; pointer-events: none; z-index: 9999; opacity: 0.92; background: var(--bg-secondary); border: 1px solid var(--accent-blue); border-radius: 4px; padding: 10px 16px; font-size: 13px; font-weight: 600; color: var(--text-primary); box-shadow: 0 8px 32px rgba(0,0,0,0.5); white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
@@ -640,17 +647,19 @@ function getCurrentShow() { return showsData[currentShowIndex]; }
 /* ── DEFAULT SECTIONS ── */
 function createDefaultSections() {
   const sections = [];
-  const sectionCount = 6;
-  for (let i = 0; i < sectionCount; i++) {
-    const lines = [];
-    if (i === 0) lines.push({ id: Date.now()+'-sig-'+i, type:'Signature', checked:false, text:'', dropdown:'', details:{} });
-    if (i >= 1) {
-      lines.push({ id:Date.now()+'-match-'+i, type:'Match', checked:false, dropdown:'Normal', matchType:'Singles', matchPosition:'Regular', details:{} });
-      lines.push({ id:Date.now()+'-mw-'+i, type:'MatchWrestlers', checked:false, wrestlers:[null,null,null,null,null,null], details:{} });
-    }
-    sections.push({ id:Date.now()+'-section-'+i, name:`Section ${i+1}`, notes:'', hasNotes:false, lines, collapsed:false });
-  }
-  sections.push({ id:Date.now()+'-closer', name:'Closer', notes:'', hasNotes:false, lines:[{ id:Date.now()+'-closer-item', type:'Closer', checked:false, text:'', dropdown:'', details:{} }], collapsed:false, isCloser:true });
+  // Section 0: Signature (special flat section)
+  sections.push({ id:Date.now()+'-sig', name:'Section 1', notes:'', hasNotes:false, lines:[
+    { id:Date.now()+'-sig-line', type:'Signature', checked:false, text:'', dropdown:'', details:{} }
+  ], collapsed:false, isSignature:true });
+  // Section 1: one Match section
+  sections.push({ id:Date.now()+'-section-1', name:'Section 1', notes:'', hasNotes:false, lines:[
+    { id:Date.now()+'-match-1', type:'Match', checked:false, dropdown:'Normal', matchType:'Singles', matchPosition:'Regular', details:{} },
+    { id:Date.now()+'-mw-1', type:'MatchWrestlers', checked:false, wrestlers:[null,null,null,null,null,null], details:{} }
+  ], collapsed:false });
+  // Closer (special flat section)
+  sections.push({ id:Date.now()+'-closer', name:'Closer', notes:'', hasNotes:false, lines:[
+    { id:Date.now()+'-closer-item', type:'Closer', checked:false, text:'', dropdown:'', details:{} }
+  ], collapsed:false, isCloser:true });
   return sections;
 }
 
@@ -741,6 +750,15 @@ async function loadShow() {
     if (!showsData[0]) showsData[0] = { id:Date.now(), name:'Show 1', title:'', subtitle:'', sections:[] };
     showsData[0].sections = createDefaultSections();
   }
+  // Migration: tag first section as isSignature if it has a Signature line and isn't tagged yet
+  showsData.forEach(show => {
+    if (!show.sections) return;
+    show.sections.forEach(sec => {
+      if (!sec.isSignature && !sec.isCloser && sec.lines && sec.lines.length > 0 && sec.lines[0].type === 'Signature') {
+        sec.isSignature = true;
+      }
+    });
+  });
 }
 
 /* ── VIEW SWITCHING ── */
@@ -851,6 +869,19 @@ function renderShow() {
   showHeader.appendChild(titleInput); showHeader.appendChild(subtitleInput); container.appendChild(showHeader);
 
   showData.sections.forEach((section, sectionIndex) => {
+    const isFlatSection = section.isSignature || section.isCloser;
+
+    if (isFlatSection) {
+      // Flat sections: no header row, lines render directly as slim rows
+      section.lines.forEach((line, lineIndex) => {
+        if (!shouldShowLine(line)) return;
+        const lineEl = createLineElement(line, sectionIndex, lineIndex);
+        lineEl.style.borderLeft = '3px solid ' + (section.isCloser ? 'var(--accent-red)' : 'var(--accent-blue)');
+        container.appendChild(lineEl);
+      });
+      return;
+    }
+
     const sectionDiv = document.createElement('div'); sectionDiv.className = 'section-container'; sectionDiv.dataset.sectionIndex = sectionIndex;
     const header = document.createElement('div'); header.className = 'section-header';
     const sectionItems = section.lines.filter(l => l.type!=='MatchWrestlers' && l.type!=='ParticipantSlots');
@@ -861,8 +892,11 @@ function renderShow() {
     ti.oninput = e => { showData.sections[sectionIndex].name = e.target.value; };
     titleContainer.appendChild(ti);
     const controls = document.createElement('div'); controls.className = 'section-controls';
-    const menuBtn = document.createElement('button'); menuBtn.className = 'hide-section-btn'; menuBtn.textContent = '☰'; menuBtn.onclick = () => showSectionMenu(sectionIndex);
-    controls.appendChild(menuBtn); header.appendChild(titleContainer); header.appendChild(controls); sectionDiv.appendChild(header);
+    const menuBtn = document.createElement('button'); menuBtn.className = 'hide-section-btn section-drag-handle'; menuBtn.textContent = '☰'; menuBtn.title = 'Drag to reorder section';
+    menuBtn.addEventListener('mousedown', e => startSectionDrag(e, sectionIndex, sectionDiv));
+    menuBtn.addEventListener('touchstart', e => startSectionDrag(e, sectionIndex, sectionDiv), { passive: false });
+    const sectionMenuBtn = document.createElement('button'); sectionMenuBtn.className = 'hide-section-btn'; sectionMenuBtn.textContent = '⋮'; sectionMenuBtn.onclick = () => showSectionMenu(sectionIndex); sectionMenuBtn.title = 'Section menu';
+    controls.appendChild(menuBtn); controls.appendChild(sectionMenuBtn); header.appendChild(titleContainer); header.appendChild(controls); sectionDiv.appendChild(header);
     if (section.collapsed) sectionDiv.classList.add('collapsed');
     const linesContainer = document.createElement('div'); linesContainer.style.minHeight = '50px';
     section.lines.forEach((line, lineIndex) => { if (!shouldShowLine(line)) return; linesContainer.appendChild(createLineElement(line, sectionIndex, lineIndex)); });
@@ -999,11 +1033,15 @@ function createLineElement(line, sectionIndex, lineIndex) {
   }
   lineDiv.appendChild(itemBox);
   if (line.type!=='MatchWrestlers' && line.type!=='ParticipantSlots') {
+    const isFlatLine = line.type === 'Signature' || line.type === 'Closer';
     const cc=document.createElement('div'); cc.className='line-controls'; cc.style.cssText='display:flex;gap:4px;opacity:0;transition:opacity .2s;';
-    const up=document.createElement('button'); up.className='delete-line-btn'; up.textContent='▲'; up.style.cssText='padding:4px 8px;font-size:10px;background:var(--bg-tertiary);color:var(--text-muted);border:1px solid var(--border-primary);'; up.onclick=()=>moveLineUp(sectionIndex,lineIndex);
-    const dn=document.createElement('button'); dn.className='delete-line-btn'; dn.textContent='▼'; dn.style.cssText='padding:4px 8px;font-size:10px;background:var(--bg-tertiary);color:var(--text-muted);border:1px solid var(--border-primary);'; dn.onclick=()=>moveLineDown(sectionIndex,lineIndex);
+    if (!isFlatLine) {
+      const up=document.createElement('button'); up.className='delete-line-btn'; up.textContent='▲'; up.style.cssText='padding:4px 8px;font-size:10px;background:var(--bg-tertiary);color:var(--text-muted);border:1px solid var(--border-primary);'; up.onclick=()=>moveLineUp(sectionIndex,lineIndex);
+      const dn=document.createElement('button'); dn.className='delete-line-btn'; dn.textContent='▼'; dn.style.cssText='padding:4px 8px;font-size:10px;background:var(--bg-tertiary);color:var(--text-muted);border:1px solid var(--border-primary);'; dn.onclick=()=>moveLineDown(sectionIndex,lineIndex);
+      cc.appendChild(up); cc.appendChild(dn);
+    }
     const dl=document.createElement('button'); dl.className='delete-line-btn'; dl.textContent='×'; dl.onclick=()=>deleteLine(sectionIndex,lineIndex);
-    cc.appendChild(up); cc.appendChild(dn); cc.appendChild(dl); lineDiv.appendChild(cc);
+    cc.appendChild(dl); lineDiv.appendChild(cc);
     lineDiv.addEventListener('mouseenter',()=>cc.style.opacity='1'); lineDiv.addEventListener('mouseleave',()=>cc.style.opacity='0');
   }
   return lineDiv;
@@ -1781,6 +1819,57 @@ function downloadPdf() {
   const a=document.createElement('a'); const cur=showsData[currentShowIndex]; a.href=url; a.download=(cur.title||'show').replace(/[^a-zA-Z0-9_\-]/g,'_')+'_mgmt.html'; a.click(); URL.revokeObjectURL(url);
 }
 function printPdf() { const iframe=document.getElementById('fsw-pdf-iframe'); if(iframe&&iframe.contentWindow){iframe.contentWindow.focus();iframe.contentWindow.print();} }
+
+/* ── SECTION DRAG & DROP ── */
+let _dragState = null;
+function startSectionDrag(e, sectionIndex, sectionDiv) {
+  e.preventDefault(); e.stopPropagation();
+  const isTouch = e.type === 'touchstart';
+  const startX = isTouch ? e.touches[0].clientX : e.clientX;
+  const startY = isTouch ? e.touches[0].clientY : e.clientY;
+  const showData = showsData[currentShowIndex];
+  const sectionName = showData.sections[sectionIndex].name || `Section ${sectionIndex + 1}`;
+  const ghost = document.createElement('div'); ghost.className = 'drag-ghost';
+  ghost.textContent = '☰  ' + sectionName;
+  ghost.style.left = startX + 12 + 'px'; ghost.style.top = startY - 16 + 'px';
+  document.body.appendChild(ghost);
+  sectionDiv.classList.add('drag-dragging');
+  _dragState = { fromIndex: sectionIndex, ghost, currentOver: null };
+  function getPos(ev) { return ev.touches ? { x: ev.touches[0].clientX, y: ev.touches[0].clientY } : { x: ev.clientX, y: ev.clientY }; }
+  function onMove(ev) {
+    if (!_dragState) return;
+    const pos = getPos(ev);
+    ghost.style.left = pos.x + 12 + 'px'; ghost.style.top = pos.y - 16 + 'px';
+    let overIndex = null;
+    document.querySelectorAll('#sectionsContainer .section-container').forEach(el => {
+      el.classList.remove('drag-over');
+      const r = el.getBoundingClientRect();
+      if (pos.y >= r.top && pos.y <= r.bottom && pos.x >= r.left && pos.x <= r.right) { overIndex = parseInt(el.dataset.sectionIndex); el.classList.add('drag-over'); }
+    });
+    _dragState.currentOver = overIndex;
+  }
+  function onEnd() {
+    if (!_dragState) return;
+    const { fromIndex, currentOver, ghost } = _dragState; _dragState = null;
+    ghost.remove();
+    document.querySelectorAll('#sectionsContainer .section-container').forEach(el => el.classList.remove('drag-dragging','drag-over'));
+    if (currentOver !== null && currentOver !== fromIndex) {
+      const d = showsData[currentShowIndex]; const sections = d.sections;
+      const closerIndex = sections.findIndex(s => s.isCloser);
+      if (sections[fromIndex].isSignature || sections[fromIndex].isCloser) return;
+      let to = currentOver;
+      if (sections[to] && (sections[to].isSignature)) to = 1;
+      if (closerIndex !== -1 && to >= closerIndex) to = closerIndex - 1;
+      if (to === fromIndex || to < 1) return;
+      const [moved] = sections.splice(fromIndex, 1); sections.splice(to, 0, moved);
+      renderShow(); showToast('Section moved');
+    }
+    document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onEnd);
+    document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onEnd);
+  }
+  document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onEnd);
+  document.addEventListener('touchmove', onMove, { passive: false }); document.addEventListener('touchend', onEnd);
+}
 
 /* ── STATIC TV ANIMATION ── */
 (function(){
