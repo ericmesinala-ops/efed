@@ -731,6 +731,7 @@ function createDefaultSections() {
     username text not null,
     shows jsonb,
     roster jsonb,
+    roster_mgmt jsonb,
     storylines jsonb,
     promos_created jsonb,
     title_belts jsonb,
@@ -738,12 +739,16 @@ function createDefaultSections() {
   );
   create unique index if not exists fsw_mgmt_username_idx on fsw_management_data(username);
   alter table fsw_management_data disable row level security;
+
+  -- If table already exists, add missing column:
+  alter table fsw_management_data add column if not exists roster_mgmt jsonb;
 */
 async function saveShow() {
   const session = getSession();
   if (!session) return;
   const btn = document.getElementById('mgmt-save-btn');
   const origText = btn ? btn.textContent : 'Save';
+  if (btn) { btn.textContent = 'Saving…'; btn.style.background = ''; }
   try {
     const payload = {
       username: session.username,
@@ -760,18 +765,46 @@ async function saveShow() {
       resp = await fetch(SUPABASE_URL+'/rest/v1/fsw_management_data?id=eq.'+_mgmtDbId, { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(payload) });
     } else {
       resp = await fetch(SUPABASE_URL+'/rest/v1/fsw_management_data', { method:'POST', headers:SB_HEADERS, body:JSON.stringify(payload) });
-      if (resp.ok) {
-        try { const arr = await resp.clone().json(); if (arr && arr[0] && arr[0].id) _mgmtDbId = arr[0].id; } catch(e) {}
-      }
     }
-    if (btn) { btn.textContent = '✓ Saved'; btn.style.background = '#2a7a3a'; setTimeout(() => { btn.textContent = origText; btn.style.background = ''; }, 1600); }
-    showToast('Saved!');
-  } catch(e) { showToast('Save failed: ' + e.message); }
+    if (!resp.ok) {
+      const errText = await resp.text();
+      // If roster_mgmt column missing, try without it
+      if (errText.includes('roster_mgmt') || errText.includes('column')) {
+        delete payload.roster_mgmt;
+        const resp2 = await fetch(
+          _mgmtDbId
+            ? SUPABASE_URL+'/rest/v1/fsw_management_data?id=eq.'+_mgmtDbId
+            : SUPABASE_URL+'/rest/v1/fsw_management_data',
+          { method: _mgmtDbId ? 'PATCH' : 'POST', headers:SB_HEADERS, body:JSON.stringify(payload) }
+        );
+        if (!resp2.ok) {
+          const e2 = await resp2.text();
+          throw new Error(resp2.status + ': ' + e2);
+        }
+        resp = resp2;
+        showToast('Saved (roster_mgmt column missing — add it in Supabase)');
+      } else {
+        throw new Error(resp.status + ': ' + errText);
+      }
+    } else {
+      showToast('Saved!');
+    }
+    // grab new ID if POST
+    if (!_mgmtDbId) {
+      try { const arr = await resp.clone().json(); if (arr && arr[0] && arr[0].id) _mgmtDbId = arr[0].id; } catch(e) {}
+    }
+    if (btn) { btn.textContent = '✓ Saved'; btn.style.background = '#2a7a3a'; setTimeout(() => { btn.textContent = origText; btn.style.background = ''; }, 1800); }
+  } catch(e) {
+    if (btn) { btn.textContent = origText; btn.style.background = ''; }
+    showToast('Save failed: ' + e.message);
+    console.error('Save error:', e);
+  }
 }
 
 async function loadShow() {
   const session = getSession();
   if (!session) return;
+  let hasSavedData = false;
   try {
     const rows = await sbGet('fsw_management_data', 'username=eq.'+encodeURIComponent(session.username)+'&limit=1');
     if (rows && rows.length && !rows.error) {
@@ -784,23 +817,20 @@ async function loadShow() {
       createdPromos = d.promos_created || [];
       titleBeltsData = d.title_belts || [];
       currentShowIndex = 0;
+      hasSavedData = true;
     }
   } catch(e) { console.log('No saved management data, starting fresh'); }
 
-  // ── IMPORT FROM PLANNER (one-time, if management has no roster yet) ──
-  if (!rosterData.length) {
+  // ── IMPORT FROM PLANNER (only if management has no saved data at all yet) ──
+  if (!hasSavedData) {
     try {
+      const pf = (val, fb) => { if (!val) return fb; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return fb; } } return val; };
       const plannerRows = await sbGet('show_planner', 'username=eq.'+encodeURIComponent(session.username)+'&order=updated_at.desc&limit=1');
       if (plannerRows && plannerRows.length && !plannerRows.error) {
         const pd = plannerRows[0];
-        const parseField = (val, fb) => { if (!val) return fb; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return fb; } } return val; };
-        const pr = parseField(pd.roster, []);
-        const pm = parseField(pd.roster_mgmt, {});
-        if (pr.length) {
-          rosterData = pr;
-          rosterMgmt = pm;
-          console.log('Imported ' + pr.length + ' wrestlers from planner');
-        }
+        const pr = pf(pd.roster, []);
+        const pm = pf(pd.roster_mgmt, {});
+        if (pr.length) { rosterData = pr; rosterMgmt = pm; showToast('Roster imported from Planner — click Save to keep it!'); }
       }
     } catch(e) { console.log('Could not import planner data:', e); }
   }
@@ -830,7 +860,6 @@ async function loadShow() {
     if (!showsData[0]) showsData[0] = { id:Date.now(), name:'Show 1', title:'', subtitle:'', sections:[] };
     showsData[0].sections = createDefaultSections();
   }
-  // Migration: tag first section as isSignature if it has a Signature line and isn't tagged yet
   showsData.forEach(show => {
     if (!show.sections) return;
     show.sections.forEach(sec => {
@@ -839,6 +868,26 @@ async function loadShow() {
       }
     });
   });
+}
+
+// ── MANUAL IMPORT FROM PLANNER (callable any time) ──
+async function importFromPlanner() {
+  const session = getSession();
+  if (!session) return;
+  if (!confirm('This will replace the current roster with data from Planner. Continue?')) return;
+  try {
+    const pf = (val, fb) => { if (!val) return fb; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return fb; } } return val; };
+    const plannerRows = await sbGet('show_planner', 'username=eq.'+encodeURIComponent(session.username)+'&order=updated_at.desc&limit=1');
+    if (!plannerRows || !plannerRows.length || plannerRows.error) { showToast('No planner data found'); return; }
+    const pd = plannerRows[0];
+    const pr = pf(pd.roster, []);
+    const pm = pf(pd.roster_mgmt, {});
+    if (!pr.length) { showToast('Planner roster is empty'); return; }
+    rosterData = pr;
+    rosterMgmt = pm;
+    if (currentView === 'roster') renderRoster();
+    showToast('Imported ' + pr.length + ' wrestlers — click Save!');
+  } catch(e) { showToast('Import failed: ' + e.message); console.error(e); }
 }
 
 /* ── VIEW SWITCHING ── */
@@ -1600,7 +1649,8 @@ function renderRoster() {
   // quick-add bar
   const qa = document.createElement('div'); qa.id = 'roster-quick-add';
   qa.innerHTML = '<input id="roster-quick-inp" placeholder="Wrestler name…" maxlength="60" onkeydown="if(event.key===\'Enter\')quickAddRoster()">'
-    + '<button id="roster-quick-btn" onclick="quickAddRoster()">Quick Add</button>';
+    + '<button id="roster-quick-btn" onclick="quickAddRoster()">Quick Add</button>'
+    + '<button onclick="importFromPlanner()" style="margin-left:auto;background:transparent;border:1px solid rgba(200,168,75,.35);color:rgba(200,168,75,.7);border-radius:5px;padding:7px 14px;font-size:.72rem;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;letter-spacing:.5px;transition:all .2s;" onmouseover="this.style.borderColor=\'rgba(200,168,75,.8)\';this.style.color=\'#c8a84b\'" onmouseout="this.style.borderColor=\'rgba(200,168,75,.35)\';this.style.color=\'rgba(200,168,75,.7)\'">⬇ Import from Planner</button>';
   wrap.appendChild(qa);
 
   // column header
