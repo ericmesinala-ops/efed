@@ -398,6 +398,7 @@ html.day-mode #fsw-body {
 .rr-ovr-cell { padding: 0 4px; border-right: 1px solid rgba(255,255,255,.05); align-self: stretch; display: flex; align-items: center; justify-content: center; }
 .rr-ovr-inp { background: transparent; border: none; outline: none; color: var(--accent-blue); font-family: 'Bebas Neue', sans-serif; font-size: 1rem; letter-spacing: 1px; width: 100%; text-align: center; padding: 0; }
 .rr-ovr-inp::placeholder { color: rgba(255,255,255,.15); font-family: 'DM Sans', sans-serif; font-size: .7rem; letter-spacing: 0; }
+.rr-ovr-inp:focus { color: #e8c060; }
 .rr-tags-cell { padding: 0 10px; border-right: 1px solid rgba(255,255,255,.05); align-self: stretch; display: flex; align-items: center; }
 .rr-inp { background: transparent; border: none; outline: none; color: rgba(255,255,255,.58); font-family: 'DM Sans', sans-serif; font-size: .73rem; width: 100%; padding: 0 2px; }
 .rr-inp::placeholder { color: rgba(255,255,255,.15); font-style: italic; }
@@ -786,7 +787,25 @@ async function loadShow() {
     }
   } catch(e) { console.log('No saved management data, starting fresh'); }
 
-  // Default roster if empty
+  // ── IMPORT FROM PLANNER (one-time, if management has no roster yet) ──
+  if (!rosterData.length) {
+    try {
+      const plannerRows = await sbGet('show_planner', 'username=eq.'+encodeURIComponent(session.username)+'&order=updated_at.desc&limit=1');
+      if (plannerRows && plannerRows.length && !plannerRows.error) {
+        const pd = plannerRows[0];
+        const parseField = (val, fb) => { if (!val) return fb; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return fb; } } return val; };
+        const pr = parseField(pd.roster, []);
+        const pm = parseField(pd.roster_mgmt, {});
+        if (pr.length) {
+          rosterData = pr;
+          rosterMgmt = pm;
+          console.log('Imported ' + pr.length + ' wrestlers from planner');
+        }
+      }
+    } catch(e) { console.log('Could not import planner data:', e); }
+  }
+
+  // Default roster if still empty
   if (!rosterData.length) {
     rosterData = [
       {id:1,name:'Derrick Maximus',tier:'Tier 1',alignment:'Heel'},{id:2,name:'Michael Hammond',tier:'Tier 1',alignment:'Heel'},
