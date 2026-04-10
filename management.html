@@ -1204,6 +1204,15 @@ function renderShow() {
       const accentBar = document.createElement('div');
       accentBar.style.cssText = 'position:absolute;left:0;top:0;bottom:0;width:3px;background:'+accentColor+';z-index:1;';
       flatCard.appendChild(accentBar);
+      // Delete button for flat cards
+      const flatDelBtn = document.createElement('button');
+      flatDelBtn.textContent = '×';
+      flatDelBtn.title = 'Delete section';
+      flatDelBtn.style.cssText = 'position:absolute;top:7px;right:8px;z-index:10;background:transparent;border:none;color:rgba(255,255,255,.25);cursor:pointer;font-size:16px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:3px;transition:color .15s,background .15s;';
+      flatDelBtn.onmouseenter = () => { flatDelBtn.style.color='var(--accent-red)'; flatDelBtn.style.background='rgba(232,48,74,.1)'; };
+      flatDelBtn.onmouseleave = () => { flatDelBtn.style.color='rgba(255,255,255,.25)'; flatDelBtn.style.background='transparent'; };
+      flatDelBtn.onclick = e => { e.stopPropagation(); deleteSection(sectionIndex); };
+      flatCard.appendChild(flatDelBtn);
       flatCard.addEventListener('click', () => {
         document.querySelectorAll('#sectionsContainer .section-container').forEach(el => el.classList.remove('active-section'));
       });
@@ -1225,9 +1234,9 @@ function renderShow() {
       sectionDiv.classList.add('active-section');
     });
 
-    // Drag handle for all section cards
+    // Drag handle + delete for all section cards
     const dragHandleWrap = document.createElement('div');
-    dragHandleWrap.style.cssText = 'position:absolute;top:7px;right:8px;z-index:10;';
+    dragHandleWrap.style.cssText = 'position:absolute;top:7px;right:8px;z-index:10;display:flex;gap:4px;';
     const dragHandleBtn = document.createElement('button');
     dragHandleBtn.className = 'delete-line-btn section-drag-handle';
     dragHandleBtn.textContent = '☰';
@@ -1235,7 +1244,15 @@ function renderShow() {
     dragHandleBtn.style.cssText = 'padding:4px 8px;font-size:11px;cursor:grab;background:var(--bg-tertiary);color:var(--text-muted);border:1px solid var(--border-primary);width:auto;height:auto;';
     dragHandleBtn.addEventListener('mousedown', e => { e.stopPropagation(); startSectionDrag(e, sectionIndex, sectionDiv); });
     dragHandleBtn.addEventListener('touchstart', e => { e.stopPropagation(); startSectionDrag(e, sectionIndex, sectionDiv); }, { passive: false });
+    const secDelBtn = document.createElement('button');
+    secDelBtn.textContent = '×';
+    secDelBtn.title = 'Delete section';
+    secDelBtn.style.cssText = 'background:transparent;border:none;color:rgba(255,255,255,.25);cursor:pointer;font-size:16px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:3px;transition:color .15s,background .15s;';
+    secDelBtn.onmouseenter = () => { secDelBtn.style.color='var(--accent-red)'; secDelBtn.style.background='rgba(232,48,74,.1)'; };
+    secDelBtn.onmouseleave = () => { secDelBtn.style.color='rgba(255,255,255,.25)'; secDelBtn.style.background='transparent'; };
+    secDelBtn.onclick = e => { e.stopPropagation(); deleteSection(sectionIndex); };
     dragHandleWrap.appendChild(dragHandleBtn);
+    dragHandleWrap.appendChild(secDelBtn);
     sectionDiv.appendChild(dragHandleWrap);
     const linesContainer = document.createElement('div'); linesContainer.style.minHeight = '50px';
     section.lines.forEach((line, lineIndex) => { if (!shouldShowLine(line)) return; linesContainer.appendChild(createLineElement(line, sectionIndex, lineIndex, sectionDiv)); });
@@ -1511,7 +1528,6 @@ function moveSectionUp(si) { const d=showsData[currentShowIndex]; if(si<=1) retu
 function moveSectionDown(si) { const d=showsData[currentShowIndex]; const ci=d.sections.findIndex(s=>s.isCloser); if(si>=ci-1) return; const s=d.sections.splice(si,1)[0]; d.sections.splice(si+1,0,s); renderShow(); }
 function deleteSection(si) {
   const showData=showsData[currentShowIndex]; const section=showData.sections[si];
-  if(si===0||section.isCloser) return;
   if(confirm(`Delete "${section.name||'Section'}" and all its items?`)){ showData.sections.splice(si,1); clearPanel(); renderShow(); updateProgress(); }
 }
 function deleteNotes(si) { showsData[currentShowIndex].sections[si].hasNotes=false; showsData[currentShowIndex].sections[si].notes=''; renderShow(); }
@@ -1651,13 +1667,30 @@ function showDetails(item, sectionIndex, lineIndex) {
     });
   } else if(item.type==='Signature'||item.type==='Opener'){
     const opTitle=document.createElement('div');opTitle.style.cssText='font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px;';opTitle.textContent='OPENER';panel.appendChild(opTitle);
-    ['Signature'].forEach(lbl=>{
-      const di=document.createElement('div'); di.className='detail-item';
+    if(!window._customOpenerItems) window._customOpenerItems=[];
+    const defaultOpenerItems=['Signature','Introductory Video','Arena Shot','Match Card'];
+    const allOpenerItems=[...defaultOpenerItems,...window._customOpenerItems];
+    allOpenerItems.forEach((lbl,idx)=>{
+      const di=document.createElement('div'); di.className='detail-item'; di.style.position='relative';
       const cb=document.createElement('input'); cb.type='checkbox'; cb.className='checkbox'; cb.checked=item.details[lbl]||false;
       cb.onchange=e=>{ showData.sections[sectionIndex].lines[lineIndex].details[lbl]=e.target.checked; updateProgress(); };
       const ls=document.createElement('span'); ls.className='detail-label'; ls.textContent=lbl;
-      di.appendChild(cb); di.appendChild(ls); panel.appendChild(di);
+      di.appendChild(cb); di.appendChild(ls);
+      if(idx>=defaultOpenerItems.length){
+        const xBtn=document.createElement('button'); xBtn.textContent='×';
+        xBtn.style.cssText='position:absolute;right:0;top:50%;transform:translateY(-50%);background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;opacity:0;transition:opacity .15s;padding:0 4px;';
+        di.onmouseenter=()=>xBtn.style.opacity='1'; di.onmouseleave=()=>xBtn.style.opacity='0';
+        xBtn.onclick=()=>{ window._customOpenerItems=window._customOpenerItems.filter(i=>i!==lbl); try{localStorage.setItem('efed_custom_opener_items',JSON.stringify(window._customOpenerItems));}catch(e){} showDetails(item,sectionIndex,lineIndex); };
+        di.appendChild(xBtn);
+      }
+      panel.appendChild(di);
     });
+    const addOpenerBtn=document.createElement('button'); addOpenerBtn.textContent='+ custom item';
+    addOpenerBtn.style.cssText='margin-top:12px;width:100%;padding:7px 12px;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px;border:1px dashed rgba(255,255,255,.2);background:transparent;color:var(--text-muted);transition:all .2s;letter-spacing:.3px;';
+    addOpenerBtn.onmouseenter=()=>{addOpenerBtn.style.borderColor='var(--accent-blue)';addOpenerBtn.style.color='var(--accent-blue)';};
+    addOpenerBtn.onmouseleave=()=>{addOpenerBtn.style.borderColor='rgba(255,255,255,.2)';addOpenerBtn.style.color='var(--text-muted)';};
+    addOpenerBtn.onclick=()=>showCustomOpenerItemModal(sectionIndex,lineIndex,item);
+    panel.appendChild(addOpenerBtn);
   } else if(item.type==='Closer'){
     ['Logo','Credits'].forEach(lbl=>{
       const di=document.createElement('div'); di.className='detail-item';
@@ -1730,6 +1763,55 @@ function showCustomItemModal(sectionIndex, lineIndex, item) {
   modal.appendChild(row);
   bd.appendChild(modal);
   document.body.appendChild(bd);
+  setTimeout(() => inp.focus(), 50);
+}
+
+/* ── CUSTOM OPENER ITEM MODAL ── */
+function showCustomOpenerItemModal(sectionIndex, lineIndex, item) {
+  const existing = document.getElementById('custom-item-modal-backdrop');
+  if (existing) existing.remove();
+  if(!window._customOpenerItems) window._customOpenerItems=[];
+  try { window._customOpenerItems = JSON.parse(localStorage.getItem('efed_custom_opener_items') || '[]'); } catch(e) {}
+  const bd = document.createElement('div');
+  bd.id = 'custom-item-modal-backdrop';
+  bd.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:700;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);';
+  bd.onclick = e => { if (e.target === bd) bd.remove(); };
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#111114;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:20px 22px 18px;width:320px;box-shadow:0 24px 64px rgba(0,0,0,.8);animation:segModalIn .18s ease;';
+  const h = document.createElement('div');
+  h.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:1rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#e8e8e8;margin-bottom:6px;';
+  h.textContent = 'Add custom opener item';
+  modal.appendChild(h);
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.maxLength = 50; inp.placeholder = 'e.g., pyro cue';
+  inp.style.cssText = 'width:100%;padding:9px 12px;background:#1a1a22;border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.88rem;outline:none;margin:10px 0 14px;transition:border-color .2s;';
+  inp.onfocus = () => inp.style.borderColor = 'rgba(200,168,75,.6)';
+  inp.onblur  = () => inp.style.borderColor = 'rgba(255,255,255,.15)';
+  modal.appendChild(inp);
+  const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'flex:1;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.5);font-family:"DM Sans",sans-serif;';
+  cancelBtn.onclick = () => bd.remove();
+  const addBtn = document.createElement('button');
+  addBtn.textContent = 'Add';
+  addBtn.style.cssText = 'flex:1;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:none;background:#b0b4bc;color:#111;font-family:"DM Sans",sans-serif;';
+  addBtn.onmouseenter = () => addBtn.style.background = '#c4c8d0';
+  addBtn.onmouseleave = () => addBtn.style.background = '#b0b4bc';
+  addBtn.onclick = () => {
+    const val = inp.value.trim();
+    if (!val) return;
+    if (!window._customOpenerItems.includes(val)) {
+      window._customOpenerItems.push(val);
+      try { localStorage.setItem('efed_custom_opener_items', JSON.stringify(window._customOpenerItems)); } catch(e) {}
+    }
+    bd.remove();
+    const showData = showsData[currentShowIndex];
+    showDetails(showData.sections[sectionIndex].lines[lineIndex], sectionIndex, lineIndex);
+  };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') addBtn.click(); if (e.key === 'Escape') bd.remove(); });
+  row.appendChild(cancelBtn); row.appendChild(addBtn);
+  modal.appendChild(row); bd.appendChild(modal); document.body.appendChild(bd);
   setTimeout(() => inp.focus(), 50);
 }
 
@@ -2609,46 +2691,16 @@ function startSectionDrag(e, sectionIndex, sectionDiv) {
 
 /* ── FAB: SEGMENT MODAL ── */
 
-/* Flat list of all addable section types — no submenus */
 const SEG_ITEMS = [
-  { group: 'Match', label: '🤼 Match',                    type: 'Match' },
-
-  { group: 'Promo', label: 'Promo — In-Ring',             type: 'Promo',         dropdown: 'In-Ring' },
-  { group: 'Promo', label: 'Promo — Backstage',           type: 'Promo',         dropdown: 'Backstage' },
-  { group: 'Promo', label: 'Promo — Titantron',           type: 'Promo',         dropdown: 'Titantron' },
-  { group: 'Promo', label: 'Promo — Junket',              type: 'Promo',         dropdown: 'Junket' },
-  { group: 'Promo', label: 'Promo — Press Conference',    type: 'Promo',         dropdown: 'Press Conference' },
-  { group: 'Promo', label: 'Promo — Split Screen',        type: 'Promo',         dropdown: 'Split Screen' },
-  { group: 'Promo', label: 'Promo — Contract Signing',    type: 'Promo',         dropdown: 'Contract Signing' },
-  { group: 'Promo', label: 'Promo — Championship Reveal', type: 'Promo',         dropdown: 'Championship Reveal' },
-  { group: 'Promo', label: 'Promo — Award Ceremony',      type: 'Promo',         dropdown: 'Award Ceremony' },
-
-  { group: 'Interview', label: 'Interview — Pre-Match',   type: 'Interview',     dropdown: 'Pre-Match' },
-  { group: 'Interview', label: 'Interview — Post-Match',  type: 'Interview',     dropdown: 'Post-Match' },
-  { group: 'Interview', label: 'Interview — Exclusive',   type: 'Interview',     dropdown: 'Exclusive' },
-  { group: 'Interview', label: 'Interview — Fan Q&A',     type: 'Interview',     dropdown: 'Fan Q&A' },
-
-  { group: 'Cutscene', label: 'Cutscene — Story',          type: 'Cutscene',     dropdown: 'Story' },
-  { group: 'Cutscene', label: 'Cutscene — Conversation',   type: 'Cutscene',     dropdown: 'Conversation' },
-  { group: 'Cutscene', label: 'Cutscene — Interruption',   type: 'Cutscene',     dropdown: 'Interruption' },
-  { group: 'Cutscene', label: 'Cutscene — Attack',         type: 'Cutscene',     dropdown: 'Attack' },
-  { group: 'Cutscene', label: 'Cutscene — Backstage Attack',type: 'Cutscene',    dropdown: 'Backstage Attack' },
-  { group: 'Cutscene', label: 'Cutscene — Locker Room',    type: 'Cutscene',     dropdown: 'Locker Room' },
-  { group: 'Cutscene', label: 'Cutscene — Parking Lot',    type: 'Cutscene',     dropdown: 'Parking Lot' },
-  { group: 'Cutscene', label: 'Cutscene — Hallway',        type: 'Cutscene',     dropdown: 'Hallway' },
-  { group: 'Cutscene', label: 'Cutscene — Authority Office',type: 'Cutscene',    dropdown: 'Authority Office' },
-
-  { group: 'Video Package', label: 'Video — Match Card',        type: 'Video Package', dropdown: 'Match Card' },
-  { group: 'Video Package', label: 'Video — Introductory',      type: 'Video Package', dropdown: 'Introductory' },
-  { group: 'Video Package', label: 'Video — Return',            type: 'Video Package', dropdown: 'Return' },
-  { group: 'Video Package', label: 'Video — Return Teaser',     type: 'Video Package', dropdown: 'Return Teaser' },
-  { group: 'Video Package', label: 'Video — New Wrestler Teaser',type: 'Video Package',dropdown: 'New Wrestler Teaser' },
-  { group: 'Video Package', label: 'Video — Flashback',         type: 'Video Package', dropdown: 'Flashback' },
-  { group: 'Video Package', label: 'Video — Match Hype',        type: 'Video Package', dropdown: 'Match Hype' },
-  { group: 'Video Package', label: 'Video — Next on the show',  type: 'Video Package', dropdown: 'Next on the show' },
-
-  { group: 'Other', label: 'Commercial',                   type: 'Commercial' },
-  { group: 'Other', label: 'Notes',                        type: 'Notes' },
+  { label: 'Match',         type: 'Match' },
+  { label: 'Opener',        type: 'Opener' },
+  { label: 'Promo',         type: 'Promo' },
+  { label: 'Interview',     type: 'Interview' },
+  { label: 'Cutscene',      type: 'Cutscene' },
+  { label: 'Video Package', type: 'Video Package' },
+  { label: 'Commercial',    type: 'Commercial' },
+  { label: 'Closer',        type: 'Closer' },
+  { label: 'Notes',         type: 'Notes' },
 ];
 
 function openSegModal() {
@@ -2668,68 +2720,21 @@ function _renderFlatSegModal() {
   document.getElementById('seg-modal-back').classList.remove('visible');
   const body = document.getElementById('seg-modal-body');
   body.innerHTML = '';
-
-  // Search box
-  const searchWrap = document.createElement('div');
-  searchWrap.style.cssText = 'padding:0 0 8px 0;';
-  const searchInp = document.createElement('input');
-  searchInp.type = 'text';
-  searchInp.placeholder = 'Search…';
-  searchInp.style.cssText = 'width:100%;padding:7px 10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.82rem;outline:none;';
-  searchInp.oninput = () => _filterSegItems(searchInp.value.trim().toLowerCase());
-  searchWrap.appendChild(searchInp);
-  body.appendChild(searchWrap);
-
-  // Items container
-  const listWrap = document.createElement('div');
-  listWrap.id = 'seg-modal-list';
-  body.appendChild(listWrap);
-
-  _renderSegItems('');
-  setTimeout(() => searchInp.focus(), 80);
-}
-
-function _renderSegItems(query) {
-  const listWrap = document.getElementById('seg-modal-list');
-  if (!listWrap) return;
-  listWrap.innerHTML = '';
-
-  const filtered = query
-    ? SEG_ITEMS.filter(it => it.label.toLowerCase().includes(query) || it.group.toLowerCase().includes(query))
-    : SEG_ITEMS;
-
-  let lastGroup = null;
-  filtered.forEach(item => {
-    if (item.group !== lastGroup) {
-      const grpHdr = document.createElement('div');
-      grpHdr.style.cssText = 'font-size:9px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.6);padding:10px 2px 4px;margin-top:' + (lastGroup ? '6px' : '0') + ';';
-      grpHdr.textContent = item.group;
-      listWrap.appendChild(grpHdr);
-      lastGroup = item.group;
-    }
+  SEG_ITEMS.forEach((item, idx) => {
     const btn = document.createElement('button');
     btn.className = 'seg-menu-btn';
-    btn.innerHTML = `<span>${item.label}</span>`;
-    btn.onclick = () => {
-      _doAddSegment(item.type, item.dropdown);
-      closeSegModalForce();
-    };
-    listWrap.appendChild(btn);
+    btn.textContent = item.label;
+    btn.onclick = () => { _doAddSegment(item.type); closeSegModalForce(); };
+    body.appendChild(btn);
+    if (idx === 0) {
+      const div = document.createElement('div');
+      div.style.cssText = 'height:1px;background:rgba(255,255,255,.08);margin:6px 0;';
+      body.appendChild(div);
+    }
   });
-
-  if (!filtered.length) {
-    const em = document.createElement('div');
-    em.style.cssText = 'padding:20px;text-align:center;color:rgba(255,255,255,.3);font-size:.82rem;';
-    em.textContent = 'No results';
-    listWrap.appendChild(em);
-  }
 }
 
-function _filterSegItems(query) {
-  _renderSegItems(query);
-}
-
-function _doAddSegment(type, dropdown) {
+function _doAddSegment(type) {
   if (currentView !== 'show') { showToast('Switch to Shows view first'); return; }
   if (type === 'Match') { addMatchFab(); return; }
   const showData = showsData[currentShowIndex];
@@ -2743,15 +2748,31 @@ function _doAddSegment(type, dropdown) {
     setTimeout(() => scrollToLastCard(), 80);
     return;
   }
+  if (type === 'Opener') {
+    const newSection = { id: Date.now(), name: 'Opener', notes: '', hasNotes: false, lines: [
+      { id: Date.now()+1, type: 'Signature', checked: false, text: '', dropdown: '', details: {} }
+    ], collapsed: false, isSignature: true };
+    showData.sections.unshift(newSection);
+    renderShow(); updateProgress(); showToast('Opener added!');
+    return;
+  }
+  if (type === 'Closer') {
+    const newSection = { id: Date.now(), name: 'Closer', notes: '', hasNotes: false, lines: [
+      { id: Date.now()+1, type: 'Closer', checked: false, text: '', dropdown: '', details: {} }
+    ], collapsed: false, isCloser: true };
+    showData.sections.push(newSection);
+    renderShow(); updateProgress(); showToast('Closer added!');
+    return;
+  }
 
-  // Each segment gets its own standalone section card
-  const item = { id: Date.now(), type, checked: false, text: '', dropdown: dropdown || getDropdownOptions(type)[0] || '', details: {} };
+  const dropdown = getDropdownOptions(type)[0] || '';
+  const item = { id: Date.now(), type, checked: false, text: '', dropdown, details: {} };
   if (['Promo','Interview','Cutscene','Video Package'].includes(type)) item.participantCount = 1;
   const lines = [item];
   if (['Promo','Interview','Cutscene','Video Package'].includes(type)) {
     lines.push({ id: Date.now()+1, type: 'ParticipantSlots', checked: false, participants: [null,null,null,null], details: {} });
   }
-  const newSection = { id: Date.now()+2, name: type + (dropdown ? ' — ' + dropdown : ''), notes: '', hasNotes: false, lines, collapsed: false };
+  const newSection = { id: Date.now()+2, name: type, notes: '', hasNotes: false, lines, collapsed: false };
   if (closerIndex !== -1) showData.sections.splice(closerIndex, 0, newSection);
   else showData.sections.push(newSection);
   renderShow(); updateProgress();
@@ -2779,6 +2800,7 @@ function _doAddSegment(type, dropdown) {
 window.addEventListener('DOMContentLoaded', async () => {
   // Load persisted custom job items
   try { window._customJobItems = JSON.parse(localStorage.getItem('efed_custom_job_items') || '[]'); } catch(e) { window._customJobItems = []; }
+  try { window._customOpenerItems = JSON.parse(localStorage.getItem('efed_custom_opener_items') || '[]'); } catch(e) { window._customOpenerItems = []; }
   initNav();
   await loadShow();
   renderShow();
