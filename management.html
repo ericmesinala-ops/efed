@@ -1136,6 +1136,7 @@ function handleFilterChange(filterType) {
 }
 function applyFilters() { renderShow(); }
 function shouldShowLine(line) {
+  if (line.type === 'MatchWrestlers' || line.type === 'ParticipantSlots') return false;
   if (activeFilters.includes('All')) return true;
   return activeFilters.includes(line.type);
 }
@@ -1320,50 +1321,73 @@ function createLineElement(line, sectionIndex, lineIndex, sectionDiv) {
     content.appendChild(dd);
   }
   if (line.type==='Match') {
-    // check if wrestler slots are filled
-    const mwlCheck=showData.sections[sectionIndex].lines[lineIndex+1];
-    let slotsFilledCheck=false;
-    if(mwlCheck&&mwlCheck.type==='MatchWrestlers'&&mwlCheck.wrestlers){
-      const matchTypeCheck=line.matchType||'Singles';
-      const needed={'Singles':2,'Tag':4,'Triple Threat':3,'4-Way Dance':4,'6-Man Elimination':6};
-      const req=needed[matchTypeCheck]||2;
-      const filled=mwlCheck.wrestlers.filter(Boolean).length;
-      slotsFilledCheck=filled>=req;
-    }
-    if(!slotsFilledCheck){
-      checkbox.disabled=true;
-      checkbox.style.opacity='0.3';
-      checkbox.style.cursor='not-allowed';
-      
-    } else {
-      
-    }
+    // Get MatchWrestlers line
+    const mwl=showData.sections[sectionIndex].lines[lineIndex+1];
+    if(!mwl||mwl.type!=='MatchWrestlers') { lineDiv.style.display='none'; return lineDiv; }
+    if(!mwl.wrestlers) mwl.wrestlers=[null,null,null,null,null,null];
+    const matchType=line.matchType||'Singles';
+    const needed={'Singles':2,'Tag':4,'Triple Threat':3,'4-Way Dance':4,'6-Man Elimination':6};
+    const req=needed[matchType]||2;
+    const filled=mwl.wrestlers.filter(Boolean).length;
+    const slotsFilled=filled>=req;
+    if(!slotsFilled){ checkbox.disabled=true; checkbox.style.opacity='0.3'; checkbox.style.cursor='not-allowed'; }
     itemBox.className='item-box match-item-box';
-    const row1=document.createElement('div'); row1.className='match-row1';
-    const matchLabel=document.createElement('span'); matchLabel.className='item-label'; matchLabel.textContent='MATCH'; matchLabel.style.cssText='font-size:.55rem;letter-spacing:2px;color:var(--text-muted);font-family:"Barlow Condensed",sans-serif;font-weight:700;margin-right:4px;flex-shrink:0;';
-    const cbWrapMatch=document.createElement('span'); cbWrapMatch.className='checkbox-wrap';
-    if(!slotsFilledCheck){ cbWrapMatch.style.opacity='0.35'; cbWrapMatch.style.cursor='not-allowed'; } 
-    cbWrapMatch.appendChild(checkbox); row1.appendChild(matchLabel); row1.appendChild(cbWrapMatch);
+    itemBox.style.cssText='display:flex;align-items:center;gap:6px;flex-wrap:nowrap;width:100%;min-width:0;';
+    // MATCH label
+    const matchLabel=document.createElement('span'); matchLabel.textContent='MATCH'; matchLabel.style.cssText='font-size:.55rem;letter-spacing:2px;color:var(--text-muted);font-family:"Barlow Condensed",sans-serif;font-weight:700;flex-shrink:0;';
+    // checkbox
+    const cbWrap=document.createElement('span'); cbWrap.className='checkbox-wrap';
+    if(!slotsFilled){cbWrap.style.opacity='0.35';cbWrap.style.cursor='not-allowed';}
+    cbWrap.appendChild(checkbox);
+    // dropdowns
     const stipDD=document.createElement('select'); stipDD.className='item-dropdown';
-    [{value:'Normal'},{value:'Non-Title'},{value:"#1 Contender's"},{value:'Tournament'},{value:'Championship'}].forEach(s=>{ const o=document.createElement('option'); o.value=s.value; o.textContent=s.value; stipDD.appendChild(o); });
-    stipDD.value=line.dropdown||'Normal'; stipDD.onchange=e=>{ showData.sections[sectionIndex].lines[lineIndex].dropdown=e.target.value; renderShow(); }; row1.appendChild(stipDD);
+    [{value:'Normal'},{value:'Non-Title'},{value:"#1 Contender's"},{value:'Tournament'},{value:'Championship'}].forEach(s=>{const o=document.createElement('option');o.value=s.value;o.textContent=s.value;stipDD.appendChild(o);});
+    stipDD.value=line.dropdown||'Normal'; stipDD.onchange=e=>{showData.sections[sectionIndex].lines[lineIndex].dropdown=e.target.value;renderShow();};
     const mtDD=document.createElement('select'); mtDD.className='item-dropdown';
-    ['Singles','Tag','Triple Threat','4-Way Dance','6-Man Elimination'].forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=t; mtDD.appendChild(o); });
-    mtDD.value=line.matchType||'Singles'; mtDD.onchange=e=>{ showData.sections[sectionIndex].lines[lineIndex].matchType=e.target.value; renderShow(); }; row1.appendChild(mtDD);
+    ['Singles','Tag','Triple Threat','4-Way Dance','6-Man Elimination'].forEach(t=>{const o=document.createElement('option');o.value=t;o.textContent=t;mtDD.appendChild(o);});
+    mtDD.value=matchType; mtDD.onchange=e=>{showData.sections[sectionIndex].lines[lineIndex].matchType=e.target.value;renderShow();};
     const posDD=document.createElement('select'); posDD.className='item-dropdown';
-    ['Opener','Refresher','Regular','Upper Mid-Card','Main Event'].forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p; posDD.appendChild(o); });
-    posDD.value=line.matchPosition||'Regular'; posDD.onchange=e=>{ showData.sections[sectionIndex].lines[lineIndex].matchPosition=e.target.value; }; row1.appendChild(posDD);
-    const row2=document.createElement('div'); row2.className='match-row2';
-    itemBox.appendChild(row1); itemBox.appendChild(row2); lineDiv.appendChild(itemBox);
-    // Left drag handle on match row
-    const matchDragHandle = document.createElement('div');
-    matchDragHandle.style.cssText = 'position:absolute;left:0;top:0;bottom:0;width:20px;display:flex;align-items:center;justify-content:center;cursor:grab;color:rgba(255,255,255,.15);transition:color .15s;';
-    matchDragHandle.innerHTML = '<svg width="8" height="8" viewBox="0 0 10 9" fill="currentColor" style="pointer-events:none;"><rect width="10" height="1.5" rx=".75"/><rect y="3.5" width="10" height="1.5" rx=".75"/><rect y="7" width="10" height="1.5" rx=".75"/></svg>';
-    matchDragHandle.onmouseenter = () => matchDragHandle.style.color = 'rgba(255,255,255,.5)';
-    matchDragHandle.onmouseleave = () => matchDragHandle.style.color = 'rgba(255,255,255,.15)';
-    lineDiv.style.position = 'relative';
-    lineDiv.style.paddingLeft = '20px';
-    lineDiv.insertBefore(matchDragHandle, lineDiv.firstChild);
+    ['Opener','Refresher','Regular','Upper Mid-Card','Main Event'].forEach(p=>{const o=document.createElement('option');o.value=p;o.textContent=p;posDD.appendChild(o);});
+    posDD.value=line.matchPosition||'Regular'; posDD.onchange=e=>{showData.sections[sectionIndex].lines[lineIndex].matchPosition=e.target.value;};
+    // championship button (always visible, only functional when Championship selected)
+    const titleBtn=document.createElement('button');
+    const hasTitle=!!line.matchChampionship;
+    const isChampMatch=line.dropdown==='Championship';
+    titleBtn.className='wrestler-slot'+(hasTitle?' filled':'');
+    if(isChampMatch){
+      titleBtn.style.cssText=hasTitle?'background:linear-gradient(135deg,#6b3a00,#8b5e1a);border-color:#a07830;color:#f0c060;font-weight:700;font-size:10px;box-shadow:0 0 10px rgba(160,120,48,0.5);min-width:80px;flex-shrink:0;':'min-width:80px;flex-shrink:0;border-style:dashed;border-color:rgba(160,120,48,0.5);color:rgba(160,120,48,0.7);font-size:11px;';
+      titleBtn.textContent=hasTitle?('🏆 '+line.matchChampionship):'🏆 Title';
+      titleBtn.onclick=e=>{e.stopPropagation();if(!titleBeltsData.length){const panel=document.getElementById('detailsPanel');clearPanel();const msg=document.createElement('div');msg.style.cssText='padding:20px 10px;text-align:center;color:var(--text-muted);font-size:13px;';msg.innerHTML='<strong>No titles yet</strong><br><br>Go to Title Belts to create one first.';panel.appendChild(msg);return;}showMatchChampionshipPicker(sectionIndex,lineIndex);};
+    } else {
+      titleBtn.style.display='none';
+    }
+    // wrestler slots
+    const slotsWrap=document.createElement('div'); slotsWrap.style.cssText='display:flex;align-items:center;gap:4px;flex-shrink:0;';
+    const addVs=()=>{const v=document.createElement('span');v.textContent='vs';v.style.cssText='color:var(--text-muted);font-size:10px;font-weight:600;flex-shrink:0;';return v;};
+    if(matchType==='Singles'){slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[0],sectionIndex,lineIndex+1,0));slotsWrap.appendChild(addVs());slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[1],sectionIndex,lineIndex+1,1));}
+    else if(matchType==='Tag'){slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[0],sectionIndex,lineIndex+1,0));slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[1],sectionIndex,lineIndex+1,1));slotsWrap.appendChild(addVs());slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[2],sectionIndex,lineIndex+1,2));slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[3],sectionIndex,lineIndex+1,3));}
+    else if(matchType==='Triple Threat'){slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[0],sectionIndex,lineIndex+1,0));slotsWrap.appendChild(addVs());slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[1],sectionIndex,lineIndex+1,1));slotsWrap.appendChild(addVs());slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[2],sectionIndex,lineIndex+1,2));}
+    else if(matchType==='4-Way Dance'){for(let i=0;i<4;i++)slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[i],sectionIndex,lineIndex+1,i));}
+    else if(matchType==='6-Man Elimination'){for(let i=0;i<6;i++)slotsWrap.appendChild(createWrestlerSlot(mwl.wrestlers[i],sectionIndex,lineIndex+1,i));}
+    // details emoji btn
+    const detailsBtn=document.createElement('button');
+    detailsBtn.textContent='📋'; detailsBtn.title='Match details';
+    detailsBtn.style.cssText='background:transparent;border:none;cursor:pointer;font-size:1rem;flex-shrink:0;padding:0 2px;opacity:0.6;transition:opacity .15s;';
+    detailsBtn.onmouseenter=()=>detailsBtn.style.opacity='1';
+    detailsBtn.onmouseleave=()=>detailsBtn.style.opacity='0.6';
+    detailsBtn.onclick=e=>{e.stopPropagation();showDetails(line,sectionIndex,lineIndex);};
+    itemBox.appendChild(matchLabel); itemBox.appendChild(cbWrap); itemBox.appendChild(stipDD); itemBox.appendChild(mtDD); itemBox.appendChild(posDD);
+    if(isChampMatch) itemBox.appendChild(titleBtn);
+    itemBox.appendChild(slotsWrap); itemBox.appendChild(detailsBtn);
+    lineDiv.appendChild(itemBox);
+    // Left drag handle
+    const matchDragHandle=document.createElement('div');
+    matchDragHandle.style.cssText='position:absolute;left:0;top:0;bottom:0;width:20px;display:flex;align-items:center;justify-content:center;cursor:grab;color:rgba(255,255,255,.15);transition:color .15s;';
+    matchDragHandle.innerHTML='<svg width="8" height="8" viewBox="0 0 10 9" fill="currentColor" style="pointer-events:none;"><rect width="10" height="1.5" rx=".75"/><rect y="3.5" width="10" height="1.5" rx=".75"/><rect y="7" width="10" height="1.5" rx=".75"/></svg>';
+    matchDragHandle.onmouseenter=()=>matchDragHandle.style.color='rgba(255,255,255,.5)';
+    matchDragHandle.onmouseleave=()=>matchDragHandle.style.color='rgba(255,255,255,.15)';
+    lineDiv.style.position='relative'; lineDiv.style.paddingLeft='20px';
+    lineDiv.insertBefore(matchDragHandle,lineDiv.firstChild);
     return lineDiv;
   }
   if (['Promo','Interview','Cutscene','Post-Show','Video Package'].includes(line.type)) {
@@ -1378,60 +1402,29 @@ function createLineElement(line, sectionIndex, lineIndex, sectionDiv) {
     ti.oninput=e=>{ showData.sections[sectionIndex].lines[lineIndex].text=e.target.value; };
     content.appendChild(ti);
   }
-  if (line.type!=='Match') content.onclick=()=>showDetails(line,sectionIndex,lineIndex);
-  if (line.type!=='MatchWrestlers' && line.type!=='ParticipantSlots') itemBox.appendChild(content);
-
-  if (line.type==='MatchWrestlers') {
-    let matchType='Singles';
-    if (lineIndex>0) { const prev=showData.sections[sectionIndex].lines[lineIndex-1]; if (prev.type==='Match') matchType=prev.matchType||'Singles'; }
-    if (!line.wrestlers) line.wrestlers=[null,null,null,null,null,null];
-    const sc=document.createElement('div'); sc.className='match-slots-container'; sc.style.cssText='display:flex;gap:8px;flex-wrap:nowrap;align-items:center;width:100%;';
-    const db=document.createElement('span'); db.className='click-for-details-hint'; db.textContent='click for details';
-    db.style.cssText='font-size:10px;color:var(--text-muted);font-style:italic;cursor:pointer;flex-shrink:0;padding:2px 6px;border-radius:3px;transition:color .15s;';
-    db.onmouseenter=()=>db.style.color='var(--accent-blue)';
-    db.onmouseleave=()=>db.style.color='var(--text-muted)';
-    db.onclick=e=>{ e.stopPropagation(); const ml=lineIndex>0?showData.sections[sectionIndex].lines[lineIndex-1]:line; showDetails(ml,sectionIndex,lineIndex-1); };
-    sc.appendChild(db);
-    const sp=document.createElement('div'); sp.style.flex='1'; sc.appendChild(sp);
-    if (matchType==='Singles') {
-      sc.appendChild(createWrestlerSlot(line.wrestlers[0],sectionIndex,lineIndex,0));
-      const vs=document.createElement('span'); vs.textContent='vs'; vs.style.cssText='color:var(--text-muted);font-size:11px;font-weight:600;'; sc.appendChild(vs);
-      sc.appendChild(createWrestlerSlot(line.wrestlers[1],sectionIndex,lineIndex,1));
-    } else if (matchType==='Tag') {
-      sc.appendChild(createWrestlerSlot(line.wrestlers[0],sectionIndex,lineIndex,0));
-      sc.appendChild(createWrestlerSlot(line.wrestlers[1],sectionIndex,lineIndex,1));
-      const vs=document.createElement('span'); vs.textContent='vs'; vs.style.cssText='color:var(--text-muted);font-size:11px;font-weight:600;'; sc.appendChild(vs);
-      sc.appendChild(createWrestlerSlot(line.wrestlers[2],sectionIndex,lineIndex,2));
-      sc.appendChild(createWrestlerSlot(line.wrestlers[3],sectionIndex,lineIndex,3));
-    } else if (matchType==='Triple Threat') {
-      sc.appendChild(createWrestlerSlot(line.wrestlers[0],sectionIndex,lineIndex,0));
-      const v1=document.createElement('span'); v1.textContent='vs'; v1.style.cssText='color:var(--text-muted);font-size:11px;font-weight:600;'; sc.appendChild(v1);
-      sc.appendChild(createWrestlerSlot(line.wrestlers[1],sectionIndex,lineIndex,1));
-      const v2=document.createElement('span'); v2.textContent='vs'; v2.style.cssText='color:var(--text-muted);font-size:11px;font-weight:600;'; sc.appendChild(v2);
-      sc.appendChild(createWrestlerSlot(line.wrestlers[2],sectionIndex,lineIndex,2));
-    } else if (matchType==='4-Way Dance') {
-      for(let i=0;i<4;i++) sc.appendChild(createWrestlerSlot(line.wrestlers[i],sectionIndex,lineIndex,i));
-    } else if (matchType==='6-Man Elimination') {
-      for(let i=0;i<6;i++) sc.appendChild(createWrestlerSlot(line.wrestlers[i],sectionIndex,lineIndex,i));
+  // For segment types, find and inline the ParticipantSlots on the same row
+  const segTypes=['Promo','Interview','Cutscene','Post-Show','Video Package'];
+  if (segTypes.includes(line.type)) {
+    const psl=showData.sections[sectionIndex].lines[lineIndex+1];
+    const pc=parseInt(line.participantCount)||1;
+    if(psl&&psl.type==='ParticipantSlots'){
+      if(!psl.participants) psl.participants=[null,null,null,null];
+      const slotsWrap=document.createElement('div'); slotsWrap.style.cssText='display:flex;align-items:center;gap:4px;flex-shrink:0;';
+      for(let i=0;i<pc;i++) slotsWrap.appendChild(createParticipantSlot(psl.participants[i],sectionIndex,lineIndex+1,i));
+      content.appendChild(slotsWrap);
     }
-    // championship title slot inline if Championship match
-    if(lineIndex>0){const matchLine=showData.sections[sectionIndex].lines[lineIndex-1];if(matchLine&&matchLine.type==='Match'&&matchLine.dropdown==='Championship'){const sep=document.createElement('span');sep.textContent='|';sep.style.cssText='color:var(--text-muted);font-size:11px;margin:0 2px;';sc.appendChild(sep);const titleBtn=document.createElement('button');const hasTitle=!!matchLine.matchChampionship;titleBtn.className='wrestler-slot'+(hasTitle?' filled':'');titleBtn.style.cssText=hasTitle?'background:linear-gradient(135deg,#6b3a00,#8b5e1a);border-color:#a07830;color:#f0c060;font-weight:700;font-size:10px;box-shadow:0 0 10px rgba(160,120,48,0.5),inset 0 0 6px rgba(255,200,80,0.1);min-width:90px;':'min-width:90px;border-style:dashed;border-color:rgba(160,120,48,0.5);color:rgba(160,120,48,0.7);font-size:11px;';titleBtn.textContent=hasTitle?('🏆 '+matchLine.matchChampionship):'🏆 Title';titleBtn.onclick=e=>{e.stopPropagation();if(!titleBeltsData.length){const panel=document.getElementById('detailsPanel');clearPanel();const msg=document.createElement('div');msg.style.cssText='padding:20px 10px;text-align:center;color:var(--text-muted);font-size:13px;line-height:1.6;';msg.innerHTML='<div style="font-size:1.5rem;margin-bottom:10px;">🏆</div><strong style="color:var(--text-primary);">No titles yet</strong><br><br><span style="font-size:12px;">Go to <strong>Title Belts</strong> in the sidebar to create a championship first.</span>';panel.appendChild(msg);return;}showMatchChampionshipPicker(sectionIndex,lineIndex-1);};sc.appendChild(titleBtn);}}
-    itemBox.appendChild(sc);
+    // details emoji btn
+    const detailsBtn=document.createElement('button');
+    detailsBtn.textContent='📋'; detailsBtn.title='Segment details';
+    detailsBtn.style.cssText='background:transparent;border:none;cursor:pointer;font-size:1rem;flex-shrink:0;padding:0 2px;opacity:0.6;transition:opacity .15s;';
+    detailsBtn.onmouseenter=()=>detailsBtn.style.opacity='1';
+    detailsBtn.onmouseleave=()=>detailsBtn.style.opacity='0.6';
+    detailsBtn.onclick=e=>{e.stopPropagation();showDetails(line,sectionIndex,lineIndex);};
+    content.appendChild(detailsBtn);
+  } else if (line.type!=='Match') {
+    content.onclick=()=>showDetails(line,sectionIndex,lineIndex);
   }
-  if (line.type==='ParticipantSlots') {
-    let pc=1;
-    if (lineIndex>0){ const prev=showData.sections[sectionIndex].lines[lineIndex-1]; if(['Promo','Interview','Cutscene','Post-Show','Video Package'].includes(prev.type)) pc=parseInt(prev.participantCount)||1; }
-    if (!line.participants) line.participants=[null,null,null,null];
-    const sc=document.createElement('div'); sc.className='participant-slots-container'; sc.style.cssText='display:flex;gap:8px;flex-wrap:nowrap;align-items:center;width:100%;';
-    const db=document.createElement('span'); db.className='click-for-details-hint'; db.textContent='click for details';
-    db.style.cssText='font-size:10px;color:var(--text-muted);font-style:italic;cursor:pointer;flex-shrink:0;padding:2px 6px;border-radius:3px;transition:color .15s;';
-    db.onmouseenter=()=>db.style.color='var(--accent-blue)';
-    db.onmouseleave=()=>db.style.color='var(--text-muted)';
-    db.onclick=e=>{ e.stopPropagation(); const sl=lineIndex>0?showData.sections[sectionIndex].lines[lineIndex-1]:line; showDetails(sl,sectionIndex,lineIndex-1); };
-    sc.appendChild(db); const sp=document.createElement('div'); sp.style.flex='1'; sc.appendChild(sp);
-    for(let i=0;i<pc;i++) sc.appendChild(createParticipantSlot(line.participants[i],sectionIndex,lineIndex,i));
-    itemBox.appendChild(sc);
-  }
+  if (line.type!=='MatchWrestlers' && line.type!=='ParticipantSlots') itemBox.appendChild(content);
   lineDiv.appendChild(itemBox);
   if (line.type!=='MatchWrestlers' && line.type!=='ParticipantSlots') {
     // Left drag handle
