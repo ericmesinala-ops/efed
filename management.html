@@ -1404,64 +1404,50 @@ function renderShow() {
     const hasMatchLine = !isFlat && section.lines.some(l => l.type === 'Match');
     const isSegSection = !isFlat && !hasMatchLine;
 
-    // Assign default tab name if not set
-    if (!section.tabName) {
-      if (isFlat) {
-        section.tabName = section.isSignature ? 'Opener' : 'Closer';
-      } else if (hasMatchLine) {
-        matchCount++;
-        section.tabName = `Match ${matchCount}`;
-      } else {
-        segCount++;
-        section.tabName = `Segment ${segCount}`;
-      }
-    }
 
-    // ── CARD WRAPPER ──
+        // ── CARD WRAPPER ──
     const wrapper = document.createElement('div');
     wrapper.className = 'card-wrapper';
     wrapper.dataset.sectionIndex = sectionIndex;
 
-    // ── TAB ──
+    // ── TAB — only render if flat (opener/closer), championship set, or specialty label set ──
+    const hasChampionship = hasMatchLine && section.lines.some(l => l.type === 'Match' && l.matchChampionship);
+    const hasSpecialty = !!section.specialtyLabel;
+    const showTab = isFlat || hasChampionship || hasSpecialty;
+
     const tabWrap = document.createElement('div');
     tabWrap.className = 'card-tab-wrap';
-    const tab = document.createElement('div');
-    tab.className = 'card-tab' + (isFlat ? '' : hasMatchLine ? ' match-tab' : ' segment-tab');
-    const tabText = document.createElement('span');
-    tabText.className = 'card-tab-text';
-    tabText.textContent = section.tabName;
-    tabText.title = 'Click to rename';
-    tabText.onclick = e => {
-      e.stopPropagation();
-      tabText.contentEditable = 'true';
-      tabText.focus();
-      const sel = window.getSelection(); const range = document.createRange();
-      range.selectNodeContents(tabText); sel.removeAllRanges(); sel.addRange(range);
-    };
-    tabText.onblur = () => {
-      tabText.contentEditable = 'false';
-      const val = (tabText.textContent || '').trim();
-      tabText.textContent = val || section.tabName;
-      section.tabName = tabText.textContent;
-    };
-    tabText.onkeydown = e => {
-      if (e.key === 'Enter') { e.preventDefault(); tabText.blur(); }
-      if (e.key === 'Escape') { tabText.textContent = section.tabName; tabText.blur(); }
-    };
-    tab.appendChild(tabText);
-    tabWrap.appendChild(tab);
 
-    // Hint beside the Opener tab only
-    if (section.isSignature) {
-      const hint = document.createElement('span');
-      hint.textContent = '← Click on the tabs to edit';
-      hint.style.cssText = 'position:absolute;left:calc(18px + var(--tab-w, 80px) + 8px);bottom:0;height:18px;display:flex;align-items:center;font-size:9px;color:var(--text-muted);font-style:italic;white-space:nowrap;pointer-events:none;line-height:1;';
-      // measure tab width after appended
-      requestAnimationFrame(() => {
-        const tw = tab.offsetWidth;
-        hint.style.left = (18 + tw + 8) + 'px';
-      });
-      tabWrap.appendChild(hint);
+    if (showTab) {
+      const tab = document.createElement('div');
+      tab.className = 'card-tab' + (isFlat ? '' : hasMatchLine ? ' match-tab' : ' segment-tab');
+      const tabText = document.createElement('span');
+      tabText.className = 'card-tab-text';
+      // Tab label: championship name, specialty label, or flat name
+      tabText.textContent = hasChampionship
+        ? section.lines.find(l => l.type === 'Match' && l.matchChampionship).matchChampionship
+        : hasSpecialty ? section.specialtyLabel
+        : (section.isSignature ? 'Opener' : 'Closer');
+      tabText.title = 'Click to rename';
+      tabText.onclick = e => {
+        e.stopPropagation();
+        tabText.contentEditable = 'true';
+        tabText.focus();
+        const sel = window.getSelection(); const range = document.createRange();
+        range.selectNodeContents(tabText); sel.removeAllRanges(); sel.addRange(range);
+      };
+      tabText.onblur = () => {
+        tabText.contentEditable = 'false';
+        const val = (tabText.textContent || '').trim();
+        if (hasSpecialty) section.specialtyLabel = val || section.specialtyLabel;
+        tabText.textContent = val || tabText.textContent;
+      };
+      tabText.onkeydown = e => {
+        if (e.key === 'Enter') { e.preventDefault(); tabText.blur(); }
+        if (e.key === 'Escape') { tabText.blur(); }
+      };
+      tab.appendChild(tabText);
+      tabWrap.appendChild(tab);
     }
 
     wrapper.appendChild(tabWrap);
@@ -1595,6 +1581,10 @@ function createLineElement(line, sectionIndex, lineIndex, wrapperOrSectionDiv, s
   // ── TROPHY BUTTON (always visible, opens championship picker directly) ──
   if (isMatch) {
     const hasTitle = !!line.matchChampionship;
+    const section = showData.sections[sectionIndex];
+    const hasSpecialty = !!section.specialtyLabel;
+
+    // 🏆 Trophy — championship toggle
     const trophyToggle = document.createElement('button');
     trophyToggle.textContent = '🏆';
     trophyToggle.title = hasTitle ? line.matchChampionship : 'Set title match';
@@ -1605,6 +1595,46 @@ function createLineElement(line, sectionIndex, lineIndex, wrapperOrSectionDiv, s
       showMatchChampionshipPicker(sectionIndex, lineIndex);
     };
     row.appendChild(trophyToggle);
+
+    // 🅢 Specialty match toggle
+    const specBtn = document.createElement('button');
+    specBtn.textContent = '🅢';
+    specBtn.title = hasSpecialty ? section.specialtyLabel : 'Set specialty match';
+    specBtn.style.cssText = 'background:transparent;border:none;cursor:pointer;font-size:.95rem;flex-shrink:0;padding:0 2px;line-height:1;transition:opacity .2s,filter .2s;opacity:' + (hasSpecialty ? '1' : '0.25') + ';filter:' + (hasSpecialty ? 'none' : 'grayscale(1)') + ';';
+    specBtn.onclick = e => {
+      e.stopPropagation();
+      if (hasSpecialty) {
+        if (confirm('Remove specialty match label?')) {
+          showData.sections[sectionIndex].specialtyLabel = '';
+          renderShow();
+        }
+      } else {
+        showSpecialtyMatchModal(sectionIndex);
+      }
+    };
+    row.appendChild(specBtn);
+  }
+
+  // ➕ Segment label toggle
+  if (isSegment) {
+    const section = showData.sections[sectionIndex];
+    const hasLabel = !!section.specialtyLabel;
+    const plusBtn = document.createElement('button');
+    plusBtn.textContent = '＋';
+    plusBtn.title = hasLabel ? section.specialtyLabel : 'Label this segment';
+    plusBtn.style.cssText = 'background:transparent;border:none;cursor:pointer;font-size:.95rem;flex-shrink:0;padding:0 2px;line-height:1;font-family:monospace;transition:opacity .2s;opacity:' + (hasLabel ? '1' : '0.25') + ';';
+    plusBtn.onclick = e => {
+      e.stopPropagation();
+      if (hasLabel) {
+        if (confirm('Remove segment label?')) {
+          showData.sections[sectionIndex].specialtyLabel = '';
+          renderShow();
+        }
+      } else {
+        showSegmentLabelModal(sectionIndex);
+      }
+    };
+    row.appendChild(plusBtn);
   }
 
   // ── SPACER ──
@@ -2050,12 +2080,12 @@ function showMatchChampionshipPicker(si, li) {
   const showData=showsData[currentShowIndex]; const panel=document.getElementById('detailsPanel'); clearPanel();
   const title=document.createElement('div'); title.className='details-title'; title.textContent='Select Championship'; panel.appendChild(title);
   const curr=showData.sections[si].lines[li].matchChampionship;
-  if(curr){const rb=document.createElement('button');rb.className='wrestler-list-btn remove-btn';rb.textContent='Remove Championship';rb.style.marginBottom='15px';rb.onclick=()=>{showData.sections[si].lines[li].matchChampionship=null;showData.sections[si].tabName='MATCH';renderShow();};panel.appendChild(rb);}
+  if(curr){const rb=document.createElement('button');rb.className='wrestler-list-btn remove-btn';rb.textContent='Remove Championship';rb.style.marginBottom='15px';rb.onclick=()=>{showData.sections[si].lines[li].matchChampionship=null;renderShow();};panel.appendChild(rb);}
   titleBeltsData.forEach(belt=>{
     const bb=document.createElement('button');bb.className='wrestler-list-btn';bb.style.cssText='margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;';
     const ns=document.createElement('span');ns.textContent=belt.name;
     const ss=document.createElement('span');ss.style.cssText='font-size:11px;padding:2px 6px;border-radius:2px;background:'+(belt.status==='Active'?'#107c10':'var(--bg-secondary)')+';color:'+(belt.status==='Active'?'white':'var(--text-muted)')+';';ss.textContent=belt.status;
-    bb.appendChild(ns);bb.appendChild(ss);bb.onclick=()=>{showData.sections[si].lines[li].matchChampionship=belt.name;showData.sections[si].tabName=belt.name;renderShow();clearPanel();};
+    bb.appendChild(ns);bb.appendChild(ss);bb.onclick=()=>{showData.sections[si].lines[li].matchChampionship=belt.name;renderShow();clearPanel();};
     panel.appendChild(bb);
   });
   if(!titleBeltsData.length){const em=document.createElement('div');em.style.cssText='padding:20px;text-align:center;color:var(--text-muted);font-size:13px;';em.textContent='No championships created yet.';panel.appendChild(em);}
@@ -2975,6 +3005,89 @@ function startSectionDrag(e, sectionIndex, sectionDiv) {
 }
 
 /* addMatchFab defined above with addSection */
+
+
+/* ── SPECIALTY MATCH MODAL ── */
+function showSpecialtyMatchModal(sectionIndex) {
+  const existing = document.getElementById('specialty-modal-bd');
+  if (existing) existing.remove();
+  const bd = document.createElement('div');
+  bd.id = 'specialty-modal-bd';
+  bd.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:700;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);';
+  bd.onclick = e => { if (e.target === bd) bd.remove(); };
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#111114;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:20px 22px 18px;width:320px;box-shadow:0 24px 64px rgba(0,0,0,.8);';
+  const h = document.createElement('div');
+  h.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:1rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#e8e8e8;margin-bottom:6px;';
+  h.textContent = 'What kind of match is this?';
+  modal.appendChild(h);
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.maxLength = 60; inp.placeholder = 'e.g. I Quit Match';
+  inp.style.cssText = 'width:100%;padding:9px 12px;background:#1a1a22;border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.88rem;outline:none;margin:10px 0 14px;transition:border-color .2s;';
+  inp.onfocus = () => inp.style.borderColor = 'rgba(200,168,75,.6)';
+  inp.onblur  = () => inp.style.borderColor = 'rgba(255,255,255,.15)';
+  modal.appendChild(inp);
+  const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'flex:1;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.5);font-family:"DM Sans",sans-serif;';
+  cancelBtn.onclick = () => bd.remove();
+  const addBtn = document.createElement('button');
+  addBtn.textContent = 'Set';
+  addBtn.style.cssText = 'flex:1;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:none;background:#b0b4bc;color:#111;font-family:"DM Sans",sans-serif;';
+  addBtn.onclick = () => {
+    const val = inp.value.trim();
+    if (!val) return;
+    showsData[currentShowIndex].sections[sectionIndex].specialtyLabel = val;
+    bd.remove();
+    renderShow();
+  };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') addBtn.click(); if (e.key === 'Escape') bd.remove(); });
+  row.appendChild(cancelBtn); row.appendChild(addBtn);
+  modal.appendChild(row); bd.appendChild(modal); document.body.appendChild(bd);
+  setTimeout(() => inp.focus(), 50);
+}
+
+/* ── SEGMENT LABEL MODAL ── */
+function showSegmentLabelModal(sectionIndex) {
+  const existing = document.getElementById('seglabel-modal-bd');
+  if (existing) existing.remove();
+  const bd = document.createElement('div');
+  bd.id = 'seglabel-modal-bd';
+  bd.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:700;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);';
+  bd.onclick = e => { if (e.target === bd) bd.remove(); };
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#111114;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:20px 22px 18px;width:320px;box-shadow:0 24px 64px rgba(0,0,0,.8);';
+  const h = document.createElement('div');
+  h.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:1rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#e8e8e8;margin-bottom:6px;';
+  h.textContent = 'What kind of segment is this?';
+  modal.appendChild(h);
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.maxLength = 60; inp.placeholder = 'e.g. Backstage Attack';
+  inp.style.cssText = 'width:100%;padding:9px 12px;background:#1a1a22;border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.88rem;outline:none;margin:10px 0 14px;transition:border-color .2s;';
+  inp.onfocus = () => inp.style.borderColor = 'rgba(200,168,75,.6)';
+  inp.onblur  = () => inp.style.borderColor = 'rgba(255,255,255,.15)';
+  modal.appendChild(inp);
+  const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'flex:1;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.5);font-family:"DM Sans",sans-serif;';
+  cancelBtn.onclick = () => bd.remove();
+  const addBtn = document.createElement('button');
+  addBtn.textContent = 'Set';
+  addBtn.style.cssText = 'flex:1;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:none;background:#b0b4bc;color:#111;font-family:"DM Sans",sans-serif;';
+  addBtn.onclick = () => {
+    const val = inp.value.trim();
+    if (!val) return;
+    showsData[currentShowIndex].sections[sectionIndex].specialtyLabel = val;
+    bd.remove();
+    renderShow();
+  };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') addBtn.click(); if (e.key === 'Escape') bd.remove(); });
+  row.appendChild(cancelBtn); row.appendChild(addBtn);
+  modal.appendChild(row); bd.appendChild(modal); document.body.appendChild(bd);
+  setTimeout(() => inp.focus(), 50);
+}
 
 /* ── FAB: SEGMENT MODAL ── */
 
