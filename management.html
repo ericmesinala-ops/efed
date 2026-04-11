@@ -382,9 +382,25 @@ html.day-mode #fsw-body {
 /* Drag handle */
 .section-drag-handle { cursor: grab !important; touch-action: none; user-select: none; }
 .section-drag-handle:active { cursor: grabbing !important; }
-.section-container.drag-dragging { opacity: 0.35; outline: 2px dashed var(--accent-blue); }
-.section-container.drag-over { outline: 2px solid var(--accent-blue); background: rgba(200,168,75,0.05); }
-.drag-ghost { position: fixed; pointer-events: none; z-index: 9999; opacity: 0.92; background: var(--bg-secondary); border: 1px solid var(--accent-blue); border-radius: 4px; padding: 10px 16px; font-size: 13px; font-weight: 600; color: var(--text-primary); box-shadow: 0 8px 32px rgba(0,0,0,0.5); white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+/* Source card while being dragged */
+.card-wrapper.drag-dragging { opacity: 0.22; }
+.card-wrapper.drag-dragging .card-body { border-style: dashed !important; border-color: rgba(200,168,75,0.25) !important; box-shadow: none !important; }
+.card-wrapper.drag-dragging .card-tab { opacity: 0.4; }
+/* Drop target highlight */
+.card-wrapper.drag-over .card-body { outline: 2px solid var(--accent-blue); background: rgba(200,168,75,0.05); }
+/* Floating ghost card */
+.drag-ghost-card {
+  position: fixed;
+  pointer-events: none !important;
+  z-index: 9999;
+  cursor: grabbing;
+  filter: drop-shadow(0 22px 40px rgba(0,0,0,0.75)) drop-shadow(0 4px 12px rgba(0,0,0,0.5));
+  transform: scale(1.03) rotate(-0.5deg);
+  transition: none;
+}
+.drag-ghost-card * { pointer-events: none !important; cursor: grabbing !important; }
+.drag-ghost-card .card-body { border-color: rgba(200,168,75,0.55) !important; }
+.drag-ghost-card select, .drag-ghost-card input, .drag-ghost-card button { pointer-events: none !important; }
 
 /* ── CARD TAB (upper-left label tab) ── */
 .card-tab-wrap {
@@ -1551,17 +1567,30 @@ function createLineElement(line, sectionIndex, lineIndex, wrapperOrSectionDiv, s
     row.appendChild(dd);
   }
 
-  // ── TITLE SLOT (championship matches only) ──
+  // ── TROPHY TOGGLE + TITLE SLOT (match cards) ──
   if (isMatch) {
-    const isChamp = line.dropdown === 'Championship' || (line.matchType || '').toLowerCase().includes('championship');
-    // Show title slot when stip is Championship; we track stip separately
-    const stip = line.stip || line.dropdown || 'Normal';
-    const isChampStip = stip === 'Championship';
-    if (isChampStip) {
-      const hasTitle = !!line.matchChampionship;
+    const isTitleOn = !!line.isTitleMatch;
+    const hasTitle = !!line.matchChampionship;
+
+    // Trophy toggle button — dim when off, bright when on
+    const trophyToggle = document.createElement('button');
+    trophyToggle.textContent = '🏆';
+    trophyToggle.title = isTitleOn ? 'Disable title match' : 'Enable title match';
+    trophyToggle.style.cssText = 'background:transparent;border:none;cursor:pointer;font-size:.95rem;flex-shrink:0;padding:0 2px;line-height:1;transition:opacity .2s,filter .2s;opacity:' + (isTitleOn ? '1' : '0.25') + ';filter:' + (isTitleOn ? 'none' : 'grayscale(1)') + ';';
+    trophyToggle.onclick = e => {
+      e.stopPropagation();
+      const newVal = !showData.sections[sectionIndex].lines[lineIndex].isTitleMatch;
+      showData.sections[sectionIndex].lines[lineIndex].isTitleMatch = newVal;
+      if (!newVal) showData.sections[sectionIndex].lines[lineIndex].matchChampionship = '';
+      renderShow();
+    };
+    row.appendChild(trophyToggle);
+
+    // Title slot — only visible when trophy is on
+    if (isTitleOn) {
       const titleBtn = document.createElement('button');
       titleBtn.className = 'row-title-slot' + (hasTitle ? '' : ' empty');
-      titleBtn.textContent = hasTitle ? ('🏆 ' + line.matchChampionship) : '🏆 Title';
+      titleBtn.textContent = hasTitle ? line.matchChampionship : 'Title';
       titleBtn.onclick = e => {
         e.stopPropagation();
         if (!titleBeltsData.length) {
