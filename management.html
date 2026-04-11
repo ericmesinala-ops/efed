@@ -386,8 +386,22 @@ html.day-mode #fsw-body {
 .card-wrapper.drag-dragging { opacity: 0.22; }
 .card-wrapper.drag-dragging .card-body { border-style: dashed !important; border-color: rgba(200,168,75,0.25) !important; box-shadow: none !important; }
 .card-wrapper.drag-dragging .card-tab { opacity: 0.4; }
-/* Drop target highlight */
-.card-wrapper.drag-over .card-body { outline: 2px solid var(--accent-blue); background: rgba(200,168,75,0.05); }
+/* Drop indicator line */
+.drag-insert-line {
+  height: 3px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent-blue) 10%, var(--accent-blue) 90%, transparent 100%);
+  box-shadow: 0 0 8px rgba(200,168,75,0.7), 0 0 2px rgba(200,168,75,0.5);
+  margin: 2px 18px;
+  pointer-events: none;
+  position: relative;
+  z-index: 20;
+  animation: dropLineIn 0.1s ease;
+}
+@keyframes dropLineIn {
+  from { opacity: 0; transform: scaleX(0.6); }
+  to   { opacity: 1; transform: scaleX(1); }
+}
 /* Floating ghost card */
 .drag-ghost-card {
   position: fixed;
@@ -2865,50 +2879,105 @@ let _dragState = null;
 function startSectionDrag(e, sectionIndex, sectionDiv) {
   e.preventDefault(); e.stopPropagation();
   const isTouch = e.type === 'touchstart';
-  const startX = isTouch ? e.touches[0].clientX : e.clientX;
-  const startY = isTouch ? e.touches[0].clientY : e.clientY;
-  const showData = showsData[currentShowIndex];
-  const sectionName = showData.sections[sectionIndex].tabName || showData.sections[sectionIndex].name || `Section ${sectionIndex + 1}`;
-  const ghost = document.createElement('div'); ghost.className = 'drag-ghost';
-  ghost.textContent = '☰  ' + sectionName;
-  ghost.style.left = startX + 12 + 'px'; ghost.style.top = startY - 16 + 'px';
-  document.body.appendChild(ghost);
-  // Find the wrapper or card body to mark as dragging
+  const clientX = isTouch ? e.touches[0].clientX : e.clientX;
+  const clientY = isTouch ? e.touches[0].clientY : e.clientY;
+
+  // Find the real card wrapper to clone
   const wrapEl = document.querySelector(`#sectionsContainer .card-wrapper[data-section-index="${sectionIndex}"]`) || sectionDiv;
+
+  // Build a visual clone of the entire card (tab + body)
+  const ghost = document.createElement('div');
+  ghost.className = 'drag-ghost-card';
+  const rect = wrapEl.getBoundingClientRect();
+  ghost.style.width = rect.width + 'px';
+  // Clone inner HTML so it looks identical
+  ghost.innerHTML = wrapEl.innerHTML;
+  // Position: offset so cursor is where the drag handle is
+  const offsetX = clientX - rect.left;
+  const offsetY = clientY - rect.top;
+  ghost.style.left = (clientX - offsetX) + 'px';
+  ghost.style.top  = (clientY - offsetY) + 'px';
+  document.body.appendChild(ghost);
+
+  // Fade the source card
   if (wrapEl) wrapEl.classList.add('drag-dragging');
-  _dragState = { fromIndex: sectionIndex, ghost, currentOver: null };
+
+  _dragState = { fromIndex: sectionIndex, ghost, currentOver: null, offsetX, offsetY };
+
   function getPos(ev) { return ev.touches ? { x: ev.touches[0].clientX, y: ev.touches[0].clientY } : { x: ev.clientX, y: ev.clientY }; }
+
+  function clearInsertLine() {
+    const old = document.getElementById('drag-insert-line');
+    if (old) old.remove();
+  }
+
+  function showInsertLine(beforeEl) {
+    clearInsertLine();
+    const line = document.createElement('div');
+    line.className = 'drag-insert-line';
+    line.id = 'drag-insert-line';
+    if (beforeEl) {
+      beforeEl.parentNode.insertBefore(line, beforeEl);
+    } else {
+      // append at end of container
+      const container = document.getElementById('sectionsContainer');
+      if (container) container.appendChild(line);
+    }
+  }
+
   function onMove(ev) {
     if (!_dragState) return;
+    if (ev.cancelable) ev.preventDefault();
     const pos = getPos(ev);
-    ghost.style.left = pos.x + 12 + 'px'; ghost.style.top = pos.y - 16 + 'px';
-    let overIndex = null;
-    document.querySelectorAll('#sectionsContainer .card-wrapper').forEach(el => {
-      el.classList.remove('drag-over');
+    ghost.style.left = (pos.x - _dragState.offsetX) + 'px';
+    ghost.style.top  = (pos.y - _dragState.offsetY) + 'px';
+
+    const container = document.getElementById('sectionsContainer');
+    const wrappers = Array.from(container.querySelectorAll('.card-wrapper'));
+    let insertBefore = null;
+    let foundOver = false;
+
+    for (const el of wrappers) {
       const r = el.getBoundingClientRect();
-      if (pos.y >= r.top && pos.y <= r.bottom && pos.x >= r.left && pos.x <= r.right) { overIndex = parseInt(el.dataset.sectionIndex); el.classList.add('drag-over'); }
-    });
-    _dragState.currentOver = overIndex;
+      const mid = r.top + r.height / 2;
+      if (pos.y < mid) {
+        insertBefore = el;
+        foundOver = true;
+        break;
+      }
+    }
+
+    // Determine target index
+    if (insertBefore) {
+      _dragState.currentOver = parseInt(insertBefore.dataset.sectionIndex);
+      _dragState.insertBefore = insertBefore;
+    } else {
+      _dragState.currentOver = wrappers.length > 0 ? parseInt(wrappers[wrappers.length - 1].dataset.sectionIndex) + 1 : 0;
+      _dragState.insertBefore = null;
+    }
+
+    showInsertLine(_dragState.insertBefore);
   }
+
   function onEnd() {
     if (!_dragState) return;
-    const { fromIndex, currentOver, ghost } = _dragState; _dragState = null;
+    const { fromIndex, currentOver, insertBefore } = _dragState;
+    _dragState = null;
     ghost.remove();
-    document.querySelectorAll('#sectionsContainer .card-wrapper').forEach(el => el.classList.remove('drag-dragging','drag-over'));
+    clearInsertLine();
+    document.querySelectorAll('#sectionsContainer .card-wrapper').forEach(el => el.classList.remove('drag-dragging'));
     if (currentOver !== null && currentOver !== fromIndex) {
       const d = showsData[currentShowIndex]; const sections = d.sections;
-      const closerIndex = sections.findIndex(s => s.isCloser);
-      if (sections[fromIndex].isSignature || sections[fromIndex].isCloser) return;
       let to = currentOver;
-      if (sections[to] && (sections[to].isSignature)) to = 1;
-      if (closerIndex !== -1 && to >= closerIndex) to = closerIndex - 1;
-      if (to === fromIndex || to < 1) return;
+      if (to > fromIndex) to--; // account for removal shift
+      if (to === fromIndex) { renderShow(); return; }
       const [moved] = sections.splice(fromIndex, 1); sections.splice(to, 0, moved);
       renderShow(); showToast('Section moved');
     }
     document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onEnd);
     document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onEnd);
   }
+
   document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onEnd);
   document.addEventListener('touchmove', onMove, { passive: false }); document.addEventListener('touchend', onEnd);
 }
