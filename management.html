@@ -462,6 +462,9 @@ html.day-mode #fsw-body {
   color: rgba(255,255,255,.9);
 }
 .card-tab.match-tab { background: linear-gradient(135deg, #1a1612 0%, #251e10 100%); border-color: rgba(200,168,75,.22); box-shadow: 0 -3px 8px rgba(0,0,0,.5), 0 -1px 6px rgba(200,168,75,.1), inset 0 1px 0 rgba(200,168,75,.08); }
+.card-tab.match-tab .card-tab-text { color: #c8a84b; }
+.card-tab.champ-tab { background: linear-gradient(135deg, #1a1612 0%, #251e10 100%); border-color: rgba(200,168,75,.4); box-shadow: 0 -3px 8px rgba(0,0,0,.5), 0 -1px 6px rgba(200,168,75,.2), inset 0 1px 0 rgba(200,168,75,.12); }
+.card-tab.champ-tab .card-tab-text { color: #c8a84b; letter-spacing: 1.8px; }
 .card-tab.segment-tab { background: linear-gradient(135deg, #111520 0%, #181d2e 100%); border-color: rgba(100,140,220,.2); box-shadow: 0 -3px 8px rgba(0,0,0,.5), 0 -1px 6px rgba(100,140,220,.08), inset 0 1px 0 rgba(100,140,220,.06); }
 html.day-mode .card-tab { background: linear-gradient(135deg, #2a2a38 0%, #35354a 100%); border-color: rgba(255,255,255,.2); }
 html.day-mode .card-tab-text { color: rgba(255,255,255,.8); }
@@ -573,6 +576,7 @@ html.day-mode .card-tab-text { color: rgba(255,255,255,.8); }
 /* Card wrapper — holds tab + card body together */
 .card-wrapper { margin-bottom: 14px; position: relative; }
 .card-body { background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 0 6px 6px 6px; overflow: hidden; transition: box-shadow .2s, border-color .2s; position: relative; }
+.card-body.segment-card { background: #111116; border-color: #222228; }
 .card-body::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--border-primary); transition: background .2s; z-index: 1; }
 .card-wrapper:hover .card-body::before,
 .card-body.active-card::before { background: rgba(200,200,210,.55); }
@@ -881,8 +885,9 @@ html.day-mode .seg-card-label { color: #111; }
 
   <!-- Top bar: title + actions -->
   <div id="mgmt-topbar">
-    <span id="mgmt-topbar-title"><span id="mgmt-fed-name">EFED</span> Show Management <span id="mgmt-topbar-save-hint">Always save your work</span></span>
+    <span id="mgmt-topbar-title"><span id="mgmt-fed-name">EFED</span>&nbsp;Show Management</span>
     <div id="mgmt-topbar-actions">
+      <span id="mgmt-topbar-save-hint">Always save your work</span>
       <button class="mgmt-btn mgmt-btn-pdf" onclick="openPdfPreview()">View as PDF</button>
       <button class="mgmt-btn mgmt-btn-save" id="mgmt-save-btn" onclick="saveShow()">Save</button>
     </div>
@@ -1454,7 +1459,7 @@ function renderShow() {
       // Championship tab always first
       if (hasChampionship) {
         const champName = section.lines.find(l => l.type === 'Match' && l.matchChampionship).matchChampionship;
-        tabWrap.appendChild(makeTab(champName, 'match-tab', null));
+        tabWrap.appendChild(makeTab(champName, 'champ-tab', null));
       }
       // Specialty tab beside it (or first if no champ)
       if (hasSpecialty) {
@@ -1467,7 +1472,7 @@ function renderShow() {
 
     // ── CARD BODY ──
     const cardBody = document.createElement('div');
-    cardBody.className = 'card-body' + (hasMatchLine ? ' match-card' : '');
+    cardBody.className = 'card-body' + (hasMatchLine ? ' match-card' : (!isFlat ? ' segment-card' : ''));
     if (section.collapsed) cardBody.style.display = 'none';
     cardBody.addEventListener('click', () => {
       document.querySelectorAll('.card-body').forEach(el => el.classList.remove('active-card'));
@@ -1927,6 +1932,13 @@ function showDetails(item, sectionIndex, lineIndex) {
     panel.appendChild(wc);
   } else if(['Promo','Interview','Cutscene','Video Package'].includes(item.type)){
     const tl=document.createElement('div'); tl.className='detail-label'; tl.style.marginBottom='10px'; tl.textContent=(item.dropdown||'')+' '+item.type; panel.appendChild(tl);
+    // Wrestler count dropdown
+    const wcRow=document.createElement('div'); wcRow.style.cssText='display:flex;align-items:center;gap:10px;margin-bottom:14px;';
+    const wcLbl=document.createElement('span'); wcLbl.style.cssText='font-size:12px;color:var(--text-secondary);white-space:nowrap;'; wcLbl.textContent='Wrestlers involved:';
+    const wcSel=document.createElement('select'); wcSel.className='item-dropdown'; wcSel.style.maxWidth='70px';
+    [0,1,2,3,4].forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; if(n===(item.participantCount||1)) o.selected=true; wcSel.appendChild(o); });
+    wcSel.onchange=e=>{ showData.sections[sectionIndex].lines[lineIndex].participantCount=parseInt(e.target.value); renderShow(); showDetails(showData.sections[sectionIndex].lines[lineIndex],sectionIndex,lineIndex); };
+    wcRow.appendChild(wcLbl); wcRow.appendChild(wcSel); panel.appendChild(wcRow);
     const ta=document.createElement('textarea'); ta.className='detail-textarea'; ta.value=item.details.content||''; ta.placeholder='Enter notes...';
     ta.oninput=e=>{ showData.sections[sectionIndex].lines[lineIndex].details.content=e.target.value; };
     panel.appendChild(ta);
@@ -1965,13 +1977,31 @@ function showDetails(item, sectionIndex, lineIndex) {
     addOpenerBtn.onclick=()=>showCustomOpenerItemModal(sectionIndex,lineIndex,item);
     panel.appendChild(addOpenerBtn);
   } else if(item.type==='Closer'){
-    ['Logo','Credits'].forEach(lbl=>{
-      const di=document.createElement('div'); di.className='detail-item';
+    if(!window._customCloserItems) window._customCloserItems=[];
+    try { window._customCloserItems = JSON.parse(localStorage.getItem('efed_custom_closer_items') || '[]'); } catch(e) {}
+    const defaultCloserItems=['Logo','Credits'];
+    const allCloserItems=[...defaultCloserItems,...window._customCloserItems];
+    allCloserItems.forEach((lbl,idx)=>{
+      const di=document.createElement('div'); di.className='detail-item'; di.style.position='relative';
       const cb=document.createElement('input'); cb.type='checkbox'; cb.className='checkbox'; cb.checked=item.details[lbl]||false;
       cb.onchange=e=>{ showData.sections[sectionIndex].lines[lineIndex].details[lbl]=e.target.checked; updateProgress(); };
       const ls=document.createElement('span'); ls.className='detail-label'; ls.textContent=lbl;
-      di.appendChild(cb); di.appendChild(ls); panel.appendChild(di);
+      di.appendChild(cb); di.appendChild(ls);
+      if(idx>=defaultCloserItems.length){
+        const xBtn=document.createElement('button'); xBtn.textContent='×';
+        xBtn.style.cssText='position:absolute;right:0;top:50%;transform:translateY(-50%);background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;opacity:0;transition:opacity .15s;padding:0 4px;';
+        di.onmouseenter=()=>xBtn.style.opacity='1'; di.onmouseleave=()=>xBtn.style.opacity='0';
+        xBtn.onclick=()=>{ window._customCloserItems=window._customCloserItems.filter(i=>i!==lbl); try{localStorage.setItem('efed_custom_closer_items',JSON.stringify(window._customCloserItems));}catch(e){} showDetails(item,sectionIndex,lineIndex); };
+        di.appendChild(xBtn);
+      }
+      panel.appendChild(di);
     });
+    const addCloserBtn=document.createElement('button'); addCloserBtn.textContent='+ custom item';
+    addCloserBtn.style.cssText='margin-top:12px;width:100%;padding:7px 12px;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px;border:1px dashed rgba(255,255,255,.2);background:transparent;color:var(--text-muted);transition:all .2s;letter-spacing:.3px;';
+    addCloserBtn.onmouseenter=()=>{addCloserBtn.style.borderColor='var(--accent-blue)';addCloserBtn.style.color='var(--accent-blue)';};
+    addCloserBtn.onmouseleave=()=>{addCloserBtn.style.borderColor='rgba(255,255,255,.2)';addCloserBtn.style.color='var(--text-muted)';};
+    addCloserBtn.onclick=()=>showCustomCloserItemModal(sectionIndex,lineIndex,item);
+    panel.appendChild(addCloserBtn);
   }
 }
 
@@ -2077,6 +2107,55 @@ function showCustomOpenerItemModal(sectionIndex, lineIndex, item) {
     if (!window._customOpenerItems.includes(val)) {
       window._customOpenerItems.push(val);
       try { localStorage.setItem('efed_custom_opener_items', JSON.stringify(window._customOpenerItems)); } catch(e) {}
+    }
+    bd.remove();
+    const showData = showsData[currentShowIndex];
+    showDetails(showData.sections[sectionIndex].lines[lineIndex], sectionIndex, lineIndex);
+  };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') addBtn.click(); if (e.key === 'Escape') bd.remove(); });
+  row.appendChild(cancelBtn); row.appendChild(addBtn);
+  modal.appendChild(row); bd.appendChild(modal); document.body.appendChild(bd);
+  setTimeout(() => inp.focus(), 50);
+}
+
+/* ── CUSTOM CLOSER ITEM MODAL ── */
+function showCustomCloserItemModal(sectionIndex, lineIndex, item) {
+  const existing = document.getElementById('custom-item-modal-backdrop');
+  if (existing) existing.remove();
+  if(!window._customCloserItems) window._customCloserItems=[];
+  try { window._customCloserItems = JSON.parse(localStorage.getItem('efed_custom_closer_items') || '[]'); } catch(e) {}
+  const bd = document.createElement('div');
+  bd.id = 'custom-item-modal-backdrop';
+  bd.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:700;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);';
+  bd.onclick = e => { if (e.target === bd) bd.remove(); };
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#111114;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:20px 22px 18px;width:320px;box-shadow:0 24px 64px rgba(0,0,0,.8);animation:segModalIn .18s ease;';
+  const h = document.createElement('div');
+  h.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:1rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#e8e8e8;margin-bottom:6px;';
+  h.textContent = 'Add custom closer item';
+  modal.appendChild(h);
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.maxLength = 50; inp.placeholder = 'e.g., outro music';
+  inp.style.cssText = 'width:100%;padding:9px 12px;background:#1a1a22;border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.88rem;outline:none;margin:10px 0 14px;transition:border-color .2s;';
+  inp.onfocus = () => inp.style.borderColor = 'rgba(200,168,75,.6)';
+  inp.onblur  = () => inp.style.borderColor = 'rgba(255,255,255,.15)';
+  modal.appendChild(inp);
+  const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:8px;';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'flex:1;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.5);font-family:"DM Sans",sans-serif;';
+  cancelBtn.onclick = () => bd.remove();
+  const addBtn = document.createElement('button');
+  addBtn.textContent = 'Add';
+  addBtn.style.cssText = 'flex:1;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer;border-radius:6px;border:none;background:#b0b4bc;color:#111;font-family:"DM Sans",sans-serif;';
+  addBtn.onmouseenter = () => addBtn.style.background = '#c4c8d0';
+  addBtn.onmouseleave = () => addBtn.style.background = '#b0b4bc';
+  addBtn.onclick = () => {
+    const val = inp.value.trim();
+    if (!val) return;
+    if (!window._customCloserItems.includes(val)) {
+      window._customCloserItems.push(val);
+      try { localStorage.setItem('efed_custom_closer_items', JSON.stringify(window._customCloserItems)); } catch(e) {}
     }
     bd.remove();
     const showData = showsData[currentShowIndex];
