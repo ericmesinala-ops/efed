@@ -917,7 +917,7 @@ html.day-mode .seg-card-label { color: #111; }
       <!-- Right panel -->
       <div id="detailsPanel">
         <div id="progressContainer" class="progress-container">
-          <div class="progress-label" id="progressPercentage">0% completed</div>
+          <div class="progress-label" id="progressPercentage"></div>
           <div class="progress-bar-bg">
             <div class="progress-bar-fill" id="progressBar" style="width:0%"></div>
           </div>
@@ -1263,15 +1263,18 @@ function switchView(view, event) {
 function addMatchFab() {
   if (currentView !== 'show') { showToast('Switch to Shows view first'); return; }
   const showData = showsData[currentShowIndex];
-  const section = { id:Date.now(), name:`Match`, notes:'', lines:[
+  const matchCount = showData.sections.filter(s => s.lines && s.lines.some(l => l.type === 'Match')).length;
+  const num = matchCount + 1;
+  const tabLabel = num === 1 ? 'MATCH' : 'MATCH ' + num;
+  const section = { id:Date.now(), name:'Match', tabName:tabLabel, notes:'', lines:[
     { id:Date.now()+'-match', type:'Match', checked:false, dropdown:'Normal', matchType:'Singles', matchPosition:'Regular', details:{} },
     { id:Date.now()+'-mw', type:'MatchWrestlers', checked:false, wrestlers:[null,null,null,null,null,null], details:{} }
   ], collapsed:false };
   const closerIndex = showData.sections.findIndex(s => s.isCloser);
   if (closerIndex !== -1) showData.sections.splice(closerIndex, 0, section); else showData.sections.push(section);
   renderShow(); updateProgress();
-  showToast('Match added!');
-  setTimeout(() => scrollToLastCard(), 80);
+  showToast('Match ' + num + ' added!');
+  setTimeout(() => scrollToNewCard(), 80);
 }
 
 function addSection() {
@@ -1279,22 +1282,21 @@ function addSection() {
 }
 
 function scrollToLastCard() {
+  scrollToNewCard();
+}
+function scrollToNewCard() {
   const container = document.getElementById('sectionsContainer');
   if (!container) return;
-  // find the last section before closer
-  const cards = container.querySelectorAll('.section-container');
-  if (!cards.length) return;
-  // find second-to-last (last before closer)
-  let target = cards[cards.length - 1];
-  // walk backwards to skip the closer flat row
-  for (let i = cards.length - 1; i >= 0; i--) {
-    target = cards[i];
-    break;
-  }
+  const wrappers = container.querySelectorAll('.card-wrapper');
+  if (!wrappers.length) return;
+  const target = wrappers[wrappers.length - 1];
   if (target) {
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    target.classList.add('active-section');
-    setTimeout(() => target.classList.remove('active-section'), 2500);
+    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const cb = target.querySelector('.card-body');
+    if (cb) {
+      cb.classList.add('active-card');
+      setTimeout(() => cb.classList.remove('active-card'), 2200);
+    }
   }
 }
 
@@ -1315,7 +1317,7 @@ function updateProgress() {
   const pct = total ? Math.round((earned/total)*100) : 0;
   const lbl = document.getElementById('progressPercentage');
   const bar = document.getElementById('progressBar');
-  if (lbl) lbl.textContent = `${pct}% completed`;
+  if (lbl) lbl.textContent = '';
   if (bar) { bar.style.width = pct+'%'; bar.textContent = pct+'%'; }
 }
 
@@ -1580,10 +1582,11 @@ function createLineElement(line, sectionIndex, lineIndex, wrapperOrSectionDiv, s
     row.appendChild(dd);
   } else if (isSegment || line.type === 'Post-Show') {
     const dd = document.createElement('select'); dd.className = 'row-dropdown';
+    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '— select one —'; placeholder.disabled = true; dd.appendChild(placeholder);
     getDropdownOptions(line.type).forEach(opt => {
       const o = document.createElement('option'); o.value = opt; o.textContent = opt; dd.appendChild(o);
     });
-    dd.value = line.dropdown || getDropdownOptions(line.type)[0];
+    dd.value = line.dropdown || '';
     dd.onclick = e => e.stopPropagation();
     dd.onchange = e => { showData.sections[sectionIndex].lines[lineIndex].dropdown = e.target.value; renderShow(); };
     row.appendChild(dd);
@@ -2047,12 +2050,12 @@ function showMatchChampionshipPicker(si, li) {
   const showData=showsData[currentShowIndex]; const panel=document.getElementById('detailsPanel'); clearPanel();
   const title=document.createElement('div'); title.className='details-title'; title.textContent='Select Championship'; panel.appendChild(title);
   const curr=showData.sections[si].lines[li].matchChampionship;
-  if(curr){const rb=document.createElement('button');rb.className='wrestler-list-btn remove-btn';rb.textContent='Remove Championship';rb.style.marginBottom='15px';rb.onclick=()=>{showData.sections[si].lines[li].matchChampionship=null;renderShow();};panel.appendChild(rb);}
+  if(curr){const rb=document.createElement('button');rb.className='wrestler-list-btn remove-btn';rb.textContent='Remove Championship';rb.style.marginBottom='15px';rb.onclick=()=>{showData.sections[si].lines[li].matchChampionship=null;showData.sections[si].tabName='MATCH';renderShow();};panel.appendChild(rb);}
   titleBeltsData.forEach(belt=>{
     const bb=document.createElement('button');bb.className='wrestler-list-btn';bb.style.cssText='margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;';
     const ns=document.createElement('span');ns.textContent=belt.name;
     const ss=document.createElement('span');ss.style.cssText='font-size:11px;padding:2px 6px;border-radius:2px;background:'+(belt.status==='Active'?'#107c10':'var(--bg-secondary)')+';color:'+(belt.status==='Active'?'white':'var(--text-muted)')+';';ss.textContent=belt.status;
-    bb.appendChild(ns);bb.appendChild(ss);bb.onclick=()=>{showData.sections[si].lines[li].matchChampionship=belt.name;renderShow();clearPanel();};
+    bb.appendChild(ns);bb.appendChild(ss);bb.onclick=()=>{showData.sections[si].lines[li].matchChampionship=belt.name;showData.sections[si].tabName=belt.name;renderShow();clearPanel();};
     panel.appendChild(bb);
   });
   if(!titleBeltsData.length){const em=document.createElement('div');em.style.cssText='padding:20px;text-align:center;color:var(--text-muted);font-size:13px;';em.textContent='No championships created yet.';panel.appendChild(em);}
@@ -3060,19 +3063,23 @@ function _doAddSegment(type) {
     return;
   }
 
-  const dropdown = getDropdownOptions(type)[0] || '';
+  const segTypes = ['Promo','Interview','Cutscene','Video Package','Post-Show','Commercial','Notes','Opener','Closer'];
+  const segCount = showData.sections.filter(s => s.lines && s.lines.some(l => !['Match','MatchWrestlers','ParticipantSlots'].includes(l.type)) && !s.isCloser && !s.isSignature).length;
+  const segNum = segCount + 1;
+  const tabLabel = segNum === 1 ? 'SEGMENT' : 'SEGMENT ' + segNum;
+  const dropdown = '';
   const item = { id: Date.now(), type, checked: false, text: '', dropdown, details: {} };
   if (['Promo','Interview','Cutscene','Video Package'].includes(type)) item.participantCount = 1;
   const lines = [item];
   if (['Promo','Interview','Cutscene','Video Package'].includes(type)) {
     lines.push({ id: Date.now()+1, type: 'ParticipantSlots', checked: false, participants: [null,null,null,null], details: {} });
   }
-  const newSection = { id: Date.now()+2, name: type, notes: '', hasNotes: false, lines, collapsed: false };
+  const newSection = { id: Date.now()+2, name: type, tabName: tabLabel, notes: '', hasNotes: false, lines, collapsed: false };
   if (closerIndex !== -1) showData.sections.splice(closerIndex, 0, newSection);
   else showData.sections.push(newSection);
   renderShow(); updateProgress();
-  showToast(type + ' added!');
-  setTimeout(() => scrollToLastCard(), 80);
+  showToast('Segment ' + segNum + ' added!');
+  setTimeout(() => scrollToNewCard(), 80);
 }
 
 /* hide FABs when not on show view — merged into switchView above */
