@@ -1034,6 +1034,76 @@ html.day-mode .settings-toggle-track { background: rgba(0,0,0,.15); }
 }
 .settings-toggle input:checked + .settings-toggle-track::after { transform: translateX(18px); }
 
+/* ── FED SWITCHER ── */
+#fed-switcher {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+#fed-switch-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 6px;
+  padding: 3px 8px 3px 6px;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  font-size: .68rem;
+  font-weight: 600;
+  color: rgba(255,255,255,.55);
+  letter-spacing: .5px;
+  transition: all .15s;
+  white-space: nowrap;
+}
+#fed-switch-btn:hover { background: rgba(255,255,255,.12); color: rgba(255,255,255,.85); border-color: rgba(255,255,255,.2); }
+html.day-mode #fed-switch-btn { background: rgba(0,0,0,.06); border-color: rgba(0,0,0,.12); color: rgba(0,0,0,.5); }
+html.day-mode #fed-switch-btn:hover { background: rgba(0,0,0,.1); color: rgba(0,0,0,.8); }
+#fed-switch-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: rgba(13,13,18,.98);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px;
+  min-width: 220px;
+  padding: 6px 0;
+  box-shadow: 0 16px 40px rgba(0,0,0,.7);
+  z-index: 500;
+  display: none;
+  animation: segModalIn .14s ease;
+}
+html.day-mode #fed-switch-dropdown { background: #fff; border-color: rgba(0,0,0,.1); box-shadow: 0 16px 40px rgba(0,0,0,.15); }
+#fed-switch-dropdown.open { display: block; }
+.fed-switch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: background .12s;
+  font-family: 'DM Sans', sans-serif;
+  font-size: .82rem;
+  color: rgba(255,255,255,.75);
+}
+html.day-mode .fed-switch-item { color: rgba(0,0,0,.75); }
+.fed-switch-item:hover { background: rgba(255,255,255,.06); }
+html.day-mode .fed-switch-item:hover { background: rgba(0,0,0,.04); }
+.fed-switch-item.active { color: #c8a84b; font-weight: 600; }
+html.day-mode .fed-switch-item.active { color: #a07830; }
+.fed-switch-logo {
+  width: 24px; height: 24px; border-radius: 4px;
+  background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Bebas Neue', sans-serif; font-size: .72rem; color: #fff;
+  flex-shrink: 0; overflow: hidden;
+}
+.fed-switch-check { margin-left: auto; color: #c8a84b; font-size: .85rem; opacity: 0; }
+.fed-switch-item.active .fed-switch-check { opacity: 1; }
+
 </style>
 </head>
 <body>
@@ -1128,6 +1198,13 @@ html.day-mode .settings-toggle-track { background: rgba(0,0,0,.15); }
     <span id="mgmt-topbar-title">
       <span id="mgmt-fed-logo" style="width:28px;height:28px;border-radius:5px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;"></span>
       <span id="mgmt-fed-name">EFED</span>
+      <div id="fed-switcher">
+        <button id="fed-switch-btn" onclick="toggleFedSwitcher(event)" title="Switch federation">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 16 3 12 7 8"/><polyline points="17 8 21 12 17 16"/><line x1="3" y1="12" x2="21" y2="12"/></svg>
+          Switch
+        </button>
+        <div id="fed-switch-dropdown"></div>
+      </div>
     </span>
     <div id="mgmt-topbar-actions">
       <span id="mgmt-topbar-save-hint">Always save your work</span>
@@ -1293,35 +1370,153 @@ function initNav() {
     const adminBtn = document.getElementById('admin-panel-btn');
     if (adminBtn) adminBtn.style.display = 'flex';
   }
-  sbGet('users','username=eq.'+encodeURIComponent(session.username)+'&select=display_name,avatar_url,promo_name,promo_logo,is_efed_owner,role').then(rows => {
+
+  // Fetch user profile + ALL their feds
+  sbGet('users', 'username=eq.'+encodeURIComponent(session.username)+'&select=display_name,avatar_url,is_efed_owner,role').then(rows => {
     if (!rows || !rows[0]) return;
     const u = rows[0];
     const fullName = u.display_name || session.username;
     if (ini) ini.textContent = fullName.charAt(0).toUpperCase();
     if (nameEl) nameEl.textContent = fullName;
     if (u.avatar_url && img) { img.src = u.avatar_url; img.style.display = 'block'; if (ini) ini.style.display = 'none'; }
-    if ((u.is_efed_owner || u.role === 'owner') && u.promo_name) {
-      if (emailEl) { emailEl.textContent = 'Owner of ' + u.promo_name; emailEl.style.color = '#c8a84b'; }
-      const fedNameEl = document.getElementById('mgmt-fed-name'); if (fedNameEl) fedNameEl.textContent = u.promo_name;
-      // Load fed square logo into topbar
-      const fedLogoEl = document.getElementById('mgmt-fed-logo');
-      if (fedLogoEl) {
-        if (u.promo_logo) {
-          fedLogoEl.innerHTML = '<img src="'+u.promo_logo+'" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentNode.innerHTML=\'<span style=\\\"font-family:Bebas Neue,sans-serif;font-size:.75rem;color:#fff;letter-spacing:1px;\\\">\'+((u.promo_name||\'E\').charAt(0))+\'</span>\'">';
-        } else {
-          // Show first letter of fed name as fallback
-          fedLogoEl.innerHTML = '<span style="font-family:\'Bebas Neue\',sans-serif;font-size:.85rem;color:#fff;letter-spacing:1px;">'+(u.promo_name||'E').charAt(0)+'</span>';
-        }
-      }
-    } else {
-      if (emailEl) emailEl.textContent = '@' + session.username;
-    }
+    if (emailEl) emailEl.textContent = '@' + session.username;
   }).catch(()=>{});
+
+  // Fetch all feds owned by this user
+  sbGet('promotions', 'owner_username=eq.'+encodeURIComponent(session.username)+'&select=id,name,logo_url,slug&order=name.asc').then(feds => {
+    if (!feds || feds.error || !feds.length) {
+      // Fallback: try the users table promo_name field (single fed)
+      sbGet('users', 'username=eq.'+encodeURIComponent(session.username)+'&select=promo_name,promo_logo').then(rows => {
+        if (!rows || !rows[0]) return;
+        const u = rows[0];
+        if (u.promo_name) {
+          _userFeds = [{ id: session.username+'_default', name: u.promo_name, logo: u.promo_logo||null, slug: 'default' }];
+          _activeFedId = _userFeds[0].id;
+          updateTopbarFed(_userFeds[0]);
+          renderFedSwitcher();
+        }
+      }).catch(()=>{});
+      return;
+    }
+    _userFeds = feds.map(f => ({ id: String(f.id), name: f.name, logo: f.logo_url||null, slug: f.slug||String(f.id) }));
+    // Restore last active fed from localStorage
+    const savedFedId = localStorage.getItem('efed_active_fed_'+session.username);
+    _activeFedId = (savedFedId && _userFeds.find(f => f.id === savedFedId)) ? savedFedId : _userFeds[0].id;
+    const activeFed = _userFeds.find(f => f.id === _activeFedId) || _userFeds[0];
+    updateTopbarFed(activeFed);
+    renderFedSwitcher();
+  }).catch(() => {
+    // promotions table may not exist — fall back to promo_name
+    sbGet('users', 'username=eq.'+encodeURIComponent(session.username)+'&select=promo_name,promo_logo').then(rows => {
+      if (!rows || !rows[0]) return;
+      const u = rows[0];
+      if (u.promo_name) {
+        _userFeds = [{ id: session.username+'_default', name: u.promo_name, logo: u.promo_logo||null, slug: 'default' }];
+        _activeFedId = _userFeds[0].id;
+        updateTopbarFed(_userFeds[0]);
+        renderFedSwitcher();
+      }
+    }).catch(()=>{});
+  });
+
   document.addEventListener('click', e => {
     const dd = document.getElementById('user-dropdown');
-    if (!dd) return;
-    if (!dd.contains(e.target) && !document.getElementById('nav-user-btn').contains(e.target)) dd.classList.remove('open');
+    if (dd && !dd.contains(e.target) && !document.getElementById('nav-user-btn').contains(e.target)) dd.classList.remove('open');
+    const sw = document.getElementById('fed-switch-dropdown');
+    const swBtn = document.getElementById('fed-switch-btn');
+    if (sw && sw.classList.contains('open') && !sw.contains(e.target) && !swBtn.contains(e.target)) sw.classList.remove('open');
   });
+}
+
+function updateTopbarFed(fed) {
+  const nameEl = document.getElementById('mgmt-fed-name');
+  const logoEl = document.getElementById('mgmt-fed-logo');
+  if (nameEl) nameEl.textContent = fed.name;
+  if (logoEl) {
+    if (fed.logo) {
+      logoEl.innerHTML = '<img src="'+fed.logo+'" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentNode.innerHTML=\'<span style=\\\"font-family:Bebas Neue,sans-serif;font-size:.85rem;color:#fff;\\\">\'+(\''+fed.name.charAt(0)+'\')+ \'</span>\'">';
+    } else {
+      logoEl.innerHTML = '<span style="font-family:\'Bebas Neue\',sans-serif;font-size:.85rem;color:#fff;letter-spacing:1px;">'+fed.name.charAt(0)+'</span>';
+    }
+  }
+  // Show/hide switch button based on number of feds
+  const switcherEl = document.getElementById('fed-switcher');
+  if (switcherEl) switcherEl.style.display = _userFeds.length > 1 ? 'flex' : 'none';
+}
+
+function renderFedSwitcher() {
+  const dropdown = document.getElementById('fed-switch-dropdown');
+  const switcherEl = document.getElementById('fed-switcher');
+  if (!dropdown) return;
+  // Only show switcher if user has multiple feds
+  if (_userFeds.length <= 1) { if (switcherEl) switcherEl.style.display = 'none'; return; }
+  if (switcherEl) switcherEl.style.display = 'flex';
+  dropdown.innerHTML = '';
+  _userFeds.forEach(fed => {
+    const item = document.createElement('div');
+    item.className = 'fed-switch-item' + (fed.id === _activeFedId ? ' active' : '');
+    const logo = document.createElement('div');
+    logo.className = 'fed-switch-logo';
+    if (fed.logo) {
+      logo.innerHTML = '<img src="'+fed.logo+'" style="width:100%;height:100%;object-fit:cover;">';
+    } else {
+      logo.textContent = fed.name.charAt(0).toUpperCase();
+    }
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = fed.name;
+    nameSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    const check = document.createElement('span');
+    check.className = 'fed-switch-check';
+    check.textContent = '✓';
+    item.appendChild(logo);
+    item.appendChild(nameSpan);
+    item.appendChild(check);
+    item.onclick = () => switchFed(fed.id);
+    dropdown.appendChild(item);
+  });
+}
+
+function toggleFedSwitcher(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('fed-switch-dropdown');
+  if (dd) dd.classList.toggle('open');
+}
+
+async function switchFed(fedId) {
+  if (fedId === _activeFedId) { document.getElementById('fed-switch-dropdown').classList.remove('open'); return; }
+  const session = getSession();
+  if (!session) return;
+
+  // Save current fed data to cache before switching
+  _fedDataCache[_activeFedId] = {
+    dbId: _mgmtDbId,
+    shows: showsData,
+    roster: rosterData,
+    rosterMgmt: rosterMgmt,
+    storylines: storylineData,
+    createdPromos: createdPromos,
+    titleBelts: titleBeltsData
+  };
+
+  _activeFedId = fedId;
+  _mgmtDbId = null; // reset so loadShow fetches the correct fed row
+  localStorage.setItem('efed_active_fed_'+session.username, fedId);
+  document.getElementById('fed-switch-dropdown').classList.remove('open');
+
+  const fed = _userFeds.find(f => f.id === fedId);
+  if (fed) updateTopbarFed(fed);
+  renderFedSwitcher();
+
+  showToast('Switching to '+( fed ? fed.name : 'federation')+'…');
+
+  // Load data for the new fed
+  await loadShow();
+  switchView(currentView, null);
+  document.querySelectorAll('#fsw-sidebar .sidebar-btn').forEach(b => b.classList.remove('active'));
+  const viewMap = { show: 0, roster: 1, titlebelts: 2, storyline: 3, promos: 4 };
+  const btns = document.querySelectorAll('#fsw-sidebar .sidebar-btn');
+  // re-activate current view button
+  btns.forEach(b => { if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'"+currentView+"'")) b.classList.add('active'); });
 }
 function toggleDropdown(close) {
   const dd = document.getElementById('user-dropdown');
@@ -1375,7 +1570,7 @@ let currentShowIndex = 0;
 let showsData = [{ id: Date.now(), name: 'Show 1', title: '', subtitle: '', sections: [] }];
 let rosterData = [];
 let storylineData = [];
-let promosData = [];   // renamed from promptsData
+let promosData = [];
 let titleBeltsData = [];
 let currentWrestlerSort = 'A-Z';
 let currentWrestlerFilter = 'All';
@@ -1383,8 +1578,13 @@ let checkedWrestlers = new Set();
 let activeFilters = ['All'];
 let activePromosTab = 'Canned';
 let cannedPromoMinimized = false;
-let createdPromos = [];  // persisted under promos_created
+let createdPromos = [];
 let _mgmtDbId = null;
+
+/* ── FEDERATION STATE ── */
+let _userFeds = [];        // array of { id, name, logo, slug }
+let _activeFedId = null;   // currently active fed id
+let _fedDataCache = {};    // { [fedId]: { dbId, shows, roster, ... } }
 
 function getCurrentShow() { return showsData[currentShowIndex]; }
 
@@ -1433,9 +1633,11 @@ async function saveShow() {
   const btn = document.getElementById('mgmt-save-btn');
   const origText = btn ? btn.textContent : 'Save';
   if (btn) { btn.textContent = 'Saving…'; btn.style.background = ''; }
+  const fedKey = _activeFedId || (session.username + '_default');
   try {
     const payload = {
       username: session.username,
+      fed_id: fedKey,
       shows: showsData,
       roster: rosterData,
       roster_mgmt: rosterMgmt,
@@ -1452,28 +1654,24 @@ async function saveShow() {
     }
     if (!resp.ok) {
       const errText = await resp.text();
-      // If roster_mgmt column missing, try without it
-      if (errText.includes('roster_mgmt') || errText.includes('column')) {
+      if (errText.includes('roster_mgmt') || errText.includes('column') || errText.includes('fed_id')) {
         delete payload.roster_mgmt;
+        delete payload.fed_id;
         const resp2 = await fetch(
           _mgmtDbId
             ? SUPABASE_URL+'/rest/v1/fsw_management_data?id=eq.'+_mgmtDbId
             : SUPABASE_URL+'/rest/v1/fsw_management_data',
           { method: _mgmtDbId ? 'PATCH' : 'POST', headers:SB_HEADERS, body:JSON.stringify(payload) }
         );
-        if (!resp2.ok) {
-          const e2 = await resp2.text();
-          throw new Error(resp2.status + ': ' + e2);
-        }
+        if (!resp2.ok) { const e2 = await resp2.text(); throw new Error(resp2.status + ': ' + e2); }
         resp = resp2;
-        showToast('Saved (roster_mgmt column missing — add it in Supabase)');
+        showToast('Saved (add fed_id column to Supabase for multi-fed support)');
       } else {
         throw new Error(resp.status + ': ' + errText);
       }
     } else {
       showToast('Saved!');
     }
-    // grab new ID if POST
     if (!_mgmtDbId) {
       try { const arr = await resp.clone().json(); if (arr && arr[0] && arr[0].id) _mgmtDbId = arr[0].id; } catch(e) {}
     }
@@ -1489,8 +1687,17 @@ async function loadShow() {
   const session = getSession();
   if (!session) return;
   let hasSavedData = false;
+
+  // Use activeFedId to scope data — falls back to username for legacy single-fed users
+  const fedKey = _activeFedId || (session.username + '_default');
+
   try {
-    const rows = await sbGet('fsw_management_data', 'username=eq.'+encodeURIComponent(session.username)+'&limit=1');
+    // Try fed-scoped row first (fed_id column)
+    let rows = await sbGet('fsw_management_data', 'username=eq.'+encodeURIComponent(session.username)+'&fed_id=eq.'+encodeURIComponent(fedKey)+'&limit=1');
+    // Fallback: if no fed_id column exists or no results, try legacy (no fed_id filter)
+    if (!rows || !rows.length || rows.error) {
+      rows = await sbGet('fsw_management_data', 'username=eq.'+encodeURIComponent(session.username)+'&limit=1');
+    }
     if (rows && rows.length && !rows.error) {
       const d = rows[0];
       _mgmtDbId = d.id;
@@ -1505,7 +1712,7 @@ async function loadShow() {
     }
   } catch(e) { console.log('No saved management data, starting fresh'); }
 
-  // ── IMPORT FROM PLANNER (only if management has no saved data at all yet) ──
+  // Import from Planner only if no saved data and this is the user's primary fed
   if (!hasSavedData) {
     try {
       const pf = (val, fb) => { if (!val) return fb; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return fb; } } return val; };
