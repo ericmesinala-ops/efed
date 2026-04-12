@@ -3050,10 +3050,10 @@ function updateEfedRosterUI() {
   const btn = document.getElementById('efed-roster-btn'); // may be null (old action bar removed)
   const label = document.getElementById('efed-roster-label');
 
-  // Show/hide the member banner
+  // Show/hide the member banner — never show it if user owns this eFed
   const banner = document.getElementById('roster-member-banner');
   if (banner) {
-    if (_efedRosterState === 'in') {
+    if (_efedRosterState === 'in' && !_isOwnProfile) {
       banner.style.display = '';
       // Populate it with session user's info
       const session = getSession();
@@ -3491,15 +3491,25 @@ async function loadRoster() {
   const session = getSession();
   try {
     // Owner sees all rows; logged-in user sees approved + their own pending; others see approved only
-    let filter;
+    // Try to sort by last_active_at first; fall back to joined_at if the column doesn't exist
+    let filter, filterFallback;
     if (_isOwnProfile) {
       filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&order=last_active_at.desc.nullsfirst,joined_at.desc`;
+      filterFallback = `efed=eq.${encodeURIComponent(EFED_NAME)}&order=joined_at.desc`;
     } else if (session) {
       filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&or=(status.eq.approved,and(status.eq.pending,username.eq.${encodeURIComponent(session.username)}))&order=last_active_at.desc.nullsfirst,joined_at.desc`;
+      filterFallback = `efed=eq.${encodeURIComponent(EFED_NAME)}&or=(status.eq.approved,and(status.eq.pending,username.eq.${encodeURIComponent(session.username)}))&order=joined_at.desc`;
     } else {
       filter = `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&order=last_active_at.desc.nullsfirst,joined_at.desc`;
+      filterFallback = `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&order=joined_at.desc`;
     }
-    const rosterRows = await sbGet('roster', filter);
+    let rosterRows;
+    try {
+      rosterRows = await sbGet('roster', filter);
+    } catch(e) {
+      // last_active_at column may not exist yet — fall back to joined_at
+      rosterRows = await sbGet('roster', filterFallback);
+    }
     const ownerRows  = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,avatar_banner`);
     const owner = ownerRows[0];
     const ownerUsername = owner?.username || EFED_OWNER || '';
@@ -6723,7 +6733,7 @@ function bumpRosterActivity(username) {
   if (card && grid.firstChild !== card) {
     grid.insertBefore(card, grid.firstChild);
   }
-  // Update last_active_at in DB (fire and forget)
+  // Update last_active_at in DB (fire and forget — silently fails if column missing)
   const session = getSession();
   if (session && username === session.username) {
     fetch(SUPABASE_URL + '/rest/v1/roster?username=eq.' + encodeURIComponent(username) + '&efed=eq.' + encodeURIComponent(EFED_NAME), {
