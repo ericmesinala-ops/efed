@@ -12406,7 +12406,21 @@ document.addEventListener('DOMContentLoaded', _syncThemeUI);
 // ═══════════════════════════════════════════
 let _createEfedPendingName = '';
 
-function openCreateEfedModal() {
+async function openCreateEfedModal() {
+  const session = getSession();
+  if (!session) { showToast('Please log in first.'); return; }
+  // Server-side ownership check — one eFed per account
+  try {
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
+    const user = rows[0];
+    if (user?.is_efed_owner || user?.role === 'owner') {
+      showToast('You already have an eFed page. Only one eFed per account is allowed.');
+      return;
+    }
+  } catch(e) {
+    showToast('Could not verify account status. Please try again.');
+    return;
+  }
   closeSettings();
   document.getElementById('create-efed-step1').style.display = '';
   document.getElementById('create-efed-step2').style.display = 'none';
@@ -12470,6 +12484,16 @@ async function createEfedSubmit() {
   document.getElementById('create-efed-step2').style.display = 'none';
   document.getElementById('create-efed-loading').style.display = '';
   try {
+    // Final server-side guard — never overwrite an existing eFed owner
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
+    const existingUser = rows[0];
+    if (existingUser?.is_efed_owner || existingUser?.role === 'owner') {
+      document.getElementById('create-efed-loading').style.display = 'none';
+      document.getElementById('create-efed-step2').style.display = '';
+      ytErrEl.textContent = 'You already own an eFed page. Only one eFed per account is allowed.';
+      ytErrEl.style.display = '';
+      return;
+    }
     await sbUpdate('users', {
       is_efed_owner: true,
       role: 'owner',
@@ -12638,8 +12662,10 @@ async function refreshSettingsOwnerItems() {
   try {
     const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
     const user = rows[0];
-    const isOwner = user?.is_efed_owner || user?.role === 'owner';
-    // Add an eFed Page is always visible for everyone
+    const isOwner = !!(user?.is_efed_owner || user?.role === 'owner');
+    // Hide "Add an eFed Page" if user already owns one — one eFed per account
+    const createItem = document.getElementById('settings-create-efed-item');
+    if (createItem) createItem.style.display = isOwner ? 'none' : 'flex';
     const deleteItem = document.getElementById('settings-delete-efed-item');
     if (deleteItem) deleteItem.style.display = isOwner ? 'flex' : 'none';
     // management btn
