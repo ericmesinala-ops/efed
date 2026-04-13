@@ -98,7 +98,8 @@
   html.day-mode .theme-sun { display: block; }
   html.day-mode .theme-moon { display: none; }
 
-body { background: #000; color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; }
+body { background: #000; color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; overflow-x: hidden; }
+html { overflow-x: hidden; }
 
 .page-card {
   max-width: 960px; margin: 0 auto;
@@ -4148,10 +4149,21 @@ async function loadRoster() {
       filterFallback = `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&order=joined_at.desc`;
     }
     let rosterRows;
+    let hasPlanNote = true;
     try {
       rosterRows = await sbGet('roster', filter + '&select=id,username,status,efed,plan_note');
     } catch(e) {
-      rosterRows = await sbGet('roster', filterFallback + '&select=id,username,status,efed,plan_note');
+      try {
+        rosterRows = await sbGet('roster', filterFallback + '&select=id,username,status,efed,plan_note');
+      } catch(e2) {
+        // plan_note column may not exist yet — fetch without it
+        hasPlanNote = false;
+        try {
+          rosterRows = await sbGet('roster', filter + '&select=id,username,status,efed');
+        } catch(e3) {
+          rosterRows = await sbGet('roster', filterFallback + '&select=id,username,status,efed');
+        }
+      }
     }
     const ownerRows  = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,avatar_banner`);
     const owner = ownerRows[0];
@@ -4375,7 +4387,7 @@ async function loadRoster() {
           const u = uRows.find(r=>r.username===uname);
           if (!u) return;
           const rosterRow = rosterRows.find(r=>r.username===uname);
-          wrap.appendChild(makeCard(u, 'Member', rosterRow?.id, rosterRow?.status || 'approved', rosterRow?.plan_note || null));
+          wrap.appendChild(makeCard(u, 'Member', rosterRow?.id, rosterRow?.status || 'approved', hasPlanNote ? (rosterRow?.plan_note || null) : null));
           if (rosterRow?.status === 'approved') cardCount++;
         });
       }
