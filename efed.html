@@ -222,6 +222,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .stat-pill:last-child { border-right: none; }
 .stat-num { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; letter-spacing: 1px; color: #fff; line-height: 1; }
 .stat-lbl { font-size: .6rem; color: #8a8a9a; letter-spacing: 2px; text-transform: uppercase; margin-top: 3px; }
+.stat-lbl { filter: saturate(0) opacity(.6); }
 
 /* ── SECTIONS ── */
 .section { padding: 22px 20px; border-bottom: 1px solid var(--border); }
@@ -1263,7 +1264,7 @@ html.day-mode .efed-action-btn.active-roster   { color: var(--gold) !important; 
 /* social-actions row */
 #efed-social-action-row {
   display: none; align-items: center; justify-content: space-between;
-  padding: 10px 20px; border-bottom: 1px solid rgba(255,255,255,.04);
+  padding: 10px 20px;
   gap: 12px; flex-wrap: wrap;
 }
 #efed-social-left  { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -1415,10 +1416,10 @@ html.day-mode #efed-social-action-row { background: var(--surface2) !important; 
 
 <!-- ── STATS ── -->
 <div class="stats-bar">
-  <div class="stat-pill"><div class="stat-num" id="stat-episodes">0</div><div class="stat-lbl">Videos</div></div>
-  <div class="stat-pill"><div class="stat-num" id="stat-likes">0</div><div class="stat-lbl">Likes</div></div>
-  <div class="stat-pill" onclick="openRosterModal()" style="cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'"><div class="stat-num" id="stat-roster">0</div><div class="stat-lbl">Roster</div></div>
-  <div class="stat-pill"><div class="stat-num" id="stat-supporters">0</div><div class="stat-lbl">Supporters</div></div>
+  <div class="stat-pill"><div class="stat-num" id="stat-episodes">0</div><div class="stat-lbl">🎬 Videos</div></div>
+  <div class="stat-pill"><div class="stat-num" id="stat-likes">0</div><div class="stat-lbl">❤️ Likes</div></div>
+  <div class="stat-pill" onclick="openRosterModal()" style="cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'"><div class="stat-num" id="stat-roster">0</div><div class="stat-lbl">👥 Roster</div></div>
+  <div class="stat-pill"><div class="stat-num" id="stat-supporters">0</div><div class="stat-lbl">👍 Supporters</div></div>
   <div class="stat-pill" id="stat-views-pill" style="display:none;"><div class="stat-num" id="stat-views">—</div><div class="stat-lbl">Page Views</div></div>
   <div class="stat-pill" id="stat-acronym-pill" style="display:none;background:rgba(255,255,255,.03);border-left:1px solid rgba(255,255,255,.07);flex-direction:column;justify-content:center;align-items:center;"><div class="stat-num" id="stat-acronym" style="font-size:1.6rem;letter-spacing:4px;color:#fff;font-family:'Bebas Neue',sans-serif;line-height:1;">—</div></div>
 </div>
@@ -1641,6 +1642,7 @@ html.day-mode #efed-social-action-row { background: var(--surface2) !important; 
   <div class="sec-title" style="cursor:pointer;" id="roster-sec-title" onclick="openRosterModal()">
     <span>Roster</span>
   </div>
+  <div id="roster-owner-hint" style="display:none;font-size:.65rem;color:rgba(255,255,255,.3);margin-bottom:12px;line-height:1.5;">Hover a member card to assign champions 🏆 or book them for a match ✍️</div>
   <div style="display:flex;align-items:center;gap:4px;">
     <div class="prof-arr-col">
       <button class="prof-pill-arr hidden" id="roster-arr-left" onclick="scrollRosterRow(-1)">&#8249;</button>
@@ -3110,6 +3112,8 @@ async function loadProfile() {
         _isMember = true; window._isMember = true;
         initEfedChat();
         document.getElementById('edit-pencil').style.display = 'flex';
+        const _rosterHint = document.getElementById('roster-owner-hint');
+        if (_rosterHint) _rosterHint.style.display = 'block';
         // Show action row immediately so support btn is visible (always lit for owner)
         const _ownerRow = document.getElementById('efed-social-action-row');
         if (_ownerRow) _ownerRow.style.display = 'flex';
@@ -3616,15 +3620,184 @@ function updateSigningsUI(on) {
   // Owner
   if (section) section.style.display = 'block';
   if (label) label.style.display = '';
+  // Show edit btn for owner
+  const editBtn = document.getElementById('signings-edit-btn');
+  if (editBtn) editBtn.style.display = 'block';
   if (on) {
     toggle.style.background = 'rgba(76,175,100,.5)'; toggle.style.borderColor = 'rgba(76,175,100,.6)';
     knob.style.transform = 'translateX(20px)'; knob.style.opacity = '1';
     if (label) label.textContent = (window.EFED_NAME || 'This eFed') + ' is currently accepting signings.';
+    // Show Apply Now only if link is set
+    if (applyBtn && applyBtn.href && applyBtn.href !== window.location.href) applyBtn.style.display = '';
   } else {
     toggle.style.background = 'rgba(255,255,255,.12)'; toggle.style.borderColor = 'rgba(255,255,255,.1)';
     knob.style.transform = 'translateX(0)'; knob.style.opacity = '.4';
     if (label) label.textContent = 'Toggle on to let CAW wrestlers know you are accepting signings.';
     if (applyBtn) applyBtn.style.display = 'none';
+  }
+}
+
+// ── BOOKING ──
+let _bookingRosterId = null;
+let _bookingUsername = null;
+let _bookingTba = false;
+
+function openBookingModal(username, displayName, rosterRowId, planNote) {
+  _bookingRosterId = rosterRowId;
+  _bookingUsername = username;
+  _bookingTba = false;
+
+  document.getElementById('booking-wrestler-label').textContent = displayName + ' is competing against…';
+  document.getElementById('booking-msg').textContent = '';
+  document.getElementById('booking-tba-btn').style.background = 'rgba(255,255,255,.06)';
+  document.getElementById('booking-tba-btn').style.color = 'rgba(255,255,255,.5)';
+  document.getElementById('booking-tba-btn').style.borderColor = 'rgba(255,255,255,.12)';
+
+  // Populate opponent dropdown from cached roster (exclude self)
+  const sel = document.getElementById('booking-opponent-select');
+  sel.innerHTML = '<option value="">— Select opponent —</option>';
+  (window._efedRosterMembers || []).filter(m => m.username !== username).forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.username;
+    opt.textContent = m.display_name || m.username;
+    sel.appendChild(opt);
+  });
+
+  // Pre-fill if existing booking
+  if (planNote) {
+    try {
+      const bk = typeof planNote === 'string' ? JSON.parse(planNote) : planNote;
+      if (bk.opponent) sel.value = bk.opponent;
+      document.getElementById('booking-show-input').value = bk.show || '';
+      if (bk.tba) {
+        _bookingTba = true;
+        document.getElementById('booking-date-input').value = '';
+        document.getElementById('booking-date-input').disabled = true;
+        document.getElementById('booking-tba-btn').style.background = 'rgba(200,168,75,.2)';
+        document.getElementById('booking-tba-btn').style.color = '#c8a84b';
+        document.getElementById('booking-tba-btn').style.borderColor = 'rgba(200,168,75,.4)';
+      } else {
+        document.getElementById('booking-date-input').value = bk.date || '';
+        document.getElementById('booking-date-input').disabled = false;
+      }
+    } catch(e) {}
+  } else {
+    sel.value = '';
+    document.getElementById('booking-show-input').value = '';
+    document.getElementById('booking-date-input').value = '';
+    document.getElementById('booking-date-input').disabled = false;
+  }
+
+  document.getElementById('booking-modal-bg').style.display = 'flex';
+}
+
+function closeBookingModal() {
+  document.getElementById('booking-modal-bg').style.display = 'none';
+}
+
+function toggleBookingTba() {
+  _bookingTba = !_bookingTba;
+  const btn = document.getElementById('booking-tba-btn');
+  const inp = document.getElementById('booking-date-input');
+  if (_bookingTba) {
+    inp.value = ''; inp.disabled = true;
+    btn.style.background = 'rgba(200,168,75,.2)'; btn.style.color = '#c8a84b'; btn.style.borderColor = 'rgba(200,168,75,.4)';
+  } else {
+    inp.disabled = false; inp.focus();
+    btn.style.background = 'rgba(255,255,255,.06)'; btn.style.color = 'rgba(255,255,255,.5)'; btn.style.borderColor = 'rgba(255,255,255,.12)';
+  }
+}
+
+async function saveBooking(clear) {
+  const session = getSession(); if (!session) return;
+  const msg = document.getElementById('booking-msg');
+  const opponentUsername = document.getElementById('booking-opponent-select').value;
+  const opponentName = document.getElementById('booking-opponent-select').selectedOptions[0]?.text || '';
+  const show = document.getElementById('booking-show-input').value.trim();
+  const date = _bookingTba ? 'TBA' : document.getElementById('booking-date-input').value.trim();
+  const planNote = clear ? null : JSON.stringify({ opponent: opponentUsername, opponentName, show, date, tba: _bookingTba });
+
+  if (!clear && !opponentUsername) {
+    msg.textContent = 'Please select an opponent.'; msg.style.color = '#ff6b6b'; return;
+  }
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(_bookingRosterId), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: planNote })
+    });
+
+    // Send notification to the booked wrestler
+    if (!clear && _bookingUsername) {
+      const showPart = show ? ` at <strong>${show}</strong>` : '';
+      const efedPart = EFED_NAME ? ` (${EFED_NAME})` : '';
+      const datePart = date ? ` on ${date}` : '';
+      const notifMsg = `Your next match will be against ${opponentName}${showPart}${efedPart}${datePart}.`;
+      try {
+        await sbInsert('notifications', {
+          username: _bookingUsername,
+          type: 'booking',
+          message: notifMsg,
+          read: false,
+          created_at: new Date().toISOString()
+        });
+      } catch(e) { /* notification non-critical */ }
+    }
+
+    // Update green dot on card
+    const existingDot = document.getElementById('booking-dot-' + _bookingUsername);
+    if (!clear && !existingDot) {
+      const card = document.querySelector(`[data-username="${_bookingUsername}"]`);
+      if (card) {
+        const dot = document.createElement('div');
+        dot.id = 'booking-dot-' + _bookingUsername;
+        dot.style.cssText = 'position:absolute;top:5px;left:5px;width:8px;height:8px;border-radius:50%;background:#4caf64;border:1.5px solid rgba(0,0,0,.6);z-index:4;';
+        card.appendChild(dot);
+      }
+    } else if (clear && existingDot) {
+      existingDot.remove();
+    }
+    closeBookingModal();
+    showToast(clear ? 'Booking cleared' : 'Booking saved!');
+  } catch(e) { msg.textContent = 'Could not save. Try again.'; msg.style.color = '#ff6b6b'; }
+}
+
+function openApplyLinkModal() {
+  const applyBtn = document.getElementById('signings-apply-btn');
+  const input = document.getElementById('apply-link-input');
+  const msg = document.getElementById('apply-link-msg');
+  if (input) input.value = (applyBtn && applyBtn.href !== window.location.href) ? applyBtn.href : '';
+  if (msg) msg.textContent = '';
+  document.getElementById('apply-link-modal-bg').style.display = 'flex';
+  setTimeout(() => input?.focus(), 80);
+}
+function closeApplyLinkModal() {
+  document.getElementById('apply-link-modal-bg').style.display = 'none';
+}
+async function saveApplyLink(remove) {
+  const session = getSession(); if (!session) return;
+  const msg = document.getElementById('apply-link-msg');
+  const link = remove ? null : (document.getElementById('apply-link-input')?.value.trim() || null);
+  if (!remove && link && !/^https?:\/\/.+/.test(link)) {
+    if (msg) { msg.textContent = 'Please enter a valid URL starting with https://'; msg.style.color = '#ff6b6b'; }
+    return;
+  }
+  try {
+    await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
+      method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({efed_signings_link: link})
+    });
+    const applyBtn = document.getElementById('signings-apply-btn');
+    if (applyBtn) {
+      if (link) {
+        applyBtn.href = link;
+        if (_signingsOn) applyBtn.style.display = '';
+      } else {
+        applyBtn.href = '';
+        applyBtn.style.display = 'none';
+      }
+    }
+    closeApplyLinkModal();
+    showToast(remove ? 'Link removed' : 'Application link saved!');
+  } catch(e) {
+    if (msg) { msg.textContent = 'Could not save. Try again.'; msg.style.color = '#ff6b6b'; }
   }
 }
 
@@ -3976,10 +4149,9 @@ async function loadRoster() {
     }
     let rosterRows;
     try {
-      rosterRows = await sbGet('roster', filter);
+      rosterRows = await sbGet('roster', filter + '&select=id,username,status,efed,plan_note');
     } catch(e) {
-      // last_active_at column may not exist yet — fall back to joined_at
-      rosterRows = await sbGet('roster', filterFallback);
+      rosterRows = await sbGet('roster', filterFallback + '&select=id,username,status,efed,plan_note');
     }
     const ownerRows  = await sbGet('users', `promo_name=eq.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,avatar_banner`);
     const owner = ownerRows[0];
@@ -3988,7 +4160,10 @@ async function loadRoster() {
     const wrap = document.createElement('div');
     wrap.style.cssText = 'display:flex;gap:10px;';
 
-    function makeCard(u, role, rosterRowId, status) {
+    // Cache for booking dropdown
+    window._efedRosterMembers = [];
+
+    function makeCard(u, role, rosterRowId, status, planNote) {
       const isOwnerCard = role === 'OWNER';
       const isPending   = status === 'pending';
       const isMe        = session && u.username === session.username;
@@ -4085,6 +4260,41 @@ async function loadRoster() {
         card.addEventListener('mouseleave', () => trophy.style.display = 'none');
       }
 
+      // ── BOOKING BUTTON (owner only, approved non-owner cards) ──
+      if (_isOwnProfile && !isPending && !isOwnerCard) {
+        const bookBtn = document.createElement('button');
+        const bookRightPos = '5px';
+        const bookTopPos = '28px'; // below trophy
+        bookBtn.style.cssText = `position:absolute;top:${bookTopPos};right:${bookRightPos};width:20px;height:20px;border-radius:5px;background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.12);display:none;align-items:center;justify-content:center;cursor:pointer;padding:0;z-index:3;font-size:.72rem;line-height:1;`;
+        bookBtn.textContent = '✍️';
+        bookBtn.title = 'Book for a match';
+        bookBtn.dataset.username = u.username;
+        bookBtn.dataset.displayname = u.display_name || u.username;
+        bookBtn.dataset.rosterid = rosterRowId || '';
+        bookBtn.onclick = (e) => {
+          e.stopPropagation();
+          e._pencilClick = true;
+          openBookingModal(u.username, u.display_name || u.username, rosterRowId, planNote);
+        };
+        card.appendChild(bookBtn);
+        card.addEventListener('mouseenter', () => bookBtn.style.display = 'flex');
+        card.addEventListener('mouseleave', () => bookBtn.style.display = 'none');
+
+        // Green dot if already booked
+        if (planNote) {
+          try {
+            const bk = typeof planNote === 'string' ? JSON.parse(planNote) : planNote;
+            if (bk && bk.opponent) {
+              const dot = document.createElement('div');
+              dot.id = 'booking-dot-' + u.username;
+              dot.style.cssText = 'position:absolute;top:5px;left:5px;width:8px;height:8px;border-radius:50%;background:#4caf64;border:1.5px solid rgba(0,0,0,.6);z-index:4;';
+              dot.title = 'Booked';
+              card.appendChild(dot);
+            }
+          } catch(e) {}
+        }
+      }
+
       // ── MOBILE: long-press → trash (approved members only) ──
       if (!isPending && (canModerate || canLeave)) {
         let holdTimer = null, dragActive = false, clone = null;
@@ -4157,12 +4367,15 @@ async function loadRoster() {
       const unames = rosterRows.map(r=>r.username).filter(u=>u!==ownerUsername);
       if (unames.length) {
         const uRows = await sbGet('users', `username=in.(${unames.map(u=>encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url,avatar_banner`);
+        // Cache for booking dropdown
+        window._efedRosterMembers = uRows.map(r => ({ username: r.username, display_name: r.display_name || r.username }));
+        if (owner) window._efedRosterMembers.unshift({ username: owner.username, display_name: owner.display_name || owner.username });
         // Preserve DB order (last_active_at desc from query) — no client-side re-sort
         unames.forEach(uname => {
           const u = uRows.find(r=>r.username===uname);
           if (!u) return;
           const rosterRow = rosterRows.find(r=>r.username===uname);
-          wrap.appendChild(makeCard(u, 'Member', rosterRow?.id, rosterRow?.status || 'approved'));
+          wrap.appendChild(makeCard(u, 'Member', rosterRow?.id, rosterRow?.status || 'approved', rosterRow?.plan_note || null));
           if (rosterRow?.status === 'approved') cardCount++;
         });
       }
@@ -4715,7 +4928,12 @@ function triggerInstall() {
 
 <!-- ── OPEN FOR SIGNINGS (bottom) ── -->
 <div id="signings-section" style="display:none;" class="section">
-  <div class="sec-title" style="margin-bottom:12px;">Open for Signings</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <div class="sec-title" style="margin-bottom:0;">Open for Signings</div>
+    <button id="signings-edit-btn" onclick="openApplyLinkModal()" style="display:none;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.3);padding:4px;transition:color .15s;" title="Edit application link" onmouseover="this.style.color='rgba(255,255,255,.7)'" onmouseout="this.style.color='rgba(255,255,255,.3)'">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    </button>
+  </div>
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
     <div style="font-size:.78rem;color:rgba(255,255,255,.65);" id="signings-status-label">Toggle on to let CAW wrestlers know you are accepting signings.</div>
     <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
@@ -4728,6 +4946,63 @@ function triggerInstall() {
 </div>
 
 </div><!-- /page-card -->
+
+<!-- ── BOOKING MODAL ── -->
+<div id="booking-modal-bg" onclick="if(event.target===this)closeBookingModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:380px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.8);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.15rem;letter-spacing:3px;color:#fff;">Book a Match</div>
+      <button onclick="closeBookingModal()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:1rem;cursor:pointer;padding:4px;">✕</button>
+    </div>
+    <div id="booking-wrestler-label" style="font-size:.7rem;color:#c8a84b;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:18px;"></div>
+
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <!-- Opponent -->
+      <div>
+        <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Competing Against</div>
+        <select id="booking-opponent-select" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;cursor:pointer;">
+          <option value="">— Select opponent —</option>
+        </select>
+      </div>
+      <!-- Show name -->
+      <div>
+        <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Show Name</div>
+        <input id="booking-show-input" type="text" maxlength="80" placeholder="e.g. FSW Maximum" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+      <!-- Date + TBA -->
+      <div>
+        <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Date</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="booking-date-input" type="text" maxlength="30" placeholder="e.g. May 10, 2026" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+          <button id="booking-tba-btn" onclick="toggleBookingTba()" style="padding:10px 14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1px;cursor:pointer;white-space:nowrap;transition:all .15s;">TBA</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="booking-msg" style="font-size:.68rem;min-height:14px;margin-top:10px;"></div>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button onclick="saveBooking()" style="flex:1;padding:11px;background:#c0000e;border:none;border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Booking</button>
+      <button onclick="saveBooking(true)" style="padding:11px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;">Clear</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── APPLY LINK MODAL ── -->
+<div id="apply-link-modal-bg" onclick="if(event.target===this)closeApplyLinkModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:360px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.7);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Application Link</div>
+      <button onclick="closeApplyLinkModal()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:1rem;cursor:pointer;padding:4px;">✕</button>
+    </div>
+    <div style="font-size:.72rem;color:#8a8a9a;margin-bottom:14px;line-height:1.5;">Paste a link to your application form (Google Form, Linktree, etc). Shown beside the toggle when signings are open.</div>
+    <input id="apply-link-input" type="url" placeholder="https://forms.gle/..." maxlength="300" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:6px;">
+    <div id="apply-link-msg" style="font-size:.68rem;min-height:14px;margin-bottom:14px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="saveApplyLink()" style="flex:1;padding:11px;background:#c0000e;border:none;border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save</button>
+      <button onclick="saveApplyLink(true)" style="padding:11px 16px;background:rgba(255,80,80,.08);border:1px solid rgba(255,80,80,.2);border-radius:8px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.78rem;cursor:pointer;">Remove</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── ROSTER POPUP MODAL ── -->
 <div id="roster-modal-bg" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeRosterModal()">
