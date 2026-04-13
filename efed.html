@@ -5560,54 +5560,82 @@ function renderChampions() {
     card.onmouseenter = () => card.style.borderColor = 'rgba(200,168,75,.5)';
     card.onmouseleave = () => card.style.borderColor = 'rgba(200,168,75,.2)';
 
-    // Drag-to-reorder (owner only)
+    // Drag-to-reorder (owner only) — mouse + touch, avoids child-element interference
     if (_isOwnProfile) {
-      card.setAttribute('draggable', 'true');
-      card.addEventListener('dragstart', e => {
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', String(idx));
-        setTimeout(() => card.style.opacity = '.35', 0);
-      });
-      card.addEventListener('dragend', () => {
-        card.style.opacity = '1';
-        grid.querySelectorAll('[data-idx]').forEach(c => c.style.outline = '');
-      });
-      card.addEventListener('dragover', e => {
+      card.style.userSelect = 'none';
+      card.style.cursor = 'grab';
+
+      // ── MOUSE drag ──
+      card.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
         e.preventDefault();
-        card.style.outline = '2px solid rgba(200,168,75,.5)';
+        const srcIdx = parseInt(card.dataset.idx);
+        const rect = card.getBoundingClientRect();
+        const offX = e.clientX - rect.left;
+        let clone = card.cloneNode(true);
+        clone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;opacity:.88;pointer-events:none;z-index:99999;border-radius:10px;border:1px solid rgba(200,168,75,.6);box-shadow:0 10px 30px rgba(0,0,0,.7);`;
+        document.body.appendChild(clone);
+        card.style.opacity = '.25';
+        let moved = false;
+
+        function onMove(ev) {
+          moved = true;
+          clone.style.left = (ev.clientX - offX) + 'px';
+          clone.style.top = rect.top + 'px';
+          clone.style.visibility = 'hidden';
+          const el = document.elementFromPoint(ev.clientX, ev.clientY);
+          clone.style.visibility = 'visible';
+          grid.querySelectorAll('[data-idx]').forEach(c2 => c2.style.outline = '');
+          const tgt = el ? el.closest('[data-idx]') : null;
+          if (tgt && tgt !== card && tgt.parentNode === grid) {
+            tgt.style.outline = '2px solid rgba(200,168,75,.55)';
+            const tr = tgt.getBoundingClientRect();
+            const after = ev.clientX > tr.left + tr.width / 2;
+            const toIdx = parseInt(tgt.dataset.idx);
+            if (!isNaN(toIdx) && toIdx !== srcIdx) {
+              const [m] = _champData.splice(srcIdx, 1);
+              _champData.splice(toIdx, 0, m);
+              _saveChampions();
+              renderChampions(); // re-render with new order
+              // stop this drag after re-render (new cards have fresh listeners)
+              cleanup();
+            }
+          }
+        }
+        function cleanup() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', cleanup);
+          if (clone) { clone.remove(); clone = null; }
+          grid.querySelectorAll('[data-idx]').forEach(c2 => { c2.style.outline = ''; c2.style.opacity = ''; });
+          if (moved) card.addEventListener('click', ev => ev.stopPropagation(), { once: true, capture: true });
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', cleanup);
       });
-      card.addEventListener('dragleave', () => card.style.outline = '');
-      card.addEventListener('drop', e => {
-        e.stopPropagation();
-        card.style.outline = '';
-        const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
-        const toIdx = idx;
-        if (isNaN(fromIdx) || fromIdx === toIdx) return;
-        const [moved] = _champData.splice(fromIdx, 1);
-        _champData.splice(toIdx, 0, moved);
-        _saveChampions();
-        renderChampions();
-      });
-      // Touch drag
-      let tActive = false, tClone = null, tFromIdx = null;
+
+      // ── TOUCH drag ──
+      let tActive = false, tClone = null, tSrcIdx = null;
       card.addEventListener('touchstart', e => {
-        tFromIdx = idx;
+        tSrcIdx = parseInt(card.dataset.idx);
         const t = e.touches[0];
         const rect = card.getBoundingClientRect();
         tActive = true;
         tClone = card.cloneNode(true);
-        tClone.style.cssText = `position:fixed;width:${rect.width}px;opacity:.8;pointer-events:none;z-index:9999;border-radius:10px;left:${rect.left}px;top:${rect.top}px;`;
+        tClone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;opacity:.85;pointer-events:none;z-index:9999;border-radius:10px;border:1px solid rgba(200,168,75,.5);`;
         document.body.appendChild(tClone);
         card.style.opacity = '.3';
       }, { passive: true });
       card.addEventListener('touchmove', e => {
         if (!tActive || !tClone) return;
         const t = e.touches[0];
-        tClone.style.left = (t.clientX - tClone.offsetWidth/2) + 'px';
-        tClone.style.top  = (t.clientY - tClone.offsetHeight/2) + 'px';
-        grid.querySelectorAll('[data-idx]').forEach(c => c.style.outline = '');
-        const below = document.elementFromPoint(t.clientX, t.clientY)?.closest('[data-idx]');
-        if (below && below !== card) below.style.outline = '2px solid rgba(200,168,75,.5)';
+        tClone.style.left = (t.clientX - tClone.offsetWidth / 2) + 'px';
+        tClone.style.top  = (t.clientY - tClone.offsetHeight / 2) + 'px';
+        tClone.style.visibility = 'hidden';
+        const el = document.elementFromPoint(t.clientX, t.clientY);
+        tClone.style.visibility = 'visible';
+        grid.querySelectorAll('[data-idx]').forEach(c2 => c2.style.outline = '');
+        const tgt = el?.closest('[data-idx]');
+        if (tgt && tgt !== card) tgt.style.outline = '2px solid rgba(200,168,75,.5)';
       }, { passive: true });
       card.addEventListener('touchend', e => {
         if (!tActive) return;
@@ -5615,13 +5643,15 @@ function renderChampions() {
         if (tClone) { tClone.remove(); tClone = null; }
         card.style.opacity = '1';
         const t = e.changedTouches[0];
-        const below = document.elementFromPoint(t.clientX, t.clientY)?.closest('[data-idx]');
-        grid.querySelectorAll('[data-idx]').forEach(c => c.style.outline = '');
-        if (below && below !== card) {
-          const toIdx2 = parseInt(below.dataset.idx);
-          if (!isNaN(toIdx2) && tFromIdx !== toIdx2) {
-            const [moved] = _champData.splice(tFromIdx, 1);
-            _champData.splice(toIdx2, 0, moved);
+        tClone && tClone.remove();
+        const el = document.elementFromPoint(t.clientX, t.clientY);
+        const tgt = el?.closest('[data-idx]');
+        grid.querySelectorAll('[data-idx]').forEach(c2 => c2.style.outline = '');
+        if (tgt && tgt !== card) {
+          const toIdx2 = parseInt(tgt.dataset.idx);
+          if (!isNaN(toIdx2) && tSrcIdx !== null && tSrcIdx !== toIdx2) {
+            const [m] = _champData.splice(tSrcIdx, 1);
+            _champData.splice(toIdx2, 0, m);
             _saveChampions();
             renderChampions();
           }
