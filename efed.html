@@ -2298,7 +2298,20 @@ function renderSocialLinks(yt, ig, x, web) {
 
 function updateActionButtonsVisibility() {
   const supBtn = document.getElementById('efed-support-action-btn');
-  if (supBtn) supBtn.style.display = _isOwnProfile ? 'none' : '';
+  if (!supBtn) return;
+  if (_isOwnProfile) {
+    // Owner: always shown, always lit green, locked
+    supBtn.style.display = '';
+    supBtn.classList.add('active-support');
+    supBtn.setAttribute('data-tip', 'You support your own eFed');
+    supBtn.style.cursor = 'default';
+    supBtn.style.pointerEvents = 'none';
+    supBtn.style.opacity = '1';
+  } else {
+    supBtn.style.display = '';
+    supBtn.style.cursor = '';
+    supBtn.style.pointerEvents = '';
+  }
   // roster btn tooltip update
   updateRosterActionBtnUI();
   updateWatchlistActionBtnUI();
@@ -2306,6 +2319,7 @@ function updateActionButtonsVisibility() {
 }
 
 function updateSupportActionBtnUI() {
+  if (_isOwnProfile) return; // owner always lit — handled in updateActionButtonsVisibility
   const btn = document.getElementById('efed-support-action-btn');
   if (!btn) return;
   if (_efedSupportActive) {
@@ -2349,7 +2363,7 @@ function updateRosterActionBtnUI() {
 async function toggleEfedSupportSimple() {
   const session = getSession();
   if (!session) { alert('Sign in to support this eFed.'); return; }
-  if (_isOwnProfile) return;
+  if (_isOwnProfile) return; // owner support is permanent — button is locked
   const btn = document.getElementById('efed-support-action-btn');
   if (btn) { btn.disabled = true; btn.style.opacity = '.5'; }
   try {
@@ -3041,6 +3055,14 @@ async function loadProfile() {
         } catch(e) {}
       }
       loadEpisodes();
+      // Always show action row even on orphaned pages — watchlist, support, and roster still work
+      const _unclaimedRow = document.getElementById('efed-social-action-row');
+      if (_unclaimedRow) _unclaimedRow.style.display = 'flex';
+      // Hide support btn tooltip (no owner but support still works)
+      const _unclaimedSupBtn = document.getElementById('efed-support-action-btn');
+      if (_unclaimedSupBtn) { _unclaimedSupBtn.style.display = ''; }
+      // Init watchlist + support state and roster btn for orphaned eFed
+      initWatchlistBtn();
       return;
     }
     const user = users[0];
@@ -3055,6 +3077,10 @@ async function loadProfile() {
         _isMember = true; window._isMember = true;
         initEfedChat();
         document.getElementById('edit-pencil').style.display = 'flex';
+        // Show action row immediately so support btn is visible (always lit for owner)
+        const _ownerRow = document.getElementById('efed-social-action-row');
+        if (_ownerRow) _ownerRow.style.display = 'flex';
+        updateActionButtonsVisibility();
         // Show compose button immediately for owner (don't wait for feed load)
         const _ownerCompose = document.getElementById('efed-feed-compose');
         if (_ownerCompose) _ownerCompose.style.display = 'flex';
@@ -3235,7 +3261,15 @@ let _efedRosterState = 'out'; // 'out' | 'pending' | 'in'
 
 async function initVisitorActionBar() {
   const session = getSession();
-  if (!session) return;
+  if (!session) {
+    // No session — still show action row (clicking will prompt sign-in)
+    const _row = document.getElementById('efed-social-action-row');
+    if (_row) _row.style.display = 'flex';
+    return;
+  }
+  // Always show action row
+  const _row = document.getElementById('efed-social-action-row');
+  if (_row) _row.style.display = 'flex';
   // Owner of this efed sees owner banner, not visitor banners
   const ownerCheck = await sbGet('users', 'username=eq.' + encodeURIComponent(session.username) + '&select=promo_name');
   const isOwnerOfThis = ownerCheck.length && ownerCheck[0].promo_name && ownerCheck[0].promo_name.toLowerCase() === EFED_NAME.toLowerCase();
@@ -3264,7 +3298,7 @@ async function initVisitorActionBar() {
 
   // Update action buttons in social row
   updateWatchlistPillUI();
-  updateSupportActionBtnUI();
+  updateActionButtonsVisibility();
   // Roster banner + join banner first
   updateEfedRosterUI();
   if (!isOwnerOfThis) {
@@ -5106,8 +5140,11 @@ function setApprovedState() {
   updateSupportBannerUI();
   _isMember = true; window._isMember = true;
   initEfedChat();
+  // Show locker room + feed compose
   const _memberCompose = document.getElementById('efed-feed-compose');
   if (_memberCompose) _memberCompose.style.display = 'flex';
+  const _memberChatSec = document.getElementById('efed-chat-section');
+  if (_memberChatSec) _memberChatSec.style.display = '';
   const btn = document.getElementById('join-roster-btn');
   if (btn) {
     btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> On Roster`;
@@ -5120,6 +5157,26 @@ function setApprovedState() {
   // Sync action bar roster button
   _efedRosterState = 'in';
   updateEfedRosterUI();
+  // Populate member banner with current user data
+  const session = getSession();
+  if (session) {
+    const banner = document.getElementById('roster-member-banner');
+    if (banner && !_isOwnProfile) {
+      banner.style.display = '';
+      const nameEl = document.getElementById('rmb-efed-name');
+      if (nameEl) nameEl.textContent = EFED_NAME;
+      const linkEl = document.getElementById('rmb-avatar-link');
+      if (linkEl) linkEl.href = 'profile.html?u=' + encodeURIComponent(session.username);
+      sbGet('users', 'username=eq.' + encodeURIComponent(session.username) + '&select=display_name,avatar_url').then(rows => {
+        if (!rows.length) return;
+        const u = rows[0];
+        const img = document.getElementById('rmb-avatar-img');
+        const init = document.getElementById('rmb-avatar-initial');
+        if (u.avatar_url) { if(img){img.src=u.avatar_url;img.style.display='';} if(init)init.style.display='none'; }
+        else if (init) { init.textContent = (u.display_name||session.username||'?')[0].toUpperCase(); }
+      }).catch(()=>{});
+    }
+  }
 }
 
 function setJoinedState() {
