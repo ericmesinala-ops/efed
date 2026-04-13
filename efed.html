@@ -3192,8 +3192,9 @@ async function loadProfile() {
     // Load champions
     _champData = Array.isArray(user.efed_champions_json) ? user.efed_champions_json : [];
     renderChampions();
-    // Store roster order for loadRoster
-    window._efedRosterOrder = Array.isArray(user.efed_roster_order) ? user.efed_roster_order : [];
+    // Store roster order — check localStorage first (immediate), fall back to DB value
+    const _lsOrder = (() => { try { const v = localStorage.getItem('efed_roster_order_' + EFED_NAME); return v ? JSON.parse(v) : null; } catch(e) { return null; } })();
+    window._efedRosterOrder = _lsOrder || (Array.isArray(user.efed_roster_order) ? user.efed_roster_order : []);
 
     // Upcoming event — pass extra events from DB column
     const _extraEventsFromDB = window._efedExtraEvents;
@@ -3921,78 +3922,99 @@ async function _saveRosterOrder() {
   const wrap = document.querySelector('#roster-grid > div');
   if (!wrap) return;
   const order = Array.from(wrap.querySelectorAll('[data-username]')).map(c => c.dataset.username);
+  if (!order.length) return;
   window._efedRosterOrder = order;
+  // Always save to localStorage
+  try { localStorage.setItem('efed_roster_order_' + EFED_NAME, JSON.stringify(order)); } catch(e) {}
+  // Save to Supabase
   try {
-    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
       method: 'PATCH', headers: SB_HEADERS,
       body: JSON.stringify({ efed_roster_order: order })
     });
-  } catch(e) { console.error('Roster order save failed', e); }
+    if (!r.ok) {
+      const txt = await r.text().catch(()=>'');
+      showToast('⚠️ Order not saved to DB — run ALTER TABLE in Supabase');
+      console.warn('[roster order] save failed', r.status, txt);
+    } else {
+      showToast('✓ Roster order saved');
+    }
+  } catch(e) { console.warn('[roster order] save error', e); }
 }
 
 function _initRosterDrag(wrap) {
-  let dragSrc = null;
+  let active = null, clone = null, offsetX = 0, wasDragged = false;
 
-  // Make each card draggable and add grip
-  Array.from(wrap.children).forEach(card => {
-    card.setAttribute('draggable', 'true');
+  function cardOf(el) {
+    while (el && el.parentNode !== wrap) el = el.parentNode;
+    return (el && el.dataset && el.dataset.username) ? el : null;
+  }
 
-    // Prevent child elements from blocking drag events
-    card.querySelectorAll('*').forEach(el => {
-      el.setAttribute('draggable', 'false');
-    });
+  function onDown(e) {
+    if (e.button !== 0) return;
+    const card = cardOf(e.target);
+    if (!card) return;
+    e.preventDefault();
+    active = card;
+    wasDragged = false;
+    const rect = card.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    clone = card.cloneNode(true);
+    clone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;opacity:.88;pointer-events:none;z-index:99999;border-radius:10px;border:1px solid rgba(200,168,75,.6);box-shadow:0 10px 30px rgba(0,0,0,.7);transition:none;`;
+    document.body.appendChild(clone);
+    card.style.opacity = '.25';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
 
-    card.addEventListener('dragstart', e => {
-      dragSrc = card;
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', ''); // required for Firefox
-      setTimeout(() => { if (dragSrc) dragSrc.style.opacity = '.35'; }, 0);
-    });
+  function onMove(e) {
+    if (!clone || !active) return;
+    wasDragged = true;
+    const rect = active.getBoundingClientRect();
+    clone.style.left = (e.clientX - offsetX) + 'px';
+    clone.style.top  = rect.top + 'px';
+    // Find card under cursor
+    clone.style.visibility = 'hidden';
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    clone.style.visibility = 'visible';
+    Array.from(wrap.children).forEach(c => c.style.outline = '');
+    const target = el ? cardOf(el) : null;
+    if (target && target !== active) {
+      const tr = target.getBoundingClientRect();
+      const after = e.clientX > tr.left + tr.width / 2;
+      target.style.outline = '2px solid rgba(200,168,75,.55)';
+      wrap.insertBefore(active, after ? target.nextSibling : target);
+    }
+  }
 
-    card.addEventListener('dragend', () => {
-      if (dragSrc) dragSrc.style.opacity = '1';
-      // Remove all hover highlights
-      Array.from(wrap.children).forEach(c => c.style.outline = '');
-      dragSrc = null;
+  function onUp(e) {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    if (clone) { clone.remove(); clone = null; }
+    Array.from(wrap.children).forEach(c => { c.style.outline = ''; c.style.opacity = ''; });
+    if (wasDragged) {
+      // Block the subsequent click so card doesn't navigate
+      if (active) active.addEventListener('click', ev => ev.stopPropagation(), { once: true, capture: true });
       _saveRosterOrder();
-    });
+    }
+    active = null;
+    wasDragged = false;
+  }
 
-    // Grip indicator
+  Array.from(wrap.children).forEach(card => {
+    card.style.userSelect = 'none';
+    card.addEventListener('mousedown', onDown);
     if (!card.querySelector('.roster-drag-grip')) {
       const grip = document.createElement('div');
       grip.className = 'roster-drag-grip';
-      grip.setAttribute('draggable', 'false');
-      grip.style.cssText = 'position:absolute;top:5px;left:5px;display:flex;flex-direction:column;gap:2.5px;padding:2px;cursor:grab;z-index:4;opacity:.3;pointer-events:none;';
-      grip.innerHTML = '<span style="display:block;width:12px;height:1.5px;background:#fff;border-radius:1px;pointer-events:none;"></span><span style="display:block;width:12px;height:1.5px;background:#fff;border-radius:1px;pointer-events:none;"></span><span style="display:block;width:12px;height:1.5px;background:#fff;border-radius:1px;pointer-events:none;"></span>';
-      card.addEventListener('mouseenter', () => grip.style.opacity = '0.7');
-      card.addEventListener('mouseleave', () => grip.style.opacity = '0.3');
+      grip.style.cssText = 'position:absolute;top:5px;left:5px;display:flex;flex-direction:column;gap:2.5px;padding:2px;cursor:grab;z-index:4;opacity:.25;pointer-events:none;transition:opacity .15s;';
+      grip.innerHTML = '<span style="display:block;width:12px;height:1.5px;background:#fff;border-radius:1px;"></span>'
+        + '<span style="display:block;width:12px;height:1.5px;background:#fff;border-radius:1px;"></span>'
+        + '<span style="display:block;width:12px;height:1.5px;background:#fff;border-radius:1px;"></span>';
+      card.addEventListener('mouseenter', () => grip.style.opacity = '0.72');
+      card.addEventListener('mouseleave', () => { if (active !== card) grip.style.opacity = '0.25'; });
       card.appendChild(grip);
     }
-  });
-
-  // Single dragover on the container — avoids child element interference
-  wrap.addEventListener('dragover', e => {
-    e.preventDefault();
-    if (!dragSrc) return;
-    const target = e.target.closest('[data-username]');
-    if (!target || target === dragSrc || target.parentNode !== wrap) return;
-    const rect = target.getBoundingClientRect();
-    const after = e.clientX > rect.left + rect.width / 2;
-    // Visual hint
-    Array.from(wrap.children).forEach(c => c.style.outline = '');
-    target.style.outline = '2px solid rgba(200,168,75,.5)';
-    wrap.insertBefore(dragSrc, after ? target.nextSibling : target);
-  });
-
-  wrap.addEventListener('dragleave', e => {
-    if (!e.relatedTarget || !wrap.contains(e.relatedTarget)) {
-      Array.from(wrap.children).forEach(c => c.style.outline = '');
-    }
-  });
-
-  wrap.addEventListener('drop', e => {
-    e.preventDefault();
-    Array.from(wrap.children).forEach(c => c.style.outline = '');
   });
 }
 
