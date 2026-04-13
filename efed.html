@@ -3952,6 +3952,8 @@ function _initRosterDrag(wrap) {
 
   function onDown(e) {
     if (e.button !== 0) return;
+    // Let buttons and links handle their own events
+    if (e.target.closest('button,a')) return;
     const card = cardOf(e.target);
     if (!card) return;
     e.preventDefault();
@@ -5478,8 +5480,13 @@ function openSetChampModal(username, displayName, avatarUrl) {
   const existing = _champData.find(c => c.username === username);
   const input = document.getElementById('set-champ-input');
   const removeBtn = document.getElementById('set-champ-remove-btn');
+  const modalTitle = document.querySelector('#set-champ-modal-bg [style*="Bebas Neue"][style*="1.2rem"]');
+  if (modalTitle) modalTitle.textContent = existing ? 'Edit Championship' : 'Set as Champion';
+  if (removeBtn) {
+    removeBtn.textContent = 'Remove Title (lost the belt)';
+    removeBtn.style.display = existing ? 'block' : 'none';
+  }
   if (input) input.value = existing ? existing.title : '';
-  if (removeBtn) removeBtn.style.display = existing ? 'block' : 'none';
   document.getElementById('set-champ-msg').textContent = '';
   document.getElementById('set-champ-modal-bg').style.display = 'flex';
   setTimeout(() => input?.focus(), 80);
@@ -5560,28 +5567,41 @@ function renderChampions() {
     card.onmouseenter = () => card.style.borderColor = 'rgba(200,168,75,.5)';
     card.onmouseleave = () => card.style.borderColor = 'rgba(200,168,75,.2)';
 
-    // Drag-to-reorder (owner only) — mouse + touch, avoids child-element interference
+    // Owner: click card to edit/remove championship; drag to reorder
     if (_isOwnProfile) {
       card.style.userSelect = 'none';
-      card.style.cursor = 'grab';
 
-      // ── MOUSE drag ──
+      // Click = open edit modal (change title or remove when they lose the belt)
+      card.onclick = e => {
+        if (card._wasDragged) { card._wasDragged = false; return; }
+        openSetChampModal(champ.username, champ.displayName, champ.avatarUrl || null);
+      };
+
+      // ── MOUSE drag — reorder on mouseup, NOT on mousemove ──
       card.addEventListener('mousedown', e => {
         if (e.button !== 0) return;
-        e.preventDefault();
+        // Let buttons/links handle their own clicks
+        if (e.target.closest('button,a')) return;
         const srcIdx = parseInt(card.dataset.idx);
         const rect = card.getBoundingClientRect();
         const offX = e.clientX - rect.left;
-        let clone = card.cloneNode(true);
-        clone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;opacity:.88;pointer-events:none;z-index:99999;border-radius:10px;border:1px solid rgba(200,168,75,.6);box-shadow:0 10px 30px rgba(0,0,0,.7);`;
-        document.body.appendChild(clone);
-        card.style.opacity = '.25';
-        let moved = false;
+        let clone = null, dragStarted = false, lastToIdx = srcIdx;
 
         function onMove(ev) {
-          moved = true;
+          // Only start visual drag after moving a few pixels
+          if (!dragStarted) {
+            if (Math.abs(ev.clientX - e.clientX) < 4) return;
+            dragStarted = true;
+            card._wasDragged = true;
+            clone = card.cloneNode(true);
+            clone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;opacity:.88;pointer-events:none;z-index:99999;border-radius:10px;border:1px solid rgba(200,168,75,.6);box-shadow:0 10px 30px rgba(0,0,0,.7);cursor:grabbing;`;
+            document.body.appendChild(clone);
+            card.style.opacity = '.25';
+          }
+          if (!clone) return;
           clone.style.left = (ev.clientX - offX) + 'px';
           clone.style.top = rect.top + 'px';
+          // Find target under cursor
           clone.style.visibility = 'hidden';
           const el = document.elementFromPoint(ev.clientX, ev.clientY);
           clone.style.visibility = 'visible';
@@ -5589,39 +5609,41 @@ function renderChampions() {
           const tgt = el ? el.closest('[data-idx]') : null;
           if (tgt && tgt !== card && tgt.parentNode === grid) {
             tgt.style.outline = '2px solid rgba(200,168,75,.55)';
-            const tr = tgt.getBoundingClientRect();
-            const after = ev.clientX > tr.left + tr.width / 2;
-            const toIdx = parseInt(tgt.dataset.idx);
-            if (!isNaN(toIdx) && toIdx !== srcIdx) {
-              const [m] = _champData.splice(srcIdx, 1);
-              _champData.splice(toIdx, 0, m);
-              _saveChampions();
-              renderChampions(); // re-render with new order
-              // stop this drag after re-render (new cards have fresh listeners)
-              cleanup();
-            }
+            lastToIdx = parseInt(tgt.dataset.idx);
+          } else {
+            lastToIdx = srcIdx;
           }
         }
-        function cleanup() {
+
+        function onUp(ev) {
           document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', cleanup);
+          document.removeEventListener('mouseup', onUp);
           if (clone) { clone.remove(); clone = null; }
           grid.querySelectorAll('[data-idx]').forEach(c2 => { c2.style.outline = ''; c2.style.opacity = ''; });
-          if (moved) card.addEventListener('click', ev => ev.stopPropagation(), { once: true, capture: true });
+          card.style.opacity = '';
+          // Do the reorder on drop
+          if (dragStarted && !isNaN(lastToIdx) && lastToIdx !== srcIdx) {
+            const [m] = _champData.splice(srcIdx, 1);
+            _champData.splice(lastToIdx, 0, m);
+            _saveChampions();
+            renderChampions();
+          }
         }
+
         document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', cleanup);
+        document.addEventListener('mouseup', onUp);
       });
 
       // ── TOUCH drag ──
-      let tActive = false, tClone = null, tSrcIdx = null;
+      let tActive = false, tClone = null, tSrcIdx = null, tLastToIdx = null;
       card.addEventListener('touchstart', e => {
         tSrcIdx = parseInt(card.dataset.idx);
+        tLastToIdx = tSrcIdx;
         const t = e.touches[0];
-        const rect = card.getBoundingClientRect();
+        const rect2 = card.getBoundingClientRect();
         tActive = true;
         tClone = card.cloneNode(true);
-        tClone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;opacity:.85;pointer-events:none;z-index:9999;border-radius:10px;border:1px solid rgba(200,168,75,.5);`;
+        tClone.style.cssText = `position:fixed;width:${rect2.width}px;height:${rect2.height}px;left:${rect2.left}px;top:${rect2.top}px;opacity:.85;pointer-events:none;z-index:9999;border-radius:10px;border:1px solid rgba(200,168,75,.5);`;
         document.body.appendChild(tClone);
         card.style.opacity = '.3';
       }, { passive: true });
@@ -5635,26 +5657,25 @@ function renderChampions() {
         tClone.style.visibility = 'visible';
         grid.querySelectorAll('[data-idx]').forEach(c2 => c2.style.outline = '');
         const tgt = el?.closest('[data-idx]');
-        if (tgt && tgt !== card) tgt.style.outline = '2px solid rgba(200,168,75,.5)';
+        if (tgt && tgt !== card) {
+          tgt.style.outline = '2px solid rgba(200,168,75,.5)';
+          tLastToIdx = parseInt(tgt.dataset.idx);
+        } else {
+          tLastToIdx = tSrcIdx;
+        }
       }, { passive: true });
-      card.addEventListener('touchend', e => {
+      card.addEventListener('touchend', () => {
         if (!tActive) return;
         tActive = false;
         if (tClone) { tClone.remove(); tClone = null; }
         card.style.opacity = '1';
-        const t = e.changedTouches[0];
-        tClone && tClone.remove();
-        const el = document.elementFromPoint(t.clientX, t.clientY);
-        const tgt = el?.closest('[data-idx]');
         grid.querySelectorAll('[data-idx]').forEach(c2 => c2.style.outline = '');
-        if (tgt && tgt !== card) {
-          const toIdx2 = parseInt(tgt.dataset.idx);
-          if (!isNaN(toIdx2) && tSrcIdx !== null && tSrcIdx !== toIdx2) {
-            const [m] = _champData.splice(tSrcIdx, 1);
-            _champData.splice(toIdx2, 0, m);
-            _saveChampions();
-            renderChampions();
-          }
+        if (!isNaN(tLastToIdx) && tSrcIdx !== null && tLastToIdx !== tSrcIdx) {
+          card._wasDragged = true;
+          const [m] = _champData.splice(tSrcIdx, 1);
+          _champData.splice(tLastToIdx, 0, m);
+          _saveChampions();
+          renderChampions();
         }
       });
     }
