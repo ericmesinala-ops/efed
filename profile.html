@@ -224,7 +224,18 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   font-family: 'Bebas Neue', sans-serif; font-size: 1.6rem;
   letter-spacing: 3px; color: #fff; line-height: 1.1;
   word-break: break-word; flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
+.on-roster-badge {
+  display: none; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 20px;
+  background: rgba(76,175,100,.12); border: 1px solid rgba(76,175,100,.3);
+  color: #4caf64; font-family: 'DM Sans', sans-serif;
+  font-size: .58rem; font-weight: 700; letter-spacing: .8px;
+  text-transform: uppercase; white-space: nowrap; flex-shrink: 0;
+  vertical-align: middle; line-height: 1;
+}
+.on-roster-badge.visible { display: inline-flex; }
 .identity-row-icons {
   display: flex; align-items: center; gap: 8px; flex-shrink: 0;
 }
@@ -304,6 +315,13 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   font-size: .58rem; font-weight: 600; color: rgba(255,255,255,.55);
   text-align: center; max-width: 60px; line-height: 1.3;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sup-efed-pill.roster-locked .sup-efed-logo {
+  border-color: rgba(76,175,100,.35);
+  background: rgba(76,175,100,.08);
+}
+.sup-efed-pill.roster-locked .sup-efed-name {
+  color: rgba(76,175,100,.7);
 }
 #efeds-list::-webkit-scrollbar { display: none; }
 .efed-item:last-child { border-bottom: none; }
@@ -1212,7 +1230,7 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
 
 <!-- ── IDENTITY ROW ── -->
 <div class="identity-row" id="identity-row">
-  <div class="identity-row-name" id="identity-row-name">—</div>
+  <div class="identity-row-name" id="identity-row-name">—<span class="on-roster-badge" id="on-roster-badge"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>On Roster</span></div>
   <div class="identity-row-icons" id="identity-row-icons"></div>
 </div>
 
@@ -1746,7 +1764,7 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
 
 <div class="posts-section" id="posts-section">
   <div class="posts-section-header">
-    <div class="sec-title" style="margin-bottom:0;">Talk</div>
+    <div class="sec-title" style="margin-bottom:0;">My Feed</div>
   </div>
   <div class="posts-track-wrap" id="posts-track-wrap">
     <div class="posts-track" id="posts-track">
@@ -3215,6 +3233,28 @@ function scrollSupEfeds(dir) {
   }, 300);
 }
 
+async function unsupportEfed(efedName, pillEl) {
+  const session = getSession();
+  if (!session) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/supports?username=eq.' + encodeURIComponent(session.username) + '&efed=eq.' + encodeURIComponent(efedName), {
+      method: 'DELETE', headers: SB_HEADERS
+    });
+    if (pillEl) {
+      pillEl.style.transition = 'opacity .2s, transform .2s';
+      pillEl.style.opacity = '0';
+      pillEl.style.transform = 'scale(.8)';
+      setTimeout(() => {
+        pillEl.remove();
+        const list = document.getElementById('efeds-list');
+        if (list && !list.querySelector('.sup-efed-pill')) {
+          list.innerHTML = '<div class="empty">Not supporting any eFed yet.</div>';
+        }
+      }, 200);
+    }
+  } catch(e) { console.error('Unsupport failed', e); }
+}
+
 function scrollSubRow(dir) {
   const row = document.getElementById('submitted-row');
   if (!row) return;
@@ -4058,14 +4098,13 @@ async function loadProfile() {
         const addBtn = document.getElementById('add-to-roster-btn');
         if (addBtn) {
           if (onRoster.length) {
-            addBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> On Roster';
-            addBtn.style.background = 'rgba(76,175,100,.12)';
-            addBtn.style.borderColor = 'rgba(76,175,100,.3)';
-            addBtn.style.color = '#4caf64';
-            addBtn.style.cursor = 'default';
-            addBtn.onclick = null;
-          }
+            // Show small badge beside name, hide the add button
+            const badge = document.getElementById('on-roster-badge');
+            if (badge) badge.classList.add('visible');
+            addBtn.style.display = 'none';
+          } else {
           addBtn.style.display = 'flex';
+          }
         }
       }
     } catch(e) {}
@@ -4301,22 +4340,70 @@ async function loadProfile() {
 
     const combined = ownerItem + rosterItems;
     myEfedList.innerHTML = combined || '<div class="empty">Not part of any eFed yet.</div>';
-    // Supporting eFeds — fan (exclude ones already in roster)
-    const rosterEfeds = new Set(rosterRows.map(r => r.efed));
-    const fanRows = supportRows.filter(s => !rosterEfeds.has(s.efed));
-    if (!fanRows.length) {
+
+    // Supporting eFeds — show ALL efeds user is part of (roster + fan supports)
+    // Roster efeds appear with a lock indicator; can only be removed by leaving the roster
+    const rosterEfeds = new Set([
+      ...(ownerEfedName ? [ownerEfedName] : []),
+      ...rosterRows.map(r => r.efed)
+    ]);
+
+    // Build combined list: roster efeds first (locked), then pure fan supports
+    const allSupporting = [];
+    // Add roster efeds (locked)
+    if (ownerEfedName) allSupporting.push({ efed: ownerEfedName, locked: true });
+    rosterRows.forEach(r => { if (r.efed !== ownerEfedName) allSupporting.push({ efed: r.efed, locked: true }); });
+    // Add fan supports that aren't already listed via roster
+    supportRows.forEach(s => { if (!rosterEfeds.has(s.efed)) allSupporting.push({ efed: s.efed, locked: false }); });
+
+    if (!allSupporting.length) {
       supEfedList.innerHTML = '<div class="empty">Not supporting any eFed yet.</div>';
     } else {
-      supEfedList.innerHTML = fanRows.map(s => {
-        const logo = logoMap[s.efed];
+      supEfedList.innerHTML = allSupporting.map(item => {
+        const logo = logoMap[item.efed];
         const logoHtml = logo
           ? `<img src="${_esc(logo)}" alt="">`
-          : `<span>${(s.efed||'?')[0].toUpperCase()}</span>`;
-        return `<a class="sup-efed-pill" href="efed.html?e=${encodeURIComponent(s.efed)}">
-          <div class="sup-efed-logo">${logoHtml}</div>
-          <div class="sup-efed-name">${_esc(s.efed)}</div>
-        </a>`;
+          : `<span>${(item.efed||'?')[0].toUpperCase()}</span>`;
+
+        if (item.locked) {
+          // Roster member — pill links to efed, lock icon shows, can't unsupport
+          return `<a class="sup-efed-pill roster-locked" href="efed.html?e=${encodeURIComponent(item.efed)}" title="Leave the roster to unsupport">
+            <div class="sup-efed-logo" style="position:relative;">
+              ${logoHtml}
+              <span style="position:absolute;bottom:-4px;right:-4px;width:14px;height:14px;border-radius:50%;background:#0d0d10;border:1px solid rgba(76,175,100,.4);display:flex;align-items:center;justify-content:center;">
+                <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="#4caf64" stroke-width="3" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+            </div>
+            <div class="sup-efed-name">${_esc(item.efed)}</div>
+          </a>`;
+        } else if (_isOwnProfile) {
+          // Own profile fan support — clickable pill with remove on hover
+          return `<div class="sup-efed-pill" style="position:relative;" onclick="window.location.href='efed.html?e=${encodeURIComponent(item.efed)}'" title="${_esc(item.efed)}">
+            <div class="sup-efed-logo">${logoHtml}</div>
+            <div class="sup-efed-name">${_esc(item.efed)}</div>
+            <button onclick="event.stopPropagation();unsupportEfed('${item.efed.replace(/'/g,"\\'")}',this.closest('.sup-efed-pill'))"
+              title="Unsupport"
+              style="position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:rgba(192,0,14,.85);border:none;color:#fff;font-size:.5rem;cursor:pointer;display:none;align-items:center;justify-content:center;line-height:1;padding:0;z-index:2;">✕</button>
+          </div>`;
+        } else {
+          // Viewing someone else's profile — plain link
+          return `<a class="sup-efed-pill" href="efed.html?e=${encodeURIComponent(item.efed)}">
+            <div class="sup-efed-logo">${logoHtml}</div>
+            <div class="sup-efed-name">${_esc(item.efed)}</div>
+          </a>`;
+        }
       }).join('');
+
+      // Show remove button on hover for own-profile fan pills
+      if (_isOwnProfile) {
+        supEfedList.querySelectorAll('.sup-efed-pill:not(.roster-locked)').forEach(pill => {
+          const btn = pill.querySelector('button');
+          if (!btn) return;
+          pill.addEventListener('mouseenter', () => btn.style.display = 'flex');
+          pill.addEventListener('mouseleave', () => btn.style.display = 'none');
+        });
+      }
+
       // show/hide scroll arrows
       setTimeout(() => {
         const list = document.getElementById('efeds-list');
