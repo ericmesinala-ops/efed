@@ -92,7 +92,8 @@ function confirmResolve(val) { if (_confirmResolve) { _confirmResolve(val); _con
   --muted: #8a8a9a; --border: rgba(255,255,255,.07);
 }
 html { font-size: 17px; }
-body { background: #000; color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; scrollbar-width: none; -ms-overflow-style: none; }
+body { background: #000; color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; scrollbar-width: none; -ms-overflow-style: none; overflow-x: hidden; }
+html { overflow-x: hidden; }
 body::-webkit-scrollbar { display: none; }
 body::-webkit-scrollbar { display: none; }
 
@@ -3194,8 +3195,7 @@ async function loadAppearances(targetUser, isOwn) {
       try {
         const bk = typeof r.plan_note === 'string' ? JSON.parse(r.plan_note) : r.plan_note;
         if (!bk || !bk.opponent) return;
-        // Auto-expire: if date is set and more than 1 day past, skip
-        if (bk.date && !bk.tba) {
+        if (bk.date && !bk.tba && bk.date !== 'TBA') {
           const d = new Date(bk.date);
           if (!isNaN(d) && (now - d.getTime()) > oneDayMs) return;
         }
@@ -3205,36 +3205,62 @@ async function loadAppearances(targetUser, isOwn) {
 
     if (!bookings.length) { sec.style.display = 'none'; return; }
 
+    // Fetch avatars for current user + all opponents in one shot
+    const opponentUsernames = [...new Set(bookings.map(b => b.opponent).filter(Boolean))];
+    let avatarMap = {};
+    let myAvatarUrl = null;
+    try {
+      const allUsers = [targetUser, ...opponentUsernames];
+      const uRows = await sbGet('users', `username=in.(${allUsers.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
+      uRows.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
+      myAvatarUrl = avatarMap[targetUser]?.avatar || null;
+    } catch(e) {}
+
+    const avHtml = (username, label) => {
+      const info = avatarMap[username] || {};
+      const av = info.avatar
+        ? `<img src="${_esc(info.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(255,255,255,.15);">`
+        : `<div style="width:28px;height:28px;border-radius:50%;background:rgba(192,0,14,.15);border:1.5px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.75rem;color:#c0000e;flex-shrink:0;">${(label||'?')[0].toUpperCase()}</div>`;
+      return `<div style="display:flex;align-items:center;gap:7px;">${av}<span style="font-size:.88rem;font-weight:600;color:#fff;">${_esc(label)}</span></div>`;
+    };
+
     sec.style.display = '';
     list.innerHTML = '';
+
     bookings.forEach(bk => {
       const isHidden = hidden.includes(String(bk.id));
-      if (isHidden && !isOwn) return; // hidden from public view
+      if (isHidden && !isOwn) return;
 
-      const dateTxt = bk.tba ? 'TBA' : (bk.date || '');
+      const myName = avatarMap[targetUser]?.name || targetUser;
+      const oppName = bk.opponentName || avatarMap[bk.opponent]?.name || bk.opponent || '';
+      const dateTxt = (bk.tba || bk.date === 'TBA') ? 'TBA' : (bk.date || '');
+
       const card = document.createElement('div');
-      card.style.cssText = `position:relative;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:14px 16px;${isHidden ? 'opacity:.35;' : ''}`;
+      card.style.cssText = `position:relative;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:14px 16px;transition:opacity .2s;${isHidden ? 'opacity:.3;' : ''}`;
 
       card.innerHTML = `
-        <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:6px;">${_esc(bk.efed || '')}</div>
-        <div style="font-size:.88rem;font-weight:600;color:#fff;margin-bottom:4px;">vs <span style="color:rgba(255,255,255,.75);">${_esc(bk.opponentName || bk.opponent || '')}</span></div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;">
-          ${bk.show ? `<span style="font-size:.72rem;color:rgba(255,255,255,.5);">📺 ${_esc(bk.show)}</span>` : ''}
-          ${dateTxt ? `<span style="font-size:.72rem;color:rgba(255,255,255,.4);">📅 ${_esc(dateTxt)}</span>` : ''}
+        <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:10px;">${_esc(bk.efed || '')}</div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+          ${avHtml(targetUser, myName)}
+          <span style="font-size:.7rem;font-weight:700;color:rgba(255,255,255,.3);letter-spacing:1px;text-transform:uppercase;">vs</span>
+          ${avHtml(bk.opponent, oppName)}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          ${bk.show ? `<span style="font-size:.72rem;color:rgba(255,255,255,.45);">📺 ${_esc(bk.show)}</span>` : ''}
+          ${dateTxt ? `<span style="font-size:.72rem;color:rgba(255,255,255,.35);">📅 ${_esc(dateTxt)}</span>` : ''}
         </div>`;
 
-      // Hide button — only for own profile
       if (isOwn) {
         const hideBtn = document.createElement('button');
-        hideBtn.style.cssText = 'position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.2);font-size:.6rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:2px 6px;border-radius:4px;transition:color .15s;';
-        hideBtn.textContent = isHidden ? 'Show' : 'Hide';
+        hideBtn.style.cssText = 'position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:.95rem;padding:2px 4px;opacity:.3;transition:opacity .15s;line-height:1;';
+        hideBtn.textContent = isHidden ? '👁️' : '🙈';
         hideBtn.title = isHidden ? 'Show on profile' : 'Hide from profile';
-        hideBtn.onmouseover = () => hideBtn.style.color = 'rgba(255,255,255,.5)';
-        hideBtn.onmouseout = () => hideBtn.style.color = 'rgba(255,255,255,.2)';
+        hideBtn.onmouseover = () => hideBtn.style.opacity = '.7';
+        hideBtn.onmouseout = () => hideBtn.style.opacity = '.3';
         hideBtn.onclick = () => {
           const idx = hidden.indexOf(String(bk.id));
-          if (idx > -1) { hidden.splice(idx, 1); card.style.opacity = '1'; hideBtn.textContent = 'Hide'; }
-          else { hidden.push(String(bk.id)); card.style.opacity = '.35'; hideBtn.textContent = 'Show'; }
+          if (idx > -1) { hidden.splice(idx, 1); card.style.opacity = '1'; hideBtn.textContent = '🙈'; }
+          else { hidden.push(String(bk.id)); card.style.opacity = '.3'; hideBtn.textContent = '👁️'; }
           localStorage.setItem(_hiddenKey, JSON.stringify(hidden));
         };
         card.appendChild(hideBtn);
@@ -3243,7 +3269,6 @@ async function loadAppearances(targetUser, isOwn) {
       list.appendChild(card);
     });
 
-    // If all hidden and not own profile, hide section
     if (!list.children.length) sec.style.display = 'none';
   } catch(e) { sec.style.display = 'none'; }
 }
