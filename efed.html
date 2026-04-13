@@ -1251,6 +1251,7 @@ html.day-mode .settings-save-btn { background: rgba(0,0,0,.06) !important; borde
 .efed-action-btn.active-support  { color: #4caf8a; border-color: rgba(76,175,138,.45); background: rgba(76,175,138,.1); }
 .efed-action-btn.active-watchlist{ color: #c8a84b; border-color: rgba(200,168,75,.45); background: rgba(200,168,75,.1); }
 .efed-action-btn.active-roster   { color: #c8a84b; border-color: rgba(200,168,75,.45); background: rgba(200,168,75,.1); }
+.efed-action-btn.active-roster[style*="pointer-events: none"] { opacity: .75; }
 /* tooltip */
 .efed-action-btn::after { content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: rgba(20,20,24,.97); color: #e8e8e8; font-size: .63rem; font-weight: 600; white-space: nowrap; padding: 4px 10px; border-radius: 6px; pointer-events: none; opacity: 0; transition: opacity .18s; font-family: 'DM Sans', sans-serif; z-index: 9999; border: 1px solid rgba(255,255,255,.12); box-shadow: 0 4px 12px rgba(0,0,0,.5); }
 .efed-action-btn:hover::after { opacity: 1; }
@@ -2346,18 +2347,47 @@ function updateWatchlistActionBtnUI() {
 function updateRosterActionBtnUI() {
   const btn = document.getElementById('efed-roster-action-btn');
   if (!btn) return;
-  if (_isOwnProfile || _efedRosterState === 'in') {
+  btn.style.opacity = '1';
+  btn.style.cursor = '';
+  btn.style.pointerEvents = '';
+
+  if (_isOwnProfile) {
+    // Owner: always lit, locked
     btn.classList.add('active-roster');
-    btn.setAttribute('data-tip', _isOwnProfile ? 'You own this eFed' : 'You are on the roster');
-  } else if (_efedRosterState === 'pending') {
+    btn.setAttribute('data-tip', 'You own this eFed');
+    btn.style.cursor = 'default';
+    btn.style.pointerEvents = 'none';
+    return;
+  }
+
+  if (_efedRosterState === 'in') {
+    btn.classList.add('active-roster');
+    if (_isUnclaimed) {
+      // Orphaned eFed — can leave
+      btn.setAttribute('data-tip', 'On roster — tap to leave');
+    } else {
+      // Owner present — locked, only owner can remove
+      btn.setAttribute('data-tip', 'On roster — only owner can remove');
+      btn.style.cursor = 'default';
+      btn.style.pointerEvents = 'none';
+    }
+    return;
+  }
+
+  if (_efedRosterState === 'pending') {
     btn.classList.add('active-roster');
     btn.style.opacity = '.6';
-    btn.setAttribute('data-tip', 'Request pending…');
-  } else {
-    btn.classList.remove('active-roster');
-    btn.style.opacity = '1';
-    btn.setAttribute('data-tip', 'Part of Roster?');
+    if (_isUnclaimed) {
+      btn.setAttribute('data-tip', 'Request sent — tap to cancel');
+    } else {
+      btn.setAttribute('data-tip', 'Request pending…');
+    }
+    return;
   }
+
+  // Out
+  btn.classList.remove('active-roster');
+  btn.setAttribute('data-tip', 'Part of Roster?');
 }
 
 async function toggleEfedSupportSimple() {
@@ -3487,10 +3517,63 @@ async function toggleEfedSupport() {
 }
 
 function toggleEfedRoster() {
+  const session = getSession();
+  if (!session) { alert('Sign in to join the roster.'); return; }
+  if (_isOwnProfile) return; // owner locked
+
   if (_efedRosterState === 'out') {
+    // Both orphaned and owned eFeds use the same "I'm on this Roster" modal
+    // submitJoinRoster() already inserts as approved — works for both
     openJoinRosterModal();
+    return;
   }
-  // pending / in: handled by banner buttons
+
+  if (_efedRosterState === 'in') {
+    if (_isUnclaimed) {
+      _leaveOrphanedRoster();
+    }
+    // Owner present: locked — do nothing
+    return;
+  }
+
+  if (_efedRosterState === 'pending') {
+    if (_isUnclaimed) {
+      _leaveOrphanedRoster();
+    }
+    // Owner present pending: could cancel, but keep locked for now
+    return;
+  }
+}
+
+async function _leaveOrphanedRoster() {
+  const session = getSession(); if (!session) return;
+  // Only allowed on orphaned eFeds
+  if (!_isUnclaimed) return;
+  const btn = document.getElementById('efed-roster-action-btn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '.4'; }
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/roster?efed=eq.' + encodeURIComponent(EFED_NAME) + '&username=eq.' + encodeURIComponent(session.username),
+      { method: 'DELETE', headers: SB_HEADERS });
+    _efedRosterState = 'out';
+    _isMember = false; window._isMember = false;
+    // Hide member banner
+    const banner = document.getElementById('roster-member-banner');
+    if (banner) banner.style.display = 'none';
+    // Hide chat + compose
+    const chatSec = document.getElementById('efed-chat-section');
+    if (chatSec) chatSec.style.display = 'none';
+    const compose = document.getElementById('efed-feed-compose');
+    if (compose) compose.style.display = 'none';
+    updateJoinRosterBannerUI();
+    updateRosterActionBtnUI();
+    updateEfedRosterUI();
+    loadRoster();
+    showToast('Left the roster.');
+  } catch(e) {
+    console.error('Leave roster failed:', e);
+    showToast('Could not leave roster. Try again.');
+  }
+  if (btn) { btn.disabled = false; }
 }
 
 function updateSigningsUI(on) {
