@@ -3062,7 +3062,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_events_json,efed_champions_json,efed_roster_order,acronym&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_events_json,efed_champions_json,efed_roster_order&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
@@ -3158,13 +3158,17 @@ async function loadProfile() {
       if (_isOwnerCheck) document.getElementById('efed-name').classList.add('is-owner');
     }
 
-    // Acronym pill
-    const acPill = document.getElementById('stat-acronym-pill');
-    const acEl = document.getElementById('stat-acronym');
-    if (user.acronym && acEl && acPill) {
-      acEl.textContent = user.acronym.toUpperCase();
-      acPill.style.display = '';
-    }
+    // Acronym pill — fetched separately so a missing column never breaks page load
+    try {
+      const acRows = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=acronym&limit=1`);
+      const acronym = acRows[0]?.acronym;
+      const acPill = document.getElementById('stat-acronym-pill');
+      const acEl = document.getElementById('stat-acronym');
+      if (acronym && acEl && acPill) {
+        acEl.textContent = acronym.toUpperCase();
+        acPill.style.display = '';
+      }
+    } catch(e) { /* acronym column may not exist yet — safe to ignore */ }
 
     // Logo
     if (user.promo_logo) {
@@ -6158,7 +6162,12 @@ const _soSearch = (() => {
     let peopleMatches = [];
     try {
       if (!_peopleCache) {
-        _peopleCache = await sbGet('users', 'select=username,display_name,promo_name,avatar_url,is_efed_owner,role,acronym&limit=500');
+        try {
+          _peopleCache = await sbGet('users', 'select=username,display_name,promo_name,avatar_url,is_efed_owner,role,acronym&limit=500');
+        } catch(e) {
+          // acronym column may not exist yet — fall back without it
+          _peopleCache = await sbGet('users', 'select=username,display_name,promo_name,avatar_url,is_efed_owner,role&limit=500');
+        }
       }
       peopleMatches = _peopleCache.filter(u =>
         (u.username||'').toLowerCase().includes(ql) ||
