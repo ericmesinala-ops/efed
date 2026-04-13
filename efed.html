@@ -2802,6 +2802,31 @@ async function loadProfile() {
   initEfedChatView(); // always load chat messages — input row shown separately for members/admin
   _efedFeed.load();  // always load community feed — visible to all, reply-enabled for logged-in users
 
+  // ── BACKFILL SUPPORTS: ensure all current roster members + owner are supporters ──
+  // Runs silently on every page load using upsert (merge-duplicates = idempotent)
+  (async function backfillSupports() {
+    try {
+      const [rosterRows, ownerRows] = await Promise.all([
+        sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=username`),
+        sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username&limit=1`)
+      ]);
+      const usernames = new Set();
+      rosterRows.forEach(r => { if (r.username) usernames.add(r.username); });
+      ownerRows.forEach(r => { if (r.username) usernames.add(r.username); });
+      if (!usernames.size) return;
+      const payload = Array.from(usernames).map(u => ({
+        username: u, efed: EFED_NAME, supported_at: Date.now()
+      }));
+      await fetch(SUPABASE_URL + '/rest/v1/supports', {
+        method: 'POST',
+        headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates' },
+        body: JSON.stringify(payload)
+      });
+      // Refresh supporter count after backfill
+      loadEfedStats();
+    } catch(e) {}
+  })();
+
   // First visit — show welcome modal tailored to whether videos exist
   const _urlParams = new URLSearchParams(window.location.search);
   if (_urlParams.get('firstvisit') === '1' && _isOwnProfile) {
