@@ -13,6 +13,8 @@
 <link rel="apple-touch-icon" href="/efed-hub-icon.svg">
 <title>EFED Streaming Hub — Access</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>emailjs.init('QQrnblwSwGWLa1G5_');</script>
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
@@ -488,7 +490,7 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
       </div>
     </div>
   </div>
-  <div id="auth-discover" data-text="Discover the Community" style="font-size:1rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);font-weight:600;text-align:center;margin-bottom:8px;min-height:18px;transition:opacity .4s;opacity:0;"><span class="discover-static">Discover the Community</span></div>
+  <div id="auth-discover" data-text="THE NETWORK IS LIVE" style="font-size:1rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);font-weight:600;text-align:center;margin-bottom:8px;min-height:18px;transition:opacity .4s;opacity:0;"><span class="discover-static">THE NETWORK IS LIVE</span></div>
   <div id="auth-flavor" style="font-size:.9rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.55);font-weight:400;font-style:italic;text-align:center;margin-bottom:6px;min-height:18px;transition:opacity .4s;opacity:0;"></div>
   <div id="auth-tagline" style="font-size:.72rem;letter-spacing:2.5px;text-transform:uppercase;color:rgba(255,255,255,.32);font-weight:400;font-style:normal;text-align:center;margin-bottom:18px;min-height:14px;transition:opacity .4s;opacity:0;"></div>
   <div class="rule"></div>
@@ -670,13 +672,36 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
           </div>
           <div class="panel" id="panel-forgot">
             <div class="panel-title">Reset Password</div>
-            <p class="panel-sub">Fill out the form below and the admin will reset your password shortly.</p>
+            <p class="panel-sub">Enter your email and we'll send you a reset link.</p>
+            <div class="msg error" id="forgot-err"></div>
             <div class="msg success" id="forgot-ok" style="display:none;"></div>
             <div id="forgot-step1">
               <div class="field"><label>Email</label><input type="email" id="forgot-email" placeholder="your@email.com" autocomplete="email"></div>
-              <button class="btn-primary" id="forgot-btn1" onclick="doForgotReset()">Submit Request</button>
+              <button class="btn-primary" id="forgot-btn1" onclick="doForgotReset()">Send Reset Link</button>
             </div>
             <p style="text-align:center;margin-top:14px;"><button onclick="switchTab('login')" style="background:none;border:none;color:var(--muted);font-size:.68rem;cursor:pointer;font-family:'DM Sans',sans-serif;letter-spacing:.5px;transition:color .2s;" onmouseover="this.style.color='rgba(255,255,255,.5)'" onmouseout="this.style.color='var(--muted)'">← Back to Sign In</button></p>
+          </div>
+          <div class="panel" id="panel-reset">
+            <div class="panel-title">New Password</div>
+            <p class="panel-sub">Choose a new password for your account.</p>
+            <div class="msg error" id="reset-err"></div>
+            <div class="msg success" id="reset-ok" style="display:none;"></div>
+            <div id="reset-form">
+              <div class="field">
+                <label>New Password</label>
+                <div style="position:relative;">
+                  <input type="password" id="reset-pass" placeholder="min 6 characters" autocomplete="new-password" style="width:100%;padding:14px 44px 14px 16px;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:10px;color:#fff;font-family:'Inter',sans-serif;font-size:1rem;outline:none;transition:border-color .2s,background .2s;">
+                  <button type="button" onclick="togglePass('reset-pass',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;display:flex;align-items:center;" aria-label="Show password">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Confirm Password</label>
+                <input type="password" id="reset-confirm" placeholder="repeat password" autocomplete="new-password" style="width:100%;padding:14px 16px;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:10px;color:#fff;font-family:'Inter',sans-serif;font-size:1rem;outline:none;transition:border-color .2s,background .2s;">
+              </div>
+              <button class="btn-primary" id="reset-btn" onclick="doPasswordReset()">Set New Password</button>
+            </div>
           </div>`;
       })();
     </script>
@@ -807,11 +832,16 @@ function switchTab(tab) {
   document.getElementById('panel-login').classList.toggle('active', tab === 'login');
   document.getElementById('panel-register').classList.toggle('active', tab === 'register');
   document.getElementById('panel-forgot').classList.toggle('active', tab === 'forgot');
+  const resetPanel = document.getElementById('panel-reset');
+  if (resetPanel) resetPanel.classList.remove('active');
   clearMsgs();
   if (tab === 'forgot') {
     document.getElementById('forgot-step1').style.display = 'block';
-    const forgotSub = document.getElementById('forgot-sub'); if (forgotSub) forgotSub.textContent = 'Enter your email and we\'ll send you a reset link.';
-    document.getElementById('forgot-user').value = '';
+    document.getElementById('forgot-ok').style.display = 'none';
+    document.getElementById('forgot-email').value = '';
+    const btn = document.getElementById('forgot-btn1');
+    btn.disabled = false;
+    btn.textContent = 'Send Reset Link';
   }
   if (tab === 'register') {
     document.getElementById('reg-step1').style.display = 'block';
@@ -993,27 +1023,90 @@ async function doRegister() {
   }
 }
 
-// ── FORGOT PASSWORD — Supabase native email reset ──
+// ── FORGOT PASSWORD — EmailJS ──
+function genResetToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
 async function doForgotReset() {
   const email = document.getElementById('forgot-email').value.trim().toLowerCase();
-  if (!email || !email.includes('@')) return alert('Please enter a valid email.');
+  if (!email || !email.includes('@')) return showErr('forgot-err', 'Please enter a valid email.');
   const btn = document.getElementById('forgot-btn1');
   btn.disabled = true;
   btn.textContent = 'Sending…';
-  try {
-    await fetch('https://formspree.io/f/xnjgyzrj', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ email, _subject: 'Password Reset Request — EFED Hub' })
-    });
+
+  const showSuccess = () => {
     document.getElementById('forgot-step1').style.display = 'none';
     const ok = document.getElementById('forgot-ok');
     ok.style.display = 'block';
-    ok.textContent = 'Request sent! The admin will reset your password and contact you shortly.';
+    ok.textContent = 'If that email is registered, a reset link has been sent. Check your inbox.';
+  };
+
+  try {
+    const users = await sbGet('users', `email=eq.${encodeURIComponent(email)}`);
+    if (!users.length) { showSuccess(); return; }
+
+    const user = users[0];
+    const token = genResetToken();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    await sbInsert('password_resets', { email, token, expires_at: expiresAt, used: false });
+
+    const resetLink = `https://efed-stream.vercel.app/auth.html?reset=${token}`;
+    await emailjs.send('service_zxvndxs', 'template_rrbxs08', {
+      to_email: email,
+      username: user.display_name || user.username,
+      reset_link: resetLink
+    });
+
+    showSuccess();
   } catch(e) {
-    alert('Could not send. Please try again.');
+    showErr('forgot-err', 'Could not send reset email. Please try again.');
     btn.disabled = false;
-    btn.textContent = 'Submit Request';
+    btn.textContent = 'Send Reset Link';
+    console.error(e);
+  }
+}
+
+// ── SET NEW PASSWORD (landing from email link) ──
+async function doPasswordReset() {
+  const token = new URLSearchParams(window.location.search).get('reset');
+  const newPass = document.getElementById('reset-pass').value;
+  const confirmPass = document.getElementById('reset-confirm').value;
+
+  if (!newPass || newPass.length < 6) return showErr('reset-err', 'Password must be at least 6 characters.');
+  if (newPass !== confirmPass) return showErr('reset-err', 'Passwords do not match.');
+
+  const btn = document.getElementById('reset-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    const resets = await sbGet('password_resets', `token=eq.${encodeURIComponent(token)}&used=eq.false`);
+    if (!resets.length) return showErr('reset-err', 'This reset link is invalid or has already been used.');
+
+    const reset = resets[0];
+    if (new Date(reset.expires_at) < new Date()) return showErr('reset-err', 'This link has expired. Please request a new one.');
+
+    await sbUpdate('users', { password_hash: await hash(newPass) }, `email=eq.${encodeURIComponent(reset.email)}`);
+    await sbUpdate('password_resets', { used: true }, `token=eq.${encodeURIComponent(token)}`);
+
+    document.getElementById('reset-form').style.display = 'none';
+    const ok = document.getElementById('reset-ok');
+    ok.style.display = 'block';
+    ok.textContent = 'Password updated! Taking you to sign in…';
+
+    setTimeout(() => {
+      window.history.replaceState({}, '', 'auth.html');
+      window.location.reload();
+    }, 2000);
+  } catch(e) {
+    showErr('reset-err', 'Something went wrong. Please try again.');
+    btn.disabled = false;
+    btn.textContent = 'Set New Password';
+    console.error(e);
   }
 }
 
@@ -1068,6 +1161,20 @@ function signOut() {
 
 // ── INIT ──
 async function init() {
+  // Check for password reset token in URL
+  const resetToken = new URLSearchParams(window.location.search).get('reset');
+  if (resetToken) {
+    const viewAuth = document.getElementById('view-auth');
+    if (viewAuth) {
+      viewAuth.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      const tabs = viewAuth.querySelector('.tabs');
+      if (tabs) tabs.style.display = 'none';
+      const resetPanel = document.getElementById('panel-reset');
+      if (resetPanel) resetPanel.classList.add('active');
+    }
+    return;
+  }
+
   const session = getSession();
   if (session?.username) {
     try {
@@ -1106,7 +1213,7 @@ init();
 document.getElementById('auth-discover').style.opacity = '1';
 document.getElementById('auth-flavor').textContent = '116 eFed Channels — Over 800 Hours of Content';
 document.getElementById('auth-flavor').style.opacity = '1';
-document.getElementById('auth-tagline').textContent = 'Create your CAW profile • Manage your EFED';
+document.getElementById('auth-tagline').textContent = 'Build your CAW. Run your EFED.';
 document.getElementById('auth-tagline').style.opacity = '1';
 </script>
 
