@@ -1420,6 +1420,7 @@ html.day-mode #efed-social-action-row { background: var(--surface2) !important; 
   <div class="stat-pill" onclick="openRosterModal()" style="cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'"><div class="stat-num" id="stat-roster">0</div><div class="stat-lbl">Roster</div></div>
   <div class="stat-pill"><div class="stat-num" id="stat-supporters">0</div><div class="stat-lbl">Supporters</div></div>
   <div class="stat-pill" id="stat-views-pill" style="display:none;"><div class="stat-num" id="stat-views">—</div><div class="stat-lbl">Page Views</div></div>
+  <div class="stat-pill" id="stat-acronym-pill" style="display:none;background:rgba(255,255,255,.03);border-left:1px solid rgba(255,255,255,.07);"><div class="stat-num" id="stat-acronym" style="font-size:1.1rem;letter-spacing:3px;color:rgba(255,255,255,.5);font-family:'Bebas Neue',sans-serif;">—</div><div class="stat-lbl">Acronym</div></div>
 </div>
 
 <!-- ── BACK TO HUB ── -->
@@ -2156,7 +2157,7 @@ async function openEditModal() {
   }
   // Pre-fill fields from DB
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=yt_channel,ig_handle,x_handle,promo_website,efed_signings_link,efed_bio,efed_banner_dim,twitch_channel`);
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=yt_channel,ig_handle,x_handle,promo_website,efed_signings_link,efed_bio,efed_banner_dim,twitch_channel,promo_name,acronym`);
     if (rows[0]) {
       const u = rows[0];
       document.getElementById('ep-yt-input').value = u.yt_channel || '';
@@ -2165,6 +2166,10 @@ async function openEditModal() {
       document.getElementById('ep-x-input').value = (u.x_handle || '').replace('@','');
       document.getElementById('ep-web-input').value = u.promo_website || '';
       document.getElementById('ep-apply-input').value = u.efed_signings_link || '';
+      const nameInput = document.getElementById('ep-efed-name-input');
+      if (nameInput) nameInput.value = u.promo_name || EFED_NAME || '';
+      const acronymInput = document.getElementById('ep-acronym-input');
+      if (acronymInput) acronymInput.value = (u.acronym || '').toUpperCase();
       const bioVal = u.efed_bio || '';
       const bioInput = document.getElementById('ep-bio-input');
       const bioCount = document.getElementById('ep-bio-count');
@@ -2244,12 +2249,20 @@ async function saveEditProfile() {
   const apply = document.getElementById('ep-apply-input').value.trim();
   const bio = (document.getElementById('ep-bio-input')?.value || '').slice(0,500);
   const bannerDim = parseInt(document.getElementById('efed-dim-slider')?.value) || 0;
+  const newName = (document.getElementById('ep-efed-name-input')?.value || '').trim();
+  const acronym = (document.getElementById('ep-acronym-input')?.value || '').trim().toUpperCase().slice(0,8);
   try {
     const _sr = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
       method:'PATCH', headers:SB_HEADERS,
-      body:JSON.stringify({yt_channel:yt||null, twitch_channel:twitch||null, ig_handle:ig||null, x_handle:x||null, promo_website:web||null, efed_signings_link:apply||null, efed_bio:bio||null, efed_banner_dim:bannerDim})
+      body:JSON.stringify({yt_channel:yt||null, twitch_channel:twitch||null, ig_handle:ig||null, x_handle:x||null, promo_website:web||null, efed_signings_link:apply||null, efed_bio:bio||null, efed_banner_dim:bannerDim, promo_name:newName||null, acronym:acronym||null})
     });
     if (!_sr.ok) throw new Error('HTTP '+_sr.status+': '+await _sr.text());
+    efedApplyBannerDim(bannerDim);
+    // Update acronym pill
+    const acPill = document.getElementById('stat-acronym-pill');
+    const acEl = document.getElementById('stat-acronym');
+    if (acEl) acEl.textContent = acronym || '—';
+    if (acPill) acPill.style.display = acronym ? '' : 'none';
     efedApplyBannerDim(bannerDim);
     // Update bio on page
     const bioEl = document.getElementById('efed-bio');
@@ -3049,7 +3062,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_events_json,efed_champions_json,efed_roster_order&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_events_json,efed_champions_json,efed_roster_order,acronym&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
@@ -3143,6 +3156,14 @@ async function loadProfile() {
     if (session) {
       const _isOwnerCheck = (typeof _isOwnProfile !== 'undefined') ? _isOwnProfile : false;
       if (_isOwnerCheck) document.getElementById('efed-name').classList.add('is-owner');
+    }
+
+    // Acronym pill
+    const acPill = document.getElementById('stat-acronym-pill');
+    const acEl = document.getElementById('stat-acronym');
+    if (user.acronym && acEl && acPill) {
+      acEl.textContent = user.acronym.toUpperCase();
+      acPill.style.display = '';
     }
 
     // Logo
@@ -4550,7 +4571,18 @@ function triggerInstall() {
         <div id="ep-av-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
       </div>
 
-      <!-- Banner -->
+      <!-- eFed Name + Acronym -->
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div>
+          <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;font-weight:700;">eFed Name</div>
+          <input id="ep-efed-name-input" type="text" maxlength="80" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+        </div>
+        <div>
+          <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;font-weight:700;">Acronym</div>
+          <input id="ep-acronym-input" type="text" maxlength="8" placeholder="e.g. FSW" style="width:120px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;text-transform:uppercase;">
+          <div style="font-size:.6rem;color:#5a5a6a;margin-top:4px;">Shown on your page · searchable by acronym</div>
+        </div>
+      </div>
       <div>
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Banner</div>
         <button onclick="document.getElementById('profile-banner-file').click()" style="width:100%;padding:9px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">
@@ -6101,29 +6133,38 @@ const _soSearch = (() => {
       (v.efed||'').toLowerCase().includes(ql)
     );
 
-    // eFeds — dedupe from videos
+    // eFeds — dedupe from videos, also match by acronym
     const efedMap = {};
     allVids.forEach(v => {
       const name = (v.efed||'').trim();
       if (!name) return;
-      if (!efedMap[name]) efedMap[name] = { count: 0, logo: null };
+      if (!efedMap[name]) efedMap[name] = { count: 0 };
       efedMap[name].count++;
     });
+    // Also add eFeds that have no videos but match acronym
+    if (_peopleCache) {
+      _peopleCache.filter(u => u.promo_name && u.acronym).forEach(u => {
+        const name = u.promo_name.trim();
+        if (!efedMap[name]) efedMap[name] = { count: 0 };
+        efedMap[name].acronym = (u.acronym||'').toUpperCase();
+      });
+    }
     const efedMatches = Object.entries(efedMap)
-      .filter(([name]) => name.toLowerCase().includes(ql))
+      .filter(([name, d]) => name.toLowerCase().includes(ql) || (d.acronym||'').toLowerCase() === ql)
       .sort((a, b) => b[1].count - a[1].count)
-      .map(([name, d]) => ({ name, count: d.count }));
+      .map(([name, d]) => ({ name, count: d.count, acronym: d.acronym }));
 
     // People — query users table
     let peopleMatches = [];
     try {
       if (!_peopleCache) {
-        _peopleCache = await sbGet('users', 'select=username,display_name,promo_name,avatar_url,is_efed_owner,role&limit=500');
+        _peopleCache = await sbGet('users', 'select=username,display_name,promo_name,avatar_url,is_efed_owner,role,acronym&limit=500');
       }
       peopleMatches = _peopleCache.filter(u =>
         (u.username||'').toLowerCase().includes(ql) ||
         (u.display_name||'').toLowerCase().includes(ql) ||
-        (u.promo_name||'').toLowerCase().includes(ql)
+        (u.promo_name||'').toLowerCase().includes(ql) ||
+        (u.acronym||'').toLowerCase() === ql
       );
     } catch(e) {}
 
@@ -6167,10 +6208,11 @@ const _soSearch = (() => {
     if (doEfeds && efeds.length) {
       html += '<div class="sr-section-label">eFeds <span class="sr-count-badge">' + efeds.length + '</span></div>';
       efeds.forEach(ef => {
+        const acTag = ef.acronym ? `<span style="font-size:.55rem;letter-spacing:1.5px;color:rgba(255,255,255,.35);background:rgba(255,255,255,.06);border-radius:4px;padding:1px 5px;font-weight:700;">${esc(ef.acronym)}</span>` : '';
         html += '<div class="sr-efed-item" onclick="_soSearch.openEfed(\'' + encodeURIComponent(ef.name) + '\')">' +
           '<div class="sr-efed-icon">🎭</div>' +
           '<div class="sr-efed-info">' +
-            '<div class="sr-efed-name">' + esc(ef.name) + '</div>' +
+            '<div class="sr-efed-name" style="display:flex;align-items:center;gap:6px;">' + esc(ef.name) + acTag + '</div>' +
             '<div class="sr-efed-eps">' + ef.count + ' episode' + (ef.count !== 1 ? 's' : '') + '</div>' +
           '</div>' +
           '<div class="sr-arrow">›</div></div>';
