@@ -3934,91 +3934,13 @@ async function _saveRosterOrder() {
     });
     if (!r.ok) {
       const txt = await r.text().catch(()=>'');
-      showToast('⚠️ Order not saved to DB — run ALTER TABLE in Supabase');
-      console.warn('[roster order] save failed', r.status, txt);
-    } else {
-      showToast('✓ Roster order saved');
+      console.warn('[roster order] save failed — run: ALTER TABLE users ADD COLUMN IF NOT EXISTS efed_roster_order jsonb DEFAULT \'[]\';', r.status, txt);
     }
+    // silent success — order saves automatically on chat activity
   } catch(e) { console.warn('[roster order] save error', e); }
 }
 
-function _initRosterDrag(wrap) {
-  let active = null, clone = null, offsetX = 0, wasDragged = false;
-
-  function cardOf(el) {
-    while (el && el.parentNode !== wrap) el = el.parentNode;
-    return (el && el.dataset && el.dataset.username) ? el : null;
-  }
-
-  function onDown(e) {
-    if (e.button !== 0) return;
-    // Let buttons and links handle their own events
-    if (e.target.closest('button,a')) return;
-    const card = cardOf(e.target);
-    if (!card) return;
-    e.preventDefault();
-    active = card;
-    wasDragged = false;
-    const rect = card.getBoundingClientRect();
-    offsetX = e.clientX - rect.left;
-    clone = card.cloneNode(true);
-    clone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;opacity:.88;pointer-events:none;z-index:99999;border-radius:10px;border:1px solid rgba(200,168,75,.6);box-shadow:0 10px 30px rgba(0,0,0,.7);transition:none;`;
-    document.body.appendChild(clone);
-    card.style.opacity = '.25';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }
-
-  function onMove(e) {
-    if (!clone || !active) return;
-    wasDragged = true;
-    const rect = active.getBoundingClientRect();
-    clone.style.left = (e.clientX - offsetX) + 'px';
-    clone.style.top  = rect.top + 'px';
-    // Find card under cursor
-    clone.style.visibility = 'hidden';
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    clone.style.visibility = 'visible';
-    Array.from(wrap.children).forEach(c => c.style.outline = '');
-    const target = el ? cardOf(el) : null;
-    if (target && target !== active) {
-      const tr = target.getBoundingClientRect();
-      const after = e.clientX > tr.left + tr.width / 2;
-      target.style.outline = '2px solid rgba(200,168,75,.55)';
-      wrap.insertBefore(active, after ? target.nextSibling : target);
-    }
-  }
-
-  function onUp(e) {
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    if (clone) { clone.remove(); clone = null; }
-    Array.from(wrap.children).forEach(c => { c.style.outline = ''; c.style.opacity = ''; });
-    if (wasDragged) {
-      // Block the subsequent click so card doesn't navigate
-      if (active) active.addEventListener('click', ev => ev.stopPropagation(), { once: true, capture: true });
-      _saveRosterOrder();
-    }
-    active = null;
-    wasDragged = false;
-  }
-
-  Array.from(wrap.children).forEach(card => {
-    card.style.userSelect = 'none';
-    card.addEventListener('mousedown', onDown);
-    if (!card.querySelector('.roster-drag-grip')) {
-      const grip = document.createElement('div');
-      grip.className = 'roster-drag-grip';
-      grip.style.cssText = 'position:absolute;top:5px;left:5px;display:flex;flex-direction:column;gap:2.5px;padding:2px;cursor:grab;z-index:4;opacity:.25;pointer-events:none;transition:opacity .15s;';
-      grip.innerHTML = '<span style="display:block;width:12px;height:1.5px;background:#fff;border-radius:1px;"></span>'
-        + '<span style="display:block;width:12px;height:1.5px;background:#fff;border-radius:1px;"></span>'
-        + '<span style="display:block;width:12px;height:1.5px;background:#fff;border-radius:1px;"></span>';
-      card.addEventListener('mouseenter', () => grip.style.opacity = '0.72');
-      card.addEventListener('mouseleave', () => { if (active !== card) grip.style.opacity = '0.25'; });
-      card.appendChild(grip);
-    }
-  });
-}
+// roster drag removed — order changes via chat activity only
 
 async function loadRoster() {
   const grid = document.getElementById('roster-grid'); if (!grid) return;
@@ -4249,8 +4171,6 @@ async function loadRoster() {
         ordered.forEach(c => wrap.appendChild(c));
       }
       grid.appendChild(wrap);
-      // Add drag-to-reorder for owner
-      if (_isOwnProfile) _initRosterDrag(wrap);
       setTimeout(updateRosterArrows, 50);
     }
     else { grid.innerHTML = '<div style="font-size:.78rem;color:#7a7a8a;">No roster members yet.</div>'; }
@@ -7556,14 +7476,26 @@ function _efedTimeAgo(ts) {
 
 // ── ROSTER ACTIVITY TRACKING ──
 function bumpRosterActivity(username) {
-  // Move this user's card to the front of the roster grid immediately
+  // Cards live inside wrap (a div child of #roster-grid), not directly in grid
   const grid = document.getElementById('roster-grid');
   if (!grid) return;
-  const card = grid.querySelector(`[data-username="${CSS.escape(username)}"]`);
-  if (card && grid.firstChild !== card) {
-    grid.insertBefore(card, grid.firstChild);
+  const wrap = grid.querySelector('div');
+  if (!wrap) return;
+  const card = wrap.querySelector(`[data-username="${CSS.escape(username)}"]`);
+  if (card) {
+    // Keep owner card pinned first — bump active member to 2nd position
+    const ownerCard = wrap.querySelector('[data-username]');
+    const isOwnerCard = ownerCard && ownerCard.dataset.username === EFED_OWNER;
+    if (isOwnerCard && ownerCard !== card) {
+      // Insert after owner card
+      ownerCard.after(card);
+    } else if (wrap.firstChild !== card) {
+      wrap.insertBefore(card, wrap.firstChild);
+    }
+    // Save new order to Supabase + localStorage
+    _saveRosterOrder();
   }
-  // Update last_active_at in DB (fire and forget — silently fails if column missing)
+  // Update last_active_at in DB
   const session = getSession();
   if (session && username === session.username) {
     fetch(SUPABASE_URL + '/rest/v1/roster?username=eq.' + encodeURIComponent(username) + '&efed=eq.' + encodeURIComponent(EFED_NAME), {
