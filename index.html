@@ -5614,32 +5614,53 @@ setTimeout(()=>{ if(typeof loadVerifiedUsers==="function") loadVerifiedUsers(); 
   const _playUrl = new URLSearchParams(window.location.search).get('play');
   if (_playUrl) {
     history.replaceState(null, '', window.location.pathname);
-    // Start hub loading in background immediately
+    // Open stub immediately so video plays right away — no waiting on DB
+    const _stub = { url: _playUrl, show: '', efed: '', date: '', dateMs: 0, submittedBy: '', displayName: '', community: true, status: 'approved', thumb: null, tags: [] };
+    videos.push(_stub);
+    // Start hub loading in background
     initHub();
-    // Try local videos array first
-    const _found = videos.find(v => v.url === _playUrl);
-    if (_found) {
-      openExpand(_found);
-    } else {
-      // Try to fetch from DB — no status filter so any approved/pending/community video works
-      let _opened = false;
-      try {
-        const rows = await sbGet('submissions', `url=eq.${encodeURIComponent(_playUrl)}&limit=1`);
-        if (rows.length) {
-          const s = rows[0];
-          const v = { url: s.url, show: s.show_name||'', efed: s.efed||'', date: s.date||'', dateMs: s.date_ms||0, submittedBy: s.submitted_by||'', displayName: s.submitted_by||'', community: true, status: 'approved', thumb: s.thumb_url||null, tags: s.tags ? (typeof s.tags==='string' ? JSON.parse(s.tags) : s.tags) : [] };
-          videos.push(v);
-          openExpand(v);
-          _opened = true;
-        }
-      } catch(e) { console.warn('[play param] DB lookup failed:', e); }
-      // Fallback: open with URL stub — at minimum the video will play
-      if (!_opened) {
-        const _stub = { url: _playUrl, show: '', efed: '', date: '', dateMs: 0, submittedBy: '', displayName: '', community: true, status: 'approved', thumb: null, tags: [] };
-        videos.push(_stub);
-        openExpand(_stub);
+    // Open video panel immediately
+    openExpand(_stub);
+    // Now fetch real metadata and backfill the already-open panel
+    try {
+      // Try encoded URL first, then raw URL (handles PostgREST encoding behaviour)
+      let rows = [];
+      try { rows = await sbGet('submissions', 'url=eq.' + encodeURIComponent(_playUrl) + '&limit=1'); } catch(e) {}
+      if (!rows.length) {
+        try { rows = await sbGet('submissions', 'url=eq.' + _playUrl + '&limit=1'); } catch(e) {}
       }
-    }
+      if (rows.length) {
+        const s = rows[0];
+        // Update stub object (used by anything that still holds the reference)
+        Object.assign(_stub, {
+          show: s.show_name || '', efed: s.efed || '', date: s.date || '',
+          dateMs: s.date_ms || 0, submittedBy: s.submitted_by || '',
+          displayName: s.submitted_by || '', thumb: s.thumb_url || null,
+          tags: s.tags ? (typeof s.tags==='string' ? JSON.parse(s.tags) : s.tags) : []
+        });
+        // Backfill visible fields in the already-open panel
+        const _se = document.getElementById('expand-show');
+        if (_se) _se.textContent = _stub.show;
+        const _ee = document.getElementById('expand-efed');
+        if (_ee) {
+          Array.from(_ee.childNodes).forEach(n => { if (n.nodeType === 3) n.remove(); });
+          _ee.appendChild(document.createTextNode(_stub.efed || ''));
+          if (_stub.efed) { _ee.href = 'efed.html?e=' + encodeURIComponent(_stub.efed); _ee.title = 'Visit ' + _stub.efed; }
+        }
+        const _me = document.getElementById('expand-meta');
+        if (_me && _stub.date) _me.textContent = _stub.date;
+        const _pe = document.getElementById('expand-poster');
+        if (_pe && _stub.submittedBy) {
+          _pe.innerHTML = 'Posted by <span>' + (_stub.displayName || _stub.submittedBy) + '</span>';
+        }
+        if (_stub.thumb) {
+          const _te = document.getElementById('expand-hero-thumb');
+          if (_te && (!_te.src || _te.src.includes('default.jpg'))) { _te.src = _stub.thumb; }
+          const _le = document.getElementById('expand-efed-logo');
+          if (_le) { _le.src = _stub.thumb; _le.style.display = 'block'; }
+        }
+      }
+    } catch(e) { console.warn('[play param] metadata backfill failed:', e); }
   } else {
     initHub();
     // Handle ?tab= param (e.g. from notification bell on other pages)
