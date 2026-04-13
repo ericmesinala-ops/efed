@@ -232,6 +232,10 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .sec-title::after { content: ''; flex: 1; height: 1px; background: rgba(200,168,75,.12); }
 .sec-sub { font-size: .65rem; color: rgba(255,255,255,.32); line-height: 1.5; margin-top: 8px; margin-bottom: 14px; display: flex; align-items: center; gap: 5px; }
 html.day-mode .sec-sub { color: rgba(0,0,0,.35) !important; }
+html.day-mode #booking-opponent-select { background: #f0f0f4 !important; color: #111 !important; border-color: rgba(0,0,0,.15) !important; }
+html.day-mode #booking-opponent-list { background: #f0f0f4 !important; border-color: rgba(0,0,0,.15) !important; }
+html.day-mode .booking-opt { color: #222 !important; }
+html.day-mode .booking-opt:hover { background: rgba(0,0,0,.06) !important; }
 
 .caw-slot { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); cursor: pointer; }
 @media (max-width: 600px) { #caw-grid { grid-template-columns: repeat(2,1fr) !important; } }
@@ -2041,6 +2045,12 @@ document.addEventListener('click', e => {
   const avBox = document.getElementById('profile-av-box');
   const avMenu = document.getElementById('av-ctx-menu');
   if (avMenu && avBox && !avBox.contains(e.target) && !avMenu.contains(e.target)) closeAvMenu();
+  // Close booking dropdown when clicking outside
+  const bookSel = document.getElementById('booking-opponent-select');
+  const bookList = document.getElementById('booking-opponent-list');
+  if (bookList && bookList.style.display !== 'none' && !bookSel?.contains(e.target) && !bookList.contains(e.target)) {
+    bookList.style.display = 'none';
+  }
 });
 
 
@@ -3653,6 +3663,12 @@ function _ram_openChamp() { openSetChampModal(_ram.username, _ram.displayName, _
 function _ram_openBook()  { openBookingModal(_ram.username, _ram.displayName, _ram.rosterRowId, _ram.planNote); }
 function _ram_viewProfile() { window.location.href = 'profile.html?u=' + encodeURIComponent(_ram.username); }
 
+function toggleBookingDropdown() {
+  const list = document.getElementById('booking-opponent-list');
+  if (!list) return;
+  list.style.display = list.style.display === 'none' ? 'block' : 'none';
+}
+
 // ── BOOKING ──
 let _bookingRosterId = null;
 let _bookingUsername = null;
@@ -3669,21 +3685,39 @@ function openBookingModal(username, displayName, rosterRowId, planNote) {
   document.getElementById('booking-tba-btn').style.color = 'rgba(255,255,255,.5)';
   document.getElementById('booking-tba-btn').style.borderColor = 'rgba(255,255,255,.12)';
 
-  // Populate opponent dropdown from cached roster (exclude self)
-  const sel = document.getElementById('booking-opponent-select');
-  sel.innerHTML = '<option value="">— Select opponent —</option>';
-  (window._efedRosterMembers || []).filter(m => m.username !== username).forEach(m => {
-    const opt = document.createElement('option');
-    opt.value = m.username;
+  // Populate custom opponent dropdown
+  const list = document.getElementById('booking-opponent-list');
+  const lbl = document.getElementById('booking-opponent-label');
+  const val = document.getElementById('booking-opponent-value');
+  list.innerHTML = '';
+  // Add empty option
+  const emptyOpt = document.createElement('div');
+  emptyOpt.className = 'booking-opt';
+  emptyOpt.textContent = '— Select opponent —';
+  emptyOpt.style.cssText = 'padding:10px 12px;font-size:.82rem;color:rgba(255,255,255,.3);cursor:pointer;font-family:\'DM Sans\',sans-serif;';
+  emptyOpt.onclick = () => { val.value=''; lbl.textContent='— Select opponent —'; lbl.style.color='rgba(255,255,255,.4)'; list.style.display='none'; };
+  list.appendChild(emptyOpt);
+  (window._efedRosterMembers || []).filter(m => m.username !== _bookingUsername).forEach(m => {
+    const opt = document.createElement('div');
+    opt.className = 'booking-opt';
+    opt.dataset.value = m.username;
     opt.textContent = m.display_name || m.username;
-    sel.appendChild(opt);
+    opt.style.cssText = 'padding:10px 12px;font-size:.82rem;color:#e8e8e8;cursor:pointer;font-family:\'DM Sans\',sans-serif;border-top:1px solid rgba(255,255,255,.05);transition:background .1s;';
+    opt.onmouseover = () => opt.style.background = 'rgba(255,255,255,.07)';
+    opt.onmouseout = () => opt.style.background = '';
+    opt.onclick = () => { val.value=m.username; lbl.textContent=m.display_name||m.username; lbl.style.color='#e8e8e8'; list.style.display='none'; };
+    list.appendChild(opt);
   });
 
   // Pre-fill if existing booking
   if (planNote) {
     try {
       const bk = typeof planNote === 'string' ? JSON.parse(planNote) : planNote;
-      if (bk.opponent) sel.value = bk.opponent;
+      if (bk.opponent) {
+        val.value = bk.opponent;
+        lbl.textContent = bk.opponentName || bk.opponent;
+        lbl.style.color = '#e8e8e8';
+      }
       document.getElementById('booking-show-input').value = bk.show || '';
       if (bk.tba) {
         _bookingTba = true;
@@ -3698,7 +3732,9 @@ function openBookingModal(username, displayName, rosterRowId, planNote) {
       }
     } catch(e) {}
   } else {
-    sel.value = '';
+    val.value = '';
+    lbl.textContent = '— Select opponent —';
+    lbl.style.color = 'rgba(255,255,255,.4)';
     document.getElementById('booking-show-input').value = '';
     document.getElementById('booking-date-input').value = '';
     document.getElementById('booking-date-input').disabled = false;
@@ -3709,6 +3745,8 @@ function openBookingModal(username, displayName, rosterRowId, planNote) {
 
 function closeBookingModal() {
   document.getElementById('booking-modal-bg').style.display = 'none';
+  const list = document.getElementById('booking-opponent-list');
+  if (list) list.style.display = 'none';
 }
 
 function toggleBookingTba() {
@@ -3727,53 +3765,80 @@ function toggleBookingTba() {
 async function saveBooking(clear) {
   const session = getSession(); if (!session) return;
   const msg = document.getElementById('booking-msg');
-  const opponentUsername = document.getElementById('booking-opponent-select').value;
-  const opponentName = document.getElementById('booking-opponent-select').selectedOptions[0]?.text || '';
+  const opponentUsername = document.getElementById('booking-opponent-value').value;
+  const opponentName = document.getElementById('booking-opponent-label').textContent || '';
   const show = document.getElementById('booking-show-input').value.trim();
   const date = _bookingTba ? 'TBA' : document.getElementById('booking-date-input').value.trim();
-  const planNote = clear ? null : JSON.stringify({ opponent: opponentUsername, opponentName, show, date, tba: _bookingTba });
 
   if (!clear && !opponentUsername) {
     msg.textContent = 'Please select an opponent.'; msg.style.color = '#ff6b6b'; return;
   }
+
+  // Build both booking payloads (wrestler ↔ opponent)
+  const planNoteA = clear ? null : JSON.stringify({ opponent: opponentUsername, opponentName, show, date, tba: _bookingTba });
+  const myDisplayName = (window._efedRosterMembers||[]).find(m=>m.username===_bookingUsername)?.display_name || _bookingUsername;
+  const planNoteB = clear ? null : JSON.stringify({ opponent: _bookingUsername, opponentName: myDisplayName, show, date, tba: _bookingTba });
+
   try {
-    await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(_bookingRosterId), {
-      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: planNote })
-    });
+    // Save wrestler A
+    if (_bookingRosterId) {
+      const rA = await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(_bookingRosterId), {
+        method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: planNoteA })
+      });
+      if (!rA.ok) throw new Error('Save failed: ' + await rA.text());
+    }
 
-    // Send notification to the booked wrestler
-    if (!clear && _bookingUsername) {
-      const showPart = show ? ` at <strong>${show}</strong>` : '';
-      const efedPart = EFED_NAME ? ` (${EFED_NAME})` : '';
-      const datePart = date ? ` on ${date}` : '';
-      const notifMsg = `Your next match will be against ${opponentName}${showPart}${efedPart}${datePart}.`;
+    // Find and save wrestler B (opponent's roster row)
+    if (!clear && opponentUsername) {
       try {
-        await sbInsert('notifications', {
-          username: _bookingUsername,
-          type: 'booking',
-          message: notifMsg,
-          read: false,
-          created_at: new Date().toISOString()
-        });
-      } catch(e) { /* notification non-critical */ }
+        const oppRows = await sbGet('roster', `username=eq.${encodeURIComponent(opponentUsername)}&efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id`);
+        if (oppRows[0]?.id) {
+          await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(oppRows[0].id), {
+            method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: planNoteB })
+          });
+        }
+      } catch(e) { /* opponent booking non-critical */ }
     }
 
-    // Update green dot on card
-    const existingDot = document.getElementById('booking-dot-' + _bookingUsername);
-    if (!clear && !existingDot) {
-      const card = document.querySelector(`[data-username="${_bookingUsername}"]`);
-      if (card) {
-        const dot = document.createElement('div');
-        dot.id = 'booking-dot-' + _bookingUsername;
-        dot.style.cssText = 'position:absolute;top:5px;left:5px;width:8px;height:8px;border-radius:50%;background:#4caf64;border:1.5px solid rgba(0,0,0,.6);z-index:4;';
-        card.appendChild(dot);
+    // Notifications
+    if (!clear) {
+      const showPart = show ? ` at ${show}` : '';
+      const efedPart = EFED_NAME ? ` (${EFED_NAME})` : '';
+      const datePart = (date && date !== 'TBA') ? ` on ${date}` : date === 'TBA' ? ' — date TBA' : '';
+      try {
+        await sbInsert('notifications', { username: _bookingUsername, type: 'booking',
+          message: `Your next match will be against ${opponentName}${showPart}${efedPart}${datePart}.`,
+          read: false, created_at: new Date().toISOString() });
+      } catch(e) {}
+      if (opponentUsername) {
+        try {
+          await sbInsert('notifications', { username: opponentUsername, type: 'booking',
+            message: `Your next match will be against ${myDisplayName}${showPart}${efedPart}${datePart}.`,
+            read: false, created_at: new Date().toISOString() });
+        } catch(e) {}
       }
-    } else if (clear && existingDot) {
-      existingDot.remove();
     }
+
+    // Update ✍️ indicator on both cards
+    _updateBookingIndicator(_bookingUsername, !clear);
+    if (opponentUsername) _updateBookingIndicator(opponentUsername, !clear);
+
     closeBookingModal();
     showToast(clear ? 'Booking cleared' : 'Booking saved!');
-  } catch(e) { msg.textContent = 'Could not save. Try again.'; msg.style.color = '#ff6b6b'; }
+  } catch(e) { msg.textContent = 'Could not save — ' + e.message; msg.style.color = '#ff6b6b'; }
+}
+
+function _updateBookingIndicator(username, booked) {
+  const card = document.querySelector(`[data-username="${username}"]`);
+  if (!card) return;
+  const existing = document.getElementById('booked-indicator-' + username);
+  if (!booked) { if (existing) existing.remove(); return; }
+  if (existing) return; // already there
+  const ind = document.createElement('div');
+  ind.id = 'booked-indicator-' + username;
+  ind.style.cssText = 'position:absolute;bottom:5px;left:6px;font-size:.65rem;opacity:.45;z-index:4;line-height:1;pointer-events:none;';
+  ind.textContent = '✍️';
+  card.appendChild(ind);
 }
 
 function openApplyLinkModal() {
@@ -4257,16 +4322,16 @@ async function loadRoster() {
         ${pendingBadge}`;
       card.appendChild(contentWrap);
 
-      // ── GREEN DOT if booked (owner view) ──
+      // ── ✍️ INDICATOR if booked (owner view) ──
       if (_isOwnProfile && !isPending && !isOwnerCard && planNote) {
         try {
           const bk = typeof planNote === 'string' ? JSON.parse(planNote) : planNote;
           if (bk && bk.opponent) {
-            const dot = document.createElement('div');
-            dot.id = 'booking-dot-' + u.username;
-            dot.style.cssText = 'position:absolute;top:5px;left:5px;width:8px;height:8px;border-radius:50%;background:#4caf64;border:1.5px solid rgba(0,0,0,.6);z-index:4;';
-            dot.title = 'Booked';
-            card.appendChild(dot);
+            const ind = document.createElement('div');
+            ind.id = 'booked-indicator-' + u.username;
+            ind.style.cssText = 'position:absolute;bottom:5px;left:6px;font-size:.65rem;opacity:.45;z-index:4;line-height:1;pointer-events:none;';
+            ind.textContent = '✍️';
+            card.appendChild(ind);
           }
         } catch(e) {}
       }
@@ -4960,11 +5025,14 @@ function triggerInstall() {
 
     <div style="display:flex;flex-direction:column;gap:14px;">
       <!-- Opponent -->
-      <div>
+      <div style="position:relative;">
         <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Competing Against</div>
-        <select id="booking-opponent-select" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;cursor:pointer;">
-          <option value="">— Select opponent —</option>
-        </select>
+        <div id="booking-opponent-select" onclick="toggleBookingDropdown()" style="width:100%;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.82rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;box-sizing:border-box;user-select:none;">
+          <span id="booking-opponent-label">— Select opponent —</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="flex-shrink:0;opacity:.5;"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div id="booking-opponent-list" style="display:none;position:absolute;left:0;right:0;top:calc(100% + 4px);background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:8px;z-index:100;max-height:200px;overflow-y:auto;box-shadow:0 12px 32px rgba(0,0,0,.7);scrollbar-width:none;"></div>
+        <input type="hidden" id="booking-opponent-value">
       </div>
       <!-- Show name -->
       <div>
