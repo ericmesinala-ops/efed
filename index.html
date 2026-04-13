@@ -5614,16 +5614,11 @@ setTimeout(()=>{ if(typeof loadVerifiedUsers==="function") loadVerifiedUsers(); 
   const _playUrl = new URLSearchParams(window.location.search).get('play');
   if (_playUrl) {
     history.replaceState(null, '', window.location.pathname);
-    // Open stub immediately so video plays right away — no waiting on DB
-    const _stub = { url: _playUrl, show: '', efed: '', date: '', dateMs: 0, submittedBy: '', displayName: '', community: true, status: 'approved', thumb: null, tags: [] };
-    videos.push(_stub);
-    // Start hub loading in background
     initHub();
-    // Open video panel immediately
-    openExpand(_stub);
-    // Now fetch real metadata and backfill the already-open panel
+    // openExpand lives in a later <script> block — must await first so it's defined
+    // Try DB lookup (encoded URL, then raw fallback)
+    let _v = null;
     try {
-      // Try encoded URL first, then raw URL (handles PostgREST encoding behaviour)
       let rows = [];
       try { rows = await sbGet('submissions', 'url=eq.' + encodeURIComponent(_playUrl) + '&limit=1'); } catch(e) {}
       if (!rows.length) {
@@ -5631,36 +5626,15 @@ setTimeout(()=>{ if(typeof loadVerifiedUsers==="function") loadVerifiedUsers(); 
       }
       if (rows.length) {
         const s = rows[0];
-        // Update stub object (used by anything that still holds the reference)
-        Object.assign(_stub, {
-          show: s.show_name || '', efed: s.efed || '', date: s.date || '',
-          dateMs: s.date_ms || 0, submittedBy: s.submitted_by || '',
-          displayName: s.submitted_by || '', thumb: s.thumb_url || null,
-          tags: s.tags ? (typeof s.tags==='string' ? JSON.parse(s.tags) : s.tags) : []
-        });
-        // Backfill visible fields in the already-open panel
-        const _se = document.getElementById('expand-show');
-        if (_se) _se.textContent = _stub.show;
-        const _ee = document.getElementById('expand-efed');
-        if (_ee) {
-          Array.from(_ee.childNodes).forEach(n => { if (n.nodeType === 3) n.remove(); });
-          _ee.appendChild(document.createTextNode(_stub.efed || ''));
-          if (_stub.efed) { _ee.href = 'efed.html?e=' + encodeURIComponent(_stub.efed); _ee.title = 'Visit ' + _stub.efed; }
-        }
-        const _me = document.getElementById('expand-meta');
-        if (_me && _stub.date) _me.textContent = _stub.date;
-        const _pe = document.getElementById('expand-poster');
-        if (_pe && _stub.submittedBy) {
-          _pe.innerHTML = 'Posted by <span>' + (_stub.displayName || _stub.submittedBy) + '</span>';
-        }
-        if (_stub.thumb) {
-          const _te = document.getElementById('expand-hero-thumb');
-          if (_te && (!_te.src || _te.src.includes('default.jpg'))) { _te.src = _stub.thumb; }
-          const _le = document.getElementById('expand-efed-logo');
-          if (_le) { _le.src = _stub.thumb; _le.style.display = 'block'; }
-        }
+        _v = { url: s.url, show: s.show_name||'', efed: s.efed||'', date: s.date||'', dateMs: s.date_ms||0, submittedBy: s.submitted_by||'', displayName: s.submitted_by||'', community: true, status: 'approved', thumb: s.thumb_url||null, tags: s.tags ? (typeof s.tags==='string' ? JSON.parse(s.tags) : s.tags) : [] };
       }
-    } catch(e) { console.warn('[play param] metadata backfill failed:', e); }
+    } catch(e) { console.warn('[play param] DB lookup error:', e); }
+    // Stub fallback if DB returned nothing — video still plays, metadata just blank
+    if (!_v) {
+      _v = { url: _playUrl, show: '', efed: '', date: '', dateMs: 0, submittedBy: '', displayName: '', community: true, status: 'approved', thumb: null, tags: [] };
+    }
+    videos.push(_v);
+    openExpand(_v);
   } else {
     initHub();
     // Handle ?tab= param (e.g. from notification bell on other pages)
