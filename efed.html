@@ -9826,22 +9826,33 @@ function _initCawDragDrop() {
   [1,2,3,4,5,6,7,8].forEach(slot => {
     const el = document.getElementById('caw-slot-' + slot);
     if (!el) return;
-    el.addEventListener('dragover', e => { e.preventDefault(); el.style.outline = '2px solid rgba(200,168,75,.6)'; });
-    el.addEventListener('dragleave', () => { el.style.outline = ''; });
+
+    el.addEventListener('dragover', e => {
+      // Only handle OS file drags, not internal slot reordering
+      if (!e.dataTransfer.types.includes('Files')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      el.style.outline = '2px solid rgba(200,168,75,.6)';
+    });
+
+    el.addEventListener('dragleave', () => {
+      el.style.outline = '';
+    });
+
     el.addEventListener('drop', e => {
-      e.preventDefault(); el.style.outline = '';
+      el.style.outline = '';
       const files = e.dataTransfer.files;
-      if (!files || !files[0]) return;
+      if (!files || !files[0]) return; // internal drag — let existing system handle
+      e.preventDefault();
+      e.stopPropagation();
       const imgEl = document.getElementById('caw-img-' + slot);
-      const isFilled = imgEl && imgEl.style.display !== 'none' && imgEl.src;
+      const isFilled = imgEl && imgEl.style.display !== 'none' && imgEl.src && !imgEl.src.endsWith('/');
       _cawDragFile = files[0];
       _cawDragTargetSlot = slot;
       if (isFilled) {
-        // Find which other slot to potentially switch with (the last clicked or source)
         document.getElementById('caw-drag-switch-label').textContent = 'Switch with another slot…';
         document.getElementById('caw-drag-modal-bg').style.display = 'flex';
       } else {
-        // Empty slot — just upload directly
         _processCawDragFile(_cawDragFile, slot);
       }
     });
@@ -9929,26 +9940,36 @@ async function _cawSwitchAndUpload(targetSlot, sourceSlot) {
 }
 
 function _processCawDragFile(file, slot) {
+  if (!file || !slot) return;
+  _cawSlot = slot;
   const reader = new FileReader();
   reader.onload = e => {
-    _cawSlot = slot;
-    const fakeEvent = { target: { files: [file], value: '' } };
-    // Reuse handleCawFile by setting _cawSlot first
-    _cawSlot = slot;
-    handleCawFile(fakeEvent);
+    openBannerCrop(e.target.result, 400, 400, async (croppedDataUrl) => {
+      const session = getSession();
+      if (!session) return;
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 400; canvas.height = 400;
+        canvas.getContext('2d').drawImage(img, 0, 0, 400, 400);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        const imgEl = document.getElementById('caw-img-' + slot);
+        const plusEl = document.getElementById('caw-plus-' + slot);
+        if (imgEl) { imgEl.src = dataUrl; imgEl.style.display = 'block'; }
+        if (plusEl) plusEl.style.display = 'none';
+        setCawSlotFilled(slot, true);
+        const field = _galField(slot);
+        const body = {}; body[field] = dataUrl;
+        try {
+          await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+            method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(body)
+          });
+        } catch(err) { console.error('Drag upload failed', err); }
+      };
+      img.src = croppedDataUrl;
+    });
   };
-  reader.readAsDataURL(file); // trigger — handleCawFile reads from input, so we use workaround below
-  // Direct approach: set _cawSlot and simulate
-  _cawSlot = slot;
-  const input = document.getElementById('caw-file-input');
-  // Create a DataTransfer to set file on input
-  try {
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    input.files = dt.files;
-    handleCawFile({ target: input });
-    input.value = '';
-  } catch(e) {}
+  reader.readAsDataURL(file);
 }
 </script>
 
