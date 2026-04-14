@@ -4961,6 +4961,121 @@ function scrollWlRow(dir) {
 }
 
 if (document.readyState === 'loading') {
+// ── GALLERY DRAG & REORDER ──
+let _galDragSlot = null;
+let _galDragClone = null;
+let _galDragOver = null;
+const _galField = slot => 'caw_image_' + slot;
+
+function _galGetImg(slot) {
+  const el = document.getElementById('caw-img-' + slot);
+  return el && el.style.display !== 'none' ? el.src : null;
+}
+function _galSetImg(slot, src) {
+  const img = document.getElementById('caw-img-' + slot);
+  const plus = document.getElementById('caw-plus-' + slot);
+  if (!img) return;
+  if (src) {
+    img.src = src; img.style.display = 'block';
+    if (plus) plus.style.display = 'none';
+    setCawSlotFilled(slot, true);
+  } else {
+    img.src = ''; img.style.display = 'none';
+    if (plus) plus.style.display = 'flex';
+    setCawSlotFilled(slot, false);
+  }
+}
+
+function initGalleryDrag(isOwner) {
+  if (!isOwner) return;
+  [1,2,3,4,5,6,7,8].forEach(slot => {
+    const el = document.getElementById('caw-slot-' + slot);
+    if (!el) return;
+    el.setAttribute('draggable', 'true');
+    el.addEventListener('dragstart', e => {
+      _galDragSlot = slot; e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => { el.style.opacity = '.35'; }, 0);
+    });
+    el.addEventListener('dragend', () => {
+      el.style.opacity = '1';
+      document.querySelectorAll('.caw-slot').forEach(s => s.classList.remove('caw-drag-over'));
+      if (_galDragSlot !== null && _galDragOver !== null && _galDragSlot !== _galDragOver) {
+        _galPerformMove(_galDragSlot, _galDragOver);
+      }
+      _galDragSlot = null; _galDragOver = null;
+    });
+    el.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (_galDragSlot === null || slot === _galDragSlot) return;
+      document.querySelectorAll('.caw-slot').forEach(s => s.classList.remove('caw-drag-over'));
+      el.classList.add('caw-drag-over'); _galDragOver = slot;
+    });
+    el.addEventListener('dragleave', () => { el.classList.remove('caw-drag-over'); });
+    el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('caw-drag-over'); });
+    let touchTimer = null, touchDragging = false;
+    el.addEventListener('touchstart', e => {
+      touchTimer = setTimeout(() => {
+        touchDragging = true; _galDragSlot = slot;
+        const rect = el.getBoundingClientRect();
+        _galDragClone = el.cloneNode(true);
+        _galDragClone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;opacity:.75;pointer-events:none;z-index:99999;border-radius:10px;left:${rect.left}px;top:${rect.top}px;transform:scale(1.05);transition:none;`;
+        document.body.appendChild(_galDragClone); el.style.opacity = '.25';
+      }, 400);
+    }, { passive: true });
+    el.addEventListener('touchmove', e => {
+      clearTimeout(touchTimer);
+      if (!touchDragging) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      if (_galDragClone) { _galDragClone.style.left = (t.clientX-50)+'px'; _galDragClone.style.top = (t.clientY-50)+'px'; }
+      const overSlot = [1,2,3,4,5,6,7,8].find(s => {
+        const se = document.getElementById('caw-slot-'+s);
+        if (!se || s === _galDragSlot) return false;
+        const r = se.getBoundingClientRect();
+        return t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom;
+      });
+      document.querySelectorAll('.caw-slot').forEach(s => s.classList.remove('caw-drag-over'));
+      if (overSlot) { document.getElementById('caw-slot-'+overSlot)?.classList.add('caw-drag-over'); _galDragOver = overSlot; } else _galDragOver = null;
+    }, { passive: false });
+    el.addEventListener('touchend', () => {
+      clearTimeout(touchTimer);
+      if (touchDragging) {
+        if (_galDragClone) { _galDragClone.remove(); _galDragClone = null; }
+        el.style.opacity = '1';
+        document.querySelectorAll('.caw-slot').forEach(s => s.classList.remove('caw-drag-over'));
+        if (_galDragSlot !== null && _galDragOver !== null && _galDragSlot !== _galDragOver) _galPerformMove(_galDragSlot, _galDragOver);
+      }
+      touchDragging = false; _galDragSlot = null; _galDragOver = null;
+    });
+    el.addEventListener('touchcancel', () => {
+      clearTimeout(touchTimer); touchDragging = false;
+      if (_galDragClone) { _galDragClone.remove(); _galDragClone = null; }
+      el.style.opacity = '1';
+      document.querySelectorAll('.caw-slot').forEach(s => s.classList.remove('caw-drag-over'));
+      _galDragSlot = null; _galDragOver = null;
+    });
+  });
+}
+
+async function _galPerformMove(fromSlot, toSlot) {
+  const imgs = {};
+  [1,2,3,4,5,6,7,8].forEach(s => { imgs[s] = _galGetImg(s); });
+  const moved = imgs[fromSlot];
+  if (fromSlot < toSlot) { for (let i = fromSlot; i < toSlot; i++) imgs[i] = imgs[i+1]; }
+  else { for (let i = fromSlot; i > toSlot; i--) imgs[i] = imgs[i-1]; }
+  imgs[toSlot] = moved;
+  [1,2,3,4,5,6,7,8].forEach(s => _galSetImg(s, imgs[s]));
+  const session = getSession(); if (!session) return;
+  const body = {};
+  [1,2,3,4,5,6,7,8].forEach(s => { body[_galField(s)] = imgs[s] || null; });
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(body)
+    });
+    if (!r.ok) showToast('Reorder failed');
+  } catch(e) { showToast('Reorder failed'); }
+}
+
   document.addEventListener('DOMContentLoaded', () => { initNav(); loadProfile(); });
 } else {
   initNav(); loadProfile();
