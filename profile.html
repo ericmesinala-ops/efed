@@ -412,7 +412,48 @@ html.day-mode .sec-help-tip { background: #fff !important; border-color: rgba(0,
 }
 .hub-back-bar:hover .hub-back-label { color: rgba(255,255,255,.85); }
 @media (max-width: 600px) { .hub-back-label { font-size: .75rem; color: rgba(255,255,255,.7); } }
-@media (max-width: 600px) { #caw-grid { grid-template-columns: repeat(2,1fr) !important; } }
+@media (max-width: 600px) {
+  #caw-grid {
+    display: block !important;
+    position: relative;
+    overflow: hidden;
+  }
+  #caw-grid .caw-page[data-page="1"] {
+    display: grid !important;
+    grid-template-columns: repeat(2,1fr);
+    gap: 8px;
+    transition: transform .32s cubic-bezier(.25,.46,.45,.94);
+  }
+  #caw-grid .caw-page[data-page="2"] {
+    display: grid !important;
+    grid-template-columns: repeat(2,1fr);
+    gap: 8px;
+    position: absolute;
+    top: 0; left: 0; width: 100%;
+    transform: translateX(100%);
+    transition: transform .32s cubic-bezier(.25,.46,.45,.94);
+  }
+  #caw-swipe-dots { display: flex !important; }
+  #caw-page-nav { display: none !important; }
+}
+#caw-swipe-dots {
+  display: none;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+}
+.caw-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.2);
+  transition: background .2s, transform .2s;
+  cursor: pointer;
+}
+.caw-dot.active {
+  background: var(--gold);
+  transform: scale(1.25);
+}
 
 .prof-arr-col { display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;flex-shrink:0;padding:0 4px; }
 .prof-pill-arr { width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.6);font-size:.9rem;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .2s,color .2s; }
@@ -2719,6 +2760,7 @@ const _posts = (() => {
     </div>
 
   </div>
+  <div id="caw-swipe-dots"><span class="caw-dot active" onclick="cawGoPage(1)"></span><span class="caw-dot" onclick="cawGoPage(2)"></span></div>
   <div id="caw-page-nav" style="display:none;justify-content:center;align-items:center;gap:20px;margin-top:10px;">
     <button onclick="cawPrevPage()" id="caw-prev-btn" style="background:none;border:none;cursor:pointer;color:rgba(255,255,255,.35);padding:4px;transition:color .15s;" onmouseover="this.style.color='rgba(255,255,255,.75)'" onmouseout="this.style.color='rgba(255,255,255,.35)'">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
@@ -2881,7 +2923,7 @@ function handleCawFile(event) {
         const canvas = document.createElement('canvas');
         canvas.width = 800; canvas.height = 800;
         canvas.getContext('2d').drawImage(img, 0, 0, 800, 800);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
         const imgEl = document.getElementById('caw-img-' + _cawSlot);
         const plusEl = document.getElementById('caw-plus-' + _cawSlot);
         if (imgEl) { imgEl.src = dataUrl; imgEl.style.display = 'block'; }
@@ -3020,6 +3062,50 @@ function openCawCtxMenu(slotOrEvent, slotOrX, y) {
 function closeCawCtxMenu() {
   document.getElementById('caw-ctx-menu').style.display = 'none';
 }
+
+// ── GALLERY MOBILE SWIPE ──
+let _cawMobilePage = 1;
+function _cawApplyMobilePage(page, animate) {
+  if (window.innerWidth > 600) return;
+  _cawMobilePage = page;
+  const p1 = document.querySelector('#caw-grid .caw-page[data-page="1"]');
+  const p2 = document.querySelector('#caw-grid .caw-page[data-page="2"]');
+  if (!p1 || !p2) return;
+  if (!animate) { p1.style.transition = 'none'; p2.style.transition = 'none'; }
+  p1.style.transform = page === 1 ? 'translateX(0)' : 'translateX(-100%)';
+  p2.style.transform = page === 1 ? 'translateX(100%)' : 'translateX(0)';
+  if (!animate) { requestAnimationFrame(() => { p1.style.transition = ''; p2.style.transition = ''; }); }
+  // Update dots
+  document.querySelectorAll('.caw-dot').forEach((d, i) => d.classList.toggle('active', i === page - 1));
+}
+function cawNextPage() { if (_cawMobilePage < 2) _cawApplyMobilePage(2, true); }
+function cawPrevPage() { if (_cawMobilePage > 1) _cawApplyMobilePage(1, true); }
+function cawGoPage(p) { _cawApplyMobilePage(p, true); }
+
+// Touch swipe on gallery grid
+(function() {
+  let _gsx = 0, _gsy = 0, _gsActive = false;
+  function _onGalleryTouchStart(e) {
+    if (window.innerWidth > 600) return;
+    _gsx = e.touches[0].clientX; _gsy = e.touches[0].clientY; _gsActive = true;
+  }
+  function _onGalleryTouchEnd(e) {
+    if (!_gsActive || window.innerWidth > 600) return;
+    _gsActive = false;
+    const dx = e.changedTouches[0].clientX - _gsx;
+    const dy = e.changedTouches[0].clientY - _gsy;
+    if (Math.abs(dx) < 40 || Math.abs(dy) > Math.abs(dx)) return;
+    if (dx < 0) cawNextPage(); else cawPrevPage();
+  }
+  function _attachGallerySwipe() {
+    const grid = document.getElementById('caw-grid');
+    if (!grid) return;
+    grid.addEventListener('touchstart', _onGalleryTouchStart, { passive: true });
+    grid.addEventListener('touchend', _onGalleryTouchEnd, { passive: true });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _attachGallerySwipe);
+  else _attachGallerySwipe();
+})();
 
 async function deleteCawImage(slot) {
   const session = getSession();
