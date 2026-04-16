@@ -1516,9 +1516,11 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
 .posts-track-wrap {
   position: relative; overflow: hidden;
   touch-action: pan-y;
+  transition: height .38s cubic-bezier(.32,.72,0,1);
 }
 .posts-track {
-  display: flex; height: 100%;
+  display: flex;
+  align-items: flex-start;
   transition: transform .38s cubic-bezier(.32,.72,0,1);
   will-change: transform;
   touch-action: none;
@@ -2109,11 +2111,21 @@ const _posts = (() => {
     </div>`;
   }
 
+  function _syncHeight(animate){
+    const track=_track(),wrap=_wrap();if(!track||!wrap)return;
+    const cards=track.children;
+    if(!cards.length)return;
+    const idx=Math.max(0,Math.min(_idx,cards.length-1));
+    const h=cards[idx].getBoundingClientRect().height||cards[idx].offsetHeight;
+    if(!animate){const prev=wrap.style.transition;wrap.style.transition='none';wrap.style.height=h+'px';requestAnimationFrame(()=>{wrap.style.transition='';});}
+    else{wrap.style.height=h+'px';}
+  }
   function _slide(idx,animate=true){
     const track=_track(); if(!track)return;
     if(!animate) track.style.transition='none';
     track.style.transform=`translateX(-${idx*100}%)`;
     if(!animate) requestAnimationFrame(()=>{track.style.transition='';});
+    _syncHeight(animate);
   }
   function _setNav(idx,total){
     const pb=document.getElementById('posts-prev'),nb=document.getElementById('posts-next'),jb=document.getElementById('posts-jump');
@@ -2144,6 +2156,8 @@ const _posts = (() => {
     } catch(e) {}
     track.innerHTML=_items.map(_renderCard).join('');
     _slide(_idx,false);_setNav(_idx,_items.length);_setDots(_idx,_items.length);
+    // Sync height after DOM is painted
+    requestAnimationFrame(()=>_syncHeight(false));
     _replyCache = {};
   }
 
@@ -2305,7 +2319,6 @@ const _posts = (() => {
     const feedSet=_PROFILE_EFED_SET.length?_PROFILE_EFED_SET:EMOJIS;
     feedSet.forEach(em=>{const s=document.createElement('span');s.className='pm-emoji';s.textContent=em;s.onclick=()=>{const ta=document.getElementById('pm-text');const pos=ta.selectionStart;ta.value=ta.value.slice(0,pos)+em+ta.value.slice(pos);ta.selectionStart=ta.selectionEnd=pos+em.length;updateCharCount();ta.focus();};el.appendChild(s);});
   }
-  } } // end _buildEmojis
   function toggleEmoji(e){e.stopPropagation();document.getElementById('pm-emoji-picker').classList.toggle('open');}
   document.addEventListener('click',()=>{document.getElementById('pm-emoji-picker')?.classList.remove('open');});
   function openGif(){showToast('GIF support coming soon!');}
@@ -2343,7 +2356,7 @@ const _posts = (() => {
     const p=_items.find(p=>p.id===postId);if(!p)return;
     _editingId=postId;
     const ta=document.getElementById('pm-text');if(ta)ta.value=p.text||'';
-    const charEl=document.getElementById('pm-char');if(charEl)charEl.textContent=(p.text||'').length+' / 360';
+    const charEl=document.getElementById('pm-char');if(charEl)charEl.textContent=(p.text||'').length+' / 800';
     const title=document.getElementById('pm-modal-title');if(title)title.textContent='Edit Post';
     const btn=document.getElementById('pm-submit');if(btn){btn.textContent='Save';btn.onclick=()=>_posts.submitEdit();}
     document.getElementById('post-modal-bg').classList.add('open');
@@ -2499,6 +2512,7 @@ const _posts = (() => {
       if (toggleBtn) toggleBtn.classList.add('open');
       _updateToggleBtn(postId);
     }
+    requestAnimationFrame(()=>_syncHeight(true));
   }
 
   function _setReplyCount(postId, val) {
@@ -2558,11 +2572,13 @@ const _posts = (() => {
     compose.dataset.replyTo = postId;
     const ta = document.getElementById('reply-textarea-' + postId);
     if (ta) { ta.value = ''; ta.focus(); }
+    requestAnimationFrame(()=>_syncHeight(true));
   }
 
   function closeReply(postId) {
     const compose = document.getElementById('reply-compose-' + postId);
     if (compose) compose.classList.remove('open');
+    requestAnimationFrame(()=>_syncHeight(true));
   }
 
   function openReplyToReply(postId, parentReplyId, btn) {
@@ -2612,6 +2628,7 @@ const _posts = (() => {
       _updateToggleBtn(postId);
       closeReply(postId);
       showToast('Reply posted!');
+      requestAnimationFrame(()=>_syncHeight(true));
     } catch(err) {
       showToast('Failed: '+err.message);
       submitBtn.disabled = false; submitBtn.textContent = 'Reply';
