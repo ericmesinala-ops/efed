@@ -218,6 +218,29 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .em-tab { padding:10px 14px; font-family:'DM Sans',sans-serif; font-size:.68rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:rgba(255,255,255,.28); cursor:pointer; border:none; background:none; border-bottom:2px solid transparent; transition:color .15s,border-color .15s; margin-bottom:-1px; }
 .em-tab.active { color:#c8a84b; border-bottom-color:#c8a84b; }
 
+/* ── PULL TO REFRESH ── */
+#ptr-indicator {
+  position: fixed; top: 71px; left: 0; right: 0; z-index: 99;
+  display: flex; align-items: center; justify-content: center;
+  height: 0; overflow: hidden;
+  transition: height .2s ease;
+  background: rgba(7,7,10,.97);
+  pointer-events: none;
+}
+#ptr-indicator.ptr-pulling { height: 52px; }
+#ptr-indicator.ptr-ready { height: 52px; }
+#ptr-spinner {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.12);
+  border-top-color: #c8a84b;
+  transition: transform .25s ease, opacity .2s;
+  opacity: 0;
+}
+#ptr-indicator.ptr-pulling #ptr-spinner { opacity: 1; }
+#ptr-indicator.ptr-ready #ptr-spinner { opacity: 1; border-top-color: #4caf64; animation: ptrSpin .5s linear infinite; }
+@keyframes ptrSpin { to { transform: rotate(360deg); } }
+@media (min-width: 601px) { #ptr-indicator { display: none; } }
+
 /* ── STATS ── */
 .stats-bar { display: flex; background: #0c0c0f; padding-top: 24px; }
 .stat-pill { flex: 1; padding: 14px 0; text-align: center; border-right: 1px solid rgba(255,255,255,.05); position: relative; }
@@ -1346,6 +1369,8 @@ html.day-mode #efed-social-action-row { background: var(--surface2) !important; 
 .caw-slot { transition: outline .1s; }
 </style>
 <body>
+<!-- ── PULL TO REFRESH ── -->
+<div id="ptr-indicator"><div id="ptr-spinner"></div></div>
 <nav id="nav">
 
   <a href="index.html" class="logo">
@@ -2064,6 +2089,51 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbo
   }, { passive: true });
 })();
 
+// ── PULL TO REFRESH ──
+(function() {
+  if (window.innerWidth > 600) return;
+  const ind = document.getElementById('ptr-indicator');
+  const spin = document.getElementById('ptr-spinner');
+  if (!ind) return;
+  let startY = 0, pulling = false, triggered = false;
+  const THRESHOLD = 72;
+
+  document.addEventListener('touchstart', e => {
+    // Only activate when at the very top of the page and no modal open
+    if (window.scrollY > 4) return;
+    const anyModal = document.querySelector('#edit-modal-bg[style*="flex"], #event-modal-bg[style*="flex"], #roster-action-bg[style*="flex"]');
+    if (anyModal) return;
+    startY = e.touches[0].clientY;
+    pulling = true;
+    triggered = false;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    if (!pulling) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0) { pulling = false; ind.className = ''; return; }
+    const progress = Math.min(dy / THRESHOLD, 1);
+    spin.style.transform = `rotate(${progress * 270}deg)`;
+    if (dy > 10) ind.classList.add('ptr-pulling');
+    if (dy >= THRESHOLD && !triggered) {
+      triggered = true;
+      ind.classList.remove('ptr-pulling');
+      ind.classList.add('ptr-ready');
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchend', () => {
+    if (!pulling) return;
+    pulling = false;
+    if (triggered) {
+      setTimeout(() => location.reload(), 300);
+    } else {
+      ind.className = '';
+      spin.style.transform = '';
+    }
+  }, { passive: true });
+})();
+
 function openCawCtxMenu(slotOrEvent, slotOrX, y) {
   // Called from pencil button: openCawCtxMenu(event, slot)
   // Called from long press: openCawCtxMenu(slot, x, y)
@@ -2283,9 +2353,13 @@ function closeEditModal() {
 
 function emSwitchTab(tab) {
   const isEvents = tab === 'events';
-  document.getElementById('em-profile-panel').style.display = isEvents ? 'none' : 'flex';
+  const isLinks = tab === 'links';
+  const isProfile = tab === 'profile';
+  document.getElementById('em-profile-panel').style.display = isProfile ? 'flex' : 'none';
+  document.getElementById('em-links-panel').style.display = isLinks ? 'flex' : 'none';
   document.getElementById('em-events-panel').style.display = isEvents ? 'flex' : 'none';
-  document.getElementById('em-tab-profile').classList.toggle('active', !isEvents);
+  document.getElementById('em-tab-profile').classList.toggle('active', isProfile);
+  document.getElementById('em-tab-links').classList.toggle('active', isLinks);
   document.getElementById('em-tab-events').classList.toggle('active', isEvents);
   const saveBtn = document.getElementById('em-save-btn');
   const clearBtn = document.getElementById('em-clear-btn');
@@ -9943,6 +10017,7 @@ function _processCawDragFile(file, slot) {
     <!-- Tab bar -->
     <div class="em-tab-bar">
       <button class="em-tab active" id="em-tab-profile" onclick="emSwitchTab('profile')">Profile</button>
+      <button class="em-tab" id="em-tab-links" onclick="emSwitchTab('links')">Links</button>
       <button class="em-tab" id="em-tab-events" onclick="emSwitchTab('events')">Events</button>
     </div>
     <!-- PROFILE PANEL -->
@@ -9991,47 +10066,6 @@ function _processCawDragFile(file, slot) {
           <input id="efed-dim-slider" type="range" min="0" max="80" step="5" value="0" oninput="efedPreviewDim(this.value)" style="width:100%;accent-color:#c0000e;cursor:pointer;">
         </div>
       </div>
-      <!-- Links & Socials (collapsible) -->
-      <div>
-        <button onclick="efedToggleLinks()" style="width:100%;display:flex;align-items:center;justify-content:space-between;background:none;border:none;border-bottom:1px solid rgba(255,255,255,.06);padding:0 0 10px;cursor:pointer;color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;">
-          <span style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;">Links &amp; Socials</span>
-          <svg id="efed-links-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="2.5" stroke-linecap="round" style="transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
-        <div id="efed-links-body" style="display:none;flex-direction:column;gap:14px;margin-top:14px;">
-          <div>
-            <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">YouTube Channel Link</div>
-            <div style="font-size:.65rem;color:rgba(255,255,255,.35);margin-bottom:8px;">Paste your full YouTube channel URL</div>
-            <input id="ep-yt-input" type="url" placeholder="https://youtube.com/@yourchannel" maxlength="120" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
-          </div>
-          <div>
-            <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Twitch Channel</div>
-            <input id="ep-twitch-input" type="url" placeholder="https://twitch.tv/channel" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
-          </div>
-          <div>
-            <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Instagram</div>
-            <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
-              <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.82rem;">@</span>
-              <input id="ep-ig-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
-            </div>
-          </div>
-          <div>
-            <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">X (Twitter)</div>
-            <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
-              <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.82rem;">@</span>
-              <input id="ep-x-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
-            </div>
-          </div>
-          <div>
-            <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Website</div>
-            <input id="ep-web-input" type="url" placeholder="https://yoursite.com" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
-          </div>
-          <div>
-            <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Application Link</div>
-            <input id="ep-apply-input" type="url" placeholder="https://forms.gle/..." style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:5px;">
-            <div style="font-size:.62rem;color:#7a7a8a;line-height:1.5;">This link only shows when you are open for signings.</div>
-          </div>
-        </div>
-      </div>
       <!-- Bio -->
       <div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
@@ -10041,6 +10075,41 @@ function _processCawDragFile(file, slot) {
         <textarea id="ep-bio-input" maxlength="500" rows="4" placeholder="Tell the community about your eFed…" oninput="document.getElementById('ep-bio-count').textContent=this.value.length+' / 500'" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;resize:none;line-height:1.6;box-sizing:border-box;"></textarea>
       </div>
       <div id="ep-name-msg" style="font-size:.68rem;margin-top:-8px;min-height:14px;"></div>
+    </div>
+    <!-- LINKS PANEL -->
+    <div id="em-links-panel" style="display:none;padding:20px 22px;flex-direction:column;gap:14px;overflow-y:auto;">
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">YouTube Channel Link</div>
+        <div style="font-size:.65rem;color:rgba(255,255,255,.35);margin-bottom:8px;">Paste your full YouTube channel URL</div>
+        <input id="ep-yt-input" type="url" placeholder="https://youtube.com/@yourchannel" maxlength="120" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Twitch Channel</div>
+        <input id="ep-twitch-input" type="url" placeholder="https://twitch.tv/channel" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Instagram</div>
+        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.82rem;">@</span>
+          <input id="ep-ig-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+        </div>
+      </div>
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">X (Twitter)</div>
+        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.82rem;">@</span>
+          <input id="ep-x-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+        </div>
+      </div>
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Website</div>
+        <input id="ep-web-input" type="url" placeholder="https://yoursite.com" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+      <div>
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Application Link</div>
+        <input id="ep-apply-input" type="url" placeholder="https://forms.gle/..." style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:5px;">
+        <div style="font-size:.62rem;color:#7a7a8a;line-height:1.5;">This link only shows when you are open for signings.</div>
+      </div>
     </div>
     <!-- EVENTS PANEL -->
     <div id="em-events-panel" style="display:none;padding:20px 22px;flex-direction:column;gap:16px;overflow-y:auto;">
