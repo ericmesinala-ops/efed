@@ -2242,7 +2242,7 @@ async function openEditModal(tab) {
   }
   // Pre-fill fields from DB
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=yt_channel,ig_handle,x_handle,promo_website,efed_signings_link,efed_bio,efed_banner_dim,twitch_channel,promo_name,acronym`);
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=yt_channel,ig_handle,x_handle,promo_website,efed_signings_link,efed_bio,efed_banner_dim,twitch_channel,promo_name,acronym,reddit_handle,discord_link`);
     if (rows[0]) {
       const u = rows[0];
       document.getElementById('ep-yt-input').value = u.yt_channel || '';
@@ -2251,6 +2251,8 @@ async function openEditModal(tab) {
       document.getElementById('ep-x-input').value = (u.x_handle || '').replace('@','');
       document.getElementById('ep-web-input').value = u.promo_website || '';
       document.getElementById('ep-apply-input').value = u.efed_signings_link || '';
+      document.getElementById('ep-reddit-input').value = (u.reddit_handle || '').replace('r/','');
+      document.getElementById('ep-discord-input').value = u.discord_link || '';
       const nameInput = document.getElementById('ep-efed-name-input');
       if (nameInput) nameInput.value = u.promo_name || EFED_NAME || '';
       const acronymInput = document.getElementById('ep-acronym-input');
@@ -2291,6 +2293,7 @@ function emSwitchTab(tab) {
   if (saveBtn) saveBtn.textContent = isEvents ? 'Save Events' : 'Save Changes';
   if (clearBtn) clearBtn.style.display = isEvents ? 'block' : 'none';
   if (isEvents) _emPrefillEvents();
+  if (isLinks) setTimeout(_checkSocialLimit, 50);
 }
 
 function _emPrefillEvents() {
@@ -2333,6 +2336,29 @@ function _emPrefillEvents() {
 function emTabSave() {
   const isEvents = document.getElementById('em-events-panel').style.display !== 'none';
   if (isEvents) saveEvent(); else saveEditProfile();
+}
+
+function _checkSocialLimit() {
+  const SOCIAL_IDS = ['ep-yt-input','ep-twitch-input','ep-ig-input','ep-x-input','ep-reddit-input','ep-discord-input','ep-web-input'];
+  const WRAP_MAP = { 'ep-ig-input':'ep-ig-wrap', 'ep-x-input':'ep-x-wrap', 'ep-reddit-input':'ep-reddit-wrap' };
+  const filled = SOCIAL_IDS.filter(id => (document.getElementById(id)?.value || '').trim() !== '').length;
+  const atMax = filled >= 5;
+  const countEl = document.getElementById('ep-social-count-display');
+  if (countEl) countEl.textContent = filled + ' / 5 used';
+  SOCIAL_IDS.forEach(id => {
+    const inp = document.getElementById(id);
+    if (!inp) return;
+    const isEmpty = !inp.value.trim();
+    const shouldDisable = atMax && isEmpty;
+    inp.disabled = shouldDisable;
+    inp.style.opacity = shouldDisable ? '.35' : '1';
+    inp.style.cursor = shouldDisable ? 'not-allowed' : '';
+    const wrapId = WRAP_MAP[id];
+    if (wrapId) {
+      const wrap = document.getElementById(wrapId);
+      if (wrap) wrap.style.opacity = shouldDisable ? '.35' : '1';
+    }
+  });
 }
 
 async function epHandleAvatar(event) {
@@ -2391,6 +2417,15 @@ async function saveEditProfile() {
   const x   = (document.getElementById('ep-x-input').value.trim()).replace('@','');
   const web = document.getElementById('ep-web-input').value.trim();
   const apply = document.getElementById('ep-apply-input').value.trim();
+  const reddit = (document.getElementById('ep-reddit-input')?.value.trim() || '').replace('r/','');
+  const discord = document.getElementById('ep-discord-input')?.value.trim() || '';
+  const spotify = document.getElementById('ep-spotify-input')?.value.trim() || '';
+  if (!yt && !twitch) {
+    msg.textContent = 'A YouTube or Twitch channel link is required.';
+    msg.style.color = '#ff6b6b';
+    emSwitchTab('links');
+    return;
+  }
   const bio = (document.getElementById('ep-bio-input')?.value || '').slice(0,500);
   const bannerDim = parseInt(document.getElementById('efed-dim-slider')?.value) || 0;
   const newName = (document.getElementById('ep-efed-name-input')?.value || '').trim();
@@ -2398,7 +2433,7 @@ async function saveEditProfile() {
   try {
     const _sr = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
       method:'PATCH', headers:SB_HEADERS,
-      body:JSON.stringify({yt_channel:yt||null, twitch_channel:twitch||null, ig_handle:ig||null, x_handle:x||null, promo_website:web||null, efed_signings_link:apply||null, efed_bio:bio||null, efed_banner_dim:bannerDim, ...(newName ? {promo_name:newName} : {}), acronym:acronym||null})
+      body:JSON.stringify({yt_channel:yt||null, twitch_channel:twitch||null, ig_handle:ig||null, x_handle:x||null, promo_website:web||null, efed_signings_link:apply||null, efed_bio:bio||null, efed_banner_dim:bannerDim, reddit_handle:reddit||null, discord_link:discord||null, ...(newName ? {promo_name:newName} : {}), acronym:acronym||null})
     });
     if (!_sr.ok) throw new Error('HTTP '+_sr.status+': '+await _sr.text());
     efedApplyBannerDim(bannerDim);
@@ -2592,7 +2627,7 @@ function evAddExtraEvent() {
   div.style.cssText = 'display:flex;flex-direction:column;gap:12px;padding:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;position:relative;';
   div.innerHTML = `
     <button onclick="evRemoveExtra(${idx})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:rgba(255,255,255,.25);cursor:pointer;font-size:.8rem;line-height:1;padding:2px;" onmouseover="this.style.color='#ff6b6b'" onmouseout="this.style.color='rgba(255,255,255,.25)'">✕</button>
-    <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.6);font-weight:700;">Event ${idx + 1}</div>
+    <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.6);font-weight:700;">Event ${idx}</div>
     <div>
       <div style="font-size:.5rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:4px;">Event Title</div>
       <input id="ev-extra-title-${idx}" type="text" maxlength="60" placeholder="e.g. Clash of Champions" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:7px;padding:8px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;outline:none;box-sizing:border-box;">
@@ -5201,33 +5236,50 @@ function triggerInstall() {
     </div>
     <!-- LINKS PANEL -->
     <div id="em-links-panel" style="display:none;padding:20px 22px;flex-direction:column;gap:14px;overflow-y:auto;">
-      <div>
-        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">YouTube Channel Link</div>
+      <!-- 5-link cap note -->
+      <div style="display:flex;align-items:flex-start;gap:8px;background:rgba(200,168,75,.06);border:1px solid rgba(200,168,75,.15);border-radius:8px;padding:10px 12px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2.5" stroke-linecap="round" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <div style="font-size:.62rem;color:rgba(200,168,75,.8);line-height:1.6;">You may add up to <strong style="color:#c8a84b;">5 social links</strong> (includes website). Application link is separate and does not count toward the limit. <span id="ep-social-count-display" style="color:#c8a84b;font-weight:700;"></span></div>
+      </div>
+      <div id="ep-link-yt">
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:6px;">YouTube Channel Link <span style="color:#c0000e;font-size:.6rem;letter-spacing:0;text-transform:none;font-weight:400;">* required if no Twitch</span></div>
         <div style="font-size:.65rem;color:rgba(255,255,255,.35);margin-bottom:8px;">Paste your full YouTube channel URL</div>
-        <input id="ep-yt-input" type="url" placeholder="https://youtube.com/@yourchannel" maxlength="120" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+        <input id="ep-yt-input" type="url" placeholder="https://youtube.com/@yourchannel" maxlength="120" oninput="_checkSocialLimit()" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
       </div>
-      <div>
-        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Twitch Channel</div>
-        <input id="ep-twitch-input" type="url" placeholder="https://twitch.tv/channel" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      <div id="ep-link-twitch">
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Twitch Channel <span style="color:#c0000e;font-size:.6rem;letter-spacing:0;text-transform:none;font-weight:400;">* required if no YouTube</span></div>
+        <input id="ep-twitch-input" type="url" placeholder="https://twitch.tv/channel" oninput="_checkSocialLimit()" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
       </div>
-      <div>
+      <div id="ep-link-ig">
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Instagram</div>
-        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+        <div id="ep-ig-wrap" style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
           <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.82rem;">@</span>
-          <input id="ep-ig-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+          <input id="ep-ig-input" type="text" placeholder="username" maxlength="40" oninput="_checkSocialLimit()" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
         </div>
       </div>
-      <div>
+      <div id="ep-link-x">
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">X (Twitter)</div>
-        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+        <div id="ep-x-wrap" style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
           <span style="padding:10px 10px 10px 12px;color:rgba(255,255,255,.3);font-size:.82rem;">@</span>
-          <input id="ep-x-input" type="text" placeholder="username" maxlength="40" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+          <input id="ep-x-input" type="text" placeholder="username" maxlength="40" oninput="_checkSocialLimit()" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
         </div>
       </div>
-      <div>
-        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Website</div>
-        <input id="ep-web-input" type="url" placeholder="https://yoursite.com" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      <div id="ep-link-reddit">
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Reddit</div>
+        <div id="ep-reddit-wrap" style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 8px 10px 12px;color:rgba(255,255,255,.3);font-size:.75rem;font-weight:700;font-family:'DM Sans',sans-serif;">r/</span>
+          <input id="ep-reddit-input" type="text" placeholder="subreddit or username" maxlength="60" oninput="_checkSocialLimit()" style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;">
+        </div>
       </div>
+      <div id="ep-link-discord">
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Discord</div>
+        <input id="ep-discord-input" type="url" placeholder="https://discord.gg/invite" oninput="_checkSocialLimit()" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+      <div id="ep-link-web">
+        <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Website</div>
+        <input id="ep-web-input" type="url" placeholder="https://yoursite.com" oninput="_checkSocialLimit()" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+      <div style="height:1px;background:rgba(255,255,255,.06);"></div>
       <div>
         <div style="font-size:.58rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;margin-bottom:8px;">Application Link</div>
         <input id="ep-apply-input" type="url" placeholder="https://forms.gle/..." style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:5px;">
