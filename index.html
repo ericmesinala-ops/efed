@@ -38,11 +38,107 @@
     if (!username) return false;
     return _verifiedUsers.has(username.toLowerCase());
   }
+
+  // ── SPECIAL EMOJI SYSTEM ──
+  // Admin (derrick_maximus) is ALWAYS 🎲. No one else can ever have 🎲.
+  // All other users get a unique emoji assigned once and stored in Supabase users.special_emoji.
+  // Pool: gender-neutral, no skin tones, universally safe.
+  const ADMIN_SPECIAL_EMOJI = '🎲';
+  const _EMOJI_POOL = [
+    '⚡','🔥','🌊','❄️','🌀','☄️','🌙','⭐','🌟','💫','✨','🎯','🏆','👑',
+    '💎','🔮','🎪','🎭','🎨','🎸','🎺','🎻','🥁','🎮','🕹️','🃏','🀄','🎰',
+    '🚀','🛸','🌈','⚗️','🔬','🔭','💡','⚙️','🔩','🧲','💣','🧨','🎆','🎇',
+    '🌋','🗻','🏔️','🌊','🦋','🦅','🦁','🐉','🦊','🐺','🦝','🦎','🦈','🦂',
+    '🐙','🦑','🦠','🍄','🌵','🌴','🎋','🍀','🌺','🌸','🍁','🍂','🍃','🌾',
+    '💀','☠️','👻','👾','🤖','👽','🎃','🧿','🔱','⚜️','🏴‍☠️','🎖️','🎗️',
+    '🧬','🦠','🧪','🧫','🧲','💾','📡','🛡️','⚔️','🗡️','🏹','🪃','🔑','🗝️',
+    '🌑','🌒','🌓','🌔','🌕','🌖','🌗','🌘','🪐','🌠','🌌','🌫️','🌪️','🌩️',
+    '🎵','🎶','🎼','🎤','🎧','📻','🥊','⛸️','🏋️','🤺','🏇','🧗','🪂','🤿',
+    '🧩','🪆','🎱','🎳','🎯','🎻','🪕','🪗','🪘','🪙','🪬','🧧','🎀'
+  ].filter(e => e !== ADMIN_SPECIAL_EMOJI);
+
+  // In-memory cache: username → emoji
+  const _emojiCache = {};
+  // Queue to avoid race conditions on assign
+  const _emojiAssigning = new Set();
+
+  function _glowEmoji(emoji) {
+    return `<span class="special-emoji-glow">${emoji}</span>`;
+  }
+
+  function getUserEmoji(username) {
+    if (!username) return null;
+    const u = username.toLowerCase();
+    if (u === ADMIN_USERNAME) return ADMIN_SPECIAL_EMOJI;
+    return _emojiCache[u] || null;
+  }
+
+  async function ensureUserEmoji(username) {
+    if (!username) return;
+    const u = username.toLowerCase();
+    if (u === ADMIN_USERNAME) {
+      _emojiCache[u] = ADMIN_SPECIAL_EMOJI;
+      // Make sure admin row in DB also has it
+      try {
+        const rows = await sbGet('users', `username=eq.${encodeURIComponent(u)}&select=special_emoji`);
+        if (rows.length && rows[0].special_emoji !== ADMIN_SPECIAL_EMOJI) {
+          await sbUpdate('users', { special_emoji: ADMIN_SPECIAL_EMOJI }, `username=eq.${encodeURIComponent(u)}`);
+        }
+      } catch(e) {}
+      return;
+    }
+    if (_emojiCache[u] || _emojiAssigning.has(u)) return;
+    _emojiAssigning.add(u);
+    try {
+      const rows = await sbGet('users', `username=eq.${encodeURIComponent(u)}&select=special_emoji`);
+      if (rows.length && rows[0].special_emoji && rows[0].special_emoji !== ADMIN_SPECIAL_EMOJI) {
+        _emojiCache[u] = rows[0].special_emoji;
+        return;
+      }
+      // Need to assign one — pick randomly from pool, avoid already-taken ones
+      const takenRows = await sbGet('users', `special_emoji=not.is.null&select=special_emoji`);
+      const taken = new Set(takenRows.map(r => r.special_emoji));
+      taken.add(ADMIN_SPECIAL_EMOJI); // admin's is always off limits
+      const available = _EMOJI_POOL.filter(e => !taken.has(e));
+      const pick = available.length > 0
+        ? available[Math.floor(Math.random() * available.length)]
+        : _EMOJI_POOL[Math.floor(Math.random() * _EMOJI_POOL.length)]; // fallback if pool exhausted
+      await sbUpdate('users', { special_emoji: pick }, `username=eq.${encodeURIComponent(u)}`);
+      _emojiCache[u] = pick;
+    } catch(e) {}
+    finally { _emojiAssigning.delete(u); }
+  }
+
+  async function preloadEmojis(usernames) {
+    if (!usernames || !usernames.length) return;
+    const toFetch = [...new Set(usernames.map(u => u.toLowerCase()))].filter(u => !_emojiCache[u]);
+    if (!toFetch.length) return;
+    try {
+      const rows = await sbGet('users', `username=in.(${toFetch.map(u => encodeURIComponent(u)).join(',')})&select=username,special_emoji`);
+      rows.forEach(r => {
+        const u = r.username.toLowerCase();
+        if (u === ADMIN_USERNAME) { _emojiCache[u] = ADMIN_SPECIAL_EMOJI; return; }
+        if (r.special_emoji && r.special_emoji !== ADMIN_SPECIAL_EMOJI) _emojiCache[u] = r.special_emoji;
+      });
+      // Assign emojis for anyone who doesn't have one yet
+      for (const u of toFetch) {
+        if (!_emojiCache[u]) await ensureUserEmoji(u);
+      }
+    } catch(e) {}
+  }
+
   function withVerified(displayName, username, useAdminLabel = true) {
-    if (!isVerifiedUser(username)) return _esc(displayName || username);
+    const emoji = getUserEmoji(username);
+    const glowHtml = emoji ? ` ${_glowEmoji(emoji)}` : '';
+    if (!isVerifiedUser(username)) {
+      const safeName = _esc(displayName || username);
+      return emoji
+        ? `<span style="display:inline-flex;align-items:center;gap:3px;">${safeName}${glowHtml}</span>`
+        : safeName;
+    }
     const isAdmin = username && username.toLowerCase() === ADMIN_USERNAME;
     const name = _esc(isAdmin && useAdminLabel ? 'Admin' : (displayName || username));
-    return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE}</span>`;
+    return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE}${glowHtml}</span>`;
   }
   const SB_HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json' };
 
@@ -155,6 +251,8 @@
     if (session) {
       if (userBtn) { userBtn.style.visibility = "visible"; userBtn.style.display = "flex"; }
       if (initialsEl) { var n = session.displayName || session.username || "?"; initialsEl.textContent = n[0].toUpperCase(); }
+      // Ensure current user has their special emoji assigned in Supabase
+      ensureUserEmoji(session.username).catch(()=>{});
     } else {
       if (userBtn) userBtn.style.visibility = "hidden";
     }
@@ -166,6 +264,21 @@ function showToast(msg){const t=document.createElement("div");t.textContent=msg;
     --bg: #07070a; --surface: #111114; --surface2: #1a1a1f;
     --accent: #c0000e; --gold: #c8a84b; --text: #e8e8e8;
     --muted: #a0a0b0; --card-w: 308px; --card-h: 173px;
+  }
+
+  /* ── SPECIAL EMOJI GLOW ── */
+  .special-emoji-glow {
+    display: inline-block;
+    font-size: 1em;
+    line-height: 1;
+    filter: drop-shadow(0 0 4px rgba(255,255,180,0.85)) drop-shadow(0 0 8px rgba(255,220,80,0.6));
+    animation: emoji-pulse 2.4s ease-in-out infinite;
+    vertical-align: middle;
+    flex-shrink: 0;
+  }
+  @keyframes emoji-pulse {
+    0%,100% { filter: drop-shadow(0 0 3px rgba(255,255,180,0.8)) drop-shadow(0 0 7px rgba(255,200,50,0.55)); }
+    50%      { filter: drop-shadow(0 0 7px rgba(255,255,200,1))   drop-shadow(0 0 14px rgba(255,220,80,0.85)); }
   }
 
   /* ── DAY MODE ── */
@@ -9010,12 +9123,19 @@ async function loadExpandComments(url) {
       return;
     }
 
-    // Fetch avatars for comments
+    // Fetch avatars + special emojis for comments
     const usernames = [...new Set(rows.map(r => r.username))];
     const avatarMap = {};
     try {
       const users = await sbGet('users', `username=in.(${usernames.map(u => encodeURIComponent(u)).join(',')})`);
-      users.forEach(u => { avatarMap[u.username] = u.avatar_url || null; });
+      users.forEach(u => {
+        avatarMap[u.username] = u.avatar_url || null;
+        const ulow = u.username.toLowerCase();
+        if (ulow === ADMIN_USERNAME) { _emojiCache[ulow] = ADMIN_SPECIAL_EMOJI; }
+        else if (u.special_emoji && u.special_emoji !== ADMIN_SPECIAL_EMOJI) { _emojiCache[ulow] = u.special_emoji; }
+      });
+      // Assign emojis to any user who doesn't have one yet
+      for (const u of usernames) { if (!_emojiCache[u.toLowerCase()]) await ensureUserEmoji(u); }
     } catch(e) {}
 
     list.innerHTML = '';
@@ -11252,11 +11372,17 @@ async function loadChatMessages(roomId) {
       `room_id=eq.${roomId}&deleted=eq.false&order=created_at.asc&limit=${CHAT_MSG_LIMIT}`);
     box.innerHTML = '';
     if (!rows.length) { box.innerHTML = '<div class="chat-empty">No messages yet. Say something! 👋</div>'; return; }
-    // Pre-fetch avatars for all unique users
+    // Pre-fetch avatars + special emojis for all unique users
     const unames = [...new Set(rows.map(r => r.username))];
     try {
-      const uRows = await sbGet('users', `username=in.(${unames.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url`);
-      uRows.forEach(u => { if (u.avatar_url) _chatAvatarCache[u.username] = u.avatar_url; });
+      const uRows = await sbGet('users', `username=in.(${unames.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,special_emoji`);
+      uRows.forEach(u => {
+        if (u.avatar_url) _chatAvatarCache[u.username] = u.avatar_url;
+        const ulow = u.username.toLowerCase();
+        if (ulow === ADMIN_USERNAME) { _emojiCache[ulow] = ADMIN_SPECIAL_EMOJI; }
+        else if (u.special_emoji && u.special_emoji !== ADMIN_SPECIAL_EMOJI) { _emojiCache[ulow] = u.special_emoji; }
+      });
+      for (const u of unames) { if (!_emojiCache[u.toLowerCase()]) await ensureUserEmoji(u); }
     } catch(e) {}
     rows.forEach(m => appendChatMessage(m, false));
     // Track highest id so polling only fetches newer messages
