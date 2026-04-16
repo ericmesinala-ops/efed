@@ -7929,6 +7929,24 @@ function showSubmitErr(msg) {
 <script>
 // ── CARD EXPAND ──
 let _expandVideo = null;
+
+// ── EFED EMOJI SET — deterministic 8 per fed ──
+let _INDEX_EFED_SET = [];
+function getEfedEmojis(name) {
+  const POOLS = [
+    ['👍','✅','💪','🙌','👏','🤜','🫡','🤝','💯'],
+    ['👎','❌','🚫','😤','🤦','🙄','🫵','😒'],
+    ['😂','🤣','😄','🥲','😆','😁','🤩','😍'],
+    ['😢','😔','💔','😞','🥺','😩','😵','🤕'],
+    ['🎉','🏆','🎊','👑','🥳','🔥','🥇','⭐'],
+    ['⚡','💥','👊','🫀','💢','🔱','🩸','😡'],
+    ['🗑️','🤡','💩','🥴','😏','😈','🕷️','🫤'],
+    ['💎','🕳️','🎭','🌪️','👀','🔑','🎺','📣'],
+  ];
+  let seed = 0;
+  for (let i = 0; i < name.length; i++) seed = ((seed * 31 + name.charCodeAt(i)) >>> 0);
+  return POOLS.map((pool, i) => pool[(seed >>> (i * 3)) % pool.length]);
+}
 const _supportedEfedsCache = new Set(); // eFed names the current user supports
 let _supportCacheLoaded = false;
 let _expandLikes = {};
@@ -7939,6 +7957,18 @@ function openExpand(v) {
   const tab = document.getElementById('chat-tab');
   if (tab) tab.style.display = 'none';
   _expandVideo = v;
+  if (v.efed) {
+    _INDEX_EFED_SET = getEfedEmojis(v.efed);
+    // Refresh chat emoji picker with new set
+    const _cBtn = document.getElementById('chat-emoji-btn');
+    if (_cBtn) _cBtn.textContent = _INDEX_EFED_SET[0] || '😀';
+    const _grid = document.getElementById('emoji-grid');
+    if (_grid) _grid.innerHTML = ''; // force rebuild on next open
+    // Refresh chat reaction picker
+    _buildChatReactionPicker();
+    // Rebuild comment reaction picker
+    _buildCommentReactionPicker();
+  }
   const id = extractId(v.url);
 
   // Show claim button for eFed owners only
@@ -10780,18 +10810,7 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
 <!-- Chat tab (collapsed state) -->
 <div id="chat-tab" onclick="toggleChat()">
 <!-- Reaction picker -->
-<div id="chat-reaction-picker">
-  <button onclick="pickReaction('👍')">👍</button>
-  <button onclick="pickReaction('❤️')">❤️</button>
-  <button onclick="pickReaction('🔥')">🔥</button>
-  <button onclick="pickReaction('😂')">😂</button>
-  <button onclick="pickReaction('😮')">😮</button>
-  <button onclick="pickReaction('😢')">😢</button>
-  <button onclick="pickReaction('🙏')">🙏</button>
-  <button onclick="pickReaction('💪')">💪</button>
-  <button onclick="pickReaction('👏')">👏</button>
-  <button onclick="pickReaction('🏆')">🏆</button>
-</div>
+<div id="chat-reaction-picker"></div>
   <div id="chat-tab-dot"></div>
   LOCKER ROOM
 </div>
@@ -11701,11 +11720,13 @@ let _emojiPickerOpen = false;
 
 function buildEmojiPicker() {
   const grid = document.getElementById('emoji-grid');
-  if (!grid || grid.children.length) return;
-  WRESTLING_EMOJIS.forEach(e => {
+  if (!grid) return;
+  const set = _INDEX_EFED_SET.length ? _INDEX_EFED_SET.map(i=>({icon:i,label:''})) : WRESTLING_EMOJIS;
+  grid.innerHTML = '';
+  set.forEach(e => {
     const btn = document.createElement('button');
     btn.className = 'emoji-item';
-    btn.title = e.label;
+    btn.title = e.label || '';
     btn.innerHTML = `<span class="emoji-item-icon">${e.icon}</span>`;
     btn.onclick = () => insertEmoji(e.icon);
     grid.appendChild(btn);
@@ -11898,14 +11919,26 @@ async function sendGif(url, title) {
 
 // ── COMMENT REACTIONS ──
 const COMMENT_REACT_EMOJIS = ['👍','❤️','🔥','😂','😮','💯','👏','🏆','💪','🙏'];
-let _cReactPickerMsgId = null;
 
-// Picker element (created once)
-(function() {
-  const p = document.createElement('div');
-  p.id = 'comment-react-picker';
-  p.style.cssText = 'position:fixed;z-index:99999;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:8px;display:none;gap:4px;flex-wrap:wrap;width:196px;box-shadow:0 12px 32px rgba(0,0,0,.7);';
-  COMMENT_REACT_EMOJIS.forEach(emoji => {
+function _buildChatReactionPicker() {
+  const p = document.getElementById('chat-reaction-picker');
+  if (!p) return;
+  const set = _INDEX_EFED_SET.length ? _INDEX_EFED_SET : ['👍','❤️','🔥','😂','😮','😢','🙏','💪'];
+  p.innerHTML = '';
+  set.forEach(emoji => {
+    const btn = document.createElement('button');
+    btn.textContent = emoji;
+    btn.onclick = () => pickReaction(emoji);
+    p.appendChild(btn);
+  });
+}
+
+function _buildCommentReactionPicker() {
+  const p = document.getElementById('comment-react-picker');
+  if (!p) return;
+  const set = _INDEX_EFED_SET.length ? _INDEX_EFED_SET : COMMENT_REACT_EMOJIS;
+  p.innerHTML = '';
+  set.forEach(emoji => {
     const btn = document.createElement('button');
     btn.textContent = emoji;
     btn.style.cssText = 'background:none;border:none;font-size:1.2rem;cursor:pointer;padding:4px 6px;border-radius:8px;transition:background .15s;';
@@ -11914,7 +11947,16 @@ let _cReactPickerMsgId = null;
     btn.onclick = () => pickCommentReaction(emoji);
     p.appendChild(btn);
   });
+}
+let _cReactPickerMsgId = null;
+
+// Picker element (created once, populated dynamically per eFed)
+(function() {
+  const p = document.createElement('div');
+  p.id = 'comment-react-picker';
+  p.style.cssText = 'position:fixed;z-index:99999;background:#1a1a1f;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:8px;display:none;gap:4px;flex-wrap:wrap;width:196px;box-shadow:0 12px 32px rgba(0,0,0,.7);';
   document.body.appendChild(p);
+  _buildCommentReactionPicker();
 })();
 
 function toggleCommentReactPicker(e, commentId) {

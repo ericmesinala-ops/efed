@@ -1946,6 +1946,24 @@ let _hasAvatar = false;
 let _isOwnProfile = false;
 let _isMember = false; // owner or approved roster member
 let EFED_NAME = '';
+
+// ── EFED EMOJI SET — deterministic 8 per fed ──
+let _EFED_SET = [];
+function getEfedEmojis(name) {
+  const POOLS = [
+    ['👍','✅','💪','🙌','👏','🤜','🫡','🤝','💯'],      // approve
+    ['👎','❌','🚫','😤','🤦','🙄','🫵','😒'],            // deny
+    ['😂','🤣','😄','🥲','😆','😁','🤩','😍'],            // happy/laugh
+    ['😢','😔','💔','😞','🥺','😩','😵','🤕'],            // sad
+    ['🎉','🏆','🎊','👑','🥳','🔥','🥇','⭐'],            // celebrate
+    ['⚡','💥','👊','🫀','💢','🔱','🩸','😡'],            // hype/intensity
+    ['🗑️','🤡','💩','🥴','😏','😈','🕷️','🫤'],           // disrespect
+    ['💎','🕳️','🎭','🌪️','👀','🔑','🎺','📣'],           // wildcard
+  ];
+  let seed = 0;
+  for (let i = 0; i < name.length; i++) seed = ((seed * 31 + name.charCodeAt(i)) >>> 0);
+  return POOLS.map((pool, i) => pool[(seed >>> (i * 3)) % pool.length]);
+}
 let EFED_OWNER = '';
 let _signingsOn = false;
 
@@ -3152,6 +3170,12 @@ async function loadProfile() {
 
   if (!EFED_NAME) { document.getElementById('efed-name').textContent = 'eFed Not Found'; return; }
   console.log('[efed] EFED_NAME resolved to:', EFED_NAME);
+  _EFED_SET = getEfedEmojis(EFED_NAME);
+  // Update emoji btn icons to preview the set
+  const _eBtn = document.getElementById('efed-emoji-btn');
+  const _lrBtn = document.getElementById('efed-lr-emoji-btn');
+  if (_eBtn) _eBtn.textContent = _EFED_SET[0] || '😀';
+  if (_lrBtn) _lrBtn.textContent = _EFED_SET[0] || '😀';
 
   // Instant render — show name + initials before DB responds
   document.getElementById('efed-name').textContent = EFED_NAME;
@@ -8777,8 +8801,10 @@ const EFED_GIPHY_KEY = 'thj9AyFQIpiYQZPscgYAQYZ9maQ4kRFJ';
 
 function efedBuildEmojiPicker() {
   const grid = document.getElementById('efed-emoji-grid');
-  if (!grid || grid.children.length) return;
-  EFED_WRESTLING_EMOJIS.forEach(icon => {
+  if (!grid) return;
+  const set = _EFED_SET.length ? _EFED_SET : EFED_WRESTLING_EMOJIS;
+  grid.innerHTML = '';
+  set.forEach(icon => {
     const btn = document.createElement('button');
     btn.className = 'efed-emoji-item';
     btn.innerHTML = `<span class="efed-emoji-item-icon">${icon}</span>`;
@@ -9419,8 +9445,46 @@ function efedLrAutoResize(ta) {
   ta.style.height = Math.min(ta.scrollHeight, 100) + "px";
 }
 
-// Emoji + GIF stubs (can wire to existing efed emoji/gif system later)
-function efedLrToggleEmoji() { /* stub */ }
+// Locker Room emoji picker
+let _lrEmojiOpen = false;
+function efedLrBuildEmoji() {
+  const grid = document.getElementById('efed-lr-emoji-grid');
+  if (!grid) return;
+  const set = _EFED_SET.length ? _EFED_SET : ['😂','🔥','💀','👑','💪','🥺','🤡','💎'];
+  grid.innerHTML = '';
+  grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;padding:8px;';
+  set.forEach(icon => {
+    const btn = document.createElement('button');
+    btn.style.cssText = 'font-size:1.45rem;line-height:1;background:none;border:none;cursor:pointer;padding:6px 8px;border-radius:8px;transition:background .15s;';
+    btn.textContent = icon;
+    btn.onmouseover = () => btn.style.background = 'rgba(255,255,255,.1)';
+    btn.onmouseout  = () => btn.style.background = 'none';
+    btn.onclick = () => {
+      const inp = document.getElementById('efed-lr-input');
+      if (!inp) return;
+      const s = inp.selectionStart, v = inp.value;
+      inp.value = v.slice(0, s) + icon + v.slice(inp.selectionEnd);
+      inp.selectionStart = inp.selectionEnd = s + icon.length;
+      inp.focus();
+      efedLrToggleEmoji(true);
+    };
+    grid.appendChild(btn);
+  });
+}
+function efedLrToggleEmoji(forceClose) {
+  _lrEmojiOpen = forceClose ? false : !_lrEmojiOpen;
+  const picker = document.getElementById('efed-lr-emoji-picker');
+  const wrap   = document.getElementById('efed-lr-pickers-wrap');
+  if (!picker) return;
+  if (_lrEmojiOpen) {
+    efedLrBuildEmoji();
+    picker.style.display = 'block';
+    if (wrap) wrap.style.display = 'flex';
+  } else {
+    picker.style.display = 'none';
+    if (wrap) { const gif = document.getElementById('efed-lr-gif-picker'); if (!gif || gif.style.display==='none') wrap.style.display = 'none'; }
+  }
+}
 function efedLrToggleGif()   { /* stub */ }
 function efedLrDebounceGif() { /* stub */ }
 
@@ -9653,10 +9717,12 @@ const _EFED_EMOJIS = ['😀','😂','😍','🔥','💯','👏','🎉','😎','�
 function efedFeedOpenModal() {
   const bg = document.getElementById('efed-post-modal-bg');
   if (bg) { bg.classList.add('open'); }
-  // Build emoji picker once
+  // Build emoji picker (always rebuild with current set)
   const ep = document.getElementById('efed-pm-emoji-picker');
-  if (ep && !ep.children.length) {
-    _EFED_EMOJIS.forEach(em => {
+  if (ep) {
+    ep.innerHTML = '';
+    const feedSet = _EFED_SET.length ? _EFED_SET : _EFED_EMOJIS;
+    feedSet.forEach(em => {
       const s = document.createElement('span');
       s.className = 'efed-pm-emoji'; s.textContent = em;
       s.onclick = () => {
