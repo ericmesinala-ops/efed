@@ -2750,6 +2750,63 @@ html, body { overscroll-behavior-y: none; }
   }
   .expand-comment-send:hover { opacity: .85; }
 
+  /* Comment tool buttons */
+  .cmt-tool-btn {
+    flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background .2s; color: rgba(255,255,255,.5);
+    font-size: .78rem; font-family: 'DM Sans',sans-serif; font-weight: 700;
+  }
+  .cmt-tool-btn:hover { background: rgba(255,255,255,.12); color: #fff; }
+  .cmt-tool-btn.active { background: rgba(192,0,14,.2); border-color: rgba(192,0,14,.4); }
+  #cmt-emoji-picker {
+    display: none; position: absolute;
+    bottom: calc(100% + 8px); left: 0; right: 0;
+    background: rgba(13,13,18,.97); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 12px; padding: 6px; z-index: 600;
+    box-shadow: 0 -6px 24px rgba(0,0,0,.7); overflow: hidden;
+  }
+  .cmt-emoji-row {
+    display: flex; flex-wrap: nowrap; width: 100%; gap: 0;
+  }
+  #cmt-gif-picker {
+    display: none; position: absolute;
+    bottom: calc(100% + 8px); left: 0; right: 0;
+    background: rgba(13,13,18,.97); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 12px; padding: 10px; z-index: 600;
+    box-shadow: 0 -6px 24px rgba(0,0,0,.7);
+    flex-direction: column; gap: 8px; max-height: 260px;
+  }
+  #cmt-gif-search {
+    width: 100%; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.1); border-radius: 8px;
+    color: #fff; font-family: 'DM Sans',sans-serif; font-size: .78rem;
+    padding: 7px 10px; outline: none; flex-shrink: 0;
+  }
+  #cmt-gif-search::placeholder { color: rgba(255,255,255,.3); }
+  #cmt-gif-grid {
+    display: grid; grid-template-columns: repeat(3,1fr);
+    gap: 4px; overflow-y: auto; flex: 1;
+  }
+  #cmt-gif-grid img {
+    width: 100%; aspect-ratio: 1; object-fit: cover;
+    border-radius: 6px; cursor: pointer; transition: opacity .15s;
+  }
+  #cmt-gif-grid img:hover { opacity: .8; }
+  #cmt-gif-preview {
+    display: none; position: relative; margin-top: 4px;
+  }
+  #cmt-gif-preview img {
+    width: 100%; max-height: 100px; object-fit: cover; border-radius: 8px;
+  }
+  #cmt-gif-preview button {
+    position: absolute; top: 4px; right: 4px;
+    background: rgba(0,0,0,.65); border: none; color: #fff;
+    border-radius: 50%; width: 20px; height: 20px; cursor: pointer;
+    font-size: .65rem; display: flex; align-items: center; justify-content: center;
+  }
+
   /* Collapse hint */
 
 @keyframes hub-scan {
@@ -4017,9 +4074,24 @@ html.day-mode .nav-tv-svg--day { display: inline; }
       
       <div class="expand-comments-title">Comments</div>
       <div id="expand-comments-list"></div>
-      <div class="expand-comment-input-wrap" id="expand-comment-wrap" style="display:none;">
-        <textarea class="expand-comment-input" id="expand-comment-input" rows="1" placeholder="Add a comment…" oninput="autoResizeComment(this)"></textarea>
-        <button class="expand-comment-send" onclick="postExpandComment()">Post</button>
+      <div id="expand-comment-wrap" style="display:none;position:relative;margin-top:16px;">
+        <div id="cmt-gif-preview">
+          <img id="cmt-gif-preview-img" src="" alt=""/>
+          <button onclick="_cmtClearGif()">✕</button>
+        </div>
+        <div id="cmt-emoji-picker">
+          <div class="cmt-emoji-row" id="cmt-emoji-row"></div>
+        </div>
+        <div id="cmt-gif-picker">
+          <input id="cmt-gif-search" placeholder="Search GIFs…" oninput="_cmtDebounceGif(this.value)" autocomplete="off"/>
+          <div id="cmt-gif-grid"></div>
+        </div>
+        <div class="expand-comment-input-wrap" style="margin-top:0;">
+          <button class="cmt-tool-btn" id="cmt-emoji-btn" onclick="_cmtToggleEmoji(event)" title="Emoji">😊</button>
+          <button class="cmt-tool-btn" id="cmt-gif-btn" onclick="_cmtToggleGif(event)" title="GIF">GIF</button>
+          <textarea class="expand-comment-input" id="expand-comment-input" rows="1" placeholder="Add a comment…" oninput="autoResizeComment(this)"></textarea>
+          <button class="expand-comment-send" onclick="postExpandComment()">Post</button>
+        </div>
       </div>
       <div id="expand-comment-login-msg" style="font-size:.72rem;color:#8a8a9a;padding:8px 0;">Sign in to leave a comment.</div>
     </div>
@@ -7970,6 +8042,7 @@ function openExpand(v) {
     _buildChatReactionPicker();
     // Rebuild comment reaction picker
     _buildCommentReactionPicker();
+    _cmtReset();
   }
   const id = extractId(v.url);
 
@@ -8978,7 +9051,8 @@ async function loadExpandComments(url) {
         </a>
         <div class="expand-comment-body" style="flex:1;">
           <div class="expand-comment-user"><a href="profile.html?u=${encodeURIComponent(c.username)}" style="color:inherit;text-decoration:none;" onclick="event.stopPropagation()">${withVerified(c.username, c.username)}</a> ${c.is_creator ? '<span style="color:#c8a84b;font-size:.55rem;letter-spacing:1px;">🎬</span>' : ''}</div>
-          <div class="expand-comment-text">${c.text}</div>
+          <div class="expand-comment-text">${c.text || ''}</div>
+          ${c.gif_url ? `<img src="${c.gif_url}" alt="GIF" style="max-width:220px;border-radius:8px;margin-top:5px;display:block;" loading="lazy">` : ''}
           <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap;">
             <div class="expand-comment-time">${new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div>
             <button id="clike-${c.id}" onclick="toggleCommentLike(${c.id},this)" style="display:flex;align-items:center;gap:3px;background:none;border:none;cursor:pointer;color:#8a8a9a;font-size:.72rem;padding:0;transition:color .15s;">
@@ -9091,12 +9165,142 @@ async function addStrike(username) {
   } catch(e) { console.warn('Strike update failed', e); }
 }
 
+// ── COMMENT EMOJI + GIF ──
+let _cmtGifUrl = null, _cmtEmojiOpen = false, _cmtGifOpen = false, _cmtGifTimer = null;
+
+function _cmtBuildEmoji() {
+  const row = document.getElementById('cmt-emoji-row');
+  if (!row || row.children.length) return;
+  const set = _INDEX_EFED_SET.length ? _INDEX_EFED_SET : ['😂','🔥','💀','👑','💪','🥺','🤡','💎','😱','😈'];
+  const fs = set.length > 10 ? '1.15rem' : '1.3rem';
+  set.forEach(icon => {
+    const btn = document.createElement('button');
+    btn.style.cssText = `background:none;border:none;cursor:pointer;font-size:${fs};line-height:1;padding:4px 2px;border-radius:8px;transition:transform .1s,background .1s;flex:1;min-width:0;text-align:center;`;
+    btn.textContent = icon;
+    btn.onmouseover = () => { btn.style.transform='scale(1.2)'; btn.style.background='rgba(255,255,255,.08)'; };
+    btn.onmouseout  = () => { btn.style.transform=''; btn.style.background='none'; };
+    btn.onclick = () => {
+      const inp = document.getElementById('expand-comment-input');
+      if (inp) { const s=inp.selectionStart, v=inp.value; inp.value=v.slice(0,s)+icon+v.slice(inp.selectionEnd); inp.selectionStart=inp.selectionEnd=s+icon.length; inp.focus(); autoResizeComment(inp); }
+      _cmtToggleEmoji();
+    };
+    row.appendChild(btn);
+  });
+}
+
+function _cmtToggleEmoji(e) {
+  if (e) e.stopPropagation();
+  _cmtEmojiOpen = !_cmtEmojiOpen;
+  const el = document.getElementById('cmt-emoji-picker');
+  const btn = document.getElementById('cmt-emoji-btn');
+  if (_cmtEmojiOpen) {
+    if (_cmtGifOpen) _cmtToggleGif();
+    _cmtBuildEmoji();
+    if (el) el.style.display = 'flex';
+    if (btn) btn.classList.add('active');
+    setTimeout(() => document.addEventListener('click', _cmtEmojiOut, {once:true}), 50);
+  } else {
+    if (el) el.style.display = 'none';
+    if (btn) btn.classList.remove('active');
+  }
+}
+function _cmtEmojiOut(e) {
+  if (!e.target.closest('#cmt-emoji-picker') && !e.target.closest('#cmt-emoji-btn')) {
+    _cmtEmojiOpen = false;
+    const el = document.getElementById('cmt-emoji-picker');
+    const btn = document.getElementById('cmt-emoji-btn');
+    if (el) el.style.display = 'none';
+    if (btn) btn.classList.remove('active');
+  }
+}
+
+function _cmtToggleGif(e) {
+  if (e) e.stopPropagation();
+  _cmtGifOpen = !_cmtGifOpen;
+  const el = document.getElementById('cmt-gif-picker');
+  const btn = document.getElementById('cmt-gif-btn');
+  if (_cmtGifOpen) {
+    if (_cmtEmojiOpen) _cmtToggleEmoji();
+    if (el) { el.style.display = 'flex'; _cmtLoadTrending(); }
+    if (btn) btn.classList.add('active');
+    setTimeout(() => document.getElementById('cmt-gif-search')?.focus(), 80);
+    setTimeout(() => document.addEventListener('click', _cmtGifOut, {once:true}), 50);
+  } else {
+    if (el) el.style.display = 'none';
+    if (btn) btn.classList.remove('active');
+  }
+}
+function _cmtGifOut(e) {
+  if (!e.target.closest('#cmt-gif-picker') && !e.target.closest('#cmt-gif-btn')) {
+    _cmtGifOpen = false;
+    const el = document.getElementById('cmt-gif-picker');
+    const btn = document.getElementById('cmt-gif-btn');
+    if (el) el.style.display = 'none';
+    if (btn) btn.classList.remove('active');
+  }
+}
+function _cmtDebounceGif(q) {
+  clearTimeout(_cmtGifTimer);
+  if (!q.trim()) { _cmtLoadTrending(); return; }
+  _cmtGifTimer = setTimeout(() => _cmtSearchGif(q), 400);
+}
+async function _cmtLoadTrending() {
+  const grid = document.getElementById('cmt-gif-grid');
+  if (grid) grid.innerHTML = '<div style="color:rgba(255,255,255,.3);font-size:.7rem;padding:6px;grid-column:1/-1;">Loading…</div>';
+  try {
+    const r = await fetch(`https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=12&rating=g`);
+    _cmtRenderGifs((await r.json()).data);
+  } catch(e) {}
+}
+async function _cmtSearchGif(q) {
+  const grid = document.getElementById('cmt-gif-grid');
+  if (grid) grid.innerHTML = '<div style="color:rgba(255,255,255,.3);font-size:.7rem;padding:6px;grid-column:1/-1;">Searching…</div>';
+  try {
+    const r = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(q)}&limit=12&rating=g`);
+    _cmtRenderGifs((await r.json()).data);
+  } catch(e) {}
+}
+function _cmtRenderGifs(gifs) {
+  const grid = document.getElementById('cmt-gif-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  gifs.forEach(g => {
+    const img = document.createElement('img');
+    img.src = g.images.fixed_width_small?.url || g.images.fixed_height.url;
+    img.alt = g.title; img.loading = 'lazy';
+    img.onclick = () => {
+      _cmtGifUrl = g.images.original.url;
+      const prev = document.getElementById('cmt-gif-preview');
+      const prevImg = document.getElementById('cmt-gif-preview-img');
+      if (prev) prev.style.display = 'block';
+      if (prevImg) prevImg.src = img.src;
+      _cmtToggleGif();
+    };
+    grid.appendChild(img);
+  });
+}
+function _cmtClearGif() {
+  _cmtGifUrl = null;
+  const prev = document.getElementById('cmt-gif-preview');
+  if (prev) prev.style.display = 'none';
+}
+// Reset comment tools when new video opens
+function _cmtReset() {
+  _cmtClearGif(); _cmtEmojiOpen = false; _cmtGifOpen = false;
+  const ep = document.getElementById('cmt-emoji-picker'); if(ep){ep.style.display='none';}
+  const gp = document.getElementById('cmt-gif-picker'); if(gp){gp.style.display='none';}
+  const er = document.getElementById('cmt-emoji-row'); if(er) er.innerHTML='';
+  const gs = document.getElementById('cmt-gif-search'); if(gs) gs.value='';
+  const btn = document.getElementById('cmt-emoji-btn');
+  if (btn && _INDEX_EFED_SET.length) btn.textContent = _INDEX_EFED_SET[0];
+}
+
 async function postExpandComment() {
   const session = getSession();
   if (!session || !_expandVideo) return;
   const input = document.getElementById('expand-comment-input');
   const text = input.value.trim();
-  if (!text) return;
+  if (!text && !_cmtGifUrl) return;
   const btn = document.querySelector('.expand-comment-send');
   btn.disabled = true; btn.textContent = 'Checking…';
 
@@ -9129,15 +9333,10 @@ async function postExpandComment() {
 
     // Post the comment
     btn.textContent = 'Posting…';
-    await sbInsert('comments', {
-      video_url: _expandVideo.url,
-      video_id: extractId(_expandVideo.url),
-      username: session.username,
-      text,
-      created_at: Date.now(),
-      flagged: false,
-      removed: false
-    });
+    const _cPay = { video_url: _expandVideo.url, video_id: extractId(_expandVideo.url), username: session.username, text: text||'', created_at: Date.now(), flagged: false, removed: false };
+    if (_cmtGifUrl) _cPay.gif_url = _cmtGifUrl;
+    await sbInsert('comments', _cPay);
+    _cmtClearGif();
 
     // Notify the video owner
     const vidOwner = videos.find(v => v.url === _expandVideo.url)?.submittedBy;
@@ -10739,18 +10938,17 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
   left: 0; right: 0;
   background: rgba(13,13,18,.97);
   border: 1px solid rgba(255,255,255,.1);
-  border-radius: 12px;
-  padding: 6px 6px;
+  border-radius: 14px;
+  padding: 8px 10px;
   box-shadow: 0 -6px 24px rgba(0,0,0,.7);
   z-index: 600;
-  overflow: hidden;
 }
 #chat-emoji-picker::-webkit-scrollbar { width: 3px; }
 #chat-emoji-picker::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 2px; }
 .emoji-grid {
   display: flex;
   flex-wrap: nowrap;
-  width: 100%;
+  justify-content: space-between;
   gap: 0;
 }
 
@@ -11751,13 +11949,11 @@ function buildEmojiPicker() {
   if (!grid) return;
   const set = _INDEX_EFED_SET.length ? _INDEX_EFED_SET : WRESTLING_EMOJIS.slice(0,10).map(e=>e.icon);
   grid.innerHTML = '';
-  // Scale font size so all emojis (10 or 11) always fit in one row
-  const fs = set.length > 10 ? '1.15rem' : '1.3rem';
   set.forEach(icon => {
     const btn = document.createElement('button');
-    btn.style.cssText = `background:none;border:none;cursor:pointer;font-size:${fs};line-height:1;padding:4px 2px;border-radius:8px;transition:transform .1s,background .1s;flex:1;min-width:0;text-align:center;overflow:hidden;`;
+    btn.style.cssText = 'background:none;border:none;cursor:pointer;font-size:1.5rem;line-height:1;padding:3px 4px;border-radius:8px;transition:transform .1s,background .1s;flex:1;text-align:center;';
     btn.textContent = icon;
-    btn.onmouseover = () => { btn.style.transform='scale(1.2)'; btn.style.background='rgba(255,255,255,.08)'; };
+    btn.onmouseover = () => { btn.style.transform='scale(1.25)'; btn.style.background='rgba(255,255,255,.08)'; };
     btn.onmouseout  = () => { btn.style.transform=''; btn.style.background='none'; };
     btn.onclick = () => insertEmoji(icon);
     grid.appendChild(btn);
