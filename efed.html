@@ -2295,24 +2295,28 @@ function emSwitchTab(tab) {
 }
 
 function _emPrefillEvents() {
-  const _evTitleRaw = (document.getElementById('ev-display-title')?.textContent || '').replace('No event scheduled yet','').trim();
-  document.getElementById('ev-title-input').value = _evTitleRaw;
-  const dateText = document.getElementById('ev-display-date-text')?.textContent || '';
-  document.getElementById('ev-date-input').value = dateText === 'TBA' ? '' : dateText;
-  document.getElementById('ev-location-input').value = document.getElementById('ev-display-location-text')?.textContent || '';
-  document.getElementById('ev-mainevent-input').value = document.getElementById('ev-display-mainevent')?.textContent || '';
   document.getElementById('ev-hype-input').value = document.getElementById('ev-hype-iframe')?.dataset.srcUrl || '';
-  _evTba = dateText === 'TBA'; _evUpdateTbaBtn();
   document.getElementById('ev-msg').textContent = '';
   const extra = document.getElementById('ev-extra-events');
   if (extra) extra.innerHTML = '';
   _evExtraCount = 0;
   const addBtn = document.getElementById('ev-add-btn');
   if (addBtn) addBtn.style.display = '';
+  // Build unified list: primary event first, then extras
+  const allEvents = [];
+  const primaryTitle = (document.getElementById('ev-display-title')?.textContent || '').replace('No event scheduled yet','').trim();
+  if (primaryTitle) {
+    allEvents.push({
+      title: primaryTitle,
+      date: document.getElementById('ev-display-date-text')?.textContent || null,
+      location: document.getElementById('ev-display-location-text')?.textContent || null,
+      slogan: document.getElementById('ev-display-mainevent')?.textContent || null
+    });
+  }
+  (window._efedExtraEvents || []).forEach(ev => allEvents.push(ev));
   try {
-    const saved = window._efedExtraEvents || [];
-    saved.forEach(() => evAddExtraEvent());
-    saved.forEach((ev, i) => {
+    allEvents.forEach(() => evAddExtraEvent());
+    allEvents.forEach((ev, i) => {
       const n = i + 1;
       const ti = document.getElementById('ev-extra-title-' + n);
       const da = document.getElementById('ev-extra-date-' + n);
@@ -2320,7 +2324,7 @@ function _emPrefillEvents() {
       const sl = document.getElementById('ev-extra-slogan-' + n);
       if (ti) ti.value = ev.title || '';
       const dateVal = ev.date || '';
-      if (da) da.value = dateVal;
+      if (da) da.value = dateVal === 'TBA' ? '' : dateVal;
       if (lo) lo.value = ev.location || '';
       if (sl) sl.value = ev.slogan || '';
       if (dateVal === 'TBA') { _evExtraTba[n] = false; evToggleExtraTba(n); }
@@ -2577,7 +2581,7 @@ function efedToggleLinks() {
 // ── UPCOMING EVENT ──
 let _evTba = false;
 let _evExtraCount = 0;
-const EV_MAX_EXTRA = 4; // max 4 additional events (5 total)
+const EV_MAX_EXTRA = 5; // max 5 events total
 
 function evAddExtraEvent() {
   if (_evExtraCount >= EV_MAX_EXTRA) { showToast('Maximum of 5 events reached.'); return; }
@@ -2589,7 +2593,7 @@ function evAddExtraEvent() {
   div.style.cssText = 'display:flex;flex-direction:column;gap:12px;padding:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;position:relative;';
   div.innerHTML = `
     <button onclick="evRemoveExtra(${idx})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:rgba(255,255,255,.25);cursor:pointer;font-size:.8rem;line-height:1;padding:2px;" onmouseover="this.style.color='#ff6b6b'" onmouseout="this.style.color='rgba(255,255,255,.25)'">✕</button>
-    <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.6);font-weight:700;">Event ${idx + 1}</div>
+    <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.6);font-weight:700;">Event ${idx}</div>
     <div>
       <div style="font-size:.5rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:4px;">Event Title</div>
       <input id="ev-extra-title-${idx}" type="text" maxlength="60" placeholder="e.g. Clash of Champions" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:7px;padding:8px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;outline:none;box-sizing:border-box;">
@@ -2643,7 +2647,9 @@ function evToggleExtraTba(idx) {
   }
 }
 function _evUpdateTbaBtn() {
-  const btn = document.getElementById('ev-tba-btn'), input = document.getElementById('ev-date-input');
+  const btn = document.getElementById('ev-tba-btn');
+  const input = document.getElementById('ev-date-input');
+  if (!btn || !input) return;
   if (_evTba) {
     btn.style.background='rgba(192,0,14,.2)'; btn.style.borderColor='rgba(192,0,14,.4)'; btn.style.color='#fff';
     input.value='TBA'; input.disabled=true; input.style.opacity='.4';
@@ -2654,32 +2660,30 @@ function _evUpdateTbaBtn() {
 }
 async function saveEvent() {
   const session=getSession(); if (!session) return;
-  const title=document.getElementById('ev-title-input').value.trim();
-  const date=_evTba?'TBA':document.getElementById('ev-date-input').value.trim();
-  const loc=document.getElementById('ev-location-input').value.trim();
-  const main=document.getElementById('ev-mainevent-input').value.trim();
   const hype=document.getElementById('ev-hype-input').value.trim();
   const msg=document.getElementById('ev-msg');
-  if (!title) { msg.textContent='Event title is required.'; msg.style.color='#ff6b6b'; return; }
-  // Collect extra events
-  const extraEvents = [];
+  // Collect all events — first becomes the primary DB record
+  const allEvents = [];
   for (let i = 1; i <= _evExtraCount; i++) {
     const el = document.getElementById('ev-extra-' + i);
     if (!el) continue;
     const et = (document.getElementById('ev-extra-title-' + i)?.value || '').trim();
     if (!et) continue;
-    extraEvents.push({
+    allEvents.push({
       title: et,
       date: (document.getElementById('ev-extra-date-' + i)?.value || '').trim() || null,
       location: (document.getElementById('ev-extra-location-' + i)?.value || '').trim() || null,
       slogan: (document.getElementById('ev-extra-slogan-' + i)?.value || '').trim() || null
     });
   }
+  if (!allEvents.length) { msg.textContent='Add at least one event.'; msg.style.color='#ff6b6b'; return; }
+  const primary = allEvents[0];
+  const extraEvents = allEvents.slice(1);
   try {
-    const r=await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_title:title,efed_event_date:date||null,efed_event_location:loc||null,efed_event_main:main||null,efed_event_hype:hype||null,efed_events_json:extraEvents})});
+    const r=await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_title:primary.title,efed_event_date:primary.date||null,efed_event_location:primary.location||null,efed_event_main:primary.slogan||null,efed_event_hype:hype||null,efed_events_json:extraEvents})});
     if (!r.ok) throw new Error('HTTP '+r.status);
     window._efedExtraEvents = extraEvents;
-    renderEvent({title,date:date||null,location:loc||null,main:main||null,hype:hype||null}, extraEvents);
+    renderEvent({title:primary.title,date:primary.date||null,location:primary.location||null,main:primary.slogan||null,hype:hype||null}, extraEvents);
     msg.textContent='Saved!'; msg.style.color='#4caf64'; setTimeout(closeEventModal,800);
   } catch(e) { msg.textContent='Save failed: '+e.message; msg.style.color='#ff6b6b'; }
 }
@@ -10043,25 +10047,6 @@ function _processCawDragFile(file, slot) {
       <div>
         <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:6px;">Featured Video <span style="color:rgba(255,255,255,.25);text-transform:none;letter-spacing:0;font-size:.6rem;">Optional · YouTube URL · no audio</span></div>
         <input id="ev-hype-input" type="url" maxlength="120" placeholder="https://youtube.com/watch?v=..." style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
-      </div>
-      <div>
-        <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:6px;">Event Title</div>
-        <input id="ev-title-input" type="text" maxlength="60" placeholder="e.g. Clash of Champions" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
-      </div>
-      <div>
-        <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:6px;">Date</div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <input id="ev-date-input" type="text" maxlength="40" placeholder="e.g. March 30, 2026" style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
-          <button id="ev-tba-btn" onclick="evToggleTba()" style="padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s;">TBA</button>
-        </div>
-      </div>
-      <div>
-        <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:6px;">Location</div>
-        <input id="ev-location-input" type="text" maxlength="60" placeholder="e.g. Chicago, IL" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
-      </div>
-      <div>
-        <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:6px;">Event Slogan</div>
-        <input id="ev-mainevent-input" type="text" maxlength="80" placeholder="e.g. Where Legends Are Made" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
       </div>
       <div id="ev-extra-events" style="display:flex;flex-direction:column;gap:16px;"></div>
       <button id="ev-add-btn" onclick="evAddExtraEvent()" style="width:100%;padding:10px;background:rgba(255,255,255,.05);border:1px dashed rgba(255,255,255,.18);border-radius:10px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;transition:background .15s,color .15s;" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='rgba(255,255,255,.75)'" onmouseout="this.style.background='rgba(255,255,255,.05)';this.style.color='rgba(255,255,255,.45)'">+ Add Event</button>
