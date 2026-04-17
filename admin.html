@@ -382,9 +382,18 @@ html.day-mode .nav-tv-svg--day { display: inline; }
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
         <div class="card-title" style="margin-bottom:0;"><div class="dot" style="background:var(--gold);"></div>Scan Queue <span id="queue-count" style="font-size:1.12rem;color:var(--muted);font-weight:400;letter-spacing:0;margin-left:4px;"></span></div>
-        <button class="btn btn-red btn-sm" onclick="clearQueue()">Clear All</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost btn-sm" id="queue-clear-unsure-btn" onclick="clearUnsureQueue()" style="display:none;">Clear Unsure</button>
+          <button class="btn btn-red btn-sm" onclick="clearQueue()">Clear New</button>
+        </div>
+      </div>
+      <!-- Queue sub-tabs -->
+      <div style="display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border);">
+        <button id="qtab-new-btn" onclick="switchQueueTab('new')" style="padding:9px 18px;border:none;background:none;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.92rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold);border-bottom:2px solid var(--gold);margin-bottom:-1px;transition:color .2s,border-color .2s;">🆕 New <span id="qtab-new-count" style="font-size:.82rem;background:var(--accent);color:#fff;padding:1px 6px;border-radius:8px;margin-left:4px;display:none;font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:0;"></span></button>
+        <button id="qtab-unsure-btn" onclick="switchQueueTab('unsure')" style="padding:9px 18px;border:none;background:none;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.92rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .2s,border-color .2s;">🤔 Unsure <span id="qtab-unsure-count" style="font-size:.82rem;background:rgba(200,168,75,.3);color:var(--gold);padding:1px 6px;border-radius:8px;margin-left:4px;display:none;font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:0;"></span></button>
       </div>
       <div id="queue-list"><div class="empty"><div class="empty-icon">🗂️</div>No queued results. Run a scan first.</div></div>
+      <div id="unsure-list" style="display:none;"><div class="empty"><div class="empty-icon">🤔</div>No unsure videos saved yet.</div></div>
     </div>
   </div>
 
@@ -1488,6 +1497,14 @@ async function loadQueue() {
   try {
     const rows=await sbGet('scan_results','status=eq.pending&order=scanned_at.desc');
     if(countEl) countEl.textContent=rows.length?'· '+rows.length+' pending':'';
+    const newBadge=document.getElementById('qtab-new-count');
+    if(newBadge){newBadge.textContent=rows.length;newBadge.style.display=rows.length>0?'inline':'none';}
+    // Also refresh unsure count badge
+    try {
+      const unsureRows=await sbGet('scan_results','status=eq.unsure&select=id');
+      const unsureBadge=document.getElementById('qtab-unsure-count');
+      if(unsureBadge){unsureBadge.textContent=unsureRows.length;unsureBadge.style.display=unsureRows.length>0?'inline':'none';}
+    } catch(e2){}
     if(!rows.length){list.innerHTML='<div class="empty"><div class="empty-icon">🗂️</div>Queue is empty.</div>';return;}
     list.innerHTML='';
     rows.forEach(r=>{
@@ -1499,11 +1516,35 @@ async function loadQueue() {
       const item=document.createElement('div');
       item.className='result-item';item.id='q-'+r.id;
       const sectionSel='<select id="sec-'+r.id+'" class="section-pick"><option value="">Auto</option><option value="show">Show</option><option value="match">Match</option><option value="showcase">Showcase</option><option value="promo">Promo</option><option value="podcast">Podcast</option><option value="upcoming">Upcoming</option></select>';
-      item.innerHTML='<div class="result-thumb"><img src="'+esc(r.thumb_url||'')+'" alt="" onerror="this.style.display=&quot;none&quot;"></div><div class="result-info"><div class="result-title">'+esc(r.title||'')+'</div><div class="result-meta" style="margin-bottom:5px;">'+esc(r.efed)+' · '+r.date+'</div><div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">'+durStr+' '+dest+' '+sectionSel+'</div><div class="result-actions"><button class="btn btn-green btn-sm" onclick="approveQueued('+r.id+')">✓ Add to Hub</button><button class="btn btn-red btn-sm" onclick="deleteQueued('+r.id+')">🗑 Delete</button><a href="'+esc(r.url)+'" target="_blank" class="btn btn-ghost btn-sm">▶ Watch</a></div></div>';
+      item.innerHTML='<div class="result-thumb"><img src="'+esc(r.thumb_url||'')+'" alt="" onerror="this.style.display=&quot;none&quot;"></div><div class="result-info"><div class="result-title">'+esc(r.title||'')+'</div><div class="result-meta" style="margin-bottom:5px;">'+esc(r.efed)+' · '+r.date+'</div><div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">'+durStr+' '+dest+' '+sectionSel+'</div><div class="result-actions"><button class="btn btn-green btn-sm" onclick="approveQueued('+r.id+')">✓ Add to Hub</button><button class="btn btn-red btn-sm" onclick="deleteQueued('+r.id+')">🗑 Delete</button><button class="btn btn-sm" onclick="markUnsure('+r.id+')" style="background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.3);color:var(--gold);">🤔 Unsure</button><a href="'+esc(r.url)+'" target="_blank" class="btn btn-ghost btn-sm">▶ Watch</a></div></div>';
       list.appendChild(item);
     });
     updateQueueBadge();
   } catch(e){list.innerHTML='<div class="empty">Error loading queue.</div>';}
+}
+
+let _currentQueueTab = 'new';
+
+function switchQueueTab(tab) {
+  _currentQueueTab = tab;
+  const newBtn = document.getElementById('qtab-new-btn');
+  const unsureBtn = document.getElementById('qtab-unsure-btn');
+  const qList = document.getElementById('queue-list');
+  const uList = document.getElementById('unsure-list');
+  const clearUnsureBtn = document.getElementById('queue-clear-unsure-btn');
+
+  if (tab === 'new') {
+    newBtn.style.color = 'var(--gold)'; newBtn.style.borderBottomColor = 'var(--gold)';
+    unsureBtn.style.color = 'var(--muted)'; unsureBtn.style.borderBottomColor = 'transparent';
+    qList.style.display = ''; uList.style.display = 'none';
+    if (clearUnsureBtn) clearUnsureBtn.style.display = 'none';
+  } else {
+    unsureBtn.style.color = 'var(--gold)'; unsureBtn.style.borderBottomColor = 'var(--gold)';
+    newBtn.style.color = 'var(--muted)'; newBtn.style.borderBottomColor = 'transparent';
+    qList.style.display = 'none'; uList.style.display = '';
+    if (clearUnsureBtn) clearUnsureBtn.style.display = 'inline-flex';
+    loadUnsureQueue();
+  }
 }
 
 async function approveQueued(id) {
@@ -1517,10 +1558,22 @@ async function approveQueued(id) {
     const section=secEl?secEl.value:'';
     await sbInsert('submissions',{url:r.url,video_id:r.video_id,show_name:r.title,efed:r.efed,date:r.date,date_ms:r.date_ms||Date.now(),submitted_by:ADMIN_USERNAME,submitted_at:Date.now(),community:true,status:r.is_upcoming?'upcoming':'approved',thumb_url:r.thumb_url||null,duration_seconds:r.duration_seconds||null,submission_type:section||null});
     await sbUpdate('scan_results',{status:'approved'},'id=eq.'+id);
-    if(row){row.style.opacity='.3';row.style.pointerEvents='none';}
-    if(btn) btn.textContent='✓ Added';
-    toast('Added to Hub!'); loadStats(); updateQueueBadge();
+    // Remove immediately from view
+    if(row) row.remove();
+    toast('✅ Added to Hub!'); loadStats(); updateQueueBadge();
+    _refreshQueueCount();
   } catch(e){if(btn){btn.disabled=false;btn.textContent='✓ Add to Hub';}toast('Error: '+e.message);}
+}
+
+async function markUnsure(id) {
+  try {
+    await sbUpdate('scan_results',{status:'unsure'},'id=eq.'+id);
+    const el=document.getElementById('q-'+id);
+    if(el) el.remove();
+    updateQueueBadge();
+    _refreshQueueCount();
+    toast('🤔 Moved to Unsure tab.');
+  } catch(e){toast('Error: '+e.message);}
 }
 
 async function deleteQueued(id) {
@@ -1529,16 +1582,100 @@ async function deleteQueued(id) {
     const el=document.getElementById('q-'+id);
     if(el) el.remove();
     updateQueueBadge();
+    _refreshQueueCount();
     toast('Deleted from queue.');
   } catch(e){toast('Error: '+e.message);}
 }
 
+async function approveUnsure(id) {
+  const row=document.getElementById('qu-'+id);
+  const btn=row?row.querySelector('.btn-green'):null;
+  if(btn){btn.disabled=true;btn.textContent='Adding...';}
+  try {
+    const rows=await sbGet('scan_results','id=eq.'+id);
+    const r=rows[0]; if(!r) return;
+    const secEl=document.getElementById('secu-'+id);
+    const section=secEl?secEl.value:'';
+    await sbInsert('submissions',{url:r.url,video_id:r.video_id,show_name:r.title,efed:r.efed,date:r.date,date_ms:r.date_ms||Date.now(),submitted_by:ADMIN_USERNAME,submitted_at:Date.now(),community:true,status:r.is_upcoming?'upcoming':'approved',thumb_url:r.thumb_url||null,duration_seconds:r.duration_seconds||null,submission_type:section||null});
+    await sbUpdate('scan_results',{status:'approved'},'id=eq.'+id);
+    if(row) row.remove();
+    toast('✅ Added to Hub!'); loadStats(); _refreshUnsureCount();
+  } catch(e){if(btn){btn.disabled=false;btn.textContent='✓ Add to Hub';}toast('Error: '+e.message);}
+}
+
+async function deleteUnsure(id) {
+  try {
+    await sbDelete('scan_results','id=eq.'+id);
+    const el=document.getElementById('qu-'+id);
+    if(el) el.remove();
+    _refreshUnsureCount();
+    toast('Deleted.');
+  } catch(e){toast('Error: '+e.message);}
+}
+
+function _refreshQueueCount() {
+  const items = document.getElementById('queue-list')?.querySelectorAll('.result-item');
+  const count = items ? items.length : 0;
+  const countEl = document.getElementById('queue-count');
+  const badge = document.getElementById('qtab-new-count');
+  if (countEl) countEl.textContent = count ? '· '+count+' pending' : '';
+  if (badge) { badge.textContent = count; badge.style.display = count > 0 ? 'inline' : 'none'; }
+  if (count === 0) {
+    const qList = document.getElementById('queue-list');
+    if (qList) qList.innerHTML = '<div class="empty"><div class="empty-icon">🗂️</div>Queue is empty.</div>';
+  }
+}
+
+function _refreshUnsureCount() {
+  const items = document.getElementById('unsure-list')?.querySelectorAll('.result-item');
+  const count = items ? items.length : 0;
+  const badge = document.getElementById('qtab-unsure-count');
+  if (badge) { badge.textContent = count; badge.style.display = count > 0 ? 'inline' : 'none'; }
+  if (count === 0) {
+    const uList = document.getElementById('unsure-list');
+    if (uList) uList.innerHTML = '<div class="empty"><div class="empty-icon">🤔</div>No unsure videos saved yet.</div>';
+  }
+}
+
 async function clearQueue() {
-  if(!await adminConfirm('Clear all pending scan results?','Clear Queue')) return;
+  if(!await adminConfirm('Clear all new pending scan results?','Clear Queue')) return;
   try {
     await sbDelete('scan_results','status=eq.pending');
     toast('Queue cleared.'); loadQueue(); updateQueueBadge();
   } catch(e){toast('Error: '+e.message);}
+}
+
+async function clearUnsureQueue() {
+  if(!await adminConfirm('Delete all unsure videos permanently?','Clear Unsure')) return;
+  try {
+    await sbDelete('scan_results','status=eq.unsure');
+    toast('Unsure queue cleared.'); loadUnsureQueue();
+  } catch(e){toast('Error: '+e.message);}
+}
+
+async function loadUnsureQueue() {
+  const list=document.getElementById('unsure-list');
+  list.innerHTML='<div class="empty"><div class="empty-icon">⏳</div>Loading...</div>';
+  try {
+    const rows=await sbGet('scan_results','status=eq.unsure&order=scanned_at.desc');
+    const badge=document.getElementById('qtab-unsure-count');
+    if(badge){badge.textContent=rows.length;badge.style.display=rows.length>0?'inline':'none';}
+    if(!rows.length){list.innerHTML='<div class="empty"><div class="empty-icon">🤔</div>No unsure videos saved yet.</div>';return;}
+    list.innerHTML='';
+    rows.forEach(r=>{
+      const fw=['episode','tryout','tryouts','full show','part 1','part 2','part 3','network','supershow','season'];
+      const mw=[' vs ',' vs.','v. ',' match','full match','1v1','2v2','championship'];
+      const t=(r.title||'').toLowerCase();
+      const durStr=r.duration_seconds>0?('<span style="font-size:1.02rem;font-family:monospace;color:rgba(255,255,255,.5);background:rgba(255,255,255,.06);border-radius:4px;padding:2px 7px;">'+Math.floor(r.duration_seconds/60)+'m'+String(r.duration_seconds%60).padStart(2,'0')+'s</span>'):'';
+      const dest=r.is_upcoming?'<span style="font-size:1.02rem;font-weight:700;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);color:var(--gold);border-radius:4px;padding:2px 8px;">⏰ UPCOMING</span>':(r.duration_seconds>0&&r.duration_seconds<900)?'<span style="font-size:1.02rem;font-weight:700;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;border-radius:4px;padding:2px 8px;">🥊 BEST MATCHES</span>':(r.duration_seconds>0&&r.duration_seconds<1800&&!fw.some(w=>t.includes(w))&&mw.some(w=>t.includes(w)))?'<span style="font-size:1.02rem;font-weight:700;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);color:#ff6b6b;border-radius:4px;padding:2px 8px;">🥊 BEST MATCHES</span>':'<span style="font-size:1.02rem;font-weight:700;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.5);border-radius:4px;padding:2px 8px;">📺 LATEST VIDEOS</span>';
+      const item=document.createElement('div');
+      item.className='result-item';item.id='qu-'+r.id;
+      item.style.borderColor='rgba(200,168,75,.2)';
+      const sectionSel='<select id="secu-'+r.id+'" class="section-pick"><option value="">Auto</option><option value="show">Show</option><option value="match">Match</option><option value="showcase">Showcase</option><option value="promo">Promo</option><option value="podcast">Podcast</option><option value="upcoming">Upcoming</option></select>';
+      item.innerHTML='<div class="result-thumb"><img src="'+esc(r.thumb_url||'')+'" alt="" onerror="this.style.display=&quot;none&quot;"></div><div class="result-info"><div class="result-title">'+esc(r.title||'')+'</div><div class="result-meta" style="margin-bottom:5px;">'+esc(r.efed)+' · '+r.date+'</div><div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">'+durStr+' '+dest+' '+sectionSel+'</div><div class="result-actions"><button class="btn btn-green btn-sm" onclick="approveUnsure('+r.id+')">✓ Add to Hub</button><button class="btn btn-red btn-sm" onclick="deleteUnsure('+r.id+')">🗑 Delete</button><a href="'+esc(r.url)+'" target="_blank" class="btn btn-ghost btn-sm">▶ Watch</a></div></div>';
+      list.appendChild(item);
+    });
+  } catch(e){list.innerHTML='<div class="empty">Error loading unsure queue.</div>';}
 }
 
 // ── INVITE GENERATOR ──
