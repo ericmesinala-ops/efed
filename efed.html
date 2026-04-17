@@ -1466,11 +1466,11 @@ html.day-mode #efed-social-action-row { background: var(--surface2) !important; 
           Planner
         </button>
 
+        <div style="height:1px;background:rgba(255,255,255,.06);margin:4px 0;"></div>
         <button class="dropdown-item" id="edit-efed-btn" style="display:none;" onclick="toggleDropdown(true); openEditModal()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           Edit eFed Page
         </button>
-        <div style="height:1px;background:rgba(255,255,255,.06);margin:4px 0;"></div>
         <button class="dropdown-item" id="admin-panel-btn" onclick="toggleDropdown(true); window.location.href='admin.html'" style="display:none;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           Admin Panel
@@ -1705,7 +1705,7 @@ html.day-mode #efed-social-action-row { background: var(--surface2) !important; 
         <input id="set-champ-input" type="text" maxlength="60" placeholder="e.g. TDW Apex Champion" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;" onkeydown="if(event.key==='Enter')applyChampion()">
       </div>
       <div style="display:flex;gap:8px;">
-        <button id="set-champ-remove-btn" onclick="removeChampion()" style="display:none;flex:1;padding:11px;background:none;border:1px solid rgba(192,0,14,.3);border-radius:10px;color:rgba(255,100,100,.7);font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;">Remove</button>
+        <button id="set-champ-remove-btn" onclick="removeChampion()" style="display:none;flex:1;padding:11px;background:none;border:1px solid rgba(192,0,14,.3);border-radius:10px;color:rgba(255,100,100,.7);font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;">Remove Title</button>
         <button onclick="applyChampion()" style="flex:2;padding:11px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:.5px;cursor:pointer;">Apply</button>
       </div>
       <div id="set-champ-msg" style="font-size:.68rem;text-align:center;min-height:12px;color:#ff6b6b;"></div>
@@ -2329,21 +2329,28 @@ function closeEditModal() {
 }
 
 function emSwitchTab(tab) {
-  const isEvents = tab === 'events';
-  const isLinks = tab === 'links';
-  const isProfile = tab === 'profile';
-  document.getElementById('em-profile-panel').style.display = isProfile ? 'flex' : 'none';
-  document.getElementById('em-links-panel').style.display = isLinks ? 'flex' : 'none';
-  document.getElementById('em-events-panel').style.display = isEvents ? 'flex' : 'none';
+  const isEvents   = tab === 'events';
+  const isLinks    = tab === 'links';
+  const isProfile  = tab === 'profile';
+  const isCust     = tab === 'customize';
+  document.getElementById('em-profile-panel').style.display   = isProfile ? 'flex' : 'none';
+  document.getElementById('em-links-panel').style.display     = isLinks   ? 'flex' : 'none';
+  document.getElementById('em-events-panel').style.display    = isEvents  ? 'flex' : 'none';
+  document.getElementById('em-customize-panel').style.display = isCust    ? 'flex' : 'none';
   document.getElementById('em-tab-profile').classList.toggle('active', isProfile);
   document.getElementById('em-tab-links').classList.toggle('active', isLinks);
   document.getElementById('em-tab-events').classList.toggle('active', isEvents);
+  document.getElementById('em-tab-customize').classList.toggle('active', isCust);
   const saveBtn = document.getElementById('em-save-btn');
   const clearBtn = document.getElementById('em-clear-btn');
-  if (saveBtn) saveBtn.textContent = isEvents ? 'Save Events' : 'Save Changes';
+  if (saveBtn) {
+    saveBtn.style.display = isCust ? 'none' : '';
+    saveBtn.textContent = isEvents ? 'Save Events' : 'Save Changes';
+  }
   if (clearBtn) clearBtn.style.display = isEvents ? 'block' : 'none';
-  if (isEvents) _emPrefillEvents();
-  if (isLinks) setTimeout(_checkSocialLimit, 50);
+  if (isEvents)  _emPrefillEvents();
+  if (isLinks)   setTimeout(_checkSocialLimit, 50);
+  if (isCust)    _emBuildCustomize();
 }
 
 function _emPrefillEvents() {
@@ -2386,6 +2393,248 @@ function _emPrefillEvents() {
 function emTabSave() {
   const isEvents = document.getElementById('em-events-panel').style.display !== 'none';
   if (isEvents) saveEvent(); else saveEditProfile();
+}
+
+/* ── CUSTOMIZE TAB ── */
+// Section definitions: id = DOM element id, label = display name
+const _EFED_SECTIONS = [
+  { id: 'efed-bio-section',       label: 'About / Bio' },
+  { id: 'upcoming-event-section', label: 'Upcoming Events' },
+  { id: 'champions-section',      label: 'Champions' },
+  { id: 'roster-section',         label: 'Roster' },
+  { id: 'efed-feed-section',      label: 'Community Feed' },
+  { id: 'efed-chat-section',      label: 'Locker Room' },
+  { id: 'caw-images-section',     label: 'Gallery' },
+  { id: 'episodes-section',       label: 'Episodes' },
+  { id: 'best-matches-section',   label: 'Best Matches' },
+  { id: 'signings-section',       label: 'Signings' },
+];
+
+// Load saved layout: [{id, hidden}] ordered list
+function _loadEfedLayout() {
+  try {
+    const db = window._efedLayoutData; // set during page load from DB
+    if (db && Array.isArray(db) && db.length) return db;
+    const ls = localStorage.getItem('efed_layout_' + EFED_NAME);
+    if (ls) return JSON.parse(ls);
+  } catch(e) {}
+  return null;
+}
+
+// Apply layout to DOM (reorder + show/hide sections)
+function applyEfedLayout(layout) {
+  if (!layout || !layout.length) return;
+  const pageCard = document.querySelector('.page-card');
+  if (!pageCard) return;
+  // Build ordered list — sections in layout first, then any extras
+  const layoutIds = layout.map(r => r.id);
+  const allIds = _EFED_SECTIONS.map(s => s.id);
+  const orderedIds = [
+    ...layoutIds.filter(id => allIds.includes(id)),
+    ...allIds.filter(id => !layoutIds.includes(id))
+  ];
+  // Find the "anchor" — insert sections after the stats-bar / back bar
+  const anchor = document.getElementById('signings-section')?.parentNode
+    ? null : null; // not needed — we use insertBefore with a reference
+  // Collect all section elements
+  const sectionEls = {};
+  orderedIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) sectionEls[id] = el;
+  });
+  // Find insertion reference: first section in DOM order
+  const firstSection = document.getElementById('efed-bio-section') ||
+                       document.getElementById('upcoming-event-section');
+  if (!firstSection) return;
+  const parent = firstSection.parentNode;
+  if (!parent) return;
+  // Find the node just before the first moveable section (to reinsert after it)
+  // We'll collect all section nodes then re-append in order
+  const fragments = orderedIds.map(id => sectionEls[id]).filter(Boolean);
+  // Find a stable anchor: node before the first section
+  let beforeNode = firstSection.previousSibling;
+  // Remove all sections from DOM, then re-insert in order
+  fragments.forEach(el => el.remove());
+  // Re-insert after beforeNode / at end of parent
+  let insertAfter = beforeNode;
+  fragments.forEach(el => {
+    if (insertAfter && insertAfter.nextSibling) {
+      parent.insertBefore(el, insertAfter.nextSibling);
+    } else {
+      parent.appendChild(el);
+    }
+    insertAfter = el;
+  });
+  // Apply visibility — respect hidden flag BUT keep sections that the system
+  // already hid (e.g. chat for non-members) still hidden
+  layout.forEach(row => {
+    const el = document.getElementById(row.id);
+    if (!el) return;
+    if (row.hidden) {
+      el.dataset.custHidden = '1';
+      el.style.display = 'none';
+    } else {
+      delete el.dataset.custHidden;
+      // Only un-hide if the section was previously shown or has no forced-hidden logic
+      // We rely on the existing show/hide (chat, signings, etc.) to override if needed
+    }
+  });
+}
+
+async function _saveEfedLayout(layout) {
+  const session = getSession(); if (!session) return;
+  try { localStorage.setItem('efed_layout_' + EFED_NAME, JSON.stringify(layout)); } catch(e) {}
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS,
+      body: JSON.stringify({ efed_layout: layout })
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(()=>'');
+      console.warn('[efed_layout] save failed — run: ALTER TABLE users ADD COLUMN IF NOT EXISTS efed_layout jsonb DEFAULT NULL;', r.status, t);
+    }
+  } catch(e) { console.warn('[efed_layout] save error', e); }
+}
+
+// Build the customize panel rows
+let _custDragSrc = null;
+let _custDragOver = null;
+
+function _emBuildCustomize() {
+  const list = document.getElementById('em-cust-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  // Build current ordered+visibility list
+  const saved = _loadEfedLayout();
+  const savedIds = saved ? saved.map(r => r.id) : [];
+  const hiddenSet = new Set(saved ? saved.filter(r => r.hidden).map(r => r.id) : []);
+
+  // Order: saved order first, then unsaved sections appended
+  const allIds = _EFED_SECTIONS.map(s => s.id);
+  const orderedSections = [
+    ...(savedIds.length ? savedIds.map(id => _EFED_SECTIONS.find(s => s.id === id)).filter(Boolean) : []),
+    ..._EFED_SECTIONS.filter(s => !savedIds.includes(s.id))
+  ];
+
+  orderedSections.forEach((sec, idx) => {
+    const hidden = hiddenSet.has(sec.id);
+    const row = document.createElement('div');
+    row.dataset.secId = sec.id;
+    row.draggable = true;
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:9px;cursor:grab;user-select:none;transition:background .15s,border-color .15s,opacity .15s;';
+    row.innerHTML = `
+      <span style="color:rgba(255,255,255,.25);font-size:1rem;line-height:1;letter-spacing:1px;flex-shrink:0;">&#8801;</span>
+      <span style="flex:1;font-family:'DM Sans',sans-serif;font-size:.78rem;color:${hidden ? 'rgba(255,255,255,.3)' : '#e8e8e8'};transition:color .15s;">${sec.label}</span>
+      <button data-sec-id="${sec.id}" onclick="event.stopPropagation();_custToggleHidden(this)" style="background:none;border:none;cursor:pointer;padding:2px 4px;color:${hidden ? 'rgba(255,255,255,.2)' : 'rgba(255,255,255,.55)'};transition:color .15s;" title="${hidden ? 'Hidden' : 'Visible'}">
+        ${hidden
+          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
+          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+        }
+      </button>`;
+
+    // Drag events
+    row.addEventListener('dragstart', e => {
+      _custDragSrc = row;
+      row.style.opacity = '.4';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.style.opacity = '1';
+      _custDragSrc = null;
+      _custDragOver = null;
+      // remove all guide highlights
+      list.querySelectorAll('[data-sec-id]').forEach(r => {
+        r.style.borderTopColor = 'rgba(255,255,255,.07)';
+        r.style.borderBottomColor = 'rgba(255,255,255,.07)';
+      });
+      _custAutoSave();
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (!_custDragSrc || _custDragSrc === row) return;
+      // Show guide line: top or bottom half
+      const rect = row.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const after = e.clientY > midY;
+      list.querySelectorAll('[data-sec-id]').forEach(r => {
+        r.style.borderTopColor = 'rgba(255,255,255,.07)';
+        r.style.borderBottomColor = 'rgba(255,255,255,.07)';
+      });
+      if (after) {
+        row.style.borderBottomColor = '#c0000e';
+      } else {
+        row.style.borderTopColor = '#c0000e';
+      }
+      _custDragOver = { el: row, after };
+    });
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      if (!_custDragSrc || _custDragSrc === row) return;
+      const rect = row.getBoundingClientRect();
+      const after = e.clientY > rect.top + rect.height / 2;
+      if (after) {
+        row.after(_custDragSrc);
+      } else {
+        list.insertBefore(_custDragSrc, row);
+      }
+    });
+
+    list.appendChild(row);
+  });
+
+  // Save button for this panel
+  let saveRow = document.getElementById('em-cust-save-row');
+  if (!saveRow) {
+    saveRow = document.createElement('div');
+    saveRow.id = 'em-cust-save-row';
+    saveRow.style.cssText = 'padding:14px 22px 0;flex-shrink:0;';
+    saveRow.innerHTML = '<button onclick="_custSave()" style="width:100%;padding:12px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:DM Sans,sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save Layout</button><div id="em-cust-msg" style="font-size:.68rem;text-align:center;min-height:16px;color:#4caf64;padding-top:6px;"></div>';
+    document.getElementById('em-customize-panel').appendChild(saveRow);
+  }
+}
+
+function _custToggleHidden(btn) {
+  const row = btn.closest('[data-sec-id]');
+  if (!row) return;
+  const secId = row.dataset.secId;
+  const isHidden = btn.title === 'Hidden';
+  const newHidden = !isHidden;
+  const label = row.querySelector('span:nth-child(2)');
+  if (newHidden) {
+    btn.title = 'Hidden';
+    btn.style.color = 'rgba(255,255,255,.2)';
+    if (label) label.style.color = 'rgba(255,255,255,.3)';
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  } else {
+    btn.title = 'Visible';
+    btn.style.color = 'rgba(255,255,255,.55)';
+    if (label) label.style.color = '#e8e8e8';
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  }
+}
+
+function _custGetLayout() {
+  const list = document.getElementById('em-cust-list');
+  if (!list) return [];
+  return Array.from(list.querySelectorAll('[data-sec-id]')).map(row => {
+    const btn = row.querySelector('button[data-sec-id]');
+    return { id: row.dataset.secId, hidden: btn ? btn.title === 'Hidden' : false };
+  });
+}
+
+function _custAutoSave() {
+  // auto-apply during drag (no toast)
+  const layout = _custGetLayout();
+  applyEfedLayout(layout);
+}
+
+async function _custSave() {
+  const layout = _custGetLayout();
+  applyEfedLayout(layout);
+  await _saveEfedLayout(layout);
+  const msg = document.getElementById('em-cust-msg');
+  if (msg) { msg.textContent = '✓ Layout saved'; setTimeout(() => { msg.textContent = ''; }, 2000); }
 }
 
 function _checkSocialLimit() {
@@ -3249,7 +3498,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_gallery_5,efed_gallery_6,efed_gallery_7,efed_gallery_8,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_events_json,efed_champions_json,efed_roster_order&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_gallery_5,efed_gallery_6,efed_gallery_7,efed_gallery_8,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_events_json,efed_champions_json,efed_roster_order,efed_layout&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
@@ -3405,6 +3654,11 @@ async function loadProfile() {
     window._efedRosterOrder = Array.isArray(user.efed_roster_order) && user.efed_roster_order.length
       ? user.efed_roster_order
       : (() => { try { const v=localStorage.getItem('efed_roster_order_'+EFED_NAME); return v?JSON.parse(v):[]; } catch(e){return[];} })();
+
+    // Load + apply page layout (section order + visibility)
+    window._efedLayoutData = Array.isArray(user.efed_layout) && user.efed_layout.length ? user.efed_layout : null;
+    // Apply after a tick so all sections are in DOM
+    setTimeout(() => { if (typeof applyEfedLayout === 'function') applyEfedLayout(_loadEfedLayout()); }, 0);
 
     // Upcoming event — pass extra events from DB column
     const _extraEventsFromDB = window._efedExtraEvents;
@@ -5227,6 +5481,7 @@ function triggerInstall() {
       <button class="em-tab active" id="em-tab-profile" onclick="emSwitchTab('profile')">Profile</button>
       <button class="em-tab" id="em-tab-links" onclick="emSwitchTab('links')">Links</button>
       <button class="em-tab" id="em-tab-events" onclick="emSwitchTab('events')">Events</button>
+      <button class="em-tab" id="em-tab-customize" onclick="emSwitchTab('customize')">Customize</button>
     </div>
     <!-- PROFILE PANEL -->
     <div id="em-profile-panel" style="padding:20px 22px;display:flex;flex-direction:column;gap:18px;overflow-y:auto;">
@@ -5345,6 +5600,16 @@ function triggerInstall() {
       <div id="ev-extra-events" style="display:flex;flex-direction:column;gap:16px;"></div>
       <button id="ev-add-btn" onclick="evAddExtraEvent()" style="width:100%;padding:10px;background:rgba(255,255,255,.05);border:1px dashed rgba(255,255,255,.18);border-radius:10px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;transition:background .15s,color .15s;" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='rgba(255,255,255,.75)'" onmouseout="this.style.background='rgba(255,255,255,.05)';this.style.color='rgba(255,255,255,.45)'">+ Add Event</button>
       <div id="ev-msg" style="font-size:.68rem;text-align:center;min-height:14px;color:#4caf64;"></div>
+    </div>
+    <!-- CUSTOMIZE PANEL -->
+    <div id="em-customize-panel" style="display:none;flex-direction:column;overflow-y:auto;max-height:calc(90vh - 160px);position:relative;">
+      <div style="padding:14px 22px 8px;border-bottom:1px solid rgba(255,255,255,.06);">
+        <div style="font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:4px;">Page Layout</div>
+        <div style="font-size:.68rem;color:rgba(255,255,255,.35);line-height:1.5;">Drag sections to reorder. Toggle eye to show or hide.</div>
+      </div>
+      <div id="em-cust-list" style="padding:10px 16px 18px;display:flex;flex-direction:column;gap:4px;position:relative;">
+        <!-- rows injected by _emBuildCustomize() -->
+      </div>
     </div>
     <!-- Footer -->
     <div style="padding:0 22px 22px;flex-shrink:0;display:flex;gap:8px;">
@@ -6190,7 +6455,7 @@ function openSetChampModal(username, displayName, avatarUrl) {
   const modalTitle = document.querySelector('#set-champ-modal-bg [style*="Bebas Neue"][style*="1.2rem"]');
   if (modalTitle) modalTitle.textContent = existing ? 'Edit Championship' : 'Set as Champion';
   if (removeBtn) {
-    removeBtn.textContent = 'Remove Title (lost the belt)';
+    removeBtn.textContent = 'Remove Title';
     removeBtn.style.display = existing ? 'block' : 'none';
   }
   if (input) input.value = existing ? existing.title : '';
@@ -8296,13 +8561,7 @@ function bumpRosterActivity(username) {
   if (!wrap) return;
   const card = wrap.querySelector(`[data-username="${CSS.escape(username)}"]`);
   if (card) {
-    // Keep owner card pinned first — bump active member to 2nd position
-    const ownerCard = wrap.querySelector('[data-username]');
-    const isOwnerCard = ownerCard && ownerCard.dataset.username === EFED_OWNER;
-    if (isOwnerCard && ownerCard !== card) {
-      // Insert after owner card
-      ownerCard.after(card);
-    } else if (wrap.firstChild !== card) {
+    if (wrap.firstChild !== card) {
       wrap.insertBefore(card, wrap.firstChild);
     }
     // Save new order to Supabase + localStorage
