@@ -3900,7 +3900,7 @@ async function openEditModal(tab) {
   // Fetch own user data fresh from DB
   let _ownData = {};
   try {
-    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio,avatar_side,avatar_banner_dim,championships,cc_hashtag_1,cc_hashtag_2,cc_hashtag_3,cc_hashtags_visible`);
+    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio,avatar_side,avatar_banner_dim,championships`);
     _ownData = _rows[0] || {};
   } catch(e) {}
 
@@ -3935,14 +3935,19 @@ async function openEditModal(tab) {
   const bioCount = document.getElementById('ep-bio-count');
   if (bioTA) { bioTA.value = _ownData.bio || ''; if (bioCount) bioCount.textContent = bioTA.value.length + ' / 500'; }
 
-  // Pre-fill hashtag inputs
+  // Pre-fill hashtag inputs (fetch separately — columns may not exist yet)
+  let _htData = {};
+  try {
+    const _htRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=cc_hashtag_1,cc_hashtag_2,cc_hashtag_3,cc_hashtags_visible`);
+    _htData = _htRows[0] || {};
+  } catch(e) {}
   const _h1 = document.getElementById('ep-hashtag-1');
   const _h2 = document.getElementById('ep-hashtag-2');
   const _h3 = document.getElementById('ep-hashtag-3');
-  if (_h1) _h1.value = _ownData.cc_hashtag_1 || '';
-  if (_h2) _h2.value = _ownData.cc_hashtag_2 || '';
-  if (_h3) _h3.value = _ownData.cc_hashtag_3 || '';
-  epSetHashtagToggle(_ownData.cc_hashtags_visible);
+  if (_h1) _h1.value = _htData.cc_hashtag_1 || '';
+  if (_h2) _h2.value = _htData.cc_hashtag_2 || '';
+  if (_h3) _h3.value = _htData.cc_hashtag_3 || '';
+  epSetHashtagToggle(_htData.cc_hashtags_visible);
 
   // Pre-fill avatar side
   epSetSide(_ownData.avatar_side || 'left', false);
@@ -4482,9 +4487,13 @@ async function saveEditProfile() {
     const _ht3 = (document.getElementById('ep-hashtag-3')?.value.trim() || '').replace(/[^a-zA-Z0-9_]/g,'').slice(0,20) || null;
     const _htVisible = _epHashtagsOn;
     const usernameChanged = !isLinks && newUsername && newUsername !== session.username;
-    const updates = { display_name: name || null, ig_handle: ig ? '@'+ig : null, x_handle: x ? '@'+x : null, twitch_channel: twitch || null, avatar_side: avatarSide, avatar_banner_dim: bannerDim, bio: bio || null, cc_hashtag_1: _ht1, cc_hashtag_2: _ht2, cc_hashtag_3: _ht3, cc_hashtags_visible: _htVisible };
+    const updates = { display_name: name || null, ig_handle: ig ? '@'+ig : null, x_handle: x ? '@'+x : null, twitch_channel: twitch || null, avatar_side: avatarSide, avatar_banner_dim: bannerDim, bio: bio || null };
     if (usernameChanged) updates.username = newUsername;
     await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(updates) });
+    // Save hashtags separately — columns must exist in DB; silently skipped if not
+    try {
+      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({ cc_hashtag_1: _ht1, cc_hashtag_2: _ht2, cc_hashtag_3: _ht3, cc_hashtags_visible: _htVisible }) });
+    } catch(e) {}
     applyAvatarSide(avatarSide);
     applyBannerDim(bannerDim);
 
@@ -4932,7 +4941,7 @@ async function loadProfile() {
     }
   }
   try {
-    const users = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment,cc_hashtag_1,cc_hashtag_2,cc_hashtag_3,cc_hashtags_visible`);
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment`);
     if (!users.length) { document.getElementById('profile-name').textContent = 'User not found'; return; }
     const user = users[0];
     // Fetch gallery images in a separate query to avoid response size issues with large base64
@@ -4940,6 +4949,11 @@ async function loadProfile() {
       const imgRow = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=caw_image_1,caw_image_2,caw_image_3,caw_image_4`);
       if (imgRow[0]) { user.caw_image_1 = imgRow[0].caw_image_1; user.caw_image_2 = imgRow[0].caw_image_2; user.caw_image_3 = imgRow[0].caw_image_3; user.caw_image_4 = imgRow[0].caw_image_4; }
     } catch(e) {}
+    // Fetch hashtags separately (columns may not exist yet — graceful fallback)
+    try {
+      const htRow = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=cc_hashtag_1,cc_hashtag_2,cc_hashtag_3,cc_hashtags_visible`);
+      if (htRow[0]) { user.cc_hashtag_1 = htRow[0].cc_hashtag_1; user.cc_hashtag_2 = htRow[0].cc_hashtag_2; user.cc_hashtag_3 = htRow[0].cc_hashtag_3; user.cc_hashtags_visible = htRow[0].cc_hashtags_visible; }
+    } catch(e) { user.cc_hashtag_1 = null; user.cc_hashtag_2 = null; user.cc_hashtag_3 = null; user.cc_hashtags_visible = false; }
     // Fetch avatar + banner separately
     try {
       const avRow = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=avatar_url,avatar_banner,avatar_side,avatar_banner_dim`);
@@ -7998,7 +8012,7 @@ function _onChatViewportResize() {
 }
 
 // ── EMOJI PICKER ──
-if (typeof WRESTLING_EMOJIS === 'undefined') var WRESTLING_EMOJIS = ['🪑','🏆','🔔','🩸','💀','🔥','⚡','💪','👊','🤜','🤛','🦵','🥊','😤','😈','😇','🤬','😱','🤩','😭','🙌','👏','🎤','📢','🎺','🚨','⛓️','🔗','🗡️','🔨','🪓','📌','3️⃣','🏟️','🎭','🩺','🩹','🪬','👑','👍','👎','😂','🤣','⭐','🫵','🤝','🫀','💔','🎯','📺','🎬','💥','🌪️','🕳️','🖼️'];
+// WRESTLING_EMOJIS defined in stamps.js
 let _stampPickerOpen = false;
 window._chatCurrentEfedName = '';
 function _buildChatStamp(pickerEl, inputEl, efedName) {
