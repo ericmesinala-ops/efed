@@ -310,7 +310,7 @@ const STAMP_DEFS = [
 
 /** Get a stamp by code */
 function getStamp(code) {
-  return STAMP_DEFS.find(s => s.code === code) || null;
+  return STAMP_DEFS.find(s => s.code === code) || USER_STAMP_DEFS.find(s => s.code === code) || null;
 }
 
 /** Get all stamps in a category (1–10) */
