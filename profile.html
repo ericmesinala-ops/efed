@@ -1298,6 +1298,8 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
   <input type="file" id="profile-banner-file" accept="image/*" style="display:none;" onchange="handleBannerUpload(event,'profile')">
   <!-- Social icons placeholder kept for renderSocialLinks compat -->
   <div class="banner-social-icons" id="banner-social-icons"></div>
+  <!-- Username bottom-right of banner -->
+  <div id="banner-username-tag" style="position:absolute;bottom:10px;right:14px;z-index:10;font-family:'DM Sans',sans-serif;font-size:.62rem;color:rgba(255,255,255,.35);letter-spacing:.5px;font-weight:500;pointer-events:none;text-shadow:0 1px 4px rgba(0,0,0,.8);display:none;"></div>
   <div class="banner-inner">
     <div class="profile-av-box" id="profile-av-box" onclick="handleAvatarClick()">
       <img id="profile-av-img" src="" alt="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">
@@ -1335,9 +1337,12 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
 
 
 <!-- ── IDENTITY ROW ── -->
-<div class="identity-row" id="identity-row">
-  <div class="identity-row-name" id="identity-row-name">—<span class="on-roster-badge" id="on-roster-badge"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>On Roster</span></div>
-  <div class="identity-row-icons" id="identity-row-icons"></div>
+<div class="identity-row" id="identity-row" style="align-items:flex-start;padding-top:12px;padding-bottom:12px;">
+  <div style="flex:1;min-width:0;">
+    <div class="identity-row-name" id="identity-row-name" style="margin-bottom:2px;">—<span class="on-roster-badge" id="on-roster-badge"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>On Roster</span></div>
+    <div id="identity-row-username" style="font-size:.62rem;color:rgba(255,255,255,.28);letter-spacing:.5px;font-family:'DM Sans',sans-serif;font-weight:400;"></div>
+  </div>
+  <div class="identity-row-icons" id="identity-row-icons" style="align-self:center;"></div>
 </div>
 
 <!-- ── PROFILE TABS ── -->
@@ -3917,7 +3922,9 @@ async function openEditModal(tab) {
   // Pre-fill all fields
   const nameInput = document.getElementById('ep-name-input');
   if (nameInput) nameInput.value = _ownData.display_name || session.username || '';
-  ['ep-av-msg','ep-name-msg','ep-save-msg','ep-links-msg','ep-title-msg'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = ''; });
+  ['ep-av-msg','ep-name-msg','ep-save-msg','ep-links-msg','ep-title-msg','ep-username-msg'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = ''; });
+  const _unInput = document.getElementById('ep-username-input');
+  if (_unInput) _unInput.value = session.username || '';
   const _igIn = document.getElementById('ep-ig-input');
   const _xIn  = document.getElementById('ep-x-input');
   if (_igIn) _igIn.value = (_ownData.ig_handle || '').replace('@','');
@@ -4453,6 +4460,17 @@ async function saveEditProfile() {
     if (name.length > 24) { if(nameMsg){nameMsg.textContent = 'Max 24 characters.'; nameMsg.style.color='#ff6b6b';} return; }
   }
 
+  // ── USERNAME CHANGE CHECK ──
+  const newUsername = (document.getElementById('ep-username-input')?.value.trim() || '').toLowerCase().replace(/[^a-z0-9_]/g,'');
+  const unMsg = document.getElementById('ep-username-msg');
+  if (!isLinks && newUsername && newUsername !== session.username) {
+    if (newUsername.length < 3) { if(unMsg){unMsg.textContent='Min 3 characters.';unMsg.style.color='#ff6b6b';} return; }
+    try {
+      const taken = await sbGet('users', `username=eq.${encodeURIComponent(newUsername)}&select=username`);
+      if (taken.length) { if(unMsg){unMsg.textContent='Username taken.';unMsg.style.color='#ff6b6b';} return; }
+    } catch(e) {}
+  }
+
   const ig = (document.getElementById('ep-ig-input')?.value.trim() || '').replace('@','');
   const x  = (document.getElementById('ep-x-input')?.value.trim()  || '').replace('@','');
   const bio = (document.getElementById('ep-bio-input')?.value || '').slice(0, 500);
@@ -4465,7 +4483,9 @@ async function saveEditProfile() {
     const _ht2 = (document.getElementById('ep-hashtag-2')?.value.trim() || '').replace(/[^a-zA-Z0-9_]/g,'').slice(0,20) || null;
     const _ht3 = (document.getElementById('ep-hashtag-3')?.value.trim() || '').replace(/[^a-zA-Z0-9_]/g,'').slice(0,20) || null;
     const _htVisible = _epHashtagsOn;
-    const updates = { display_name: name || session.username, ig_handle: ig ? '@'+ig : null, x_handle: x ? '@'+x : null, twitch_channel: twitch || null, avatar_side: avatarSide, avatar_banner_dim: bannerDim, bio: bio || null, cc_hashtag_1: _ht1, cc_hashtag_2: _ht2, cc_hashtag_3: _ht3, cc_hashtags_visible: _htVisible };
+    const usernameChanged = !isLinks && newUsername && newUsername !== session.username;
+    const updates = { display_name: name || null, ig_handle: ig ? '@'+ig : null, x_handle: x ? '@'+x : null, twitch_channel: twitch || null, avatar_side: avatarSide, avatar_banner_dim: bannerDim, bio: bio || null, cc_hashtag_1: _ht1, cc_hashtag_2: _ht2, cc_hashtag_3: _ht3, cc_hashtags_visible: _htVisible };
+    if (usernameChanged) updates.username = newUsername;
     await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(updates) });
     applyAvatarSide(avatarSide);
     applyBannerDim(bannerDim);
@@ -4499,11 +4519,21 @@ async function saveEditProfile() {
       }
     } catch(e) { console.warn('Ban check failed silently', e); }
 
+    if (usernameChanged) { session.username = newUsername; }
     session.displayName = name || session.username; session.igHandle = ig; session.xHandle = x;
     localStorage.setItem('efed_session', JSON.stringify(session));
-    document.getElementById('profile-name').textContent = name || session.username;
-    const _irn = document.getElementById('identity-row-name'); if (_irn) { const badge = _irn.querySelector('.on-roster-badge'); _irn.textContent = name || session.username; if (badge) _irn.appendChild(badge); }
-    document.getElementById('profile-av-initial').textContent = (name || session.username)[0].toUpperCase();
+    // Update display name on page
+    const _dispName = name || session.username;
+    document.getElementById('profile-name').textContent = _dispName;
+    const _irn = document.getElementById('identity-row-name');
+    if (_irn) { const badge = _irn.querySelector('.on-roster-badge'); const tn=_irn.childNodes[0]; if(tn&&tn.nodeType===3)tn.textContent=_dispName; else _irn.insertBefore(document.createTextNode(_dispName),_irn.firstChild); }
+    document.getElementById('profile-av-initial').textContent = _dispName[0].toUpperCase();
+    // Update @username elements
+    if (usernameChanged || !isLinks) {
+      const _uname = session.username;
+      const _iru = document.getElementById('identity-row-username'); if(_iru) _iru.textContent = '@' + _uname;
+      const _but = document.getElementById('banner-username-tag'); if(_but) _but.textContent = '@' + _uname;
+    }
     const navImg = document.getElementById('nav-avatar-img');
     if (!navImg || navImg.style.display === 'none') { var _ni=document.getElementById('nav-initials'); if(_ni){_ni.style.display='flex';_ni.style.alignItems='center';_ni.style.justifyContent='center';_ni.innerHTML='<svg width="20" height="17" viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="18" width="110" height="72" rx="8" fill="#b0b0b8" stroke="#d0d0d8" stroke-width="1.5"/><rect x="12" y="24" width="96" height="58" rx="5" fill="#7a7a84" stroke="#a0a0aa" stroke-width="1"/><rect x="15" y="27" width="90" height="52" fill="#686870"/><line x1="38" y1="18" x2="22" y2="3" stroke="#c8c8d0" stroke-width="2.5" stroke-linecap="round"/><line x1="82" y1="18" x2="98" y2="3" stroke="#c8c8d0" stroke-width="2.5" stroke-linecap="round"/><rect x="5" y="84" width="110" height="6" fill="#9a9aa2"/><circle cx="100" cy="87" r="2.2" fill="#c0000e" opacity=".9"/><rect x="28" y="90" width="10" height="8" rx="2" fill="#8a8a92"/><rect x="82" y="90" width="10" height="8" rx="2" fill="#8a8a92"/></svg>';} }
     renderSocialLinks(ig, x, twitch);
@@ -4897,7 +4927,7 @@ async function loadProfile() {
     const _cachedName = session.displayName || session.username || '';
     if (_cachedName) {
       document.getElementById('profile-name').textContent = _cachedName;
-      const _irn0 = document.getElementById('identity-row-name'); if (_irn0) _irn0.textContent = _cachedName;
+      const _irn0 = document.getElementById('identity-row-name'); if (_irn0) { const _b0=_irn0.querySelector('.on-roster-badge'); _irn0.textContent=_cachedName; if(_b0)_irn0.appendChild(_b0); }
       document.getElementById('profile-av-initial').textContent = _cachedName[0].toUpperCase();
       if (session.avatarUrl) setAvatar(session.avatarUrl);
       if (session.igHandle || session.xHandle) renderSocialLinks(session.igHandle || '', session.xHandle || '', '');
@@ -4918,10 +4948,22 @@ async function loadProfile() {
       if (avRow[0]) { user.avatar_url = avRow[0].avatar_url; user.avatar_banner = avRow[0].avatar_banner; user.avatar_side = avRow[0].avatar_side; user.avatar_banner_dim = avRow[0].avatar_banner_dim; }
     } catch(e) {}
     const name = user.display_name || user.username;
+    const uname = user.username;
     _atrTargetName = name;
     document.title = name + ' — EFED Hub';
     document.getElementById('profile-name').textContent = name;
-    const _irn1 = document.getElementById('identity-row-name'); if (_irn1) _irn1.textContent = name;
+    // Identity row: display name + @username
+    const _irn1 = document.getElementById('identity-row-name');
+    if (_irn1) {
+      const _badge = _irn1.querySelector('.on-roster-badge');
+      _irn1.textContent = name;
+      if (_badge) _irn1.appendChild(_badge);
+    }
+    const _iru = document.getElementById('identity-row-username');
+    if (_iru) _iru.textContent = '@' + uname;
+    // Banner username tag
+    const _but = document.getElementById('banner-username-tag');
+    if (_but) { _but.textContent = '@' + uname; _but.style.display = ''; }
     document.getElementById('profile-av-initial').textContent = name[0].toUpperCase();
     if (user.avatar_url) setAvatar(user.avatar_url, _isOwnProfile);
     // Load saved banner
@@ -5004,7 +5046,7 @@ async function loadProfile() {
     console.error('Profile user fetch failed:', e);
     const fallbackName = session.displayName || session.username || '';
     document.getElementById('profile-name').textContent = fallbackName;
-    const _irn2 = document.getElementById('identity-row-name'); if (_irn2) _irn2.textContent = fallbackName;
+    const _irn2 = document.getElementById('identity-row-name'); if (_irn2) { const _b2=_irn2.querySelector('.on-roster-badge'); _irn2.textContent=fallbackName; if(_b2)_irn2.appendChild(_b2); }
     if (fallbackName) document.getElementById('profile-av-initial').textContent = fallbackName[0].toUpperCase();
   }
 
@@ -5738,6 +5780,18 @@ function triggerInstall() {
         <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:8px;">Display Name</div>
         <input id="ep-name-input" type="text" placeholder="Your display name" maxlength="24" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
         <div id="ep-name-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
+      </div>
+
+      <!-- Username -->
+      <div>
+        <div style="font-size:.56rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:8px;">Username</div>
+        <div style="display:flex;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden;">
+          <span style="padding:10px 6px 10px 12px;color:rgba(255,255,255,.25);font-size:.82rem;">@</span>
+          <input id="ep-username-input" type="text" placeholder="your_username" maxlength="30"
+            style="flex:1;background:none;border:none;padding:10px 12px 10px 0;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;"
+            oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_]/g,'');document.getElementById('ep-username-msg').textContent='';">
+        </div>
+        <div id="ep-username-msg" style="font-size:.68rem;margin-top:5px;min-height:14px;"></div>
       </div>
 
       <!-- Banner -->
