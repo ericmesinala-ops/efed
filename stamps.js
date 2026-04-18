@@ -319,8 +319,10 @@ function getStampsByCategory(cat) {
 }
 
 /**
- * Assign one stamp per category to an eFed, seeded by name.
- * Returns array of 10 stamp objects (one per category).
+ * Assign two stamps per category to an eFed, seeded by name.
+ * Returns array of 20 stamp objects (two per category, 10 categories).
+ * The first pick per category is identical to the original single pick,
+ * so existing eFed stamps never change.
  */
 function getEfedStamps(name) {
   if (!name) name = '';
@@ -329,7 +331,13 @@ function getEfedStamps(name) {
   const stamps = [];
   for (let cat = 1; cat <= 10; cat++) {
     const pool = getStampsByCategory(cat);
-    if (pool.length) stamps.push(pool[(seed >>> (cat * 2)) % pool.length]);
+    if (!pool.length) continue;
+    // First pick — unchanged from original (seed >>> cat*2)
+    const idx1 = (seed >>> (cat * 2)) % pool.length;
+    stamps.push(pool[idx1]);
+    // Second pick — offset from first, guaranteed different stamp
+    const idx2 = (idx1 + 1 + (seed >>> (cat * 3)) % (pool.length - 1)) % pool.length;
+    stamps.push(pool[idx2]);
   }
   return stamps;
 }
