@@ -1363,6 +1363,173 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
   <input type="hidden" id="pts-invite-bonus" value="0">
 </div>
 
+<!-- ── PROFILE TABS ── -->
+<div class="profile-tab-bar" id="profile-tab-bar">
+  <button class="profile-tab active" data-tab="overview" onclick="switchProfileTab(0)">Overview</button>
+  <button class="profile-tab" data-tab="activity" onclick="switchProfileTab(1)">Activity</button>
+  <button class="profile-tab" data-tab="career" onclick="switchProfileTab(2)">Career</button>
+  <button class="profile-tab" data-tab="media" onclick="switchProfileTab(3)">Media</button>
+  <div class="profile-tab-ink" id="profile-tab-ink"></div>
+</div>
+<style>
+/* ── PROFILE TAB BAR ── */
+.profile-tab-bar {
+  display: flex; border-bottom: 1px solid rgba(255,255,255,.06);
+  background: var(--bg); position: sticky; top: 57px; z-index: 50;
+  overflow: hidden;
+}
+.profile-tab {
+  flex: 1; padding: 13px 0; font-family: 'DM Sans', sans-serif;
+  font-size: .62rem; font-weight: 700; letter-spacing: 2px;
+  text-transform: uppercase; color: rgba(255,255,255,.3);
+  cursor: pointer; border: none; background: none;
+  border-bottom: 2px solid transparent;
+  transition: color .2s, border-color .2s;
+  margin-bottom: -1px; position: relative; z-index: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+.profile-tab.active { color: #fff; border-bottom-color: #c0000e; }
+.profile-tab:hover:not(.active) { color: rgba(255,255,255,.55); }
+
+/* sliding ink indicator */
+.profile-tab-ink {
+  position: absolute; bottom: 0; left: 0;
+  height: 2px; background: #c0000e;
+  width: 25%; /* 1/4 for 4 tabs */
+  transform: translateX(0%);
+  transition: transform .28s cubic-bezier(.4,0,.2,1);
+  pointer-events: none;
+}
+
+/* ── SWIPE VIEWPORT ── */
+.profile-panels-viewport {
+  overflow: hidden; width: 100%;
+  /* height managed by JS to match tallest visible panel */
+}
+.profile-panels-track {
+  display: flex; width: 400%; /* 4 panels */
+  will-change: transform;
+  transition: transform .32s cubic-bezier(.4,0,.2,1);
+}
+.profile-panels-track.no-transition { transition: none; }
+.profile-tab-panel {
+  width: 25%; flex-shrink: 0; min-width: 0;
+  box-sizing: border-box;
+}
+
+html.day-mode .profile-tab-bar { background: var(--bg) !important; border-bottom-color: rgba(0,0,0,.08) !important; }
+html.day-mode .profile-tab { color: rgba(0,0,0,.3) !important; }
+html.day-mode .profile-tab.active { color: #111 !important; }
+html.day-mode .profile-tab:hover:not(.active) { color: rgba(0,0,0,.55) !important; }
+html.day-mode .profile-tab-ink { background: #c0000e !important; }
+</style>
+<script>
+(function() {
+  const TABS = ['overview','activity','career','media'];
+  let _curIdx = 0;
+
+  /* ── switch by index ── */
+  function _goTo(idx, animate) {
+    idx = Math.max(0, Math.min(TABS.length - 1, idx));
+    _curIdx = idx;
+
+    /* tab buttons */
+    document.querySelectorAll('.profile-tab').forEach((t, i) =>
+      t.classList.toggle('active', i === idx));
+
+    /* ink slider */
+    const ink = document.getElementById('profile-tab-ink');
+    if (ink) ink.style.transform = 'translateX(' + (idx * 100) + '%)';
+
+    /* panel track */
+    const track = document.getElementById('profile-panels-track');
+    if (track) {
+      if (!animate) track.classList.add('no-transition');
+      track.style.transform = 'translateX(-' + (idx * 25) + '%)';
+      if (!animate) requestAnimationFrame(() => track.classList.remove('no-transition'));
+    }
+  }
+
+  /* public: called by onclick and by swipe */
+  window.switchProfileTab = function(tabOrIdx) {
+    const idx = typeof tabOrIdx === 'number' ? tabOrIdx : TABS.indexOf(tabOrIdx);
+    _goTo(idx, true);
+  };
+
+  /* ── touch / swipe ── */
+  document.addEventListener('DOMContentLoaded', function() {
+    const viewport = document.getElementById('profile-panels-viewport');
+    const track    = document.getElementById('profile-panels-track');
+    if (!viewport || !track) return;
+
+    let _tx = 0, _ty = 0, _startX = 0, _startY = 0;
+    let _dragging = false, _locked = null; /* 'h' | 'v' | null */
+    const THRESHOLD = 50;   /* px to commit a swipe */
+    const LOCK_ANGLE = 25;  /* degrees — below this → horizontal lock */
+
+    viewport.addEventListener('touchstart', function(e) {
+      const t = e.touches[0];
+      _startX = t.clientX; _startY = t.clientY;
+      _tx = 0; _ty = 0;
+      _dragging = true; _locked = null;
+      track.classList.add('no-transition');
+    }, { passive: true });
+
+    viewport.addEventListener('touchmove', function(e) {
+      if (!_dragging) return;
+      const t = e.touches[0];
+      _tx = t.clientX - _startX;
+      _ty = t.clientY - _startY;
+
+      /* determine axis lock on first significant move */
+      if (_locked === null && (Math.abs(_tx) > 6 || Math.abs(_ty) > 6)) {
+        const angle = Math.abs(Math.atan2(Math.abs(_ty), Math.abs(_tx)) * 180 / Math.PI);
+        _locked = angle < (90 - LOCK_ANGLE) ? 'h' : 'v';
+      }
+
+      if (_locked === 'h') {
+        e.preventDefault();
+        /* clamp: can't swipe past first/last */
+        const maxDrag = viewport.offsetWidth * 0.55;
+        const clamped = Math.max(-maxDrag, Math.min(maxDrag, _tx));
+        const base = _curIdx * 25; /* % */
+        /* convert px drag to % of track width (track = 4× viewport) */
+        const pct = (clamped / (viewport.offsetWidth * 4)) * 100;
+        track.style.transform = 'translateX(calc(-' + base + '% + ' + (clamped) + 'px))';
+      }
+    }, { passive: false });
+
+    function _end() {
+      if (!_dragging) return;
+      _dragging = false;
+      track.classList.remove('no-transition');
+
+      if (_locked === 'h') {
+        if (_tx < -THRESHOLD && _curIdx < TABS.length - 1) {
+          _goTo(_curIdx + 1, true);
+        } else if (_tx > THRESHOLD && _curIdx > 0) {
+          _goTo(_curIdx - 1, true);
+        } else {
+          /* snap back */
+          _goTo(_curIdx, true);
+        }
+      }
+      _locked = null; _tx = 0; _ty = 0;
+    }
+
+    viewport.addEventListener('touchend',    _end, { passive: true });
+    viewport.addEventListener('touchcancel', _end, { passive: true });
+  });
+})();
+</script>
+
+<!-- ── PANEL VIEWPORT ── -->
+<div class="profile-panels-viewport" id="profile-panels-viewport">
+<div class="profile-panels-track" id="profile-panels-track">
+
+<!-- ── OVERVIEW PANEL ── -->
+<div class="profile-tab-panel" data-panel="overview">
+
 <!-- ── BIO STRIP ── -->
 <div class="bio-strip" id="bio-strip">
   <div class="bio-cell" onclick="bioStripEdit('nickname')">
@@ -1482,7 +1649,21 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
   <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
 </div>
 
-<!-- ── MY EFEDS (Part of / Roster) ── -->
+<!-- ── END OVERVIEW PANEL ── -->
+</div><!-- /profile-tab-panel overview -->
+
+<!-- ── ACTIVITY PANEL ── -->
+<div class="profile-tab-panel" data-panel="activity"></div>
+
+<!-- ── CAREER PANEL ── -->
+<div class="profile-tab-panel" data-panel="career"></div>
+
+<!-- ── MEDIA PANEL ── -->
+<div class="profile-tab-panel" data-panel="media"></div>
+
+</div><!-- /profile-panels-track -->
+</div><!-- /profile-panels-viewport -->
+
 <!-- ── IMAGE LIGHTBOX ── -->
 <div id="lightbox-bg" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.92);backdrop-filter:blur(12px);align-items:center;justify-content:center;" onclick="closeLightbox()">
   <img id="lightbox-img" src="" alt="" style="max-width:95vw;max-height:92vh;border-radius:10px;object-fit:contain;box-shadow:0 24px 80px rgba(0,0,0,.8);animation:lbIn .2s ease-out;">
