@@ -4411,10 +4411,11 @@ function a2hsDismiss(){
         </div>
         <!-- Input row -->
         <div class="expand-comment-input-wrap" style="margin-top:0;">
-          <button id="expand-stamp-btn" onclick="toggleExpandStampPicker()" title="Stamps"
-            style="padding:8px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.55);cursor:pointer;font-size:.8rem;transition:background .15s,color .15s;flex-shrink:0;">🎟</button>
+          <button id="expand-stamp-btn" class="stamp-btn" onclick="toggleExpandStampPicker()" title="Stamps">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M7 14V10a5 5 0 0 1 10 0v4"/><circle cx="12" cy="17" r="1.2" fill="currentColor" stroke="none"/></svg>
+          </button>
           <button id="expand-gif-btn" onclick="toggleExpandGifPicker()" title="GIF"
-            style="padding:8px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.55);cursor:pointer;font-size:.65rem;font-weight:800;letter-spacing:1px;font-family:DM Sans,sans-serif;transition:background .15s,color .15s;flex-shrink:0;">GIF</button>
+            style="flex-shrink:0;height:32px;padding:0 8px;border-radius:16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.6);font-size:.58rem;font-weight:800;letter-spacing:1px;cursor:pointer;font-family:DM Sans,sans-serif;transition:background .2s;">GIF</button>
           <textarea class="expand-comment-input" id="expand-comment-input" rows="1" placeholder="Add a comment…" oninput="autoResizeComment(this)"></textarea>
           <button class="expand-comment-send" onclick="postExpandComment()">Post</button>
         </div>
@@ -9462,19 +9463,27 @@ async function toggleCommentLike(commentId, btn) {
 
 function renderCommentText(text) {
   if (!text) return '';
+  // Use same rendering pipeline as chat
+  if (typeof _renderWithMoodlets === 'function' && typeof escapeHtml === 'function') {
+    let rendered = _renderWithMoodlets(escapeHtml(text));
+    // Wrap stamp imgs with glow, same as chat
+    if (text.includes('[m:')) {
+      rendered = rendered.replace(/<img([^>]*class="[^"]*moodlet[^"]*"[^>]*)>/gi,
+        '<span class="chat-stamp-glow"><img$1></span>');
+    }
+    // Render [gif] tags
+    rendered = rendered.replace(/\[gif\](https?:\/\/[^\[]+)\[\/gif\]/g, (_, url) =>
+      `<img src="${url}" alt="GIF" style="max-width:200px;max-height:140px;border-radius:6px;display:block;margin-top:4px;">`
+    );
+    return rendered;
+  }
+  // Fallback if stamps.js not loaded
   return text
     .replace(/\[gif\](https?:\/\/[^\[]+)\[\/gif\]/g, (_, url) =>
       `<img src="${url}" alt="GIF" style="max-width:200px;max-height:140px;border-radius:6px;display:block;margin-top:4px;">`
     )
-    .replace(/\[m:([a-zA-Z0-9_\-]+)\]/g, (_, code) => {
-      if (typeof stampImg === 'function') return `<span class="chat-stamp-glow">${stampImg(code, 32)}</span>`;
-      return `<img src="/stamps/${code}.gif" style="width:32px;height:32px;vertical-align:middle;">`;
-    })
-    .replace(/\[stamp:([a-zA-Z0-9_\-]+)\]/g, (_, code) => {
-      if (typeof stampImg === 'function') return `<span class="chat-stamp-glow">${stampImg(code, 32)}</span>`;
-      return `<img src="/stamps/${code}.gif" style="width:32px;height:32px;vertical-align:middle;">`;
-    })
-    .replace(/(?<![>=])[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+    .replace(/\[m:([a-zA-Z0-9_\-]+)\]/g, (match) => match)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ── COMMENT MODERATION ──
