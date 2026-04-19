@@ -1885,8 +1885,7 @@ html.day-mode .ms-add-btn:hover { color: rgba(0,0,0,.55); border-color: rgba(0,0
 .ht-slot-lbl { font-size:.48rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.5);font-weight:700;margin-bottom:4px;font-family:'DM Sans',sans-serif; }
 .ht-slot-val { font-size:.82rem;color:rgba(255,255,255,.7);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
 .ht-slot-val.empty { min-height: 1.2em; }
-.ht-slot-val a { color: inherit; text-decoration: none; pointer-events: auto; }
-.ht-slot-val a:hover { color: #c8a84b; text-decoration: underline; }
+
 .ht-slot-input {
   width: 100%; background: none; border: none; outline: none;
   font-size: .82rem; color: rgba(255,255,255,.85); font-weight: 500;
@@ -1898,6 +1897,36 @@ html.day-mode .ht-slot-lbl { color: rgba(168,130,10,.55); }
 html.day-mode .ht-slot-val { color: rgba(0,0,0,.6); }
 html.day-mode .ht-slot-val.empty { }
 html.day-mode .ht-slot-input { color: rgba(0,0,0,.75); }
+
+/* ── HASHTAG ADD BUTTON ── */
+.ht-add-btn {
+  flex-shrink: 0;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.12);
+  color: rgba(255,255,255,.35);
+  font-size: .9rem; line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0;
+  transition: opacity .2s, background .15s, color .15s;
+}
+/* desktop: show on parent hover */
+.ht-slot:hover ~ .ht-add-btn,
+.ht-add-btn:hover { opacity: 1; }
+/* always show wrapper hover */
+div:hover > .ht-add-btn { opacity: 1; }
+.ht-add-btn:hover { background: rgba(200,168,75,.15); border-color: rgba(200,168,75,.35); color: #c8a84b; }
+/* mobile: always subtly visible */
+.ht-add-btn--mobile { opacity: .3; }
+.ht-add-btn--hidden { display: none; }
+html.day-mode .ht-add-btn { background: rgba(0,0,0,.06); border-color: rgba(0,0,0,.12); color: rgba(0,0,0,.3); }
+html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color: rgba(168,130,10,.3); color: var(--gold); }
+@media (hover: none) {
+  /* touch devices — always show subtly */
+  .ht-add-btn { opacity: .3 !important; }
+  .ht-add-btn:active { opacity: 1 !important; background: rgba(200,168,75,.15); color: #c8a84b; }
+}
 </style>
 
 <!-- Mobile long-press context menu -->
@@ -4881,7 +4910,7 @@ function renderProfileHashtags(tags, visible, isOwn) {
     display.innerHTML = filled.map(tag => `
       <div class="ht-slot">
         <div class="ht-slot-lbl">CC Hashtag</div>
-        <div class="ht-slot-val"><a href="https://twitter.com/hashtag/${_esc(tag)}" target="_blank" rel="noopener">#${_esc(tag)}</a></div>
+        <div class="ht-slot-val">#${_esc(tag)}</div>
       </div>`).join('');
     return;
   }
@@ -4895,23 +4924,57 @@ function renderProfileHashtags(tags, visible, isOwn) {
   if (toggleEl) { toggleEl.style.background = visible ? '#c8a84b' : 'rgba(255,255,255,.12)'; toggleEl.style.borderColor = visible ? '#c8a84b' : 'rgba(255,255,255,.1)'; }
   if (knob) { knob.style.transform = visible ? 'translateX(16px)' : 'translateX(0)'; knob.style.opacity = visible ? '1' : '.4'; }
 
-  // Render 3 editable slots — contenteditable just like bio
-  display.innerHTML = [0,1,2].map(i => {
+  // Figure out how many slots to show: always at least 1, show next if prev has content
+  // + button appears after last visible slot (up to 2), not after slot 3
+  window._htVisibleSlots = rawTags[1] ? (rawTags[2] ? 3 : 2) : 1;
+
+  _htRenderSlots(rawTags);
+}
+
+function _htRenderSlots(rawTags) {
+  const display = document.getElementById('hashtags-display');
+  if (!display) return;
+  rawTags = rawTags || ['','',''];
+  const visible = window._htVisibleSlots || 1;
+
+  let html = '';
+  for (let i = 0; i < visible; i++) {
     const tag = rawTags[i] || '';
     const slotNum = i + 1;
-    return `<div class="ht-slot owner" id="ht-slot-${slotNum}">
-      <div class="ht-slot-lbl">CC Hashtag</div>
-      <div class="ht-slot-val" id="ht-val-${slotNum}"
-        contenteditable="true"
-        spellcheck="false"
-        data-slot="${slotNum}"
-        style="outline:none;cursor:text;"
-        onblur="htSlotSave(this)"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
-        oninput="this.textContent=this.textContent.replace(/[^a-zA-Z0-9_#]/g,'').replace(/^#+/,'');"
-      >${tag ? '#'+_esc(tag) : ''}</div>
+    // Show + button after this slot if it's the last visible and < 3
+    const showPlus = (i === visible - 1) && visible < 3;
+    html += `<div style="display:flex;align-items:center;gap:6px;">
+      <div class="ht-slot owner" id="ht-slot-${slotNum}">
+        <div class="ht-slot-lbl">CC Hashtag</div>
+        <div class="ht-slot-val" id="ht-val-${slotNum}"
+          contenteditable="true"
+          spellcheck="false"
+          data-slot="${slotNum}"
+          style="outline:none;cursor:text;"
+          onblur="htSlotSave(this)"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+          oninput="this.textContent=this.textContent.replace(/[^a-zA-Z0-9_#]/g,'').replace(/^#+/,'');"
+        >${tag ? '#'+_esc(tag) : ''}</div>
+      </div>
+      <button class="ht-add-btn${showPlus ? ' ht-add-btn--mobile' : ' ht-add-btn--hidden'}" id="ht-add-${slotNum}" onclick="htShowNext()" title="Add hashtag">+</button>
     </div>`;
-  }).join('');
+  }
+  display.innerHTML = html;
+}
+
+function htShowNext() {
+  window._htVisibleSlots = Math.min(3, (window._htVisibleSlots || 1) + 1);
+  // Gather current tag values before re-render
+  const tags = [1,2,3].map(n => {
+    const el = document.getElementById('ht-val-' + n);
+    if (!el) return '';
+    const raw = (el.textContent||'').replace(/^#+/,'').trim();
+    return raw;
+  });
+  _htRenderSlots(tags);
+  // Focus the newly revealed slot
+  const newSlot = document.getElementById('ht-val-' + window._htVisibleSlots);
+  if (newSlot) setTimeout(() => newSlot.focus(), 50);
 }
 
 async function htSlotSave(el) {
