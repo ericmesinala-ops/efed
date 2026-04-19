@@ -2757,7 +2757,7 @@ html, body { overscroll-behavior-y: none; }
   .expand-action-btn:hover { background: rgba(255,255,255,.12); }
   .expand-action-btn.liked { color: #c8a84b; border-color: rgba(200,168,75,.4); background: rgba(200,168,75,.1); }
   .expand-action-btn.appeared { color: #ff8c42; border-color: rgba(255,140,66,.4); background: rgba(255,140,66,.1); }
-  .expand-action-btn.appeared#expand-appear-btn { filter: none; }
+  .expand-action-btn.appeared#expand-appear-btn .appear-emoji { filter: none; }
   html.day-mode .expand-action-btn.appeared { color: #d46000 !important; border-color: rgba(212,96,0,.4) !important; background: rgba(212,96,0,.08) !important; }
 
   /* Featured in this Video section */
@@ -2776,9 +2776,28 @@ html, body { overscroll-behavior-y: none; }
     margin-bottom: 10px;
   }
   html.day-mode .expand-featured-title { color: rgba(0,0,0,.35); }
-  .expand-featured-avatars {
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  .expand-featured-scroll-wrap {
+    display: flex; align-items: center; gap: 4px; position: relative;
   }
+  .expand-featured-avatars {
+    display: flex; flex-wrap: nowrap; gap: 10px; align-items: center;
+    overflow-x: auto; overflow-y: visible;
+    scrollbar-width: none; -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+    padding: 6px 2px 10px;
+    flex: 1;
+  }
+  .expand-featured-avatars::-webkit-scrollbar { display: none; }
+  .expand-featured-arr {
+    flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+    color: rgba(255,255,255,.6); font-size: .9rem; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: background .2s, color .2s; padding: 0;
+  }
+  .expand-featured-arr:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .expand-featured-arr.hidden { opacity: 0; pointer-events: none; }
+  html.day-mode .expand-featured-arr { background: rgba(0,0,0,.06); border-color: rgba(0,0,0,.12); color: rgba(0,0,0,.5); }
   .expand-featured-avatar {
     position: relative; cursor: pointer;
     transition: transform .18s;
@@ -2810,6 +2829,25 @@ html, body { overscroll-behavior-y: none; }
     border: 1px solid rgba(255,255,255,.1);
   }
   .expand-featured-avatar:hover .expand-featured-avatar-tip { opacity: 1; }
+  .featured-remove-btn {
+    position: absolute; top: -4px; right: -4px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: rgba(30,10,10,.92); border: 1px solid rgba(192,0,14,.5);
+    color: rgba(255,100,100,.9); font-size: .55rem; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; opacity: 0; transition: opacity .15s, background .15s;
+    line-height: 1; padding: 0; pointer-events: none;
+    z-index: 10; flex-shrink: 0;
+  }
+  .expand-featured-avatar:hover .featured-remove-btn {
+    opacity: 1; pointer-events: auto;
+  }
+  .featured-remove-btn:hover { background: rgba(192,0,14,.85); color: #fff; }
+  .expand-featured-avatar.longpress-flash img,
+  .expand-featured-avatar.longpress-flash .expand-featured-avatar-initials {
+    border-color: rgba(192,0,14,.8);
+    box-shadow: 0 0 0 2px rgba(192,0,14,.4);
+  }
   .expand-action-btn.supported { color: #4caf8a; border-color: rgba(76,175,138,.4); background: rgba(76,175,138,.1); }
   .expand-action-btn.watchlisted { color: #c8a84b; border-color: rgba(200,168,75,.4); background: rgba(200,168,75,.1); }
   .expand-btn-label { display: none; }
@@ -4434,8 +4472,8 @@ function a2hsDismiss(){
       </button>
 
       <!-- Appear -->
-      <button class="expand-action-btn" id="expand-appear-btn" onclick="toggleExpandAppear()" data-tip="I'm in this!" style="filter:grayscale(1) brightness(10);">
-        🤼
+      <button class="expand-action-btn" id="expand-appear-btn" onclick="toggleExpandAppear()" data-tip="I'm in this!">
+        <span class="appear-emoji" style="filter:grayscale(1) brightness(10);">🤼</span>
       </button>
 
       <!-- Bookmark -->
@@ -4488,7 +4526,11 @@ function a2hsDismiss(){
     <!-- ── FEATURED IN THIS VIDEO ── -->
     <div id="expand-featured-section">
       <div class="expand-featured-title">🤼 Featured in this Video</div>
-      <div class="expand-featured-avatars" id="expand-featured-avatars"></div>
+      <div class="expand-featured-scroll-wrap">
+        <button class="expand-featured-arr left hidden" id="featured-arr-left" onclick="scrollFeaturedRow(-1)">&#8249;</button>
+        <div class="expand-featured-avatars" id="expand-featured-avatars"></div>
+        <button class="expand-featured-arr right hidden" id="featured-arr-right" onclick="scrollFeaturedRow(1)">&#8250;</button>
+      </div>
     </div>
 
     <div id="expand-comments-section">
@@ -9402,31 +9444,97 @@ async function loadFeaturedAvatars(videoId) {
   try {
     const rows = await sbGet('video_appearances', `video_id=eq.${encodeURIComponent(videoId)}&select=username,appeared_at`);
     if (!rows.length) { section.style.display = 'none'; return; }
-    // Fetch avatar urls
     const usernames = rows.map(r => r.username);
     let avatarMap = {};
     try {
       const users = await sbGet('users', `username=in.(${usernames.map(u => encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
       users.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
     } catch(e) {}
+
+    // Determine who can remove whom
+    const session = getSession();
+    const me = session ? session.username.toLowerCase() : null;
+    const isAdmin = me === ADMIN_USERNAME;
+    const myPromo = (session?.promo_name || '').toLowerCase();
+    const videoEfed = (_expandVideo?.efed || '').toLowerCase();
+    const isEfedOwner = myPromo && videoEfed && myPromo === videoEfed;
+
     container.innerHTML = '';
     rows.forEach(r => {
+      const targetUser = r.username.toLowerCase();
+      const canRemove = me && (me === targetUser || isAdmin || isEfedOwner);
+
       const info = avatarMap[r.username] || { avatar: null, name: r.username };
       const wrap = document.createElement('a');
       wrap.href = `profile.html?u=${encodeURIComponent(r.username)}`;
       wrap.className = 'expand-featured-avatar';
       wrap.onclick = e => e.stopPropagation();
+
       const inner = info.avatar
         ? `<img src="${info.avatar}" alt="${_esc(info.name)}" onerror="this.outerHTML='<div class=expand-featured-avatar-initials>${(info.name[0]||'?').toUpperCase()}</div>'">`
         : `<div class="expand-featured-avatar-initials">${(info.name[0]||'?').toUpperCase()}</div>`;
       wrap.innerHTML = inner + `<div class="expand-featured-avatar-tip">${_esc(info.name)}</div>`;
+
+      if (canRemove) {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'featured-remove-btn';
+        removeBtn.innerHTML = '✕';
+        removeBtn.title = '';
+        removeBtn.onclick = async (e) => {
+          e.preventDefault(); e.stopPropagation();
+          try {
+            await sbDelete('video_appearances', `video_id=eq.${encodeURIComponent(videoId)}&username=eq.${encodeURIComponent(r.username)}`);
+            // If removing self, also un-toggle the appear button
+            if (me === targetUser) {
+              const appearBtn = document.getElementById('expand-appear-btn');
+              if (appearBtn) appearBtn.classList.remove('appeared');
+            }
+            loadFeaturedAvatars(videoId);
+          } catch(err) { console.warn('Remove appearance failed', err); }
+        };
+        wrap.appendChild(removeBtn);
+
+        // Mobile: long-press to remove
+        let _lpTimer = null;
+        wrap.addEventListener('touchstart', () => {
+          _lpTimer = setTimeout(() => {
+            wrap.classList.add('longpress-flash');
+            setTimeout(() => wrap.classList.remove('longpress-flash'), 400);
+            removeBtn.onclick(new Event('click'));
+          }, 600);
+        }, { passive: true });
+        wrap.addEventListener('touchend', () => { clearTimeout(_lpTimer); }, { passive: true });
+        wrap.addEventListener('touchmove', () => { clearTimeout(_lpTimer); }, { passive: true });
+      }
+
       container.appendChild(wrap);
     });
     section.style.display = 'block';
+    const avatarEl = document.getElementById('expand-featured-avatars');
+    if (avatarEl) {
+      avatarEl.onscroll = _updateFeaturedArrows;
+      setTimeout(_updateFeaturedArrows, 50);
+    }
   } catch(e) { section.style.display = 'none'; }
 }
 
 
+
+function scrollFeaturedRow(dir) {
+  const el = document.getElementById('expand-featured-avatars');
+  if (!el) return;
+  el.scrollBy({ left: dir * 120, behavior: 'smooth' });
+  setTimeout(_updateFeaturedArrows, 300);
+}
+
+function _updateFeaturedArrows() {
+  const el = document.getElementById('expand-featured-avatars');
+  const left = document.getElementById('featured-arr-left');
+  const right = document.getElementById('featured-arr-right');
+  if (!el || !left || !right) return;
+  left.classList.toggle('hidden', el.scrollLeft <= 2);
+  right.classList.toggle('hidden', el.scrollLeft + el.clientWidth >= el.scrollWidth - 2);
+}
 
 // ── WATCH LIST POPUP ──
 function openWatchlistInfo() {
@@ -11364,6 +11472,21 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
   width: 100% !important; height: auto !important; max-width: 100%; display: block;
 }
 .stamp-picker-btn:hover { background: rgba(255,255,255,.1); }
+/* Custom tooltip for stamp picker — replaces native browser title tooltip */
+.stamp-picker-btn { position: relative; }
+.stamp-picker-btn::after {
+  content: attr(data-label);
+  position: absolute; bottom: calc(100% + 5px); left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20,20,24,.97); color: #e8e8e8;
+  font-size: .58rem; font-weight: 600; white-space: nowrap;
+  padding: 3px 8px; border-radius: 5px;
+  pointer-events: none; opacity: 0; transition: opacity .15s;
+  font-family: 'DM Sans', sans-serif; z-index: 99999;
+  border: 1px solid rgba(255,255,255,.1);
+  box-shadow: 0 3px 10px rgba(0,0,0,.5);
+}
+.stamp-picker-btn:hover::after { opacity: 1; }
 .stamp-picker-divider { height: 1px; background: rgba(255,255,255,.07); margin: 2px 0 5px; }
 .stamp-picker-special-row {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -12423,7 +12546,7 @@ function _buildStampPickerContent(pickerEl, efedName, inputEl) {
     stamps.forEach(s => {
       const btn = document.createElement('button');
       btn.className = 'stamp-picker-btn';
-      btn.title = s.label;
+      btn.dataset.label = s.label;
       btn.innerHTML = stampImg(s.code, 20);
       btn.onclick = () => { insertStampAtCursor(inputEl, s.code); closeStampPicker(); };
       grid.appendChild(btn);
@@ -12436,7 +12559,7 @@ function _buildStampPickerContent(pickerEl, efedName, inputEl) {
     if (userStamp) {
       const btn = document.createElement('button');
       btn.className = 'stamp-picker-btn stamp-picker-special-glow';
-      btn.title = userStamp.label || 'Special Stamp';
+      btn.dataset.label = userStamp.label || 'Special Stamp';
       btn.innerHTML = stampImg(userStamp.code, 20);
       btn.onclick = () => { insertStampAtCursor(inputEl, userStamp.code); closeStampPicker(); };
       specialEl.appendChild(btn);
@@ -12653,7 +12776,7 @@ function toggleExpandStampPicker() {
       stamps.forEach(s => {
         const b = document.createElement('button');
         b.className = 'stamp-picker-btn';
-        b.title = s.label;
+        b.dataset.label = s.label;
         b.innerHTML = typeof stampImg === 'function' ? stampImg(s.code, 20) : s.code;
         b.onclick = () => { insertExpandStamp(s.code); closeExpandStampPicker(); };
         grid.appendChild(b);
@@ -12666,7 +12789,7 @@ function toggleExpandStampPicker() {
       if (userStamp) {
         const b = document.createElement('button');
         b.className = 'stamp-picker-btn stamp-picker-special-glow';
-        b.title = userStamp.label || 'Special Stamp';
+        b.dataset.label = userStamp.label || 'Special Stamp';
         b.innerHTML = typeof stampImg === 'function' ? stampImg(userStamp.code, 20) : userStamp.code;
         b.onclick = () => { insertExpandStamp(userStamp.code); closeExpandStampPicker(); };
         specialEl.appendChild(b);
