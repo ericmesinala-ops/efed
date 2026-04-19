@@ -4388,9 +4388,36 @@ function a2hsDismiss(){
       
       <div class="expand-comments-title">Comments</div>
       <div id="expand-comments-list"></div>
-      <div class="expand-comment-input-wrap" id="expand-comment-wrap" style="display:none;">
-        <textarea class="expand-comment-input" id="expand-comment-input" rows="1" placeholder="Add a comment…" oninput="autoResizeComment(this)"></textarea>
-        <button class="expand-comment-send" onclick="postExpandComment()">Post</button>
+      <div id="expand-comment-wrap" style="display:none;flex-direction:column;gap:6px;margin-top:16px;">
+        <!-- Stamp picker popup -->
+        <div id="expand-stamp-picker" class="stamp-picker-popup" style="bottom:auto;top:auto;left:0;right:0;position:relative;margin-bottom:2px;">
+          <div class="stamp-picker-efed-label" id="expand-stamp-efed-label">Official Stamps</div>
+          <div class="stamp-picker-grid" id="expand-stamp-grid"></div>
+          <div class="stamp-picker-divider"></div>
+          <div class="stamp-picker-special-row">
+            <div class="stamp-picker-special-label">Your Special Stamp</div>
+            <div class="stamp-picker-special-wrap" id="expand-stamp-special"></div>
+          </div>
+        </div>
+        <!-- GIF picker -->
+        <div id="expand-gif-picker" style="display:none;flex-direction:column;background:#0d0d10;border-radius:10px;overflow:hidden;max-height:220px;">
+          <div id="expand-gif-search-wrap" style="padding:8px;border-bottom:1px solid rgba(255,255,255,.07);">
+            <input id="expand-gif-search-input" type="text" placeholder="Search GIFs…" oninput="debounceExpandGifSearch(this.value)"
+              style="width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:20px;color:#fff;font-family:DM Sans,sans-serif;font-size:.78rem;padding:6px 12px;outline:none;box-sizing:border-box;">
+          </div>
+          <div id="expand-gif-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:3px;padding:6px;overflow-y:auto;max-height:170px;"></div>
+          <div id="expand-gif-loading" style="display:none;text-align:center;padding:20px;font-size:.75rem;color:#8a8a9a;">Loading…</div>
+          <div id="expand-gif-empty" style="display:none;text-align:center;padding:20px;font-size:.75rem;color:#8a8a9a;">No GIFs found</div>
+        </div>
+        <!-- Input row -->
+        <div class="expand-comment-input-wrap" style="margin-top:0;">
+          <textarea class="expand-comment-input" id="expand-comment-input" rows="1" placeholder="Add a comment…" oninput="autoResizeComment(this)"></textarea>
+          <button id="expand-stamp-btn" onclick="toggleExpandStampPicker()" title="Stamps"
+            style="padding:8px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.55);cursor:pointer;font-size:.8rem;transition:background .15s,color .15s;flex-shrink:0;">🎟</button>
+          <button id="expand-gif-btn" onclick="toggleExpandGifPicker()" title="GIF"
+            style="padding:8px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.55);cursor:pointer;font-size:.65rem;font-weight:800;letter-spacing:1px;font-family:DM Sans,sans-serif;transition:background .15s,color .15s;flex-shrink:0;">GIF</button>
+          <button class="expand-comment-send" onclick="postExpandComment()">Post</button>
+        </div>
       </div>
       <div id="expand-comment-login-msg" style="font-size:.72rem;color:#8a8a9a;padding:8px 0;">Sign in to leave a comment.</div>
     </div>
@@ -8761,6 +8788,8 @@ function _showTwitchOffline() {
 })();
 
 function closeExpand(fromPopState) {
+  closeExpandStampPicker();
+  closeExpandGifPicker();
   const _chatTab = document.getElementById('chat-tab');
   if (_chatTab) {
     _chatTab.style.display = '';
@@ -9360,7 +9389,7 @@ async function loadExpandComments(url) {
         </a>
         <div class="expand-comment-body" style="flex:1;">
           <div class="expand-comment-user"><a href="profile.html?u=${encodeURIComponent(c.username)}" style="color:inherit;text-decoration:none;" onclick="event.stopPropagation()">${withVerified(c.username, c.username)}</a> ${c.is_creator ? '<span style="color:#c8a84b;font-size:.55rem;letter-spacing:1px;">🎬</span>' : ''}</div>
-          <div class="expand-comment-text">${c.text}</div>
+          <div class="expand-comment-text">${renderCommentText(c.text)}</div>
           <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap;">
             <div class="expand-comment-time">${new Date(c.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div>
             <button id="clike-${c.id}" onclick="toggleCommentLike(${c.id},this)" style="display:flex;align-items:center;gap:3px;background:none;border:none;cursor:pointer;color:#8a8a9a;font-size:.72rem;padding:0;transition:color .15s;">
@@ -9431,6 +9460,21 @@ async function toggleCommentLike(commentId, btn) {
   } catch(e) { console.warn('Comment like failed', e); }
 }
 
+function renderCommentText(text) {
+  if (!text) return '';
+  let out = _esc(text);
+  // Render [gif]url[/gif]
+  out = out.replace(/\[gif\](.*?)\[\/gif\]/g, (_, url) =>
+    `<img src="${url}" alt="GIF" style="max-width:200px;max-height:140px;border-radius:6px;display:block;margin-top:4px;">`
+  );
+  // Render [stamp:code]
+  out = out.replace(/\[stamp:([^\]]+)\]/g, (_, code) => {
+    if (typeof stampImg === 'function') return `<span class="chat-stamp-glow">${stampImg(code, 32)}</span>`;
+    return `<img src="/stamps/${code}.gif" style="width:32px;height:32px;vertical-align:middle;">`;
+  });
+  return out;
+}
+
 // ── COMMENT MODERATION ──
 const BANNED_WORDS = [
   // Slurs and hate speech
@@ -9491,22 +9535,24 @@ async function postExpandComment() {
       return;
     }
 
-    // Screen the comment
-    const screen = await screenComment(text);
-    if (screen.blocked) {
-      // Add strike silently
-      await addStrike(session.username);
-      const users2 = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
-      const strikes = users2[0]?.strikes || 1;
-      btn.disabled = false; btn.textContent = 'Post';
-      input.value = '';
-      input.style.height = '';
-      if (strikes >= 3) {
-        alert('Your comment violated community guidelines. Your account has been suspended.');
-      } else {
-        alert(`Your comment was removed for violating community guidelines. Strike ${strikes} of 3.`);
+    // Screen the comment (skip for stamp/gif-only messages)
+    const isMediaOnly = /^(\[stamp:[^\]]+\]|\[gif\].*?\[\/gif\]|\s)+$/.test(text);
+    if (!isMediaOnly) {
+      const screen = await screenComment(text);
+      if (screen.blocked) {
+        await addStrike(session.username);
+        const users2 = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}`);
+        const strikes = users2[0]?.strikes || 1;
+        btn.disabled = false; btn.textContent = 'Post';
+        input.value = '';
+        input.style.height = '';
+        if (strikes >= 3) {
+          alert('Your comment violated community guidelines. Your account has been suspended.');
+        } else {
+          alert(`Your comment was removed for violating community guidelines. Strike ${strikes} of 3.`);
+        }
+        return;
       }
-      return;
     }
 
     // Post the comment
@@ -12408,7 +12454,185 @@ async function sendGif(url, title) {
   } catch(e) { console.error('GIF send failed:', e); }
 }
 
-// ── COMMENT REACTIONS ──
+// ── COMMENT STAMP & GIF PICKERS ──
+let _expandStampOpen = false;
+let _expandGifOpen = false;
+let _expandGifTimer = null;
+
+function toggleExpandStampPicker() {
+  _expandStampOpen = !_expandStampOpen;
+  const picker = document.getElementById('expand-stamp-picker');
+  const btn = document.getElementById('expand-stamp-btn');
+  if (_expandStampOpen) {
+    if (_expandGifOpen) closeExpandGifPicker();
+    // Build content
+    const efedName = _expandVideo?.efed || '';
+    const session = getSession();
+    const username = session?.username || '';
+    const labelEl = document.getElementById('expand-stamp-efed-label');
+    if (labelEl) labelEl.textContent = (efedName || 'eFed') + ' Official Stamps';
+    const grid = document.getElementById('expand-stamp-grid');
+    if (grid) {
+      grid.innerHTML = '';
+      const stamps = typeof getEfedStamps === 'function' ? getEfedStamps(efedName) : [];
+      stamps.forEach(s => {
+        const b = document.createElement('button');
+        b.className = 'stamp-picker-btn';
+        b.title = s.label;
+        b.innerHTML = typeof stampImg === 'function' ? stampImg(s.code, 26) : s.code;
+        b.onclick = () => { insertExpandStamp(s.code); closeExpandStampPicker(); };
+        grid.appendChild(b);
+      });
+    }
+    const specialEl = document.getElementById('expand-stamp-special');
+    if (specialEl) {
+      specialEl.innerHTML = '';
+      const userStamp = typeof getUserStamp === 'function' ? getUserStamp(username) : null;
+      if (userStamp) {
+        const b = document.createElement('button');
+        b.className = 'stamp-picker-btn stamp-picker-special-glow';
+        b.title = userStamp.label || 'Special Stamp';
+        b.innerHTML = typeof stampImg === 'function' ? stampImg(userStamp.code, 26) : userStamp.code;
+        b.onclick = () => { insertExpandStamp(userStamp.code); closeExpandStampPicker(); };
+        specialEl.appendChild(b);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'stamp-picker-empty-slot';
+        specialEl.appendChild(empty);
+      }
+    }
+    picker.classList.add('open');
+    if (btn) btn.style.color = '#fff';
+    setTimeout(() => document.addEventListener('click', _closeExpandStampOutside, {once:true}), 50);
+  } else {
+    closeExpandStampPicker();
+  }
+}
+
+function closeExpandStampPicker() {
+  _expandStampOpen = false;
+  const picker = document.getElementById('expand-stamp-picker');
+  const btn = document.getElementById('expand-stamp-btn');
+  if (picker) picker.classList.remove('open');
+  if (btn) btn.style.color = '';
+}
+
+function _closeExpandStampOutside(e) {
+  if (!e.target.closest('#expand-stamp-picker') && !e.target.closest('#expand-stamp-btn')) {
+    closeExpandStampPicker();
+  }
+}
+
+function insertExpandStamp(code) {
+  const input = document.getElementById('expand-comment-input');
+  if (!input) return;
+  if (typeof insertStampAtCursor === 'function') {
+    insertStampAtCursor(input, code);
+  } else {
+    const val = input.value;
+    const pos = input.selectionStart || val.length;
+    input.value = val.slice(0, pos) + `[stamp:${code}]` + val.slice(pos);
+  }
+  autoResizeComment(input);
+  input.focus();
+}
+
+function toggleExpandGifPicker() {
+  _expandGifOpen = !_expandGifOpen;
+  const picker = document.getElementById('expand-gif-picker');
+  const btn = document.getElementById('expand-gif-btn');
+  if (_expandGifOpen) {
+    if (_expandStampOpen) closeExpandStampPicker();
+    picker.style.display = 'flex';
+    if (btn) btn.style.color = '#fff';
+    loadExpandTrendingGifs();
+    setTimeout(() => document.getElementById('expand-gif-search-input')?.focus(), 100);
+  } else {
+    closeExpandGifPicker();
+  }
+}
+
+function closeExpandGifPicker() {
+  _expandGifOpen = false;
+  const picker = document.getElementById('expand-gif-picker');
+  const btn = document.getElementById('expand-gif-btn');
+  if (picker) picker.style.display = 'none';
+  if (btn) btn.style.color = '';
+}
+
+async function loadExpandTrendingGifs() {
+  const grid = document.getElementById('expand-gif-grid');
+  const loading = document.getElementById('expand-gif-loading');
+  const empty = document.getElementById('expand-gif-empty');
+  if (grid) grid.innerHTML = '';
+  if (loading) loading.style.display = 'block';
+  if (empty) empty.style.display = 'none';
+  try {
+    const r = await fetch(`https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=12&rating=g`);
+    const data = await r.json();
+    renderExpandGifs(data.data);
+  } catch(e) { if (loading) loading.style.display = 'none'; if (empty) empty.style.display = 'block'; }
+}
+
+function debounceExpandGifSearch(query) {
+  clearTimeout(_expandGifTimer);
+  if (!query.trim()) { loadExpandTrendingGifs(); return; }
+  _expandGifTimer = setTimeout(async () => {
+    const grid = document.getElementById('expand-gif-grid');
+    const loading = document.getElementById('expand-gif-loading');
+    const empty = document.getElementById('expand-gif-empty');
+    if (grid) grid.innerHTML = '';
+    if (loading) loading.style.display = 'block';
+    if (empty) empty.style.display = 'none';
+    try {
+      const r = await fetch(`https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(query)}&limit=12&rating=g`);
+      const data = await r.json();
+      if (!data.data.length) { if (loading) loading.style.display='none'; if(empty) empty.style.display='block'; return; }
+      renderExpandGifs(data.data);
+    } catch(e) { if(loading) loading.style.display='none'; if(empty) empty.style.display='block'; }
+  }, 400);
+}
+
+function renderExpandGifs(gifs) {
+  const grid = document.getElementById('expand-gif-grid');
+  const loading = document.getElementById('expand-gif-loading');
+  const empty = document.getElementById('expand-gif-empty');
+  if (loading) loading.style.display = 'none';
+  if (empty) empty.style.display = 'none';
+  if (!grid) return;
+  grid.innerHTML = '';
+  gifs.forEach(gif => {
+    const url = gif.images.fixed_width_small?.url || gif.images.fixed_height.url;
+    const original = gif.images.original.url;
+    const div = document.createElement('div');
+    div.className = 'gif-item';
+    const img = document.createElement('img');
+    img.src = url; img.alt = gif.title; img.loading = 'lazy';
+    div.appendChild(img);
+    div.onclick = () => postExpandCommentGif(original);
+    grid.appendChild(div);
+  });
+}
+
+async function postExpandCommentGif(url) {
+  closeExpandGifPicker();
+  const session = getSession();
+  if (!session || !_expandVideo) return;
+  const text = `[gif]${url}[/gif]`;
+  try {
+    await sbInsert('comments', {
+      video_url: _expandVideo.url,
+      video_id: extractId(_expandVideo.url),
+      username: session.username,
+      text,
+      created_at: Date.now(),
+      flagged: false,
+      removed: false
+    });
+    loadExpandComments(_expandVideo.url);
+  } catch(e) { console.error('GIF comment failed', e); }
+}
+
 const COMMENT_REACT_EMOJIS = ['👍','❤️','🔥','😂','😮','💯','👏','🏆','💪','🙏'];
 
 function _buildChatReactionPicker() {
