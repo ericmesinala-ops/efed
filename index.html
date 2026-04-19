@@ -1269,12 +1269,10 @@ html, body { overscroll-behavior-y: none; }
   .row-jump-btn.hidden { opacity: 0.15; pointer-events: none; }
   @media (max-width: 768px) {
     .arr-col { display: flex; padding: 0; }
-    /* Hide right col and scroll arrows — only show jump-to-start on left */
     .arr-col.right { display: none; }
     .arr-col.left .pill-arr { display: none; }
     .arr-col.left .row-jump-btn { display: flex; }
-    /* Let the row overflow naturally so cards aren't clipped */
-    .row-wrap { overflow: visible; padding: 0 16px 0 0; }
+    .row-wrap { overflow: visible; padding: 0 16px 0 12px; }
   }
   .pill {
     font-size: .58rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
@@ -14044,5 +14042,114 @@ if ('serviceWorker' in navigator) {
   });
 }
 </script>
+
+<style>
+  #ptr-indicator {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    height: 0; overflow: hidden;
+    background: var(--bg);
+    border-bottom: 1px solid rgba(255,255,255,.07);
+    font-family: 'DM Sans', sans-serif; font-size: .72rem; letter-spacing: 1px;
+    color: rgba(255,255,255,.45); text-transform: uppercase;
+    transition: height .2s ease;
+    pointer-events: none;
+  }
+  html.day-mode #ptr-indicator { color: rgba(0,0,0,.4); border-bottom-color: rgba(0,0,0,.08); }
+  #ptr-spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.15);
+    border-top-color: #c0000e;
+    animation: ptr-spin .7s linear infinite;
+    display: none;
+  }
+  html.day-mode #ptr-spinner { border-color: rgba(0,0,0,.1); border-top-color: #c0000e; }
+  @keyframes ptr-spin { to { transform: rotate(360deg); } }
+  #ptr-arrow {
+    font-size: .9rem; display: inline-block;
+    transition: transform .2s ease;
+  }
+</style>
+
+<div id="ptr-indicator">
+  <span id="ptr-arrow">↓</span>
+  <span id="ptr-spinner"></span>
+  <span id="ptr-label">Pull to refresh</span>
+</div>
+
+<script>
+(function() {
+  // Only on mobile/touch devices
+  if (!('ontouchstart' in window)) return;
+
+  const THRESHOLD = 72;   // px to pull before triggering
+  const MAX_PULL  = 100;  // max visual pull distance
+
+  let startY = 0;
+  let pulling = false;
+  let triggered = false;
+  let currentPull = 0;
+
+  const indicator = document.getElementById('ptr-indicator');
+  const arrow     = document.getElementById('ptr-arrow');
+  const spinner   = document.getElementById('ptr-spinner');
+  const label     = document.getElementById('ptr-label');
+
+  function atTop() {
+    return (document.documentElement.scrollTop || document.body.scrollTop) <= 0;
+  }
+
+  document.addEventListener('touchstart', function(e) {
+    if (!atTop()) return;
+    startY = e.touches[0].clientY;
+    pulling = true;
+    triggered = false;
+    currentPull = 0;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function(e) {
+    if (!pulling || triggered) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0) { pulling = false; return; }
+
+    // Dampen the pull so it never fights iOS bounce
+    currentPull = Math.min(dy * 0.45, MAX_PULL);
+    const h = Math.round(currentPull);
+    indicator.style.height = h + 'px';
+
+    const ready = currentPull >= THRESHOLD;
+    arrow.style.transform = ready ? 'rotate(180deg)' : 'rotate(0deg)';
+    label.textContent = ready ? 'Release to refresh' : 'Pull to refresh';
+    arrow.style.display = ready ? 'none' : 'inline-block';
+    spinner.style.display = ready ? 'block' : 'none';
+  }, { passive: true });
+
+  document.addEventListener('touchend', function() {
+    if (!pulling) return;
+    pulling = false;
+
+    if (currentPull >= THRESHOLD && !triggered) {
+      triggered = true;
+      // Keep indicator visible briefly then reload
+      label.textContent = 'Refreshing…';
+      setTimeout(function() {
+        window.location.reload();
+      }, 600);
+    } else {
+      // Snap back
+      indicator.style.transition = 'height .25s ease';
+      indicator.style.height = '0px';
+      setTimeout(function() {
+        indicator.style.transition = 'height .2s ease';
+        arrow.style.transform = '';
+        label.textContent = 'Pull to refresh';
+        arrow.style.display = 'inline-block';
+        spinner.style.display = 'none';
+      }, 260);
+    }
+  }, { passive: true });
+})();
+</script>
+
 </body>
 </html>
