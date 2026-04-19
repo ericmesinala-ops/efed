@@ -4895,79 +4895,36 @@ function renderProfileHashtags(tags, visible, isOwn) {
   if (toggleEl) { toggleEl.style.background = visible ? '#c8a84b' : 'rgba(255,255,255,.12)'; toggleEl.style.borderColor = visible ? '#c8a84b' : 'rgba(255,255,255,.1)'; }
   if (knob) { knob.style.transform = visible ? 'translateX(16px)' : 'translateX(0)'; knob.style.opacity = visible ? '1' : '.4'; }
 
-  // Render 3 editable slots
+  // Render 3 editable slots — contenteditable just like bio
   display.innerHTML = [0,1,2].map(i => {
     const tag = rawTags[i] || '';
     const slotNum = i + 1;
-    const valHtml = tag
-      ? `<a href="https://twitter.com/hashtag/${_esc(tag)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${_esc(tag)}</a>`
-      : '';
-    return `<div class="ht-slot owner" id="ht-slot-${slotNum}" onclick="htSlotEdit(${slotNum})">
+    return `<div class="ht-slot owner" id="ht-slot-${slotNum}">
       <div class="ht-slot-lbl">CC Hashtag</div>
-      <div class="ht-slot-val${tag?'':' empty'}" id="ht-val-${slotNum}">${valHtml}</div>
+      <div class="ht-slot-val" id="ht-val-${slotNum}"
+        contenteditable="true"
+        spellcheck="false"
+        data-slot="${slotNum}"
+        style="outline:none;cursor:text;"
+        onblur="htSlotSave(this)"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+        oninput="this.textContent=this.textContent.replace(/[^a-zA-Z0-9_#]/g,'').replace(/^#+/,'');"
+      >${tag ? '#'+_esc(tag) : ''}</div>
     </div>`;
   }).join('');
 }
 
-function htSlotEdit(slotNum) {
+async function htSlotSave(el) {
   if (!window._isOwnProfile) return;
-  const slot = document.getElementById('ht-slot-' + slotNum);
-  const valEl = document.getElementById('ht-val-' + slotNum);
-  if (!slot || !valEl || slot.classList.contains('editing')) return;
-
-  // Get current value (strip # prefix)
-  const curTag = (valEl.textContent || '').replace(/^#/, '').trim();
-  const isEmpty = valEl.classList.contains('empty');
-  const current = isEmpty ? '' : curTag;
-
-  slot.classList.add('editing');
-  valEl.innerHTML = '';
-
-  const input = document.createElement('input');
-  input.className = 'ht-slot-input';
-  input.type = 'text';
-  input.maxLength = 20;
-  input.placeholder = 'hashtag';
-  input.value = current;
-  input.oninput = () => { input.value = input.value.replace(/[^a-zA-Z0-9_]/g, ''); };
-  valEl.appendChild(input);
-  input.focus();
-  input.select();
-
-  const save = async () => {
-    const newVal = input.value.trim();
-    slot.classList.remove('editing');
-    valEl.innerHTML = '';
-    if (newVal) {
-      valEl.classList.remove('empty');
-      valEl.innerHTML = `<a href="https://twitter.com/hashtag/${_esc(newVal)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${_esc(newVal)}</a>`;
-    } else {
-      valEl.classList.add('empty');
-      valEl.textContent = '';
-    }
-    const session = getSession(); if (!session) return;
-    const body = { ['cc_hashtag_' + slotNum]: newVal || null };
-    try {
-      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),
-        { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(body) });
-    } catch(e) { showToast('Save failed'); }
-  };
-
-  input.onblur = save;
-  input.onkeydown = e => {
-    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-    if (e.key === 'Escape') {
-      slot.classList.remove('editing');
-      valEl.innerHTML = '';
-      if (current) {
-        valEl.classList.remove('empty');
-        valEl.innerHTML = `<a href="https://twitter.com/hashtag/${_esc(current)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">#${_esc(current)}</a>`;
-      } else {
-        valEl.classList.add('empty');
-        valEl.textContent = '';
-      }
-    }
-  };
+  const slotNum = el.dataset.slot;
+  const raw = (el.textContent || '').replace(/^#+/, '').trim().replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20);
+  // Re-render cleanly
+  el.textContent = raw ? '#' + raw : '';
+  const session = getSession(); if (!session) return;
+  try {
+    await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),
+      { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({ ['cc_hashtag_'+slotNum]: raw || null }) });
+  } catch(e) { showToast('Save failed'); }
 }
 
 async function toggleHashtagVis() {
