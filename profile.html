@@ -2477,6 +2477,394 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
     </div>
   </div>
 </div>
+
+<!-- ── RECORDS SECTION ── -->
+<div class="section" id="records-section" style="padding-bottom:100px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <div class="sec-title" style="margin-bottom:0;">Records</div>
+    <button id="add-record-btn" style="display:none;align-items:center;gap:5px;padding:5px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:20px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:600;letter-spacing:.5px;cursor:pointer;transition:background .15s,color .15s;" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='rgba(255,255,255,.06)';this.style.color='rgba(255,255,255,.55)'">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add Record
+    </button>
+  </div>
+  <div id="records-list"></div>
+  <div id="records-empty" style="font-size:.78rem;color:#5a5a6a;padding:8px 0 4px;">No records yet.</div>
+</div>
+
+<style>
+/* ── RECORD CARD ── */
+.record-card {
+  position: relative;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 10px;
+  padding: 12px 14px 12px 38px;
+  margin-bottom: 7px;
+  cursor: default;
+  transition: border-color .15s, background .15s;
+  user-select: none;
+}
+.record-card.win  { border-left: 3px solid rgba(76,175,100,.5); }
+.record-card.loss { border-left: 3px solid rgba(192,0,14,.45); }
+.record-card.win:hover  { background: rgba(76,175,100,.04); }
+.record-card.loss:hover { background: rgba(192,0,14,.04); }
+.record-drag-handle {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: rgba(255,255,255,.15); cursor: grab; font-size: .85rem; line-height: 1;
+  display: none;
+}
+.record-card:hover .record-drag-handle { display: block; }
+.record-card.dragging { opacity: .4; border-style: dashed; }
+.record-card.drag-over { border-color: rgba(200,168,75,.5); background: rgba(200,168,75,.04); }
+.record-top { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.record-result {
+  font-size: .5rem; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 20px; flex-shrink: 0;
+}
+.record-result.win  { background: rgba(76,175,100,.15); color: #4caf64; border: 1px solid rgba(76,175,100,.3); }
+.record-result.loss { background: rgba(192,0,14,.12); color: #ff6b6b; border: 1px solid rgba(192,0,14,.3); }
+.record-type { font-size: .6rem; color: rgba(255,255,255,.35); letter-spacing: .5px; flex-shrink: 0; }
+.record-champ-badge {
+  font-size: .46rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 20px; flex-shrink: 0;
+  background: rgba(200,168,75,.12); color: #c8a84b; border: 1px solid rgba(200,168,75,.25);
+}
+.record-opponent { font-size: .85rem; font-weight: 600; color: #e8e8e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.record-meta { font-size: .62rem; color: #5a5a6a; margin-top: 2px; }
+.record-del-btn {
+  position: absolute; top: 8px; right: 8px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: none; border: none; cursor: pointer;
+  color: rgba(255,255,255,0); font-size: .6rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s, color .15s; padding: 0;
+}
+.record-card:hover .record-del-btn { color: rgba(255,80,80,.4); }
+.record-del-btn:hover { background: rgba(192,0,14,.7) !important; color: #fff !important; }
+/* day mode */
+html.day-mode .record-card { background: rgba(0,0,0,.03); border-color: rgba(0,0,0,.08); }
+html.day-mode .record-card.win  { border-left-color: rgba(76,175,100,.4); }
+html.day-mode .record-card.loss { border-left-color: rgba(192,0,14,.35); }
+html.day-mode .record-opponent { color: #111118; }
+html.day-mode .record-type { color: rgba(0,0,0,.35); }
+html.day-mode .record-meta { color: rgba(0,0,0,.3); }
+html.day-mode .record-drag-handle { color: rgba(0,0,0,.15); }
+</style>
+
+<!-- ── ADD RECORD MODAL ── -->
+<div id="record-modal-bg" onclick="if(event.target===this)closeRecordModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:400px;max-height:90dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.7);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;">
+      <div id="record-modal-title" style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Add Record</div>
+      <button onclick="closeRecordModal()" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#fff;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:.85rem;display:flex;align-items:center;justify-content:center;">✕</button>
+    </div>
+    <div style="padding:18px 20px 20px;display:flex;flex-direction:column;gap:13px;overflow-y:auto;">
+
+      <!-- Result -->
+      <div>
+        <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:7px;">Result</div>
+        <div style="display:flex;gap:8px;">
+          <button id="rm-win-btn" onclick="rmSetResult('win')" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(76,175,100,.25);background:rgba(76,175,100,.08);color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:all .15s;">Win</button>
+          <button id="rm-loss-btn" onclick="rmSetResult('loss')" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:all .15s;">Loss</button>
+        </div>
+      </div>
+
+      <!-- Match Type -->
+      <div>
+        <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:7px;">Match Type</div>
+        <input id="rm-type" type="text" placeholder="e.g. Singles, Tag Team, Triple Threat…" maxlength="50"
+          style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+
+      <!-- eFed -->
+      <div>
+        <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:7px;">eFed</div>
+        <input id="rm-efed" type="text" placeholder="eFed name" maxlength="50"
+          style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+
+      <!-- Opponent(s) -->
+      <div>
+        <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:7px;">Opponent(s)</div>
+        <input id="rm-opponents" type="text" placeholder="Name(s), separate with commas" maxlength="100"
+          style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+      </div>
+
+      <!-- Championship on the line? -->
+      <div>
+        <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:7px;">Championship on the Line?</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px;">
+          <button id="rm-champ-yes" onclick="rmSetChamp(true)" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;transition:all .15s;">Yes</button>
+          <button id="rm-champ-no" onclick="rmSetChamp(false)" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(200,168,75,.25);background:rgba(200,168,75,.06);color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;transition:all .15s;">No</button>
+        </div>
+        <div id="rm-champ-fields" style="display:none;flex-direction:column;gap:8px;">
+          <input id="rm-champ-name" type="text" placeholder="Championship name" maxlength="60"
+            style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:3px;">Coming in as…</div>
+          <div style="display:flex;gap:8px;">
+            <button id="rm-role-contender" onclick="rmSetRole('contender')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(200,168,75,.25);background:rgba(200,168,75,.06);color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;transition:all .15s;">Contender</button>
+            <button id="rm-role-champion" onclick="rmSetRole('champion')" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;transition:all .15s;">Champion</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Save -->
+      <button onclick="saveRecord()" style="width:100%;padding:12px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;margin-top:2px;transition:opacity .15s;" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">Save Record</button>
+      <div id="rm-msg" style="font-size:.72rem;text-align:center;min-height:14px;margin-top:-8px;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── RECORDS SYSTEM ──
+let _records = [];
+let _recordEditIdx = null;
+let _rmResult = 'win';
+let _rmChampOn = false;
+let _rmRole = 'contender';
+let _dragSrcIdx = null;
+
+function rmSetResult(val) {
+  _rmResult = val;
+  const wb = document.getElementById('rm-win-btn');
+  const lb = document.getElementById('rm-loss-btn');
+  if (val === 'win') {
+    wb.style.cssText = wb.style.cssText.replace(/border:[^;]+;background:[^;]+;color:[^;]+;/g,'');
+    wb.style.border = '1px solid rgba(76,175,100,.6)'; wb.style.background = 'rgba(76,175,100,.18)'; wb.style.color = '#4caf64';
+    lb.style.border = '1px solid rgba(255,255,255,.1)'; lb.style.background = 'rgba(255,255,255,.04)'; lb.style.color = 'rgba(255,255,255,.4)';
+  } else {
+    lb.style.border = '1px solid rgba(192,0,14,.5)'; lb.style.background = 'rgba(192,0,14,.15)'; lb.style.color = '#ff6b6b';
+    wb.style.border = '1px solid rgba(255,255,255,.1)'; wb.style.background = 'rgba(255,255,255,.04)'; wb.style.color = 'rgba(255,255,255,.4)';
+  }
+}
+
+function rmSetChamp(val) {
+  _rmChampOn = val;
+  const yb = document.getElementById('rm-champ-yes');
+  const nb = document.getElementById('rm-champ-no');
+  const fields = document.getElementById('rm-champ-fields');
+  if (val) {
+    yb.style.border = '1px solid rgba(200,168,75,.5)'; yb.style.background = 'rgba(200,168,75,.12)'; yb.style.color = '#c8a84b';
+    nb.style.border = '1px solid rgba(255,255,255,.1)'; nb.style.background = 'rgba(255,255,255,.04)'; nb.style.color = 'rgba(255,255,255,.4)';
+    fields.style.display = 'flex';
+  } else {
+    nb.style.border = '1px solid rgba(200,168,75,.25)'; nb.style.background = 'rgba(200,168,75,.06)'; nb.style.color = '#c8a84b';
+    yb.style.border = '1px solid rgba(255,255,255,.1)'; yb.style.background = 'rgba(255,255,255,.04)'; yb.style.color = 'rgba(255,255,255,.4)';
+    fields.style.display = 'none';
+  }
+}
+
+function rmSetRole(val) {
+  _rmRole = val;
+  const cb = document.getElementById('rm-role-contender');
+  const ch = document.getElementById('rm-role-champion');
+  if (val === 'contender') {
+    cb.style.border = '1px solid rgba(200,168,75,.5)'; cb.style.background = 'rgba(200,168,75,.12)'; cb.style.color = '#c8a84b';
+    ch.style.border = '1px solid rgba(255,255,255,.1)'; ch.style.background = 'rgba(255,255,255,.04)'; ch.style.color = 'rgba(255,255,255,.4)';
+  } else {
+    ch.style.border = '1px solid rgba(200,168,75,.5)'; ch.style.background = 'rgba(200,168,75,.12)'; ch.style.color = '#c8a84b';
+    cb.style.border = '1px solid rgba(255,255,255,.1)'; cb.style.background = 'rgba(255,255,255,.04)'; cb.style.color = 'rgba(255,255,255,.4)';
+  }
+}
+
+function openRecordModal(editIdx) {
+  _recordEditIdx = (editIdx !== undefined) ? editIdx : null;
+  const title = document.getElementById('record-modal-title');
+  if (title) title.textContent = _recordEditIdx !== null ? 'Edit Record' : 'Add Record';
+
+  // Reset form
+  document.getElementById('rm-type').value = '';
+  document.getElementById('rm-efed').value = '';
+  document.getElementById('rm-opponents').value = '';
+  document.getElementById('rm-champ-name').value = '';
+  document.getElementById('rm-msg').textContent = '';
+  rmSetResult('win');
+  rmSetChamp(false);
+  rmSetRole('contender');
+
+  // Pre-fill if editing
+  if (_recordEditIdx !== null) {
+    const r = _records[_recordEditIdx];
+    if (r) {
+      document.getElementById('rm-type').value = r.type || '';
+      document.getElementById('rm-efed').value = r.efed || '';
+      document.getElementById('rm-opponents').value = r.opponents || '';
+      rmSetResult(r.result || 'win');
+      if (r.champ_name) {
+        rmSetChamp(true);
+        document.getElementById('rm-champ-name').value = r.champ_name || '';
+        rmSetRole(r.role || 'contender');
+      }
+    }
+  }
+
+  document.getElementById('record-modal-bg').style.display = 'flex';
+  setTimeout(() => document.getElementById('rm-type').focus(), 80);
+}
+
+function closeRecordModal() {
+  document.getElementById('record-modal-bg').style.display = 'none';
+  _recordEditIdx = null;
+}
+
+async function saveRecord() {
+  const session = getSession(); if (!session) return;
+  const type = document.getElementById('rm-type').value.trim();
+  const efed = document.getElementById('rm-efed').value.trim();
+  const opponents = document.getElementById('rm-opponents').value.trim();
+  const champName = _rmChampOn ? document.getElementById('rm-champ-name').value.trim() : '';
+  const msg = document.getElementById('rm-msg');
+
+  if (!opponents) { msg.textContent = 'Opponent(s) required.'; msg.style.color = '#ff6b6b'; return; }
+
+  const rec = {
+    result: _rmResult,
+    type: type || '',
+    efed: efed || '',
+    opponents,
+    champ_name: champName || '',
+    role: _rmChampOn ? _rmRole : '',
+  };
+
+  if (_recordEditIdx !== null) {
+    _records[_recordEditIdx] = rec;
+  } else {
+    _records.unshift(rec);
+  }
+
+  closeRecordModal();
+  renderRecords();
+  await saveRecords(session);
+}
+
+async function deleteRecord(idx) {
+  const ok = await showConfirm('Delete Record', 'Remove this record?', 'Delete');
+  if (!ok) return;
+  _records.splice(idx, 1);
+  renderRecords();
+  const session = getSession();
+  if (session) await saveRecords(session);
+}
+
+async function saveRecords(session) {
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ career_records: _records })
+    });
+  } catch(e) { showToast('Save failed'); }
+  updateCareerStats();
+}
+
+function updateCareerStats() {
+  const wins   = _records.filter(r => r.result === 'win').length;
+  const losses = _records.filter(r => r.result === 'loss').length;
+  // Champ wins: won as contender with champ on line
+  const champWins = _records.filter(r => r.result === 'win' && r.champ_name && r.role === 'contender').length;
+  // Defenses: won as champion with champ on line
+  const defenses  = _records.filter(r => r.result === 'win' && r.champ_name && r.role === 'champion').length;
+
+  const sw = document.getElementById('stat-wins');
+  const sl = document.getElementById('stat-losses');
+  const sc = document.getElementById('stat-champ-wins');
+  const sd = document.getElementById('stat-champ-defenses');
+  if (sw) sw.textContent = wins || '—';
+  if (sl) sl.textContent = losses || '—';
+  if (sc) sc.textContent = champWins || '—';
+  if (sd) sd.textContent = defenses || '—';
+}
+
+function _recordChampLabel(r) {
+  if (!r.champ_name) return '';
+  if (r.result === 'win' && r.role === 'contender') return '🏆 Title Win';
+  if (r.result === 'win' && r.role === 'champion')  return '🛡️ Defense';
+  if (r.result === 'loss' && r.role === 'champion')  return '👑 Title Lost';
+  if (r.result === 'loss' && r.role === 'contender') return '🎯 Title Shot';
+  return r.champ_name;
+}
+
+function renderRecords() {
+  const list = document.getElementById('records-list');
+  const empty = document.getElementById('records-empty');
+  if (!list) return;
+
+  if (!_records.length) {
+    list.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    updateCareerStats();
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  list.innerHTML = _records.map((r, i) => {
+    const champLabel = _recordChampLabel(r);
+    const metaParts = [r.type, r.efed].filter(Boolean);
+    return `<div class="record-card ${r.result}" draggable="true"
+      ondragstart="_recDragStart(event,${i})"
+      ondragover="_recDragOver(event,${i})"
+      ondrop="_recDrop(event,${i})"
+      ondragend="_recDragEnd()"
+      data-idx="${i}">
+      <div class="record-drag-handle">⠿</div>
+      <div class="record-top">
+        <span class="record-result ${r.result}">${r.result === 'win' ? 'W' : 'L'}</span>
+        ${r.type ? `<span class="record-type">${_esc(r.type)}</span>` : ''}
+        ${champLabel ? `<span class="record-champ-badge">${champLabel}</span>` : ''}
+      </div>
+      <div class="record-opponent">vs ${_esc(r.opponents)}</div>
+      ${metaParts.length || r.champ_name ? `<div class="record-meta">${[r.efed ? _esc(r.efed) : '', r.champ_name ? _esc(r.champ_name) : ''].filter(Boolean).join(' · ')}</div>` : ''}
+      ${_isOwnProfile ? `<button class="record-del-btn" onclick="event.stopPropagation();deleteRecord(${i})">✕</button>` : ''}
+    </div>`;
+  }).join('');
+
+  // Edit on click (owner only)
+  if (_isOwnProfile) {
+    list.querySelectorAll('.record-card').forEach((card, i) => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.record-del-btn') || e.target.closest('.record-drag-handle')) return;
+        openRecordModal(i);
+      });
+    });
+  }
+
+  updateCareerStats();
+}
+
+// ── DRAG & DROP ──
+function _recDragStart(e, idx) {
+  _dragSrcIdx = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => { const c = document.querySelector(`.record-card[data-idx="${idx}"]`); if(c) c.classList.add('dragging'); }, 0);
+}
+function _recDragOver(e, idx) {
+  e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.record-card').forEach(c => c.classList.remove('drag-over'));
+  const c = document.querySelector(`.record-card[data-idx="${idx}"]`); if(c) c.classList.add('drag-over');
+}
+function _recDrop(e, idx) {
+  e.preventDefault();
+  if (_dragSrcIdx === null || _dragSrcIdx === idx) return;
+  const moved = _records.splice(_dragSrcIdx, 1)[0];
+  _records.splice(idx, 0, moved);
+  renderRecords();
+  const session = getSession(); if (session) saveRecords(session);
+}
+function _recDragEnd() {
+  _dragSrcIdx = null;
+  document.querySelectorAll('.record-card').forEach(c => { c.classList.remove('dragging'); c.classList.remove('drag-over'); });
+}
+
+// ── LOAD RECORDS ──
+async function loadCareerRecords(username, isOwn) {
+  const addBtn = document.getElementById('add-record-btn');
+  if (addBtn) addBtn.style.display = isOwn ? 'flex' : 'none';
+  try {
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=career_records`);
+    _records = Array.isArray(rows[0]?.career_records) ? rows[0].career_records : [];
+  } catch(e) { _records = []; }
+  renderRecords();
+}
+</script>
+
 <a href="index.html" class="hub-back-bar">
   <div class="hub-back-circle" style="display:flex;align-items:center;justify-content:center;">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="13" rx="2"/><line x1="9" y1="8" x2="6" y2="2"/><line x1="15" y1="8" x2="18" y2="2"/></svg>
@@ -5604,6 +5992,7 @@ async function loadProfile() {
     renderMoveset(user.moveset, _isOwnProfile);
     _posts.load(targetUser);
     loadAppearances(targetUser, _isOwnProfile);
+    loadCareerRecords(targetUser, _isOwnProfile);
 
     // Bio
     const bioEl = document.getElementById('profile-bio');
