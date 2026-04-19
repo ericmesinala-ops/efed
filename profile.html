@@ -1530,9 +1530,15 @@ html.day-mode .profile-tab-ink { background: #c0000e !important; }
     function _end() {
       if (!_dragging) return;
       _dragging = false;
-      track.classList.remove('no-transition');
 
       if (_locked === 'h') {
+        /* Remove no-transition and force a reflow so the browser re-enables
+           the CSS transition BEFORE we set the final transform.
+           Without this, the track snaps to mid-position first then
+           animates the remaining distance — causing the ~0.5s pause. */
+        track.classList.remove('no-transition');
+        void track.offsetWidth; /* reflow */
+
         if (_tx < -THRESHOLD && _curIdx < TABS.length - 1) {
           _goTo(_curIdx + 1, true);
         } else if (_tx > THRESHOLD && _curIdx > 0) {
@@ -1541,6 +1547,8 @@ html.day-mode .profile-tab-ink { background: #c0000e !important; }
           /* snap back */
           _goTo(_curIdx, true);
         }
+      } else {
+        track.classList.remove('no-transition');
       }
       _locked = null; _tx = 0; _ty = 0;
     }
@@ -3511,15 +3519,18 @@ const _posts = (() => {
     if(window._postsSwipeInit)return;
     window._postsSwipeInit=true;
     let _tx=0,_ty=0,_swiping=false,_locked=false,_active=false;
-    document.addEventListener('touchstart',e=>{
-      const wrap=_wrap(); if(!wrap)return;
-      // Only activate if touch starts within the wrap bounds
-      const r=wrap.getBoundingClientRect();
-      const t=e.touches[0];
-      if(t.clientX<r.left||t.clientX>r.right||t.clientY<r.top||t.clientY>r.bottom){_active=false;return;}
-      _active=true; _tx=t.clientX; _ty=t.clientY; _swiping=false; _locked=false;
-    },{passive:true});
-    document.addEventListener('touchmove',e=>{
+
+    // Use the wrap element directly instead of document so we don't
+    // conflict with the tab-panel swiper which also listens on document.
+    function _getWrap(){ return _wrap(); }
+
+    function _onStart(e){
+      // Ignore touches on inner horizontally-scrollable strips (e.g. reply avatar row)
+      if(e.target.closest('.post-reply-scroll-wrap')||e.target.closest('.vid-row'))return;
+      _active=true; _tx=e.touches[0].clientX; _ty=e.touches[0].clientY;
+      _swiping=false; _locked=false;
+    }
+    function _onMove(e){
       if(!_active||_locked)return;
       const dx=e.touches[0].clientX-_tx, dy=e.touches[0].clientY-_ty;
       if(!_swiping){
@@ -3528,13 +3539,36 @@ const _posts = (() => {
         else return;
       }
       e.preventDefault();
-    },{passive:false});
-    document.addEventListener('touchend',e=>{
+    }
+    function _onEnd(e){
       if(!_active||_locked||!_swiping)return;
       const dx=e.changedTouches[0].clientX-_tx;
-      if(Math.abs(dx)>22) dx<0?next():prev();
+      if(Math.abs(dx)>22){ if(dx<0) next(); else prev(); }
       _active=false;
-    },{passive:true});
+    }
+
+    // Attach to the wrap element only — not document — so the tab swiper
+    // can still handle swipes that start outside the posts section.
+    document.addEventListener('DOMContentLoaded', function attachPostSwipe(){
+      const wrap=_getWrap();
+      if(wrap){
+        wrap.addEventListener('touchstart',_onStart,{passive:true});
+        wrap.addEventListener('touchmove',_onMove,{passive:false});
+        wrap.addEventListener('touchend',_onEnd,{passive:true});
+      } else {
+        // wrap not in DOM yet — fall back to document with bounds check
+        document.addEventListener('touchstart',e=>{
+          const w=_getWrap(); if(!w)return;
+          if(e.target.closest('.post-reply-scroll-wrap')||e.target.closest('.vid-row'))return;
+          const r=w.getBoundingClientRect(),t=e.touches[0];
+          if(t.clientX<r.left||t.clientX>r.right||t.clientY<r.top||t.clientY>r.bottom){_active=false;return;}
+          _active=true;_tx=t.clientX;_ty=t.clientY;_swiping=false;_locked=false;
+        },{passive:true});
+        document.addEventListener('touchmove',_onMove,{passive:false});
+        document.addEventListener('touchend',_onEnd,{passive:true});
+      }
+    });
+
     let _wLock=false;
     const wrap=_wrap();
     if(wrap) wrap.addEventListener('wheel',e=>{
