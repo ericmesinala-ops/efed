@@ -2199,16 +2199,19 @@ html.day-mode .ms-add-btn:hover { color: rgba(0,0,0,.55); border-color: rgba(0,0
 #post-modal-bg {
   position: fixed; inset: 0; z-index: 9000;
   background: rgba(0,0,0,.7); backdrop-filter: blur(8px);
-  display: none; align-items: center; justify-content: center; padding: 20px;
+  display: none; align-items: flex-end; justify-content: center; padding: 0;
 }
 #post-modal-bg.open { display: flex; }
 #post-modal {
   width: 100%; max-width: 600px;
   background: #13131a; border: 1px solid rgba(255,255,255,.1);
-  border-radius: 20px;
+  border-radius: 20px 20px 0 0;
   padding: 20px 20px 28px;
   display: flex; flex-direction: column; gap: 14px;
   animation: slideUp .3s cubic-bezier(.32,.72,0,1);
+  /* leave room so toolbar clears keyboard */
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  transition: transform .2s ease;
 }
 @keyframes slideUp { from { transform: translateY(60px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes lbIn { from { opacity:0; transform:scale(.94); } to { opacity:1; transform:scale(1); } }
@@ -2500,6 +2503,42 @@ html.day-mode .ms-add-btn:hover { color: rgba(0,0,0,.55); border-color: rgba(0,0
     <button class="pm-submit-btn" id="pm-submit" onclick="_posts.submit()">Post</button>
   </div>
 </div>
+
+<script>
+// ── KEYBOARD-AWARE POST MODAL (iOS) ──
+(function() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  function _adjust() {
+    const bg = document.getElementById('post-modal-bg');
+    if (!bg || !bg.classList.contains('open')) return;
+    // offsetFromBottom = full window height minus the bottom of the visual viewport
+    const offsetFromBottom = window.innerHeight - (vv.offsetTop + vv.height);
+    const modal = document.getElementById('post-modal');
+    if (modal) modal.style.marginBottom = offsetFromBottom > 0 ? offsetFromBottom + 'px' : '0px';
+  }
+  function _reset() {
+    const modal = document.getElementById('post-modal');
+    if (modal) modal.style.marginBottom = '0px';
+  }
+  vv.addEventListener('resize', _adjust);
+  vv.addEventListener('scroll', _adjust);
+  // Also hook into open/close
+  const _orig_open = window._pmOpenHook;
+  document.addEventListener('click', function(e) {
+    if (e.target && e.target.id === 'open-post-modal-btn') setTimeout(_adjust, 100);
+  });
+  // Reset on close
+  const _observer = new MutationObserver(() => {
+    const bg = document.getElementById('post-modal-bg');
+    if (bg && !bg.classList.contains('open')) _reset();
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    const bg = document.getElementById('post-modal-bg');
+    if (bg) _observer.observe(bg, { attributes: true, attributeFilter: ['class'] });
+  });
+})();
+</script>
 
 <script>
 const _posts = (() => {
