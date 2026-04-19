@@ -2749,7 +2749,54 @@ html, body { overscroll-behavior-y: none; }
   }
   .expand-action-btn:hover { background: rgba(255,255,255,.12); }
   .expand-action-btn.liked { color: #c8a84b; border-color: rgba(200,168,75,.4); background: rgba(200,168,75,.1); }
-  .expand-action-btn.bookmarked { color: #c8a84b; border-color: rgba(200,168,75,.4); background: rgba(200,168,75,.1); }
+  .expand-action-btn.appeared { color: #ff8c42; border-color: rgba(255,140,66,.4); background: rgba(255,140,66,.1); }
+  html.day-mode .expand-action-btn.appeared { color: #d46000 !important; border-color: rgba(212,96,0,.4) !important; background: rgba(212,96,0,.08) !important; }
+
+  /* Featured in this Video section */
+  #expand-featured-section {
+    padding: 14px 20px 4px;
+    display: none;
+  }
+  .expand-featured-title {
+    font-size: .6rem; letter-spacing: 2px; text-transform: uppercase;
+    color: rgba(255,255,255,.35); font-weight: 700; font-family: 'DM Sans', sans-serif;
+    margin-bottom: 10px;
+  }
+  html.day-mode .expand-featured-title { color: rgba(0,0,0,.35); }
+  .expand-featured-avatars {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  .expand-featured-avatar {
+    position: relative; cursor: pointer;
+    transition: transform .18s;
+  }
+  .expand-featured-avatar:hover { transform: scale(1.12); }
+  .expand-featured-avatar img,
+  .expand-featured-avatar-initials {
+    width: 36px; height: 36px; border-radius: 50%;
+    object-fit: cover; display: block;
+    border: 2px solid rgba(255,140,66,.45);
+    box-shadow: 0 0 0 1px rgba(0,0,0,.3);
+  }
+  .expand-featured-avatar-initials {
+    background: rgba(255,140,66,.15);
+    display: flex; align-items: center; justify-content: center;
+    font-size: .75rem; font-weight: 700;
+    color: rgba(255,140,66,.9);
+    font-family: 'DM Sans', sans-serif;
+  }
+  .expand-featured-avatar-tip {
+    position: absolute; bottom: calc(100% + 5px); left: 50%;
+    transform: translateX(-50%);
+    background: rgba(20,20,24,.97); color: #e8e8e8;
+    font-size: .6rem; font-weight: 600; white-space: nowrap;
+    padding: 3px 8px; border-radius: 5px;
+    pointer-events: none; opacity: 0;
+    transition: opacity .15s;
+    font-family: 'DM Sans', sans-serif;
+    border: 1px solid rgba(255,255,255,.1);
+  }
+  .expand-featured-avatar:hover .expand-featured-avatar-tip { opacity: 1; }
   .expand-action-btn.supported { color: #4caf8a; border-color: rgba(76,175,138,.4); background: rgba(76,175,138,.1); }
   .expand-action-btn.watchlisted { color: #c8a84b; border-color: rgba(200,168,75,.4); background: rgba(200,168,75,.1); }
   .expand-btn-label { display: none; }
@@ -4337,6 +4384,16 @@ function a2hsDismiss(){
         </div>
       </button>
 
+      <!-- Appear -->
+      <button class="expand-action-btn" id="expand-appear-btn" onclick="toggleExpandAppear()" data-tip="I'm in this!">
+        🤼
+      </button>
+
+      <!-- Bookmark -->
+      <button class="expand-action-btn" id="expand-bookmark-btn" onclick="toggleExpandBookmark()" data-tip="Bookmark">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
+
       <!-- Tags (admin/owner only) -->
       <button class="expand-action-btn" id="expand-tag-btn" onclick="openTagModal()" data-tip="Tags" style="display:none;">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
@@ -4376,6 +4433,12 @@ function a2hsDismiss(){
     <div id="expand-tags-section" style="display:none;">
       <div class="expand-comments-title" style="margin-bottom:10px;">Tags</div>
       <div class="expand-tags-row" id="expand-tags-row"></div>
+    </div>
+
+    <!-- ── FEATURED IN THIS VIDEO ── -->
+    <div id="expand-featured-section">
+      <div class="expand-featured-title">🤼 Featured in this Video</div>
+      <div class="expand-featured-avatars" id="expand-featured-avatars"></div>
     </div>
 
     <div id="expand-comments-section">
@@ -8511,10 +8574,24 @@ function openExpand(v) {
   const liked = session && _expandLikes[videoKey]?.includes(session.username);
   likeBtn.classList.toggle('liked', !!liked);
 
-  // Bookmark button removed — now lives on eFed page only
+  // Bookmark button - use cache if available, else fetch from Supabase once
+  const bookmarkBtn = document.getElementById('expand-bookmark-btn');
   const bKey = encodeURIComponent(extractId(v.url));
+  if (bookmarkBtn) bookmarkBtn.classList.remove('bookmarked');
+  if (session && bookmarkBtn) {
+    if (_expandBookmarks[bKey] !== undefined) {
+      bookmarkBtn.classList.toggle('bookmarked', !!_expandBookmarks[bKey]);
+    } else {
+      sbGet('bookmarks', 'video_id=eq.' + encodeURIComponent(extractId(v.url)) + '&username=eq.' + encodeURIComponent(session.username))
+        .then(rows => {
+          _expandBookmarks[bKey] = rows.length > 0;
+          bookmarkBtn.classList.toggle('bookmarked', _expandBookmarks[bKey]);
+        })
+        .catch(() => {});
+    }
+  }
 
-  // Watchlist button removed — now lives on eFed page only
+  // Watchlist removed — now lives on eFed page only
 
   // Comments
   document.getElementById('expand-comment-wrap').style.display = session ? 'flex' : 'none';
@@ -8523,6 +8600,16 @@ function openExpand(v) {
   loadExpandLikeCount(v.url);
   loadExpandSupport();
   loadSupportersRow();
+  // Appear button state
+  const appearBtn = document.getElementById('expand-appear-btn');
+  if (appearBtn) appearBtn.classList.remove('appeared');
+  const videoId = extractId(v.url);
+  loadFeaturedAvatars(videoId);
+  if (session) {
+    sbGet('video_appearances', `video_id=eq.${encodeURIComponent(videoId)}&username=eq.${encodeURIComponent(session.username)}`)
+      .then(rows => { if (rows.length && appearBtn) appearBtn.classList.add('appeared'); })
+      .catch(() => {});
+  }
 
   // Inject Back to Hub clone (desktop only) + Reload Video (both)
   {
@@ -9230,6 +9317,63 @@ async function toggleExpandBookmark() {
     }
   } catch(e) { console.warn('Bookmark failed', e); }
 }
+
+// ── APPEAR / FEATURED IN THIS VIDEO ──
+async function toggleExpandAppear() {
+  const session = getSession();
+  if (!session) { alert('Sign in to mark yourself as featured.'); return; }
+  if (!_expandVideo) return;
+  const btn = document.getElementById('expand-appear-btn');
+  const videoId = extractId(_expandVideo.url);
+  const appeared = btn.classList.contains('appeared');
+  try {
+    if (appeared) {
+      await sbDelete('video_appearances', `video_id=eq.${encodeURIComponent(videoId)}&username=eq.${encodeURIComponent(session.username)}`);
+      btn.classList.remove('appeared');
+    } else {
+      await sbInsert('video_appearances', {
+        video_id: videoId,
+        video_url: _expandVideo.url,
+        username: session.username,
+        appeared_at: Date.now()
+      });
+      btn.classList.add('appeared');
+    }
+    loadFeaturedAvatars(videoId);
+  } catch(e) { console.warn('Appear failed', e); }
+}
+
+async function loadFeaturedAvatars(videoId) {
+  const section = document.getElementById('expand-featured-section');
+  const container = document.getElementById('expand-featured-avatars');
+  if (!section || !container) return;
+  try {
+    const rows = await sbGet('video_appearances', `video_id=eq.${encodeURIComponent(videoId)}&select=username,appeared_at`);
+    if (!rows.length) { section.style.display = 'none'; return; }
+    // Fetch avatar urls
+    const usernames = rows.map(r => r.username);
+    let avatarMap = {};
+    try {
+      const users = await sbGet('users', `username=in.(${usernames.map(u => encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
+      users.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
+    } catch(e) {}
+    container.innerHTML = '';
+    rows.forEach(r => {
+      const info = avatarMap[r.username] || { avatar: null, name: r.username };
+      const wrap = document.createElement('a');
+      wrap.href = `profile.html?u=${encodeURIComponent(r.username)}`;
+      wrap.className = 'expand-featured-avatar';
+      wrap.onclick = e => e.stopPropagation();
+      const inner = info.avatar
+        ? `<img src="${info.avatar}" alt="${_esc(info.name)}" onerror="this.outerHTML='<div class=expand-featured-avatar-initials>${(info.name[0]||'?').toUpperCase()}</div>'">`
+        : `<div class="expand-featured-avatar-initials">${(info.name[0]||'?').toUpperCase()}</div>`;
+      wrap.innerHTML = inner + `<div class="expand-featured-avatar-tip">${_esc(info.name)}</div>`;
+      container.appendChild(wrap);
+    });
+    section.style.display = 'block';
+  } catch(e) { section.style.display = 'none'; }
+}
+
 
 
 // ── WATCH LIST POPUP ──
@@ -11140,8 +11284,8 @@ body.chat-open #chat-panel { height: 100vh; padding-top: 64px; } /* desktop only
 /* Match stamp size in comments to chat */
 .expand-comment-text .chat-stamp-glow img,
 .expand-comment-text img.moodlet {
-  width: 23px !important;
-  height: 23px !important;
+  width: 24px !important;
+  height: 24px !important;
   vertical-align: middle;
 }
 .stamp-picker-popup {
@@ -12228,7 +12372,7 @@ function _buildStampPickerContent(pickerEl, efedName, inputEl) {
       const btn = document.createElement('button');
       btn.className = 'stamp-picker-btn';
       btn.title = s.label;
-      btn.innerHTML = stampImg(s.code, 26);
+      btn.innerHTML = stampImg(s.code, 24);
       btn.onclick = () => { insertStampAtCursor(inputEl, s.code); closeStampPicker(); };
       grid.appendChild(btn);
     });
@@ -12241,7 +12385,7 @@ function _buildStampPickerContent(pickerEl, efedName, inputEl) {
       const btn = document.createElement('button');
       btn.className = 'stamp-picker-btn stamp-picker-special-glow';
       btn.title = userStamp.label || 'Special Stamp';
-      btn.innerHTML = stampImg(userStamp.code, 26);
+      btn.innerHTML = stampImg(userStamp.code, 24);
       btn.onclick = () => { insertStampAtCursor(inputEl, userStamp.code); closeStampPicker(); };
       specialEl.appendChild(btn);
     } else {
@@ -12458,7 +12602,7 @@ function toggleExpandStampPicker() {
         const b = document.createElement('button');
         b.className = 'stamp-picker-btn';
         b.title = s.label;
-        b.innerHTML = typeof stampImg === 'function' ? stampImg(s.code, 26) : s.code;
+        b.innerHTML = typeof stampImg === 'function' ? stampImg(s.code, 24) : s.code;
         b.onclick = () => { insertExpandStamp(s.code); closeExpandStampPicker(); };
         grid.appendChild(b);
       });
@@ -12471,7 +12615,7 @@ function toggleExpandStampPicker() {
         const b = document.createElement('button');
         b.className = 'stamp-picker-btn stamp-picker-special-glow';
         b.title = userStamp.label || 'Special Stamp';
-        b.innerHTML = typeof stampImg === 'function' ? stampImg(userStamp.code, 26) : userStamp.code;
+        b.innerHTML = typeof stampImg === 'function' ? stampImg(userStamp.code, 24) : userStamp.code;
         b.onclick = () => { insertExpandStamp(userStamp.code); closeExpandStampPicker(); };
         specialEl.appendChild(b);
       } else {
