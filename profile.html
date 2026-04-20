@@ -3206,6 +3206,32 @@ async function loadCareerRecords(username, isOwn) {
 
 <!-- ── MEDIA PANEL ── -->
 <div class="profile-tab-panel" data-panel="media">
+<!-- ── MEDIA STATS ── -->
+<div class="stats-bar">
+  <div class="stats-top-row">
+    <div class="stat-pill top">
+      <div class="stat-num" id="stat-featured-count">—</div>
+      <div class="stat-lbl">Featured</div>
+    </div>
+  </div>
+</div>
+<!-- ── FEATURED IN THESE VIDEOS ── -->
+<div class="section" id="featured-in-section">
+  <div style="margin-bottom:16px;">
+    <div class="sec-title" style="margin-bottom:0;">Featured in These Videos</div>
+  </div>
+  <div id="featured-in-row-wrap" style="display:flex;align-items:center;gap:0;">
+    <div class="prof-arr-col">
+      <button class="prof-pill-arr hidden" id="feat-arr-left" onclick="scrollFeatInRow(-1)">&#8249;</button>
+      <button class="prof-jump-btn hidden" id="feat-jump-left" onclick="jumpFeatInRow('start')" title="Jump to first">&#171;&#171;</button>
+    </div>
+    <div class="vid-row" id="featured-in-row" style="flex:1;" onscroll="updateFeatInArrows()"><div class="empty">No featured appearances yet.</div></div>
+    <div class="prof-arr-col">
+      <button class="prof-pill-arr hidden" id="feat-arr-right" onclick="scrollFeatInRow(1)">&#8250;</button>
+      <button class="prof-jump-btn hidden" id="feat-jump-right" onclick="jumpFeatInRow('end')" title="Jump to last">&#187;&#187;</button>
+    </div>
+  </div>
+</div>
 <!-- ── BACK TO HUB ── -->
 <a href="index.html" class="hub-back-bar">
   <div class="hub-back-circle" style="display:flex;align-items:center;justify-content:center;">
@@ -6595,6 +6621,9 @@ async function loadProfile() {
   const _wlTargetUser = targetUser;
   loadWatchlistSection(_wlTargetUser);
 
+  // Featured in These Videos — visible to everyone
+  loadFeaturedVideos(targetUser);
+
   // Bookmarks — only load for owner or admin
   const bmRow = document.getElementById('bookmarks-row');
   const _canSeeBookmarks = _isOwnProfile || session.username.toLowerCase() === ADMIN_USERNAME;
@@ -6644,6 +6673,103 @@ async function loadProfile() {
     if (_pvEl) _pvEl.textContent = _pvFmt;
     if (_pvPill) _pvPill.style.display = '';
   } catch(e) {}
+}
+
+// ── FEATURED IN THESE VIDEOS ──
+async function loadFeaturedVideos(targetUser) {
+  const row = document.getElementById('featured-in-row');
+  const section = document.getElementById('featured-in-section');
+  const countEl = document.getElementById('stat-featured-count');
+  if (!row) return;
+  try {
+    // Get all video_ids this CAW appears in
+    const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(targetUser)}&select=video_id,video_url,appeared_at&order=appeared_at.desc`);
+    // Update stat pill
+    if (countEl) countEl.textContent = appearances.length || '0';
+    if (!appearances.length) {
+      row.innerHTML = '<div class="empty">No featured appearances yet.</div>';
+      return;
+    }
+    // Fetch matching submissions for thumbnails + show names
+    const urls = appearances.map(a => a.video_url).filter(Boolean);
+    let subMap = {};
+    if (urls.length) {
+      try {
+        const subs = await sbGet('submissions', `url=in.(${urls.map(u => encodeURIComponent(u)).join(',')})&select=url,show_name,date,thumb_url`);
+        subs.forEach(s => { subMap[s.url] = s; });
+      } catch(e) {}
+    }
+    row.innerHTML = '';
+    appearances.forEach(a => {
+      const s = subMap[a.video_url] || {};
+      const card = makeFeaturedVidCard(a.video_url, s.show_name, s.date, s.thumb_url);
+      row.appendChild(card);
+    });
+    setTimeout(updateFeatInArrows, 100);
+  } catch(e) {
+    row.innerHTML = '<div class="empty">Could not load.</div>';
+    if (countEl) countEl.textContent = '0';
+  }
+}
+
+function makeFeaturedVidCard(url, showName, date, thumbUrl) {
+  const id = extractId ? extractId(url) : null;
+  const thumb = thumbUrl || (id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '');
+  const card = document.createElement('div');
+  card.className = 'vid-card';
+  card.style.cursor = 'pointer';
+  card.onclick = () => { if (url) window.open(url, '_blank'); };
+  const thumbDiv = document.createElement('div');
+  thumbDiv.className = 'vid-thumb';
+  if (thumb) {
+    const img = document.createElement('img');
+    img.src = thumb; img.alt = '';
+    img.onerror = function() { this.style.display = 'none'; };
+    thumbDiv.appendChild(img);
+  }
+  // Play overlay
+  const playOverlay = document.createElement('div');
+  playOverlay.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;';
+  playOverlay.innerHTML = '<div class="play-dot"><svg width="8" height="9" viewBox="0 0 8 9" fill="#fff"><polygon points="0,0 8,4.5 0,9"/></svg></div>';
+  thumbDiv.appendChild(playOverlay);
+  card.appendChild(thumbDiv);
+  const titleDiv = document.createElement('div');
+  titleDiv.className = 'vid-title';
+  titleDiv.textContent = showName || url || '';
+  card.appendChild(titleDiv);
+  const dateDiv = document.createElement('div');
+  dateDiv.className = 'vid-date';
+  dateDiv.textContent = date || '';
+  card.appendChild(dateDiv);
+  return card;
+}
+
+function scrollFeatInRow(dir) {
+  const el = document.getElementById('featured-in-row');
+  if (!el) return;
+  el.scrollBy({ left: dir * 180, behavior: 'smooth' });
+  setTimeout(updateFeatInArrows, 300);
+}
+function jumpFeatInRow(pos) {
+  const el = document.getElementById('featured-in-row');
+  if (!el) return;
+  el.scrollTo({ left: pos === 'start' ? 0 : el.scrollWidth, behavior: 'smooth' });
+  setTimeout(updateFeatInArrows, 300);
+}
+function updateFeatInArrows() {
+  const el = document.getElementById('featured-in-row');
+  const left = document.getElementById('feat-arr-left');
+  const right = document.getElementById('feat-arr-right');
+  const jLeft = document.getElementById('feat-jump-left');
+  const jRight = document.getElementById('feat-jump-right');
+  if (!el) return;
+  const atStart = el.scrollLeft <= 2;
+  const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 2;
+  const hasScroll = el.scrollWidth > el.clientWidth + 4;
+  if (left) left.classList.toggle('hidden', atStart);
+  if (right) right.classList.toggle('hidden', !hasScroll || atEnd);
+  if (jLeft) jLeft.classList.toggle('hidden', atStart);
+  if (jRight) jRight.classList.toggle('hidden', !hasScroll || atEnd);
 }
 
 // ── WATCH LIST (PROFILE) ──
