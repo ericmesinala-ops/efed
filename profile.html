@@ -6812,15 +6812,15 @@ async function _loadPublicProfile(username) {
     try {
       const imgRow = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=caw_image_1,caw_image_2,caw_image_3,caw_image_4`);
       if (imgRow[0]) { user.caw_image_1=imgRow[0].caw_image_1; user.caw_image_2=imgRow[0].caw_image_2; user.caw_image_3=imgRow[0].caw_image_3; user.caw_image_4=imgRow[0].caw_image_4; }
-    } catch(e) { console.warn('Public profile: images failed', e); }
+    } catch(e) {}
     try {
       const avRow = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=avatar_url,avatar_banner,avatar_side,avatar_banner_dim`);
       if (avRow[0]) { user.avatar_url=avRow[0].avatar_url; user.avatar_banner=avRow[0].avatar_banner; user.avatar_side=avRow[0].avatar_side; user.avatar_banner_dim=avRow[0].avatar_banner_dim; }
-    } catch(e) { console.warn('Public profile: avatar failed', e); }
+    } catch(e) {}
     try {
       const htRow = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=cc_hashtag_1,cc_hashtag_2,cc_hashtag_3,cc_hashtags_visible`);
-      if (htRow[0]) { user.cc_hashtag_1=htRow[0].cc_hashtag_1; user.cc_hashtag_2=htRow[0].cc_hashtag_2; user.cc_hashtag_3=htRow[0].cc_hashtag_3; user.cc_hashtags_visible=htRow[0].cc_hashtags_visible ?? true; }
-    } catch(e) { console.warn('Public profile: hashtags failed', e); }
+      if (htRow[0]) { user.cc_hashtag_1=htRow[0].cc_hashtag_1; user.cc_hashtag_2=htRow[0].cc_hashtag_2; user.cc_hashtag_3=htRow[0].cc_hashtag_3; user.cc_hashtags_visible=htRow[0].cc_hashtags_visible; }
+    } catch(e) {}
 
     const name = user.display_name || user.username;
     document.title = name + ' — EFED Hub';
@@ -6910,31 +6910,24 @@ async function _loadPublicProfile(username) {
 
     // Stats
     try {
-      const [subsForStats, watchRows, rosterCheck] = await Promise.all([
+      const [subs, watchRows] = await Promise.all([
         sbGet('submissions', `submitted_by=eq.${encodeURIComponent(username)}&status=eq.approved&select=id`),
-        sbGet('watch_time', `username=eq.${encodeURIComponent(username)}&select=total_seconds`),
-        sbGet('roster', `username=eq.${encodeURIComponent(username)}&status=eq.approved&select=id&limit=1`)
+        sbGet('watch_time', `username=eq.${encodeURIComponent(username)}&select=total_seconds`)
       ]);
-      document.getElementById('stat-points').textContent = subsForStats.length * 5;
+      document.getElementById('stat-points').textContent = subs.length * 5;
       const totalSecs = watchRows.reduce((s,r) => s+(r.total_seconds||0), 0);
       const hrs = Math.floor(totalSecs/3600);
       const mins = Math.floor((totalSecs%3600)/60);
-      const watchEl = document.getElementById('stat-watch-hours');
-      if (watchEl) watchEl.textContent = hrs > 0 ? `${hrs}:${String(mins).padStart(2,'0')}` : `0:${String(mins).padStart(2,'0')}`;
-      // Show on-roster badge if they're on any roster
-      if (rosterCheck.length) {
-        const badge = document.getElementById('on-roster-badge');
-        if (badge) badge.classList.add('visible');
-      }
+      document.getElementById('stat-watch').textContent = hrs > 0 ? `${hrs}:${String(mins).padStart(2,'0')}` : `0:${String(mins).padStart(2,'0')}`;
     } catch(e) {}
+
+    // Intercept video clicks — show sign-in prompt
+    _applyPublicVideoBlock();
 
     // Track page view
     try { await sbInsert('page_views', { page_type:'profile', page_key: username, viewer: null, viewed_at: Date.now() }); } catch(e) {}
 
   } catch(e) { console.error('Public profile load failed:', e); }
-
-  // Intercept video clicks — registered outside try so it always fires
-  _applyPublicVideoBlock();
 }
 
 function _applyPublicVideoBlock() {
@@ -9042,6 +9035,7 @@ const _soSearch = (() => {
 
   /* ---- result actions ---- */
   function openVideo(urlEncoded) {
+    if (window._publicVideoBlocked) { close(); _showSignInPrompt(); return; }
     const url = decodeURIComponent(urlEncoded);
     close();
     // If on index.html and openExpand exists, use it; otherwise navigate
@@ -9052,11 +9046,13 @@ const _soSearch = (() => {
     window.location.href = 'index.html?play=' + encodeURIComponent(url);
   }
   function openEfed(nameEncoded) {
+    if (window._publicVideoBlocked) { close(); _showSignInPrompt(); return; }
     const name = decodeURIComponent(nameEncoded);
     close();
     window.location.href = 'efed.html?e=' + encodeURIComponent(name);
   }
   function openProfile(usernameEncoded) {
+    if (window._publicVideoBlocked) { close(); _showSignInPrompt(); return; }
     const username = decodeURIComponent(usernameEncoded);
     close();
     window.location.href = 'profile.html?u=' + encodeURIComponent(username);
