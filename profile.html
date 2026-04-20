@@ -1863,11 +1863,7 @@ html.day-mode .profile-tab-ink { background: #c0000e !important; }
 
 <!-- ── MY EFEDS (Part of / Roster) ── -->
 <div class="section">
-  <div class="sec-title" id="my-efeds-title">eFeds
-    <button class="sec-help-btn" onclick="event.stopPropagation()" style="margin-left:auto;">❓
-      <div class="sec-help-tip">To join an eFed's roster, go to the eFed's page and tap the 👥 button on the right side under the banner to request a spot. The eFed owner will approve or deny.</div>
-    </button>
-  </div>
+  <div class="sec-title" id="my-efeds-title">eFeds</div>
   <div id="myefeds-list"><div class="empty">Not part of any eFed yet.</div></div>
 </div>
 
@@ -6853,6 +6849,55 @@ async function _loadPublicProfile(username) {
     loadCareerRecords(username, false);
     loadTrophyCase(username);
     loadLinks(username);
+    loadFeaturedVideos(username);
+
+    // Show submitted videos section (public), hide bookmarks
+    const _subSec = document.getElementById('submitted-section');
+    if (_subSec) _subSec.style.display = '';
+    // bookmarks stay hidden for guests
+
+    // Load eFeds list for guests — display only, no onclick navigation
+    try {
+      const [rosterRows] = await Promise.all([
+        sbGet('roster', `username=eq.${encodeURIComponent(username)}&status=eq.approved&order=joined_at.asc`)
+      ]);
+      // Check if user owns an eFed
+      let ownerEfedName = null;
+      try {
+        const oc = (await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=promo_name,is_efed_owner,role`))[0];
+        if (oc?.promo_name && (oc.is_efed_owner || oc.role === 'owner')) ownerEfedName = oc.promo_name;
+      } catch(e) {}
+      // Fetch logos
+      const allNames = [...new Set([...(ownerEfedName ? [ownerEfedName] : []), ...rosterRows.map(r=>r.efed)])];
+      let logoMap = {};
+      if (allNames.length) {
+        try {
+          const logos = await sbGet('users', `promo_name=in.(${allNames.map(n=>encodeURIComponent(n)).join(',')})&select=promo_name,promo_logo`);
+          logos.forEach(l => { if (l.promo_logo) logoMap[l.promo_name] = l.promo_logo; });
+        } catch(e) {}
+      }
+      const _guestEfedCard = (name, role) => {
+        const logo = logoMap[name];
+        const av = logo
+          ? `<img src="${logo}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
+          : `<div style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;color:rgba(255,255,255,.4);flex-shrink:0;">${_esc(name[0]||'?')}</div>`;
+        return `<div class="efed-item" style="cursor:default;pointer-events:none;">${av}<div><div class="efed-name-txt">${_esc(name)}</div>${role?`<div class="efed-role-txt">${role}</div>`:''}</div></div>`;
+      };
+      const ownerItem  = ownerEfedName ? _guestEfedCard(ownerEfedName, 'Owner') : '';
+      const rosterItems = rosterRows.filter(r=>r.efed!==ownerEfedName).map(r=>_guestEfedCard(r.efed,'')).join('');
+      const combined = ownerItem + rosterItems;
+      const myEfedList = document.getElementById('myefeds-list');
+      if (myEfedList) myEfedList.innerHTML = combined || '<div class="empty">Not part of any eFed yet.</div>';
+    } catch(e) {}
+      const subs = await sbGet('submissions', `submitted_by=eq.${encodeURIComponent(username)}&status=eq.approved&order=date.desc&select=url,show_name,date,thumb_url`);
+      const subRow = document.getElementById('submitted-row');
+      if (subRow) {
+        subRow.innerHTML = subs.length
+          ? subs.map(s => makeVidCard(s.url, s.show_name, s.date, s.thumb_url)).join('')
+          : '<div class="empty">No submissions yet.</div>';
+        setTimeout(updateSubArrows, 100);
+      }
+    } catch(e) {}
 
     const bioEl = document.getElementById('profile-bio');
     const bioSec = document.getElementById('bio-section');
@@ -6959,13 +7004,6 @@ function _applyPublicVideoBlock() {
         _showSignInPrompt();
         return;
       }
-    }
-
-    // Block tab switching (activity, career, media tabs — they can see overview only)
-    if (e.target.closest('.profile-tab')) {
-      e.preventDefault(); e.stopImmediatePropagation();
-      _showSignInPrompt();
-      return;
     }
 
   }, true); // capture phase so it fires before any onclick
