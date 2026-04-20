@@ -1863,7 +1863,11 @@ html.day-mode .profile-tab-ink { background: #c0000e !important; }
 
 <!-- ── MY EFEDS (Part of / Roster) ── -->
 <div class="section">
-  <div class="sec-title" id="my-efeds-title">eFeds</div>
+  <div class="sec-title" id="my-efeds-title">eFeds
+    <button class="sec-help-btn" onclick="event.stopPropagation()" style="margin-left:auto;">❓
+      <div class="sec-help-tip">To join an eFed's roster, go to the eFed's page and tap the 👥 button on the right side under the banner to request a spot. The eFed owner will approve or deny.</div>
+    </button>
+  </div>
   <div id="myefeds-list"><div class="empty">Not part of any eFed yet.</div></div>
 </div>
 
@@ -6808,15 +6812,15 @@ async function _loadPublicProfile(username) {
     try {
       const imgRow = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=caw_image_1,caw_image_2,caw_image_3,caw_image_4`);
       if (imgRow[0]) { user.caw_image_1=imgRow[0].caw_image_1; user.caw_image_2=imgRow[0].caw_image_2; user.caw_image_3=imgRow[0].caw_image_3; user.caw_image_4=imgRow[0].caw_image_4; }
-    } catch(e) {}
+    } catch(e) { console.warn('Public profile: images failed', e); }
     try {
       const avRow = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=avatar_url,avatar_banner,avatar_side,avatar_banner_dim`);
       if (avRow[0]) { user.avatar_url=avRow[0].avatar_url; user.avatar_banner=avRow[0].avatar_banner; user.avatar_side=avRow[0].avatar_side; user.avatar_banner_dim=avRow[0].avatar_banner_dim; }
-    } catch(e) {}
+    } catch(e) { console.warn('Public profile: avatar failed', e); }
     try {
       const htRow = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=cc_hashtag_1,cc_hashtag_2,cc_hashtag_3,cc_hashtags_visible`);
-      if (htRow[0]) { user.cc_hashtag_1=htRow[0].cc_hashtag_1; user.cc_hashtag_2=htRow[0].cc_hashtag_2; user.cc_hashtag_3=htRow[0].cc_hashtag_3; user.cc_hashtags_visible=htRow[0].cc_hashtags_visible; }
-    } catch(e) {}
+      if (htRow[0]) { user.cc_hashtag_1=htRow[0].cc_hashtag_1; user.cc_hashtag_2=htRow[0].cc_hashtag_2; user.cc_hashtag_3=htRow[0].cc_hashtag_3; user.cc_hashtags_visible=htRow[0].cc_hashtags_visible ?? true; }
+    } catch(e) { console.warn('Public profile: hashtags failed', e); }
 
     const name = user.display_name || user.username;
     document.title = name + ' — EFED Hub';
@@ -6856,39 +6860,8 @@ async function _loadPublicProfile(username) {
     if (_subSec) _subSec.style.display = '';
     // bookmarks stay hidden for guests
 
-    // Load eFeds list for guests — display only, no onclick navigation
+    // Load submitted videos row
     try {
-      const [rosterRows] = await Promise.all([
-        sbGet('roster', `username=eq.${encodeURIComponent(username)}&status=eq.approved&order=joined_at.asc`)
-      ]);
-      // Check if user owns an eFed
-      let ownerEfedName = null;
-      try {
-        const oc = (await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=promo_name,is_efed_owner,role`))[0];
-        if (oc?.promo_name && (oc.is_efed_owner || oc.role === 'owner')) ownerEfedName = oc.promo_name;
-      } catch(e) {}
-      // Fetch logos
-      const allNames = [...new Set([...(ownerEfedName ? [ownerEfedName] : []), ...rosterRows.map(r=>r.efed)])];
-      let logoMap = {};
-      if (allNames.length) {
-        try {
-          const logos = await sbGet('users', `promo_name=in.(${allNames.map(n=>encodeURIComponent(n)).join(',')})&select=promo_name,promo_logo`);
-          logos.forEach(l => { if (l.promo_logo) logoMap[l.promo_name] = l.promo_logo; });
-        } catch(e) {}
-      }
-      const _guestEfedCard = (name, role) => {
-        const logo = logoMap[name];
-        const av = logo
-          ? `<img src="${logo}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
-          : `<div style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;color:rgba(255,255,255,.4);flex-shrink:0;">${_esc(name[0]||'?')}</div>`;
-        return `<div class="efed-item" style="cursor:default;pointer-events:none;">${av}<div><div class="efed-name-txt">${_esc(name)}</div>${role?`<div class="efed-role-txt">${role}</div>`:''}</div></div>`;
-      };
-      const ownerItem  = ownerEfedName ? _guestEfedCard(ownerEfedName, 'Owner') : '';
-      const rosterItems = rosterRows.filter(r=>r.efed!==ownerEfedName).map(r=>_guestEfedCard(r.efed,'')).join('');
-      const combined = ownerItem + rosterItems;
-      const myEfedList = document.getElementById('myefeds-list');
-      if (myEfedList) myEfedList.innerHTML = combined || '<div class="empty">Not part of any eFed yet.</div>';
-    } catch(e) {}
       const subs = await sbGet('submissions', `submitted_by=eq.${encodeURIComponent(username)}&status=eq.approved&order=date.desc&select=url,show_name,date,thumb_url`);
       const subRow = document.getElementById('submitted-row');
       if (subRow) {
@@ -6937,24 +6910,31 @@ async function _loadPublicProfile(username) {
 
     // Stats
     try {
-      const [subs, watchRows] = await Promise.all([
+      const [subsForStats, watchRows, rosterCheck] = await Promise.all([
         sbGet('submissions', `submitted_by=eq.${encodeURIComponent(username)}&status=eq.approved&select=id`),
-        sbGet('watch_time', `username=eq.${encodeURIComponent(username)}&select=total_seconds`)
+        sbGet('watch_time', `username=eq.${encodeURIComponent(username)}&select=total_seconds`),
+        sbGet('roster', `username=eq.${encodeURIComponent(username)}&status=eq.approved&select=id&limit=1`)
       ]);
-      document.getElementById('stat-points').textContent = subs.length * 5;
+      document.getElementById('stat-points').textContent = subsForStats.length * 5;
       const totalSecs = watchRows.reduce((s,r) => s+(r.total_seconds||0), 0);
       const hrs = Math.floor(totalSecs/3600);
       const mins = Math.floor((totalSecs%3600)/60);
-      document.getElementById('stat-watch').textContent = hrs > 0 ? `${hrs}:${String(mins).padStart(2,'0')}` : `0:${String(mins).padStart(2,'0')}`;
+      const watchEl = document.getElementById('stat-watch-hours');
+      if (watchEl) watchEl.textContent = hrs > 0 ? `${hrs}:${String(mins).padStart(2,'0')}` : `0:${String(mins).padStart(2,'0')}`;
+      // Show on-roster badge if they're on any roster
+      if (rosterCheck.length) {
+        const badge = document.getElementById('on-roster-badge');
+        if (badge) badge.classList.add('visible');
+      }
     } catch(e) {}
-
-    // Intercept video clicks — show sign-in prompt
-    _applyPublicVideoBlock();
 
     // Track page view
     try { await sbInsert('page_views', { page_type:'profile', page_key: username, viewer: null, viewed_at: Date.now() }); } catch(e) {}
 
   } catch(e) { console.error('Public profile load failed:', e); }
+
+  // Intercept video clicks — registered outside try so it always fires
+  _applyPublicVideoBlock();
 }
 
 function _applyPublicVideoBlock() {
