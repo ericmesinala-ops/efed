@@ -2652,19 +2652,7 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
     <div id="trophy-count-badge" style="display:none;font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(200,168,75,.5);font-weight:700;"></div>
   </div>
 
-  <!-- Owner emblem always first -->
-  <div id="trophy-owner-row" style="display:none;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid rgba(200,168,75,.1);">
-    <div style="font-size:.46rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.4);font-weight:700;margin-bottom:10px;">eFed Owner</div>
-    <div style="display:flex;gap:14px;align-items:flex-start;">
-      <div class="trophy-emblem owner-emblem">
-        <div class="trophy-emblem-icon owner-glow" id="trophy-owner-icon"></div>
-        <div class="trophy-emblem-name" style="color:#c8a84b;">eFed Owner</div>
-        <div class="trophy-emblem-efed" id="trophy-owner-efed-name"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Scrollable grid -->
+  <!-- Scrollable grid — owner emblem injected as first item by JS -->
   <div id="trophy-case-scroll" style="overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch;padding-top:10px;padding-bottom:6px;margin-top:-10px;">
     <div id="trophy-case-grid" style="display:flex;gap:14px;flex-wrap:nowrap;min-width:max-content;padding:4px 2px 8px;"></div>
   </div>
@@ -3515,9 +3503,6 @@ html.day-mode #trophy-case-scroll::-webkit-scrollbar-thumb { background: rgba(16
 async function loadTrophyCase(targetUser) {
   const grid       = document.getElementById('trophy-case-grid');
   const empty      = document.getElementById('trophy-case-empty');
-  const ownerRow   = document.getElementById('trophy-owner-row');
-  const ownerIcon  = document.getElementById('trophy-owner-icon');
-  const ownerEfed  = document.getElementById('trophy-owner-efed-name');
   const badge      = document.getElementById('trophy-count-badge');
   if (!grid) return;
 
@@ -3525,21 +3510,40 @@ async function loadTrophyCase(targetUser) {
   const session = typeof getSession === 'function' ? getSession() : null;
   const isAdmin = session && (session.isEfedOwner || session.is_efed_owner || session.role === 'owner' || (typeof ADMIN_USERNAME !== 'undefined' && session.username && session.username.toLowerCase() === ADMIN_USERNAME));
 
-  // eFed owner badge
+  grid.innerHTML = '';
+
+  // eFed owner emblem — injected as first item in the shared grid
+  let ownerEmblemEl = null;
   try {
     const urows = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=promo_name,is_efed_owner,role`);
     const u = urows && urows[0];
     if (u && (u.is_efed_owner || u.role === 'owner') && u.promo_name) {
-      if (ownerIcon) ownerIcon.innerHTML = (typeof EMBLEM_OWNER_SVG !== 'undefined') ? EMBLEM_OWNER_SVG : '';
-      if (ownerEfed) ownerEfed.textContent = u.promo_name;
-      if (ownerRow)  ownerRow.style.display = 'block';
+      ownerEmblemEl = document.createElement('div');
+      ownerEmblemEl.className = 'trophy-emblem owner-emblem';
+
+      const iconDiv = document.createElement('div');
+      iconDiv.className = 'trophy-emblem-icon owner-glow';
+      iconDiv.innerHTML = (typeof EMBLEM_OWNER_SVG !== 'undefined') ? EMBLEM_OWNER_SVG : '';
+      ownerEmblemEl.appendChild(iconDiv);
+
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'trophy-emblem-name';
+      nameDiv.style.color = '#c8a84b';
+      nameDiv.textContent = 'eFed Owner';
+      ownerEmblemEl.appendChild(nameDiv);
+
+      const efedDiv = document.createElement('div');
+      efedDiv.className = 'trophy-emblem-efed';
+      efedDiv.textContent = u.promo_name;
+      ownerEmblemEl.appendChild(efedDiv);
+
+      grid.appendChild(ownerEmblemEl);
     }
   } catch(e) {}
 
   try {
     const rows = await sbGet('emblems', `username=eq.${encodeURIComponent(targetUser)}&order=created_at.desc`);
     if (!rows.length) {
-      grid.innerHTML = '';
       if (empty) empty.style.display = 'block';
       if (badge) badge.style.display = 'none';
       return;
@@ -3547,7 +3551,6 @@ async function loadTrophyCase(targetUser) {
     if (empty) empty.style.display = 'none';
     if (badge) { badge.textContent = rows.length + ' emblem' + (rows.length !== 1 ? 's' : ''); badge.style.display = 'block'; }
 
-    grid.innerHTML = '';
     rows.forEach(e => {
       const svg       = (typeof getEmblemSVG === 'function') ? getEmblemSVG(e.emblem_design) : '';
       const champName = _esc(e.emblem_name || '');
@@ -3619,7 +3622,6 @@ async function loadTrophyCase(targetUser) {
     });
 
   } catch(err) {
-    grid.innerHTML = '';
     if (empty) empty.style.display = 'block';
   }
 }
@@ -6855,22 +6857,7 @@ async function _loadPublicProfile(username) {
     loadLinks(username);
     loadFeaturedVideos(username);
 
-    // Show submitted videos section (public), hide bookmarks
-    const _subSec = document.getElementById('submitted-section');
-    if (_subSec) _subSec.style.display = '';
-    // bookmarks stay hidden for guests
-
-    // Load submitted videos row
-    try {
-      const subs = await sbGet('submissions', `submitted_by=eq.${encodeURIComponent(username)}&status=eq.approved&order=date.desc&select=url,show_name,date,thumb_url`);
-      const subRow = document.getElementById('submitted-row');
-      if (subRow) {
-        subRow.innerHTML = subs.length
-          ? subs.map(s => makeVidCard(s.url, s.show_name, s.date, s.thumb_url)).join('')
-          : '<div class="empty">No submissions yet.</div>';
-        setTimeout(updateSubArrows, 100);
-      }
-    } catch(e) {}
+    // Submitted videos and bookmarks are private — only the owner can see them, not guests or admin
 
     const bioEl = document.getElementById('profile-bio');
     const bioSec = document.getElementById('bio-section');
@@ -7028,11 +7015,7 @@ async function loadProfile() {
     document.getElementById('profile-av-box').style.cursor = 'default';
     document.getElementById('profile-av-box').classList.remove('owner-av');
 
-    // Admin can see private sections on any profile
-    if (session.username.toLowerCase() === ADMIN_USERNAME) {
-      const _subSecA = document.getElementById('submitted-section'); if (_subSecA) _subSecA.style.display = '';
-      const _bkSecA  = document.getElementById('bookmarks-section');  if (_bkSecA)  _bkSecA.style.display  = '';
-    }
+    // Submitted videos and bookmarks are owner-only — admin cannot see them
 
     // Show "Add to Roster" button if the viewer is an eFed owner
     try {
@@ -7268,7 +7251,7 @@ async function loadProfile() {
   if (!myEfedList) { console.warn('myefeds-list element missing'); }
   else try {
     const [rosterRows, supportRows] = await Promise.all([
-      sbGet('roster', `username=eq.${encodeURIComponent(resolvedUser)}&status=eq.approved&order=joined_at.asc`).catch(()=>[]),
+      sbGet('roster', `username=eq.${encodeURIComponent(resolvedUser)}&status=eq.approved&select=efed&order=joined_at.asc`).catch(()=>[]),
       sbGet('supports', `username=eq.${encodeURIComponent(resolvedUser)}&order=supported_at.desc`).catch(()=>[])
     ]);
     // Fetch logos for all efeds
@@ -7412,7 +7395,7 @@ async function loadProfile() {
 
   // Bookmarks — only load for owner or admin
   const bmRow = document.getElementById('bookmarks-row');
-  const _canSeeBookmarks = _isOwnProfile || session.username.toLowerCase() === ADMIN_USERNAME;
+  const _canSeeBookmarks = _isOwnProfile; // bookmarks are owner-only, not visible to admin
   try {
     if (!_canSeeBookmarks) { bmRow.innerHTML = ''; return; }
     const bookmarks = await sbGet('bookmarks', `username=eq.${encodeURIComponent(resolvedUser)}&order=saved_at.desc`);
