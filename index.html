@@ -254,6 +254,7 @@
     }
   });
 function showToast(msg){const t=document.createElement("div");t.textContent=msg;t.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:8px 16px;border-radius:20px;font-size:.75rem;z-index:99999;opacity:0;transition:opacity .3s;";document.body.appendChild(t);setTimeout(()=>t.style.opacity="1",10);setTimeout(()=>{t.style.opacity="0";setTimeout(()=>t.remove(),300);},2500);}
+function safeParseTagsJson(raw) { if (!raw) return []; if (Array.isArray(raw)) return raw; if (typeof raw === "string") { try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; } } return []; }
 </script>
 <style>
   :root {
@@ -5368,7 +5369,7 @@ async function loadWatchlistRow() {
           date: s.date || '', dateMs: s.date_ms || 0,
           submittedBy: s.submitted_by || '', community: true, status: 'approved',
           thumb: s.thumb_url || null,
-          tags: Array.isArray(s.tags) ? s.tags : (s.tags ? JSON.parse(s.tags) : [])
+          tags: safeParseTagsJson(s.tags)
         };
         grid.appendChild(makeCard(v));
       });
@@ -6016,8 +6017,14 @@ function loadBestMatches(allVideos) {
     const grid = document.getElementById('row-best-matches');
     const count = document.getElementById('best-matches-count');
     if (!section || !grid) return;
+    const now = new Date();
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
     const matches = allVideos
-      .filter(v => v.url && isMatch(v))
+      .filter(v => {
+        if (!v.url || !isMatch(v)) return false;
+        const ms = v.dateMs || (v.date ? new Date(v.date).getTime() : 0);
+        return ms >= cutoff;
+      })
       .sort((a, b) => {
         const ta = a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
         const tb = b.dateMs || (b.date ? new Date(b.date).getTime() : 0);
@@ -6158,7 +6165,7 @@ async function initHub() {
           community: true,
           status: 'approved',
           thumb: s.thumb_url || null,
-          tags: Array.isArray(s.tags) ? s.tags : (s.tags ? JSON.parse(s.tags) : [])
+          tags: safeParseTagsJson(s.tags)
         });
       }
     });
@@ -6214,7 +6221,7 @@ async function initHub() {
         if (r.duration_seconds) v.durationSecs = r.duration_seconds;
         if (r.section_override) v.sectionOverride = r.section_override;
         if (r.submission_type) v.submission_type = r.submission_type;
-        if (r.tags) v.tags = Array.isArray(r.tags) ? r.tags : (typeof r.tags === 'string' ? JSON.parse(r.tags) : []);
+        if (r.tags) v.tags = safeParseTagsJson(r.tags);
       });
       const stillNeed = videos.filter(v => v.url && !v.durationSecs && !v.url.includes('twitch'));
       for (let i = 0; i < stillNeed.length; i += 50) {
@@ -6268,7 +6275,7 @@ function handlePlayParam() {
     sbGet('submissions', `url=eq.${encodeURIComponent(playUrl)}&status=eq.approved`).then(rows => {
       if (rows.length) {
         const s = rows[0];
-        const v = { url: s.url, show: s.show_name||'', efed: s.efed||'', date: s.date||'', dateMs: s.date_ms||0, submittedBy: s.submitted_by||'', displayName: s.submitted_by||'', community: true, status: 'approved', thumb: s.thumb_url||null, tags: s.tags ? (typeof s.tags==='string' ? JSON.parse(s.tags) : s.tags) : [] };
+        const v = { url: s.url, show: s.show_name||'', efed: s.efed||'', date: s.date||'', dateMs: s.date_ms||0, submittedBy: s.submitted_by||'', displayName: s.submitted_by||'', community: true, status: 'approved', thumb: s.thumb_url||null, tags: safeParseTagsJson(s.tags) };
         videos.push(v);
         openExpand(v);
       }
@@ -6302,7 +6309,7 @@ setTimeout(()=>{ if(typeof loadVerifiedUsers==="function") loadVerifiedUsers(); 
       }
       if (rows.length) {
         const s = rows[0];
-        _v = { url: s.url, show: s.show_name||'', efed: s.efed||'', date: s.date||'', dateMs: s.date_ms||0, submittedBy: s.submitted_by||'', displayName: s.submitted_by||'', community: true, status: 'approved', thumb: s.thumb_url||null, tags: s.tags ? (typeof s.tags==='string' ? JSON.parse(s.tags) : s.tags) : [] };
+        _v = { url: s.url, show: s.show_name||'', efed: s.efed||'', date: s.date||'', dateMs: s.date_ms||0, submittedBy: s.submitted_by||'', displayName: s.submitted_by||'', community: true, status: 'approved', thumb: s.thumb_url||null, tags: safeParseTagsJson(s.tags) };
       }
     } catch(e) { console.warn('[play param] DB lookup error:', e); }
     // Stub fallback if DB returned nothing — video still plays, metadata just blank
@@ -8818,7 +8825,7 @@ function openExpand(v) {
   // Anyone can tag a video that has no tags yet.
   // Admin or the eFed owner can re-tag (edit) a video that already has tags.
   if (tagBtn) {
-    const _tagsExisting = Array.isArray(v.tags) ? v.tags : (typeof v.tags === 'string' && v.tags ? JSON.parse(v.tags) : []);
+    const _tagsExisting = safeParseTagsJson(v.tags);
     const hasTags = _tagsExisting.length > 0;
     const _tSess = getSession();
     const isEfedOwner = _tSess && ((_tSess.is_efed_owner || _tSess.role === 'owner') && _tSess.promo_name && v.efed && _tSess.promo_name.toLowerCase() === v.efed.toLowerCase());
@@ -8826,7 +8833,7 @@ function openExpand(v) {
     tagBtn.style.display = canTag ? 'flex' : 'none';
   }
   // Load tags
-  const _tags = Array.isArray(v.tags) ? v.tags : (typeof v.tags === 'string' && v.tags ? JSON.parse(v.tags) : []);
+  const _tags = safeParseTagsJson(v.tags);
   renderExpandTags(_tags);
   renderRecommended(v);
 
