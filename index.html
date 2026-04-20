@@ -1023,7 +1023,7 @@ html, body { overscroll-behavior-y: none; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.22); }
-  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; overflow-x: hidden; min-height: 100vh; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; }
 
   nav {
     position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
@@ -1144,7 +1144,7 @@ html, body { overscroll-behavior-y: none; }
   .divider-line { flex: 1; height: 1px; background: rgba(255,255,255,.06); }
   .divider-text { font-size: .6rem; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); font-weight: 500; }
 
-  main { padding-top: 32px; padding-bottom: 80px; transition: margin-right .3s cubic-bezier(.16,1,.3,1); }
+  main { padding-top: 32px; padding-bottom: 80px; transition: margin-right .3s cubic-bezier(.16,1,.3,1); overflow-x: hidden; }
   footer { border-top: 1px solid rgba(255,255,255,.05); padding: 40px 56px; font-size: .78rem; color: var(--muted); transition: margin-right .3s cubic-bezier(.16,1,.3,1); }
   .section { margin-bottom: 56px; overflow: hidden; }
   .my-efed-banner-card {
@@ -2021,6 +2021,8 @@ html, body { overscroll-behavior-y: none; }
 #search-results-scroll {
   flex: 1; overflow-y: auto; padding: 0 0 100px;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 #search-results-scroll::-webkit-scrollbar { display: none; }
 .sr-empty {
@@ -6948,6 +6950,20 @@ const _soSearch = (() => {
     } catch(e) { return []; }
   }
 
+  /* ---- acronym helper ---- */
+  // Returns true if `query` matches `text` by substring OR by acronym.
+  // e.g. "wwe" matches "World Wrestling Entertainment" (first letters: W-W-E)
+  // Works with any word separators (spaces, hyphens, ampersands, etc.)
+  function _matchesQuery(text, ql) {
+    if (!text) return false;
+    const tl = text.toLowerCase();
+    if (tl.includes(ql)) return true;
+    // Build acronym from the first letter of each word
+    const acronym = text.match(/\b\w/g);
+    if (acronym && acronym.join('').toLowerCase().includes(ql)) return true;
+    return false;
+  }
+
   /* ---- main search ---- */
   async function run(q) {
     showLoading();
@@ -6958,15 +6974,13 @@ const _soSearch = (() => {
     // Shows
     const showMatches = allVids.filter(v =>
       !isMatch(v) &&
-      ((v.show||'').toLowerCase().includes(ql) ||
-      (v.efed||'').toLowerCase().includes(ql))
+      (_matchesQuery(v.show, ql) || _matchesQuery(v.efed, ql))
     );
 
     // Matches
     const matchMatches = allVids.filter(v =>
       isMatch(v) &&
-      ((v.show||'').toLowerCase().includes(ql) ||
-      (v.efed||'').toLowerCase().includes(ql))
+      (_matchesQuery(v.show, ql) || _matchesQuery(v.efed, ql))
     );
 
     // eFeds — dedupe from videos
@@ -6986,7 +7000,7 @@ const _soSearch = (() => {
       });
     }
     const efedMatches = Object.entries(efedMap)
-      .filter(([name]) => name.toLowerCase().includes(ql))
+      .filter(([name]) => _matchesQuery(name, ql))
       .sort((a, b) => b[1].count - a[1].count)
       .map(([name, d]) => ({ name, count: d.count, logo: d.logo }));
 
@@ -6997,9 +7011,9 @@ const _soSearch = (() => {
         _peopleCache = await sbGet('users', 'select=username,display_name,promo_name,avatar_url,promo_logo,is_efed_owner,role&limit=500');
       }
       peopleMatches = _peopleCache.filter(u =>
-        (u.username||'').toLowerCase().includes(ql) ||
-        (u.display_name||'').toLowerCase().includes(ql) ||
-        (u.promo_name||'').toLowerCase().includes(ql)
+        _matchesQuery(u.username, ql) ||
+        _matchesQuery(u.display_name, ql) ||
+        _matchesQuery(u.promo_name, ql)
       );
     } catch(e) {}
 
