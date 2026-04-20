@@ -7859,10 +7859,11 @@ function _atrEsc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').
     <button id="search-overlay-done" onclick="_soSearch.close()">Done</button>
   </div>
   <div id="search-tabs">
-    <button class="search-tab active" data-tab="all"    onclick="_soSearch.setTab('all')">All</button>
-    <button class="search-tab"        data-tab="shows"  onclick="_soSearch.setTab('shows')">Shows</button>
-    <button class="search-tab"        data-tab="efeds"  onclick="_soSearch.setTab('efeds')">eFeds</button>
-    <button class="search-tab"        data-tab="people" onclick="_soSearch.setTab('people')">People</button>
+    <button class="search-tab active" data-tab="all"     onclick="_soSearch.setTab('all')">All</button>
+    <button class="search-tab"        data-tab="shows"   onclick="_soSearch.setTab('shows')">Shows</button>
+    <button class="search-tab"        data-tab="matches"  onclick="_soSearch.setTab('matches')">Matches</button>
+    <button class="search-tab"        data-tab="efeds"   onclick="_soSearch.setTab('efeds')">eFeds</button>
+    <button class="search-tab"        data-tab="people"  onclick="_soSearch.setTab('people')">People</button>
   </div>
   <div id="search-results-scroll"></div>
 </div>
@@ -7975,8 +7976,16 @@ const _soSearch = (() => {
 
     // Shows
     const showMatches = allVids.filter(v =>
-      (v.show||'').toLowerCase().includes(ql) ||
-      (v.efed||'').toLowerCase().includes(ql)
+      !isMatch(v) &&
+      ((v.show||'').toLowerCase().includes(ql) ||
+      (v.efed||'').toLowerCase().includes(ql))
+    );
+
+    // Matches
+    const matchMatches = allVids.filter(v =>
+      isMatch(v) &&
+      ((v.show||'').toLowerCase().includes(ql) ||
+      (v.efed||'').toLowerCase().includes(ql))
     );
 
     // eFeds — dedupe from videos
@@ -8011,19 +8020,21 @@ const _soSearch = (() => {
       );
     } catch(e) {}
 
-    _render(q, showMatches, efedMatches, peopleMatches);
+    _render(q, showMatches, matchMatches, efedMatches, peopleMatches);
   }
 
   /* ---- render ---- */
-  function _render(q, shows, efeds, people) {
+  function _render(q, shows, matches, efeds, people) {
     const t = _tab;
-    const doShows  = t === 'all' || t === 'shows';
-    const doEfeds  = t === 'all' || t === 'efeds';
-    const doPeople = t === 'all' || t === 'people';
+    const doShows   = t === 'all' || t === 'shows';
+    const doMatches = t === 'all' || t === 'matches';
+    const doEfeds   = t === 'all' || t === 'efeds';
+    const doPeople  = t === 'all' || t === 'people';
 
-    const total = (doShows ? shows.length : 0) +
-                  (doEfeds ? efeds.length : 0) +
-                  (doPeople ? people.length : 0);
+    const total = (doShows   ? shows.length   : 0) +
+                  (doMatches ? matches.length  : 0) +
+                  (doEfeds   ? efeds.length    : 0) +
+                  (doPeople  ? people.length   : 0);
 
     if (!total) {
       setResults('<div class="sr-empty"><div class="sr-empty-icon">😶</div>' +
@@ -8036,6 +8047,21 @@ const _soSearch = (() => {
     if (doShows && shows.length) {
       html += '<div class="sr-section-label">Shows <span class="sr-count-badge">' + shows.length + '</span></div>';
       shows.forEach(v => {
+        const id = ytId(v.url);
+        const thumb = v.thumb || (id ? 'https://i.ytimg.com/vi/'+id+'/mqdefault.jpg' : '');
+        html += '<div class="sr-video-item" onclick="_soSearch.openVideo(\'' + encodeURIComponent(v.url) + '\')">' +
+          '<img class="sr-video-thumb" src="' + esc(thumb) + '" alt="" onerror="this.style.opacity=.3">' +
+          '<div class="sr-video-info">' +
+            '<div class="sr-video-efed">' + esc(v.efed) + '</div>' +
+            '<div class="sr-video-title">' + esc(v.show) + '</div>' +
+            '<div class="sr-video-date">' + esc(v.date) + '</div>' +
+          '</div></div>';
+      });
+    }
+
+    if (doMatches && matches.length) {
+      html += '<div class="sr-section-label">Matches <span class="sr-count-badge">' + matches.length + '</span></div>';
+      matches.forEach(v => {
         const id = ytId(v.url);
         const thumb = v.thumb || (id ? 'https://i.ytimg.com/vi/'+id+'/mqdefault.jpg' : '');
         html += '<div class="sr-video-item" onclick="_soSearch.openVideo(\'' + encodeURIComponent(v.url) + '\')">' +

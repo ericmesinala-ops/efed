@@ -3710,10 +3710,11 @@ html.day-mode .myefed-popup-cancel:hover { color: rgba(0,0,0,.6); background: rg
     <button id="search-overlay-done" onclick="_soSearch.close()">Done</button>
   </div>
   <div id="search-tabs">
-    <button class="search-tab active" data-tab="all"    onclick="_soSearch.setTab('all')">All</button>
-    <button class="search-tab"        data-tab="shows"  onclick="_soSearch.setTab('shows')">Shows</button>
-    <button class="search-tab"        data-tab="efeds"  onclick="_soSearch.setTab('efeds')">eFeds</button>
-    <button class="search-tab"        data-tab="people" onclick="_soSearch.setTab('people')">People</button>
+    <button class="search-tab active" data-tab="all"     onclick="_soSearch.setTab('all')">All</button>
+    <button class="search-tab"        data-tab="shows"   onclick="_soSearch.setTab('shows')">Shows</button>
+    <button class="search-tab"        data-tab="matches"  onclick="_soSearch.setTab('matches')">Matches</button>
+    <button class="search-tab"        data-tab="efeds"   onclick="_soSearch.setTab('efeds')">eFeds</button>
+    <button class="search-tab"        data-tab="people"  onclick="_soSearch.setTab('people')">People</button>
   </div>
   <div id="search-results-scroll"></div>
 </div>
@@ -4881,16 +4882,32 @@ function filteredVideos() {
   }));
 }
 function buildPills() {
-  const efeds = [...new Set(videos.map(v => v.efed).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  // Only show pills for eFeds that have at least one video in the current Latest Videos window
+  const now = new Date();
+  const cutoff = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
+  const visibleEfeds = [...new Set(
+    videos
+      .filter(v => {
+        if (!isLatest(v)) return false;
+        const ms = v.dateMs || (v.date ? new Date(v.date).getTime() : 0);
+        return ms >= cutoff;
+      })
+      .map(v => v.efed)
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+
   const wrap = document.getElementById('filter-wrap');
   const allBtn = document.getElementById('filter-all-btn');
   wrap.innerHTML = '';
-  // Update the fixed All button state
+  // If active filter is for an eFed no longer in the visible list, reset to 'all'
+  if (activeFilter !== 'all' && !visibleEfeds.includes(activeFilter)) {
+    activeFilter = 'all';
+  }
   if (allBtn) {
     allBtn.className = 'pill filter-all-fixed' + (activeFilter === 'all' ? ' active' : '');
     allBtn.onclick = () => setFilter('all', allBtn);
   }
-  efeds.forEach(e => {
+  visibleEfeds.forEach(e => {
     const btn = document.createElement('button');
     btn.className = 'pill' + (activeFilter === e ? ' active' : '');
     btn.dataset.filter = e; btn.textContent = e;
@@ -5930,8 +5947,14 @@ function loadBestMatches(allVideos) {
     const grid = document.getElementById('row-best-matches');
     const count = document.getElementById('best-matches-count');
     if (!section || !grid) return;
+    const now = new Date();
+    const cutoff = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
     const matches = allVideos
-      .filter(v => v.url && isMatch(v))
+      .filter(v => {
+        if (!v.url || !isMatch(v)) return false;
+        const ms = v.dateMs || (v.date ? new Date(v.date).getTime() : 0);
+        return ms >= cutoff;
+      })
       .sort((a, b) => {
         const ta = a.dateMs || (a.date ? new Date(a.date).getTime() : 0);
         const tb = b.dateMs || (b.date ? new Date(b.date).getTime() : 0);
@@ -6934,8 +6957,16 @@ const _soSearch = (() => {
 
     // Shows
     const showMatches = allVids.filter(v =>
-      (v.show||'').toLowerCase().includes(ql) ||
-      (v.efed||'').toLowerCase().includes(ql)
+      !isMatch(v) &&
+      ((v.show||'').toLowerCase().includes(ql) ||
+      (v.efed||'').toLowerCase().includes(ql))
+    );
+
+    // Matches
+    const matchMatches = allVids.filter(v =>
+      isMatch(v) &&
+      ((v.show||'').toLowerCase().includes(ql) ||
+      (v.efed||'').toLowerCase().includes(ql))
     );
 
     // eFeds — dedupe from videos
@@ -6972,19 +7003,21 @@ const _soSearch = (() => {
       );
     } catch(e) {}
 
-    _render(q, showMatches, efedMatches, peopleMatches);
+    _render(q, showMatches, matchMatches, efedMatches, peopleMatches);
   }
 
   /* ---- render ---- */
-  function _render(q, shows, efeds, people) {
+  function _render(q, shows, matches, efeds, people) {
     const t = _tab;
-    const doShows  = t === 'all' || t === 'shows';
-    const doEfeds  = t === 'all' || t === 'efeds';
-    const doPeople = t === 'all' || t === 'people';
+    const doShows   = t === 'all' || t === 'shows';
+    const doMatches = t === 'all' || t === 'matches';
+    const doEfeds   = t === 'all' || t === 'efeds';
+    const doPeople  = t === 'all' || t === 'people';
 
-    const total = (doShows ? shows.length : 0) +
-                  (doEfeds ? efeds.length : 0) +
-                  (doPeople ? people.length : 0);
+    const total = (doShows   ? shows.length   : 0) +
+                  (doMatches ? matches.length  : 0) +
+                  (doEfeds   ? efeds.length    : 0) +
+                  (doPeople  ? people.length   : 0);
 
     if (!total) {
       setResults('<div class="sr-empty"><div class="sr-empty-icon">😶</div>' +
@@ -6997,6 +7030,21 @@ const _soSearch = (() => {
     if (doShows && shows.length) {
       html += '<div class="sr-section-label">Shows <span class="sr-count-badge">' + shows.length + '</span></div>';
       shows.forEach(v => {
+        const id = ytId(v.url);
+        const thumb = v.thumb || (id ? 'https://i.ytimg.com/vi/'+id+'/mqdefault.jpg' : '');
+        html += '<div class="sr-video-item" onclick="_soSearch.openVideo(\'' + encodeURIComponent(v.url) + '\')">' +
+          '<img class="sr-video-thumb" src="' + esc(thumb) + '" alt="" onerror="this.style.opacity=.3">' +
+          '<div class="sr-video-info">' +
+            '<div class="sr-video-efed">' + esc(v.efed) + '</div>' +
+            '<div class="sr-video-title">' + esc(v.show) + '</div>' +
+            '<div class="sr-video-date">' + esc(v.date) + '</div>' +
+          '</div></div>';
+      });
+    }
+
+    if (doMatches && matches.length) {
+      html += '<div class="sr-section-label">Matches <span class="sr-count-badge">' + matches.length + '</span></div>';
+      matches.forEach(v => {
         const id = ytId(v.url);
         const thumb = v.thumb || (id ? 'https://i.ytimg.com/vi/'+id+'/mqdefault.jpg' : '');
         html += '<div class="sr-video-item" onclick="_soSearch.openVideo(\'' + encodeURIComponent(v.url) + '\')">' +
