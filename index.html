@@ -4838,6 +4838,18 @@ async function deleteSubmittedVideo(e, url) {
       const existing = await sbGet('submissions', `url=eq.${encodeURIComponent(url)}&submitted_by=eq.${encodeURIComponent(session.username)}`);
       if (!existing.length) { alert('Video not found or you do not own it.'); return; }
       await sbDelete('submissions', `url=eq.${encodeURIComponent(url)}&submitted_by=eq.${encodeURIComponent(session.username)}`);
+      // Notify admin
+      const vInfo = videos.find(v => v.url === url);
+      try {
+        await sbInsert('notifications', {
+          username: ADMIN_USERNAME,
+          type: 'delete',
+          message: `🗑 ${session.displayName || session.username} deleted their own video.\n\nShow: ${vInfo?.show || '—'}\neFed: ${vInfo?.efed || '—'}\nURL: ${url}`,
+          video_url: url,
+          read: false,
+          created_at: Date.now()
+        });
+      } catch(e) {}
     }
     const vi = videos.findIndex(v => v.url === url);
     if (vi !== -1) videos.splice(vi, 1);
@@ -13260,7 +13272,31 @@ function openCardActionModal(v, isAdmin, isOwner, el) {
   } else if (isOwner) {
     makeBtn('✕ Remove Video', '#ff6b6b', async () => {
       if (!confirm('Remove this video?')) return;
-      try { await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url)); el.remove(); showToast('Removed.'); }
+      // Only allow owner to remove videos that belong to their own eFed
+      const sessionNow = getSession();
+      if (!sessionNow) return;
+      const ownerEfed = (sessionNow.promo_name || '').toLowerCase();
+      const videoEfed = (v.efed || '').toLowerCase();
+      if (ownerEfed && videoEfed && ownerEfed !== videoEfed) {
+        showToast('You can only remove videos from your own eFed.');
+        return;
+      }
+      try {
+        await sbDelete('submissions', 'url=eq.' + encodeURIComponent(v.url));
+        el.remove();
+        showToast('Removed.');
+        // Notify admin
+        try {
+          await sbInsert('notifications', {
+            username: ADMIN_USERNAME,
+            type: 'delete',
+            message: `🗑 ${sessionNow.displayName || sessionNow.username} (${sessionNow.promo_name || 'unknown eFed'}) removed a video.\n\nShow: ${v.show || '—'}\neFed: ${v.efed || '—'}\nURL: ${v.url}`,
+            video_url: v.url,
+            read: false,
+            created_at: Date.now()
+          });
+        } catch(e) {}
+      }
       catch(e) { showToast('Could not remove.'); }
     });
   } else {
