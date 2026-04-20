@@ -5884,17 +5884,20 @@ async function loadMostViewed(allVideos) {
 
     const viewData = {};
     for (const batch of batches) {
-      const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${batch.join(',')}&key=${YT_API_KEY}`);
-      const data = await res.json();
-      (data.items || []).forEach(item => {
-        viewData[item.id] = parseInt(item.statistics?.viewCount || 0);
-      });
+      try {
+        const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${batch.join(',')}&key=${YT_API_KEY}`);
+        if (!res.ok) continue; // quota hit or error — skip batch, don't crash
+        const data = await res.json();
+        (data.items || []).forEach(item => {
+          viewData[item.id] = parseInt(item.statistics?.viewCount || 0);
+        });
+      } catch(e) { continue; } // network error on this batch — skip it
     }
 
-    // Sort by views descending, take top 50
-    const sorted = ids
-      .filter(id => viewData[id] !== undefined)
-      .sort((a, b) => viewData[b] - viewData[a])
+    // Sort by views descending — videos with no API data go at the bottom
+    const withViews    = ids.filter(id =>  viewData[id] !== undefined).sort((a, b) => viewData[b] - viewData[a]);
+    const withoutViews = ids.filter(id =>  viewData[id] === undefined);
+    const sorted = [...withViews, ...withoutViews]
       .slice(0, 50)
       .map(id => idMap[id]);
 
