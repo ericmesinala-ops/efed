@@ -5865,12 +5865,8 @@ function sbGetWithTimeout(table, filters, ms = 5000) {
 
 async function loadMostViewed(allVideos) {
   try {
-    // Include ALL approved videos (shows + matches), exclude only upcoming
-    const toFetch = allVideos.filter(v =>
-      v.url &&
-      v.sectionOverride !== 'upcoming' &&
-      v.status !== 'upcoming'
-    );
+    // Episodes and PLEs only — same as isLatest (excludes matches, showcase, promo, podcast, upcoming)
+    const toFetch = allVideos.filter(v => v.url && isLatest(v));
     if (!toFetch.length) return;
 
     // Extract YouTube video IDs — handle all URL formats
@@ -6117,7 +6113,17 @@ async function initHub() {
   showSkeletons(8);
   buildPills();
   try {
-    const subs = await sbGetWithTimeout('submissions', 'status=eq.approved&order=submitted_at.desc&select=*');
+    // Paginate to get ALL approved submissions — Supabase defaults to 1000 row limit
+    let subs = [];
+    let offset = 0;
+    const PAGE = 1000;
+    while (true) {
+      const page = await sbGetWithTimeout('submissions',
+        `status=eq.approved&order=submitted_at.desc&select=*&limit=${PAGE}&offset=${offset}`, 8000);
+      subs = subs.concat(page);
+      if (page.length < PAGE) break; // last page
+      offset += PAGE;
+    }
     const dbApprovedUrls = new Set(subs.map(s => s.url));
     // Remove hardcoded videos that were submitted to DB but later deleted
     // Fetch all submissions regardless of status to know which hardcoded ones exist in DB
