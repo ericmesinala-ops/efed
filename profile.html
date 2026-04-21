@@ -251,7 +251,7 @@ body::-webkit-scrollbar { display: none; }
   background: var(--bg);
   box-shadow: 0 0 0 1px rgba(255,255,255,.05), 0 32px 80px rgba(0,0,0,.9), 0 8px 32px rgba(0,0,0,.6);
   min-height: 100vh; position: relative;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* ── NAV ── */
@@ -1578,21 +1578,26 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
   <input type="hidden" id="pts-supports" value="0">
   <input type="hidden" id="pts-invite-bonus" value="0">
 <style>
-/* ── PROFILE NAV ROW (3-column) ── */
+/* ── PROFILE NAV ROW (3-column, always single row) ── */
 .profile-nav-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
+  flex-direction: row;
   background: var(--surface2);
   border-bottom: 1px solid rgba(255,255,255,.07);
+  width: 100%;
 }
 .profile-nav-tab {
+  flex: 1;
   display: flex; align-items: center; justify-content: center; gap: 8px;
   padding: 11px 8px; position: relative; overflow: hidden;
   background: transparent; border: none; text-decoration: none; cursor: pointer;
   transition: background .2s;
   border-right: 1px solid rgba(255,255,255,.06);
+  min-width: 0; white-space: nowrap;
 }
-.profile-nav-tab:last-child { border-right: none; }
+.profile-nav-tab:last-child,
+.profile-nav-tab:last-of-type { border-right: none; }
+/* When My eFed is hidden we only have 2 visible tabs — handled via JS flex */
 .profile-nav-tab::after {
   content: '';
   position: absolute; top: 0; left: 0;
@@ -1605,14 +1610,8 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
 .profile-nav-tab:hover .hub-back-circle { background: rgba(255,255,255,.15); border-color: rgba(255,255,255,.25); }
 .profile-nav-tab:hover .hub-back-label { color: rgba(255,255,255,.85); }
 
-/* My eFed tab visibility — show when user has an eFed */
+/* My eFed tab: hidden until JS reveals it */
 #nav-tab-myefed { display: none; }
-#nav-tab-myefed.visible { display: flex; }
-
-/* When My eFed is hidden, My Profile tab expands to fill 2 cols */
-.profile-nav-row:not(:has(#nav-tab-myefed.visible)) {
-  grid-template-columns: 1fr 2fr;
-}
 
 @media (max-width: 480px) {
   .hub-back-label { font-size: .62rem; letter-spacing: 1.2px; }
@@ -1682,7 +1681,7 @@ html.day-mode .profile-nav-tab:hover { background: rgba(0,0,0,.04) !important; }
 html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !important; }
 </style>
 <script>
-// Sync "My eFed" tab in nav row with existing my-efed-btn visibility logic
+// Sync "My eFed" tab in nav row and fix sticky tab bar top
 (function() {
   function _syncNavTabs() {
     const efedBtn  = document.getElementById('my-efed-btn');
@@ -1690,26 +1689,34 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     if (!efedBtn || !navEfed) return;
     const shown = efedBtn.style.display !== 'none';
     navEfed.style.display = shown ? 'flex' : 'none';
+    // Fix border-right on last visible tab
+    const tabs = document.querySelectorAll('.profile-nav-tab');
+    tabs.forEach(t => t.style.borderRight = '1px solid rgba(255,255,255,.06)');
+    let last = null;
+    tabs.forEach(t => { if (t.style.display !== 'none') last = t; });
+    if (last) last.style.borderRight = 'none';
   }
-  // Re-check periodically until page auth resolves
   let _tries = 0;
   const _iv = setInterval(function() {
     _syncNavTabs();
     if (++_tries >= 20) clearInterval(_iv);
   }, 300);
 
-  // Also update profile-tab-bar sticky top dynamically
   function _updateTabBarTop() {
     const stickyHeader = document.getElementById('profile-sticky-header');
     const tabBar = document.getElementById('profile-tab-bar');
-    if (!stickyHeader || !tabBar) return;
-    const navH = 57; // nav bar height
-    const headerH = stickyHeader.offsetHeight;
-    tabBar.style.top = (navH + headerH) + 'px';
+    const navEl = document.getElementById('nav');
+    const navH = navEl ? navEl.offsetHeight : 57;
+    // Set sticky header exactly at nav bottom
+    if (stickyHeader) stickyHeader.style.top = navH + 'px';
+    // Set profile tab bar exactly at nav + sticky header bottom
+    if (stickyHeader && tabBar) {
+      tabBar.style.top = (navH + stickyHeader.offsetHeight) + 'px';
+    }
   }
   document.addEventListener('DOMContentLoaded', function() {
+    _syncNavTabs();
     _updateTabBarTop();
-    // Re-run after images/fonts settle
     setTimeout(_updateTabBarTop, 400);
     window.addEventListener('resize', _updateTabBarTop);
   });
