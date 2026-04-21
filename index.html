@@ -10427,7 +10427,7 @@ async function loadExistingRating(url) {
         rateBtn.style.background = 'rgba(200,168,75,.1)';
         rateBtn.style.cursor = 'pointer';
         const label = document.getElementById('rate-btn-label');
-        if (label) label.textContent = `★ ${(Math.round((r.overall || 0) / 10) / 1).toFixed(1)}/5`;
+        if (label) label.textContent = `★ ${parseFloat(r.overall || 0).toFixed(1)}/5`;
         const barWrap = document.getElementById('rate-watch-bar-wrap');
         if (barWrap) barWrap.style.display = 'none';
         const inner = document.getElementById('rate-btn-inner');
@@ -10549,20 +10549,22 @@ async function submitRating() {
   }
 
   try {
+    // Compute weighted score as true 0-5 decimal (no rounding until display)
+    const _weighted = parseFloat((
+      (_ratingValues.overall   * 20 +
+       _ratingValues.match     * 20 +
+       _ratingValues.promo2    * 15 +
+       _ratingValues.roster    * 15 +
+       _ratingValues.production * 10 +
+       _ratingValues.sound     * 10 +
+       _ratingValues.promo     * 10) / 100
+    ).toFixed(2));
     const data = {
       username: session.username,
       video_url: url,
       video_id: extractId(url),
-      // Weighted: overall_production=20, match=20, promo=15, roster=15, graphics=10, sound=10, visuals=10 (total=100)
-      overall: Math.round(
-        (_ratingValues.overall   * 20 +
-         _ratingValues.match     * 20 +
-         _ratingValues.promo2    * 15 +
-         _ratingValues.roster    * 15 +
-         _ratingValues.production * 10 +
-         _ratingValues.sound     * 10 +
-         _ratingValues.promo     * 10) / (5 * 100) * 500
-      ) / 10,
+      // Stored as true 0-5 decimal score
+      overall: _weighted,
       production: Math.round((_ratingValues.production + _ratingValues.sound + _ratingValues.promo) / 3 * 10) / 10,
       promo_storyline: _ratingValues.promo2,
       match_quality: _ratingValues.match,
@@ -10583,18 +10585,7 @@ async function submitRating() {
       rateBtn.style.background = 'rgba(200,168,75,.1)';
       rateBtn.style.cursor = 'pointer';
       const label = document.getElementById('rate-btn-label');
-      if (label) {
-        const computedScore = Math.round(
-          (_ratingValues.overall   * 20 +
-           _ratingValues.match     * 20 +
-           _ratingValues.promo2    * 15 +
-           _ratingValues.roster    * 15 +
-           _ratingValues.production * 10 +
-           _ratingValues.sound     * 10 +
-           _ratingValues.promo     * 10) / (5 * 100) * 500
-        ) / 10;
-        label.textContent = `★ ${(computedScore / 10).toFixed(1)}/5`;
-      }
+      if (label) label.textContent = `★ ${_weighted.toFixed(1)}/5`;
       const barWrap = document.getElementById('rate-watch-bar-wrap');
       if (barWrap) barWrap.style.display = 'none';
       const inner = document.getElementById('rate-btn-inner');
@@ -10612,7 +10603,7 @@ async function submitRating() {
     const vidOwner = videos.find(v => v.url === url)?.submittedBy;
     if (vidOwner && vidOwner !== session.username) {
       await sendNotification(vidOwner, 'rating',
-        `⭐ @${session.username} rated your show "${videos.find(v => v.url === url)?.show || ''}" ${_ratingValues.overall}/5`,
+        `⭐ @${session.username} rated your show "${videos.find(v => v.url === url)?.show || ''}" ${_weighted.toFixed(1)}/5`,
         url);
     }
     // Update rating display on card
@@ -10822,7 +10813,7 @@ async function loadVideoRating(url) {
     const rows = await sbGet('ratings', `video_id=eq.${encodeURIComponent(extractId(url))}`);
     if (!rows.length) return;
     const avg = rows.reduce((sum, r) => sum + (r.overall || 0), 0) / rows.length;
-    const rounded = Math.round((avg / 10) * 10) / 10; // overall stored 0-50, convert to 0-5
+    const rounded = Math.round(avg * 10) / 10; // already 0-5, round to 1 decimal
     // Update all cards with this URL
     document.querySelectorAll('.card').forEach(card => {
       if (card._videoUrl === url) {
@@ -10857,7 +10848,7 @@ async function loadAllCardRatings() {
       if (existing) existing.remove();
       if (url && grouped[key] && grouped[key].length) {
         const avg = grouped[key].reduce((a,b) => a+b, 0) / grouped[key].length;
-        const rounded = Math.round((avg / 10) * 10) / 10; // avg is 0-50, divide by 10 = 0-5
+        const rounded = Math.round(avg * 10) / 10; // already 0-5, round to 1 decimal
         // Only show if 4.0 or above (on /5 scale)
         if (rounded >= 4.0) {
           const badge = document.createElement('div');
