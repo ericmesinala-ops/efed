@@ -7260,6 +7260,50 @@ async function _loadPublicProfile(username) {
     loadRivalries(username, false);
     loadTrophyCase(username);
 
+    // ── eFeds (public/guest view) ──
+    const _pubEfedList = document.getElementById('myefeds-list');
+    if (_pubEfedList) {
+      try {
+        const [rosterRows, ownerCheck] = await Promise.all([
+          sbGet('roster', `username=eq.${encodeURIComponent(username)}&status=eq.approved&select=efed&order=joined_at.asc`).catch(()=>[]),
+          sbGet('users', `username=eq.${encodeURIComponent(username)}&select=promo_name,is_efed_owner,role`).catch(()=>[])
+        ]);
+        const oc = ownerCheck[0];
+        const ownerEfedName = (oc?.promo_name && (oc.is_efed_owner || oc.role === 'owner')) ? oc.promo_name : null;
+        const allEfedNames = [...new Set([...(ownerEfedName ? [ownerEfedName] : []), ...rosterRows.map(r=>r.efed)])];
+        let logoMap = {};
+        if (allEfedNames.length) {
+          try {
+            const logoUsers = await sbGet('users', `promo_name=in.(${allEfedNames.map(e=>encodeURIComponent(e)).join(',')})&select=promo_name,promo_logo`);
+            logoUsers.forEach(u => { if (u.promo_logo) logoMap[u.promo_name] = u.promo_logo; });
+          } catch(e) {}
+        }
+        const _wsvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="22" height="22" style="opacity:.55;filter:grayscale(1)brightness(1.5);flex-shrink:0;"><text y=".9em" font-size="90">🤼</text></svg>`;
+        const _avHtml = (name, style='') => {
+          const logo = logoMap[name];
+          return logo
+            ? `<div class="efed-av" style="${style}"><img src="${logo}" style="width:100%;height:100%;object-fit:cover;"></div>`
+            : `<div class="efed-av" style="display:flex;align-items:center;justify-content:center;${style}">${_wsvg}</div>`;
+        };
+        const ownerItem = ownerEfedName ? `
+          <div class="efed-item" onclick="void(0)">
+            ${_avHtml(ownerEfedName, 'background:rgba(192,0,14,.12);border-color:rgba(192,0,14,.3);color:var(--accent);')}
+            <div><div class="efed-name-txt">${_esc(ownerEfedName)}</div><div class="efed-role-txt">Owner</div></div>
+            <svg style="margin-left:auto;opacity:.25;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </div>` : '';
+        const rosterItems = rosterRows
+          .filter(r => r.efed !== ownerEfedName)
+          .map(r => `
+            <div class="efed-item" onclick="void(0)">
+              ${_avHtml(r.efed)}
+              <div><div class="efed-name-txt">${_esc(r.efed)}</div></div>
+              <svg style="margin-left:auto;opacity:.25;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>`).join('');
+        const combined = ownerItem + rosterItems;
+        _pubEfedList.innerHTML = combined || '<div class="empty">Not part of any eFed yet.</div>';
+      } catch(e) { _pubEfedList.innerHTML = '<div class="empty">Not part of any eFed yet.</div>'; }
+    }
+
     const bioEl = document.getElementById('profile-bio');
     const bioSec = document.getElementById('bio-section');
     if (bioEl) { bioEl.textContent = user.bio || ''; }
@@ -7850,13 +7894,14 @@ async function loadFeaturedVideos(targetUser) {
   const section = document.getElementById('featured-in-section');
   const countEl = document.getElementById('stat-featured-count');
   if (!row) return;
+  if (section) section.style.display = 'none'; // hide until we confirm there are videos
   try {
     // Get all video_ids this CAW appears in
     const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(resolvedUser)}&select=video_id,video_url,appeared_at&order=appeared_at.desc`);
     // Update stat pill
     if (countEl) countEl.textContent = appearances.length || '0';
     if (!appearances.length) {
-      row.innerHTML = '<div class="featured-empty-state"><span class="featured-empty-text">Tap the <span class="featured-empty-btn" aria-hidden="true"><span style="filter:grayscale(1) brightness(10);font-size:.95rem;">🤼</span></span> on a video you appear in — it\'ll show up here.</span></div>';
+      if (section) section.style.display = 'none';
       return;
     }
     // Fetch matching submissions for thumbnails + show names
@@ -7869,6 +7914,7 @@ async function loadFeaturedVideos(targetUser) {
       } catch(e) {}
     }
     row.innerHTML = '';
+    if (section) section.style.display = '';
     appearances.forEach(a => {
       const s = subMap[a.video_url] || {};
       const card = makeFeaturedVidCard(a.video_url, s.show_name, s.date, s.thumb_url);
@@ -7876,7 +7922,7 @@ async function loadFeaturedVideos(targetUser) {
     });
     setTimeout(updateFeatInArrows, 100);
   } catch(e) {
-    row.innerHTML = '<div class="featured-empty-state"><span class="featured-empty-text">Tap the <span class="featured-empty-btn" aria-hidden="true"><span style="filter:grayscale(1) brightness(10);font-size:.95rem;">🤼</span></span> on a video you appear in — it\'ll show up here.</span></div>';
+    if (section) section.style.display = 'none';
     if (countEl) countEl.textContent = '0';
   }
 }
