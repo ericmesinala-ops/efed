@@ -3981,15 +3981,26 @@ function openRosterActionMenu(username, displayName, avatarUrl, rosterRowId, pla
     if (planNote) { try { const bk = JSON.parse(planNote); isBooked = !!(bk && bk.opponent); } catch(e) {} }
     bookLbl.textContent = isBooked ? 'Edit Booking' : 'Book Wrestler';
   }
-  document.getElementById('roster-action-bg').style.display = 'flex';
+  const bg = document.getElementById('roster-action-bg');
+  const card = document.getElementById('roster-action-card');
+  bg.style.display = 'flex';
+  // Trigger entrance animations
+  requestAnimationFrame(() => {
+    bg.classList.add('open');
+    if (card) card.classList.add('open');
+  });
 }
 function closeRosterActionMenu() {
-  document.getElementById('roster-action-bg').style.display = 'none';
+  const bg = document.getElementById('roster-action-bg');
+  const card = document.getElementById('roster-action-card');
+  if (bg) { bg.classList.remove('open'); bg.style.display = 'none'; }
+  if (card) card.classList.remove('open');
 }
-function _ram_openChamp() { openSetChampModal(_ram.username, _ram.displayName, _ram.avatarUrl); }
-function _ram_openBook()  { openBookingModal(_ram.username, _ram.displayName, _ram.rosterRowId, _ram.planNote); }
-function _ram_viewProfile() { window.location.href = 'profile.html?u=' + encodeURIComponent(_ram.username); }
-function _ram_openEmblem() { openCreateEmblemModal(_ram.username, _ram.displayName); }
+function _ram_openChamp()        { openSetChampModal(_ram.username, _ram.displayName, _ram.avatarUrl); }
+function _ram_openBook()         { openBookingModal(_ram.username, _ram.displayName, _ram.rosterRowId, _ram.planNote); }
+function _ram_viewProfile()      { window.location.href = 'profile.html?u=' + encodeURIComponent(_ram.username); }
+function _ram_openEmblem()       { openCreateEmblemModal(_ram.username, _ram.displayName); }
+function _ram_removeFromRoster() { openRemoveRosterConfirm(_ram.username, _ram.displayName, _ram.rosterRowId); }
 
 function showStatTip(pill, label, e) {
   const tip = document.getElementById('stat-tip');
@@ -4817,6 +4828,19 @@ async function removeFromRoster(username, rosterRowId) {
     } else {
       await fetch(SUPABASE_URL+'/rest/v1/roster?efed=eq.'+encodeURIComponent(EFED_NAME)+'&username=eq.'+encodeURIComponent(username), { method:'DELETE', headers:SB_HEADERS });
     }
+    // Send notification to the removed wrestler
+    try {
+      await fetch(SUPABASE_URL+'/rest/v1/notifications', {
+        method:'POST', headers:{...SB_HEADERS,'Prefer':'return=minimal'},
+        body: JSON.stringify({
+          username: username,
+          type: 'roster',
+          message: `You have been removed from the ${EFED_NAME} roster.`,
+          read: false,
+          created_at: new Date().toISOString()
+        })
+      });
+    } catch(e) {}
     // If user removed themselves, flip join button back
     const session = getSession();
     if (session && session.username === username) {
@@ -5548,29 +5572,98 @@ function triggerInstall() {
 </div><!-- /page-card -->
 
 <!-- ── ROSTER ACTION MENU ── -->
-<div id="roster-action-bg" onclick="if(event.target===this)closeRosterActionMenu()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);align-items:center;justify-content:center;padding:20px;">
-  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:92%;max-width:360px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.8);">
-    <div style="padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.06);">
-      <div id="ram-name" style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;"></div>
-      <div style="font-size:.65rem;color:#5a5a6a;letter-spacing:1px;text-transform:uppercase;margin-top:2px;">Roster Member</div>
+<style>
+  @keyframes _ram-bg-in   { from { opacity:0 } to { opacity:1 } }
+  @keyframes _ram-card-in { from { opacity:0; transform:translateY(20px) scale(.96) } to { opacity:1; transform:translateY(0) scale(1) } }
+  #roster-action-bg.open   { animation: _ram-bg-in .18s ease forwards; }
+  #roster-action-card.open { animation: _ram-card-in .24s cubic-bezier(.16,1,.3,1) forwards; }
+  .ram-btn {
+    width:100%; display:flex; align-items:center; gap:13px;
+    padding:12px 16px;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px;
+    color:#e2e2e2; font-family:'DM Sans',sans-serif; font-size:.85rem; font-weight:500;
+    cursor:pointer; text-align:left; letter-spacing:.1px;
+    transition:background .15s, border-color .15s, transform .12s;
+  }
+  .ram-btn:hover  { background:rgba(255,255,255,.09); border-color:rgba(255,255,255,.15); transform:translateY(-1px); }
+  .ram-btn:active { transform:scale(.98); }
+  .ram-btn-icon {
+    width:34px; height:34px; border-radius:9px; flex-shrink:0;
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.09);
+    display:flex; align-items:center; justify-content:center; font-size:.95rem;
+    filter:grayscale(1) brightness(100);
+  }
+  .ram-btn-danger { background:rgba(192,0,14,.1) !important; border-color:rgba(192,0,14,.28) !important; color:#ff6b6b !important; }
+  .ram-btn-danger:hover { background:rgba(192,0,14,.2) !important; border-color:rgba(192,0,14,.45) !important; }
+  .ram-btn-danger .ram-btn-icon { background:rgba(192,0,14,.15) !important; border-color:rgba(192,0,14,.25) !important; filter:none !important; }
+  .ram-cancel {
+    width:100%; padding:11px 16px; margin-top:2px;
+    background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06);
+    border-radius:12px; color:rgba(255,255,255,.3);
+    font-family:'DM Sans',sans-serif; font-size:.75rem; font-weight:600;
+    letter-spacing:1.2px; text-transform:uppercase; cursor:pointer;
+    transition:background .15s, color .15s;
+  }
+  .ram-cancel:hover { background:rgba(255,255,255,.07); color:rgba(255,255,255,.55); }
+  html.day-mode .ram-btn { background:rgba(0,0,0,.04); border-color:rgba(0,0,0,.09); color:#1a1a22; }
+  html.day-mode .ram-btn:hover { background:rgba(0,0,0,.08); border-color:rgba(0,0,0,.16); }
+  html.day-mode .ram-btn-icon { background:rgba(0,0,0,.06); border-color:rgba(0,0,0,.09); }
+  html.day-mode .ram-btn-danger { background:rgba(192,0,14,.07) !important; border-color:rgba(192,0,14,.22) !important; color:#c0000e !important; }
+  html.day-mode .ram-btn-danger:hover { background:rgba(192,0,14,.13) !important; }
+  html.day-mode .ram-cancel { background:rgba(0,0,0,.04); border-color:rgba(0,0,0,.08); color:rgba(0,0,0,.3); }
+  html.day-mode .ram-cancel:hover { background:rgba(0,0,0,.08); color:rgba(0,0,0,.55); }
+</style>
+
+<div id="roster-action-bg" onclick="if(event.target===this)closeRosterActionMenu()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.75);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);align-items:center;justify-content:center;padding:20px;">
+  <div id="roster-action-card" style="background:#0d0d10;border:1px solid rgba(255,255,255,.1);border-radius:20px;width:92%;max-width:340px;overflow:hidden;box-shadow:0 40px 90px rgba(0,0,0,.95),0 0 0 1px rgba(255,255,255,.04);">
+
+    <!-- Header -->
+    <div style="padding:18px 20px 15px;border-bottom:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.015);">
+      <div id="ram-name" style="font-family:'Bebas Neue',sans-serif;font-size:1.15rem;letter-spacing:3px;color:#fff;line-height:1.1;"></div>
+      <div style="font-size:.58rem;color:#44445a;letter-spacing:2.5px;text-transform:uppercase;margin-top:5px;font-family:'DM Sans',sans-serif;font-weight:600;">Roster Member</div>
     </div>
-    <div style="padding:8px 0;">
-      <button onclick="closeRosterActionMenu(); setTimeout(()=>_ram_openChamp(),80)" style="width:100%;display:flex;align-items:center;gap:14px;padding:14px 20px;background:none;border:none;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;text-align:left;transition:background .12s;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='none'">
-        <span style="font-size:1.1rem;">🏆</span> Assign Championship
+
+    <!-- Action buttons -->
+    <div style="padding:14px 14px 6px;display:flex;flex-direction:column;gap:7px;">
+
+      <button class="ram-btn" onclick="closeRosterActionMenu();setTimeout(()=>_ram_openChamp(),80)">
+        <span class="ram-btn-icon">🏆</span>
+        Assign Championship
       </button>
-      <button onclick="closeRosterActionMenu(); setTimeout(()=>_ram_openEmblem(),80)" style="width:100%;display:flex;align-items:center;gap:14px;padding:14px 20px;background:none;border:none;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;text-align:left;transition:background .12s;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='none'">
-        <span style="font-size:1.1rem;">🎖️</span> Create Emblem
+
+      <button class="ram-btn" onclick="closeRosterActionMenu();setTimeout(()=>_ram_openEmblem(),80)">
+        <span class="ram-btn-icon">🎖️</span>
+        Create Emblem
       </button>
-      <button id="ram-book-btn" onclick="closeRosterActionMenu(); setTimeout(()=>_ram_openBook(),80)" style="width:100%;display:flex;align-items:center;gap:14px;padding:14px 20px;background:none;border:none;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;text-align:left;transition:background .12s;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='none'">
-        <span style="font-size:1.1rem;">✍️</span> <span id="ram-book-label">Book Wrestler</span>
+
+      <button class="ram-btn" id="ram-book-btn" onclick="closeRosterActionMenu();setTimeout(()=>_ram_openBook(),80)">
+        <span class="ram-btn-icon">✍️</span>
+        <span id="ram-book-label">Book Wrestler</span>
       </button>
-      <button onclick="closeRosterActionMenu(); setTimeout(()=>_ram_viewProfile(),80)" style="width:100%;display:flex;align-items:center;gap:14px;padding:14px 20px;background:none;border:none;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.88rem;cursor:pointer;text-align:left;transition:background .12s;" onmouseover="this.style.background='rgba(255,255,255,.05)'" onmouseout="this.style.background='none'">
-        <span style="font-size:1.1rem;">👤</span> View Profile
+
+      <button class="ram-btn" onclick="closeRosterActionMenu();setTimeout(()=>_ram_viewProfile(),80)">
+        <span class="ram-btn-icon">👤</span>
+        View Profile
       </button>
+
+      <div style="height:1px;background:rgba(255,255,255,.05);margin:3px 0;"></div>
+
+      <button class="ram-btn ram-btn-danger" onclick="closeRosterActionMenu();setTimeout(()=>_ram_removeFromRoster(),80)">
+        <span class="ram-btn-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></svg>
+        </span>
+        Remove from Roster
+      </button>
+
     </div>
-    <div style="padding:0 12px 12px;">
-      <button onclick="closeRosterActionMenu()" style="width:100%;padding:11px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.78rem;cursor:pointer;">Cancel</button>
+
+    <!-- Cancel -->
+    <div style="padding:4px 14px 14px;">
+      <button class="ram-cancel" onclick="closeRosterActionMenu()">Cancel</button>
     </div>
+
   </div>
 </div>
 
