@@ -14535,44 +14535,93 @@ if ('serviceWorker' in navigator) {
   // Only on mobile/touch devices
   if (!('ontouchstart' in window)) return;
 
-  const THRESHOLD = 72;   // px to pull before triggering
+  const THRESHOLD = 72;   // px to pull before triggering refresh
   const MAX_PULL  = 100;  // max visual pull distance
 
-  let startY = 0;
-  let pulling = false;
-  let triggered = false;
+  let startY      = 0;
+  let pulling     = false;
+  let triggered   = false;
   let currentPull = 0;
+
+  // Two-step state: when the video page is open and user is scrolled down,
+  // the first downward pull scrolls back to top instead of triggering PTR.
+  // Only once already at the top does a subsequent pull trigger PTR.
+  let scrollBackMode = false;
 
   const indicator = document.getElementById('ptr-indicator');
   const arrow     = document.getElementById('ptr-arrow');
   const spinner   = document.getElementById('ptr-spinner');
   const label     = document.getElementById('ptr-label');
 
-  function atTop() {
-    // Check document scroll
-    if ((document.documentElement.scrollTop || document.body.scrollTop) <= 0) return true;
-    // Also check expand overlay scroll position
-    const overlay = document.getElementById('card-expand');
-    if (overlay && overlay.classList.contains('open') && overlay.scrollTop <= 0) return true;
-    return false;
+  function getExpandOverlay() {
+    const el = document.getElementById('card-expand');
+    return (el && el.classList.contains('open')) ? el : null;
   }
 
-  function expandIsOpen() {
-    // Only block PTR if the tag modal is open — not the video panel itself
+  // Returns true if the relevant scroll container is already at the top
+  function atTop() {
+    const overlay = getExpandOverlay();
+    if (overlay) return overlay.scrollTop <= 0;
+    return (document.documentElement.scrollTop || document.body.scrollTop) <= 0;
+  }
+
+  // Returns true if a modal that should block PTR entirely is open
+  function modalIsOpen() {
     const tagBg = document.getElementById('tag-modal-bg');
     if (tagBg && tagBg.classList.contains('open')) return true;
     return false;
   }
 
   document.addEventListener('touchstart', function(e) {
-    if (!atTop() || expandIsOpen()) return;
-    startY = e.touches[0].clientY;
-    pulling = true;
+    if (modalIsOpen()) return;
+
+    const overlay = getExpandOverlay();
+
+    if (overlay && overlay.scrollTop > 0) {
+      // Step 1: user is scrolled down inside the video page.
+      // Record touch so we can scroll back to top on a downward swipe —
+      // but do NOT activate the PTR indicator at all.
+      startY         = e.touches[0].clientY;
+      scrollBackMode = true;
+      pulling        = false;
+      return;
+    }
+
+    // Normal case: already at top (or hub is shown)
+    scrollBackMode = false;
+    if (!atTop()) return;
+    startY    = e.touches[0].clientY;
+    pulling   = true;
     triggered = false;
     currentPull = 0;
   }, { passive: true });
 
   document.addEventListener('touchmove', function(e) {
+    if (modalIsOpen()) return;
+
+    // ── Step 1: scroll-back mode ──────────────────────────────────────────
+    // User pulled down while scrolled into comments/lower sections.
+    // Smoothly scroll the container back to top; never show PTR indicator.
+    if (scrollBackMode) {
+      const overlay = getExpandOverlay();
+      if (!overlay) { scrollBackMode = false; return; }
+      const dy = e.touches[0].clientY - startY;
+      if (dy > 8) {
+        // Accelerate scroll-back proportional to drag distance but cap it
+        // so it doesn't over-shoot past 0
+        const scrollStep = Math.min(dy * 1.6, overlay.scrollTop);
+        overlay.scrollTop -= scrollStep;
+        startY = e.touches[0].clientY; // update so each frame is relative
+        if (overlay.scrollTop <= 0) {
+          // Reached the top — exit scroll-back mode so the *next* gesture
+          // can trigger PTR normally
+          scrollBackMode = false;
+        }
+      }
+      return;
+    }
+
+    // ── Step 2: normal PTR pull ───────────────────────────────────────────
     if (!pulling || triggered) return;
     const dy = e.touches[0].clientY - startY;
     if (dy <= 0) { pulling = false; return; }
@@ -14584,12 +14633,18 @@ if ('serviceWorker' in navigator) {
 
     const ready = currentPull >= THRESHOLD;
     arrow.style.transform = ready ? 'rotate(180deg)' : 'rotate(0deg)';
-    label.textContent = ready ? 'Release to refresh' : 'Pull to refresh';
-    arrow.style.display = ready ? 'none' : 'inline-block';
+    label.textContent     = ready ? 'Release to refresh' : 'Pull to refresh';
+    arrow.style.display   = ready ? 'none' : 'inline-block';
     spinner.style.display = ready ? 'block' : 'none';
   }, { passive: true });
 
   document.addEventListener('touchend', function() {
+    // Clean up scroll-back mode on lift
+    if (scrollBackMode) {
+      scrollBackMode = false;
+      return;
+    }
+
     if (!pulling) return;
     pulling = false;
 
@@ -14614,8 +14669,8 @@ if ('serviceWorker' in navigator) {
       setTimeout(function() {
         indicator.style.transition = 'height .2s ease';
         arrow.style.transform = '';
-        label.textContent = 'Pull to refresh';
-        arrow.style.display = 'inline-block';
+        label.textContent     = 'Pull to refresh';
+        arrow.style.display   = 'inline-block';
         spinner.style.display = 'none';
       }, 260);
     }
