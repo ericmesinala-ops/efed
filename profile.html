@@ -7317,9 +7317,9 @@ async function loadProfile() {
     try {
       users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,spotify_handle,discord_handle,facebook_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment,style,debut,brand,faction,entrance_music,moveset`);
     } catch(e) {
-      // spotify_handle column may not exist yet — run: ALTER TABLE users ADD COLUMN spotify_handle text;
-      if (e.message && e.message.includes('spotify_handle')) {
-        users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,discord_handle,facebook_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment,style,debut,brand,faction,entrance_music,moveset`);
+      // spotify_handle or discord_handle column may not exist yet
+      if (e.message && (e.message.includes('spotify_handle') || e.message.includes('discord_handle'))) {
+        users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,facebook_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment,style,debut,brand,faction,entrance_music,moveset`);
       } else { throw e; }
     }
     if (!users.length) { document.getElementById('profile-name').textContent = 'User not found'; return; }
@@ -7643,7 +7643,7 @@ async function loadProfile() {
   }
 
   // Watch List — visible to everyone (public section)
-  const _wlTargetUser = targetUser;
+  const _wlTargetUser = targetUser || session.username;
   loadWatchlistSection(_wlTargetUser);
 
   // Featured in These Videos — visible to everyone
@@ -7839,7 +7839,7 @@ async function loadWatchlistSection(targetUser) {
   if (!sec || !videoRow) return;
 
   try {
-    const watchRows = await sbGet('efed_watchlist', 'username=eq.' + encodeURIComponent(resolvedUser));
+    const watchRows = await sbGet('efed_watchlist', 'username=eq.' + encodeURIComponent(targetUser));
     if (!watchRows.length) { sec.style.display = 'none'; return; }
 
     const efedNames = watchRows.map(r => r.efed_name);
@@ -11233,43 +11233,54 @@ async function _peSaveEmblem() {
 
 <script>
 // ── SPOTIFY COLUMN MIGRATION — probes DB, shows one-click SQL banner if column missing ──
-(async function checkSpotifyColumn() {
+(async function checkMissingColumns() {
+  const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
+  const hdrs = { 'apikey': SB_ANON, 'Authorization': 'Bearer ' + SB_ANON };
+  const missing = [];
+  // Check spotify_handle
   try {
-    const probe = await fetch('https://osbarvhklizidsffytye.supabase.co/rest/v1/users?select=spotify_handle&limit=1', {
-      headers: { 'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM', 'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM' }
-    });
-    if (!probe.ok) {
-      const txt = await probe.text();
-      if (txt.includes('spotify_handle')) _showSpotifyMigrationBanner();
-    }
+    const r = await fetch('https://osbarvhklizidsffytye.supabase.co/rest/v1/users?select=spotify_handle&limit=1', { headers: hdrs });
+    if (!r.ok) { const t = await r.text(); if (t.includes('spotify_handle')) missing.push('spotify_handle'); }
   } catch(e) {}
+  // Check discord_handle
+  try {
+    const r = await fetch('https://osbarvhklizidsffytye.supabase.co/rest/v1/users?select=discord_handle&limit=1', { headers: hdrs });
+    if (!r.ok) { const t = await r.text(); if (t.includes('discord_handle')) missing.push('discord_handle'); }
+  } catch(e) {}
+  if (missing.length) _showMigrationBanner(missing);
 })();
 
-function _showSpotifyMigrationBanner() {
+function _showMigrationBanner(cols) {
   const existing = document.getElementById('spotify-migration-banner');
   if (existing) return;
+  const sql = cols.map(c => `ALTER TABLE users ADD COLUMN ${c} text;`).join('\n');
   const banner = document.createElement('div');
   banner.id = 'spotify-migration-banner';
-  banner.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;background:#111114;border:1px solid rgba(200,168,75,.35);border-radius:14px;padding:14px 20px;box-shadow:0 16px 48px rgba(0,0,0,.8);display:flex;align-items:center;gap:14px;max-width:520px;width:calc(100% - 32px);';
+  banner.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;background:#111114;border:1px solid rgba(200,168,75,.35);border-radius:14px;padding:14px 20px;box-shadow:0 16px 48px rgba(0,0,0,.8);display:flex;align-items:center;gap:14px;max-width:560px;width:calc(100% - 32px);';
   banner.innerHTML = `
     <div style="flex:1;min-width:0;">
       <div style="font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:2px;color:var(--gold,#c8a84b);margin-bottom:4px;">Run this in Supabase SQL Editor</div>
-      <code id="spotify-sql-code" style="display:block;font-family:'JetBrains Mono',monospace;font-size:.78rem;color:#e8e8e8;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:7px 10px;cursor:pointer;transition:background .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" onclick="_copySpotifySQL(this)" title="Click to copy">ALTER TABLE users ADD COLUMN spotify_handle text;</code>
+      <code id="spotify-sql-code" style="display:block;font-family:'JetBrains Mono',monospace;font-size:.78rem;color:#e8e8e8;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:7px 10px;cursor:pointer;transition:background .15s;white-space:pre;overflow:hidden;text-overflow:ellipsis;" onclick="_copyMigrationSQL(this)" title="Click to copy">${sql.replace(/</g,'&lt;')}</code>
     </div>
     <button onclick="document.getElementById('spotify-migration-banner').remove()" style="flex-shrink:0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.4);font-size:.75rem;cursor:pointer;padding:6px 10px;font-family:'DM Sans',sans-serif;transition:all .15s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.4)'">✕ Dismiss</button>`;
   document.body.appendChild(banner);
+  // store sql for copy
+  banner._migrationSQL = sql;
 }
 
-function _copySpotifySQL(el) {
-  navigator.clipboard?.writeText('ALTER TABLE users ADD COLUMN spotify_handle text;').then(() => {
+// keep old name for backward compat
+function _showSpotifyMigrationBanner() { _showMigrationBanner(['spotify_handle']); }
+
+function _copyMigrationSQL(el) {
+  const sql = document.getElementById('spotify-migration-banner')?._migrationSQL || el.textContent;
+  navigator.clipboard?.writeText(sql).then(() => {
     el.style.background = 'rgba(200,168,75,.12)';
+    const orig = el.textContent;
     el.textContent = '✅ Copied!';
-    setTimeout(() => {
-      el.style.background = 'rgba(255,255,255,.05)';
-      el.textContent = 'ALTER TABLE users ADD COLUMN spotify_handle text;';
-    }, 2000);
+    setTimeout(() => { el.style.background = 'rgba(255,255,255,.05)'; el.textContent = orig; }, 2000);
   });
 }
+function _copySpotifySQL(el) { _copyMigrationSQL(el); }
 </script>
 
 </body>
