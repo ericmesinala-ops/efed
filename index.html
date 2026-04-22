@@ -8594,6 +8594,59 @@ function doSubmitPost(submissionType) {
         return;
       }
 
+      // ── NEW EFED AUTO-ASSIGN + ADMIN NOTIFICATION ──
+      if (assignedEfed) {
+        try {
+          // Check if this eFed already exists in efed_channels or prior submissions
+          const [existingChannels, existingSubs] = await Promise.all([
+            sbGet('efed_channels', `efed_name=eq.${encodeURIComponent(assignedEfed)}&select=efed_name`).catch(() => []),
+            sbGet('submissions', `efed=eq.${encodeURIComponent(assignedEfed)}&status=eq.approved&select=efed&limit=2`).catch(() => [])
+          ]);
+          const isNewEfed = !existingChannels.length && existingSubs.length <= 1; // <=1 because current insert counts
+          if (isNewEfed) {
+            // Count how many channels are in each group (from localStorage via supabase-stored group or fallback)
+            // We read the efed_channels table to get group counts
+            const allChannels = await sbGet('efed_channels', 'select=efed_name').catch(() => []);
+            // Group assignments are stored client-side in localStorage (efed_scan_groups)
+            // We can't read localStorage from index.html the same way admin does,
+            // but we CAN store group in supabase efed_channels.scan_group if present,
+            // or fall back to a simple count-based approach using total submissions per group keyword.
+            // Simplest reliable approach: count approved submissions per known group pattern.
+            // We store group assignments in a supabase table 'efed_scan_groups' if we add it,
+            // OR we use a metadata key in the notifications table as a workaround.
+            // Best approach: store group assignment in efed_channels.scan_group (text col).
+            // For now, count entries in each group using the scan_groups key stored in notifications metadata,
+            // but since that's complex, use a simple round-robin: check total efed count parity.
+            // Count approved-submission efeds (distinct) per group from efed_channels scan_group col if available.
+            const chWithGroup = await sbGet('efed_channels', 'select=efed_name,scan_group').catch(() => []);
+            let aCount = chWithGroup.filter(c => !c.scan_group || c.scan_group === 'a').length;
+            let bCount = chWithGroup.filter(c => c.scan_group === 'b').length;
+            const assignedGroup = bCount < aCount ? 'b' : 'a'; // assign to smaller group; ties go to A
+            const groupLabel = assignedGroup === 'a' ? 'Group A' : 'Group B';
+            // Save group assignment to efed_channels if we can (upsert)
+            try {
+              await fetch(SUPABASE_URL + '/rest/v1/efed_channels', {
+                method: 'POST',
+                headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates' },
+                body: JSON.stringify({ efed_name: assignedEfed, scan_group: assignedGroup })
+              });
+            } catch(e) {}
+            // Send admin notification
+            try {
+              await sbInsert('notifications', {
+                username: ADMIN_USERNAME,
+                type: 'admin',
+                message: `📺 New eFed named "${assignedEfed}" has been added to the system. This goes to ${groupLabel}.`,
+                video_url: null,
+                read: false,
+                created_at: Date.now()
+              });
+            } catch(e) {}
+          }
+        } catch(e) { console.warn('New eFed check failed:', e); }
+      }
+      // ── END NEW EFED LOGIC ──
+
       // Get display name for card label
       let posterDisplayName = session.username;
       try {

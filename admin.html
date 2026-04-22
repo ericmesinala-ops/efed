@@ -459,8 +459,8 @@ html.day-mode .nav-tv-svg--day { display: inline; }
         <button class="btn btn-gold" onclick="addChannel()" style="align-self:flex-end;">+ Add</button>
       </div>
     </div>
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+    <div class="card" style="padding-bottom:0;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
         <div class="card-title" style="margin-bottom:0;"><div class="dot"></div>Registered Channels <span id="ch-count" style="font-size:1.12rem;color:var(--muted);font-family:'DM Sans';font-weight:400;letter-spacing:0;margin-left:4px;"></span></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;" id="scan-month-btns">
           <button class="btn btn-ghost btn-sm" id="scan-filter-all" onclick="toggleScanFilter('all')" style="border-color:rgba(200,168,75,.5);color:var(--gold);background:rgba(200,168,75,.08);">All</button>
@@ -468,7 +468,18 @@ html.day-mode .nav-tv-svg--day { display: inline; }
           <button class="btn btn-ghost btn-sm" id="scan-filter-last" onclick="toggleScanFilter('last')">Last Month</button>
         </div>
       </div>
-      <div class="channel-list" id="channel-list"><div class="empty"><div class="empty-icon">📺</div>No channels yet.</div></div>
+
+      <!-- Group sub-tabs -->
+      <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:0;">
+        <button id="ch-tab-a-btn" onclick="switchChGroupTab('a')" style="display:inline-flex;align-items:center;gap:8px;padding:10px 22px;border:none;background:rgba(192,0,14,.1);border-top:2px solid rgba(192,0,14,.5);border-left:1px solid rgba(192,0,14,.2);border-right:1px solid rgba(192,0,14,.2);cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:1.05rem;letter-spacing:2px;color:#ff6b6b;border-radius:8px 8px 0 0;margin-right:4px;transition:background .15s;">
+          📡 GROUP A <span id="ch-tab-a-count" style="font-size:.8rem;font-weight:700;padding:1px 7px;border-radius:10px;background:rgba(192,0,14,.2);color:#ff6b6b;font-family:'DM Sans',sans-serif;letter-spacing:0;">0</span>
+        </button>
+        <button id="ch-tab-b-btn" onclick="switchChGroupTab('b')" style="display:inline-flex;align-items:center;gap:8px;padding:10px 22px;border:none;background:transparent;border-top:2px solid transparent;border-left:1px solid transparent;border-right:1px solid transparent;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:1.05rem;letter-spacing:2px;color:var(--muted);border-radius:8px 8px 0 0;margin-right:4px;transition:background .15s,color .15s;">
+          📡 GROUP B <span id="ch-tab-b-count" style="font-size:.8rem;font-weight:700;padding:1px 7px;border-radius:10px;background:rgba(76,100,200,.15);color:#7a90e8;font-family:'DM Sans',sans-serif;letter-spacing:0;">0</span>
+        </button>
+      </div>
+
+      <div id="channel-list" style="padding-top:12px;padding-bottom:12px;"><div class="empty"><div class="empty-icon">📺</div>No channels yet.</div></div>
     </div>
   </div>
 
@@ -1252,6 +1263,16 @@ function _getChannelGroup(key) {
 function _setChannelGroup(key, cbKey, grp) {
   const s = _getGroupState(); s[key] = grp;
   localStorage.setItem('efed_scan_groups', JSON.stringify(s));
+  // Also persist to Supabase so index.html can read group counts
+  (async () => {
+    try {
+      // Find the efed_channels row by efed_name (case-insensitive key match)
+      const rows = await sbGet('efed_channels', `efed_name=ilike.${encodeURIComponent(key)}&select=id`).catch(() => []);
+      if (rows.length) {
+        await sbUpdate('efed_channels', { scan_group: grp }, `id=eq.${rows[0].id}`);
+      }
+    } catch(e) {}
+  })();
   // Reload so the channel moves into the correct group section
   loadChannels();
   updateCostPreview();
@@ -1268,13 +1289,174 @@ function _applyGrpBtnStyle(el, active, grp) {
   }
 }
 
+let _activeChGroup = 'a';
+
+function switchChGroupTab(grp) {
+  _activeChGroup = grp;
+  // Style the tab buttons
+  const btnA = document.getElementById('ch-tab-a-btn');
+  const btnB = document.getElementById('ch-tab-b-btn');
+  if (btnA) {
+    if (grp === 'a') {
+      btnA.style.background = 'rgba(192,0,14,.1)';
+      btnA.style.borderTop = '2px solid rgba(192,0,14,.5)';
+      btnA.style.borderLeft = '1px solid rgba(192,0,14,.2)';
+      btnA.style.borderRight = '1px solid rgba(192,0,14,.2)';
+      btnA.style.color = '#ff6b6b';
+    } else {
+      btnA.style.background = 'transparent';
+      btnA.style.borderTop = '2px solid transparent';
+      btnA.style.borderLeft = '1px solid transparent';
+      btnA.style.borderRight = '1px solid transparent';
+      btnA.style.color = 'var(--muted)';
+    }
+  }
+  if (btnB) {
+    if (grp === 'b') {
+      btnB.style.background = 'rgba(76,100,200,.1)';
+      btnB.style.borderTop = '2px solid rgba(76,100,200,.5)';
+      btnB.style.borderLeft = '1px solid rgba(76,100,200,.2)';
+      btnB.style.borderRight = '1px solid rgba(76,100,200,.2)';
+      btnB.style.color = '#7a90e8';
+    } else {
+      btnB.style.background = 'transparent';
+      btnB.style.borderTop = '2px solid transparent';
+      btnB.style.borderLeft = '1px solid transparent';
+      btnB.style.borderRight = '1px solid transparent';
+      btnB.style.color = 'var(--muted)';
+    }
+  }
+  const all = window._allChannels;
+  if (all) _renderActiveChGroup(all);
+}
+
+function _renderActiveChGroup(all) {
+  const grp = _activeChGroup;
+  const grpLabel = grp.toUpperCase();
+  const isA = grp === 'a';
+  const grpColor = isA ? '#ff6b6b' : '#7a90e8';
+  const grpBorder = isA ? 'rgba(192,0,14,.25)' : 'rgba(76,100,200,.25)';
+
+  const groupChannels = all.filter(ch => _getChannelGroup(ch.efed_name.toLowerCase()) === grp);
+  const otherGrp = grp === 'a' ? 'b' : 'a';
+  const otherLabel = otherGrp.toUpperCase();
+
+  const list = document.getElementById('channel-list');
+  list.innerHTML = '';
+
+  // Column header
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;gap:10px;padding:4px 14px 10px;border-bottom:1px solid var(--border);margin-bottom:4px;';
+  header.innerHTML = `
+    <div style="width:36px;text-align:center;flex-shrink:0;font-size:.75rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:700;">Scan</div>
+    <div style="flex:1;font-size:.75rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;">eFed Name</div>
+    <div style="width:68px;text-align:center;font-size:.75rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:700;flex-shrink:0;">Group</div>
+    <div style="width:120px;text-align:right;font-size:.75rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:700;flex-shrink:0;">Last Upload</div>
+    <div style="width:80px;flex-shrink:0;"></div>`;
+  list.appendChild(header);
+
+  if (!groupChannels.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'padding:32px 20px;text-align:center;color:var(--muted);font-size:.96rem;line-height:1.7;';
+    empty.innerHTML = `<div style="font-size:2rem;margin-bottom:10px;">📺</div>No eFeds in Group ${grpLabel} yet.<br><span style="font-size:.85rem;">Use the <strong style="color:${grpColor};">A/B</strong> toggle on any channel to assign it here.</span>`;
+    list.appendChild(empty);
+    // Hidden compat
+    const hiddenSA = document.createElement('input');
+    hiddenSA.type='checkbox'; hiddenSA.id='scan-select-all'; hiddenSA.style.display='none';
+    list.appendChild(hiddenSA);
+    return;
+  }
+
+  groupChannels.forEach((ch, idx) => {
+    const state = _getScanState();
+    const key = ch.efed_name.toLowerCase();
+    const cbKey = key.replace(/[^a-z0-9]/g, '_');
+    const hasUrl = !!ch.yt_channel_url;
+    const now = new Date();
+    const thisMonth = now.getMonth(), thisYear = now.getFullYear();
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonth2 = lastMonthDate.getMonth(), lastMonthYear2 = lastMonthDate.getFullYear();
+    let autoDefault = false;
+    if (ch.lastUploadMs) {
+      const d = new Date(ch.lastUploadMs);
+      autoDefault = (d.getMonth()===thisMonth&&d.getFullYear()===thisYear)||(d.getMonth()===lastMonth2&&d.getFullYear()===lastMonthYear2);
+    }
+    const isEnabled = key in state ? state[key] !== false : autoDefault;
+    let lastUploadStr = '—';
+    if (ch.lastUploadMs) {
+      const d = new Date(ch.lastUploadMs);
+      if (!isNaN(d)) lastUploadStr = d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    } else if (ch.lastUpload) {
+      const d = new Date(ch.lastUpload + 'T12:00:00');
+      if (!isNaN(d)) lastUploadStr = d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    }
+    const isLast = idx === groupChannels.length - 1;
+    const item = document.createElement('div');
+    item.className = 'channel-item';
+    item.style.cssText = 'display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:6px;transition:border-color .2s,opacity .2s;' + (!isEnabled ? 'opacity:.45;' : '');
+
+    item.innerHTML = `
+      <div style="width:36px;text-align:center;flex-shrink:0;">
+        <input type="checkbox" id="scan-cb-${cbKey}" ${isEnabled?'checked':''} style="width:16px;height:16px;accent-color:var(--gold);cursor:pointer;">
+      </div>
+      <div class="channel-avatar" style="flex-shrink:0;">${(ch.efed_name||'?')[0].toUpperCase()}</div>
+      <div class="channel-info" style="flex:1;min-width:0;">
+        <div class="channel-name">${esc(ch.efed_name)}</div>
+        <div id="ch-url-display-${cbKey}" class="channel-url">${hasUrl ? esc(ch.yt_channel_url) : '<span style="color:rgba(255,255,255,.25);font-style:italic;font-size:.84rem;">No YT channel — click ✏️ to add</span>'}</div>
+        ${ch.latestUrl ? `<div style="margin-top:3px;"><a href="${esc(ch.latestUrl)}" target="_blank" style="font-size:1.02rem;color:var(--gold);text-decoration:none;opacity:.8;font-family:'JetBrains Mono',monospace;">▶ ${esc(ch.latestShow || 'Latest Video')} ↗</a></div>` : ''}
+        <div id="ch-url-edit-${cbKey}" style="display:none;margin-top:6px;">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input id="ch-url-input-${cbKey}" type="text" value="${hasUrl ? esc(ch.yt_channel_url) : ''}" placeholder="https://www.youtube.com/@ChannelName" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(200,168,75,.4);border-radius:6px;padding:6px 10px;color:#fff;font-family:'JetBrains Mono',monospace;font-size:.86rem;outline:none;">
+            <button onclick="saveChannelUrl('${cbKey}','${esc(ch.efed_name)}',${ch.id||'null'})" style="padding:5px 12px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.4);border-radius:6px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.86rem;font-weight:700;cursor:pointer;white-space:nowrap;">Save</button>
+            <button onclick="cancelChannelEdit('${cbKey}')" style="padding:5px 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.86rem;cursor:pointer;">✕</button>
+          </div>
+          <div id="ch-url-edit-status-${cbKey}" style="font-size:.84rem;margin-top:4px;display:none;"></div>
+        </div>
+      </div>
+      <div style="width:68px;text-align:center;flex-shrink:0;">
+        <div style="display:inline-flex;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.12);">
+          <button id="grp-a-${cbKey}" onclick="_setChannelGroup('${key}','${cbKey}','a')" style="padding:4px 10px;border:none;font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:1.5px;cursor:pointer;transition:background .15s,color .15s;"
+            class="${_getChannelGroup(key)==='a'?'grp-btn-active-a':'grp-btn-inactive'}">A</button>
+          <button id="grp-b-${cbKey}" onclick="_setChannelGroup('${key}','${cbKey}','b')" style="padding:4px 10px;border:none;font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:1.5px;cursor:pointer;transition:background .15s,color .15s;"
+            class="${_getChannelGroup(key)==='b'?'grp-btn-active-b':'grp-btn-inactive'}">B</button>
+        </div>
+      </div>
+      <div style="width:120px;text-align:right;flex-shrink:0;">
+        <span style="font-size:.86rem;color:${ch.lastUploadMs?'var(--gold)':'var(--muted)'};font-family:'JetBrains Mono',monospace;">${lastUploadStr}</span>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0;width:80px;justify-content:flex-end;">
+        <button onclick="editChannelUrl('${cbKey}')" class="btn btn-ghost btn-sm" title="Edit YouTube URL">✏️</button>
+        ${hasUrl ? `<a href="${esc(ch.yt_channel_url)}" target="_blank" class="btn btn-ghost btn-sm">↗</a>` : ''}
+        <button class="btn btn-red btn-sm" onclick="${ch.id ? `deleteChannel(${ch.id},'${esc(ch.efed_name)}')` : `deleteChannelByName('${esc(ch.efed_name)}')`}">✕</button>
+      </div>`;
+
+    list.appendChild(item);
+
+    const cb = item.querySelector('#scan-cb-' + cbKey);
+    if (cb) {
+      cb.addEventListener('change', function() {
+        _setScanState(key, this.checked);
+        item.style.opacity = this.checked ? '1' : '.45';
+        updateScanCountLabel(all);
+      });
+    }
+  });
+
+  // Hidden compat checkbox
+  if (!document.getElementById('scan-select-all')) {
+    const hiddenSA = document.createElement('input');
+    hiddenSA.type='checkbox'; hiddenSA.id='scan-select-all'; hiddenSA.style.display='none';
+    list.appendChild(hiddenSA);
+  }
+}
+
 async function loadChannels() {
   const list = document.getElementById('channel-list');
   list.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
   try {
     // Pull registered channels (have YT URL) + all distinct efeds from approved submissions
     const [channels, subs] = await Promise.all([
-      sbGet('efed_channels', 'select=*&order=efed_name.asc'),
+      sbGet('efed_channels', 'select=*,scan_group&order=efed_name.asc'),
       sbGet('submissions', 'status=eq.approved&select=efed,date,date_ms,url,show_name&order=date_ms.desc')
     ]);
 
@@ -1296,6 +1478,8 @@ async function loadChannels() {
     });
 
     // Overlay registered channels (they have YT URLs and may have better names)
+    // Also sync scan_group from Supabase to localStorage
+    const groupState = _getGroupState();
     channels.forEach(ch => {
       const key = ch.efed_name.trim().toLowerCase();
       const existing = map.get(key) || {};
@@ -1308,7 +1492,12 @@ async function loadChannels() {
         latestUrl: existing.latestUrl || null,
         latestShow: existing.latestShow || null
       });
+      // Sync Supabase scan_group to localStorage (Supabase wins if set)
+      if (ch.scan_group && !groupState[key]) {
+        groupState[key] = ch.scan_group;
+      }
     });
+    localStorage.setItem('efed_scan_groups', JSON.stringify(groupState));
 
     // Sort alphabetically by display name
     const all = Array.from(map.values()).sort((a, b) => a.efed_name.localeCompare(b.efed_name));
@@ -1320,141 +1509,27 @@ async function loadChannels() {
 
     if (!all.length) { list.innerHTML = '<div class="empty"><div class="empty-icon">📺</div>No feds yet.</div>'; return; }
 
-    // Split into groups and render with group headers
-    list.innerHTML = '';
+    // Store all channels for filter/tab use
+    window._allChannels = all;
 
-    const groupA = all.filter(ch => _getChannelGroup(ch.efed_name.toLowerCase()) === 'a');
-    const groupB = all.filter(ch => _getChannelGroup(ch.efed_name.toLowerCase()) === 'b');
+    // Update tab counts
+    const aAll = all.filter(ch => _getChannelGroup(ch.efed_name.toLowerCase()) === 'a');
+    const bAll = all.filter(ch => _getChannelGroup(ch.efed_name.toLowerCase()) === 'b');
+    const cntA = document.getElementById('ch-tab-a-count');
+    const cntB = document.getElementById('ch-tab-b-count');
+    if (cntA) cntA.textContent = aAll.length;
+    if (cntB) cntB.textContent = bAll.length;
 
-    function renderGroupSection(groupChannels, grpLabel, grpColor, grpBg, grpBorder, grpId) {
-      const section = document.createElement('div');
-      section.id = 'ch-group-section-' + grpId;
-      section.style.cssText = 'margin-bottom:24px;';
-
-      // Group header banner
-      const banner = document.createElement('div');
-      banner.style.cssText = `display:flex;align-items:center;gap:12px;padding:10px 16px;border-radius:10px 10px 0 0;background:${grpBg};border:1px solid ${grpBorder};border-bottom:none;margin-bottom:0;`;
-      const countBadge = groupChannels.length;
-      banner.innerHTML = `
-        <span style="font-family:'Bebas Neue',sans-serif;font-size:1.25rem;letter-spacing:3px;color:${grpColor};">GROUP ${grpLabel}</span>
-        <span style="font-size:.78rem;font-weight:700;letter-spacing:2px;padding:2px 9px;border-radius:20px;background:${grpBg};border:1px solid ${grpBorder};color:${grpColor};font-family:'DM Sans',sans-serif;">${countBadge} fed${countBadge!==1?'s':''}</span>
-        <div style="flex:1;"></div>
-        <span style="font-size:.78rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:600;">← assign channels using the A/B toggle</span>`;
-      section.appendChild(banner);
-
-      // Column header row
-      const header = document.createElement('div');
-      header.style.cssText = `display:flex;align-items:center;gap:10px;padding:8px 14px;background:rgba(255,255,255,.02);border-left:1px solid ${grpBorder};border-right:1px solid ${grpBorder};border-bottom:1px solid var(--border);margin-bottom:0;`;
-      header.innerHTML = `
-        <div style="width:36px;text-align:center;flex-shrink:0;font-size:.78rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:700;">Scan</div>
-        <div style="flex:1;font-size:.78rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-weight:700;">eFed Name</div>
-        <div style="width:68px;text-align:center;font-size:.78rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:700;flex-shrink:0;">Group</div>
-        <div style="width:120px;text-align:right;font-size:.78rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:700;flex-shrink:0;">Last Upload</div>
-        <div style="width:80px;flex-shrink:0;"></div>`;
-      section.appendChild(header);
-
-      // Channel rows container
-      const rowsWrap = document.createElement('div');
-      rowsWrap.style.cssText = `border-left:1px solid ${grpBorder};border-right:1px solid ${grpBorder};border-bottom:1px solid ${grpBorder};border-radius:0 0 10px 10px;overflow:hidden;`;
-
-      if (!groupChannels.length) {
-        const empty = document.createElement('div');
-        empty.style.cssText = 'padding:20px;text-align:center;color:var(--muted);font-size:.9rem;';
-        empty.textContent = `No eFeds in Group ${grpLabel} yet — use the A/B toggle on any channel to assign it here.`;
-        rowsWrap.appendChild(empty);
-      } else {
-        groupChannels.forEach((ch, idx) => {
-          const state = _getScanState();
-          const key = ch.efed_name.toLowerCase();
-          const cbKey = key.replace(/[^a-z0-9]/g, '_');
-          const hasUrl = !!ch.yt_channel_url;
-          const now = new Date();
-          const thisMonth = now.getMonth(), thisYear = now.getFullYear();
-          const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          const lastMonth2 = lastMonthDate.getMonth(), lastMonthYear2 = lastMonthDate.getFullYear();
-          let autoDefault = false;
-          if (ch.lastUploadMs) {
-            const d = new Date(ch.lastUploadMs);
-            autoDefault = (d.getMonth()===thisMonth&&d.getFullYear()===thisYear)||(d.getMonth()===lastMonth2&&d.getFullYear()===lastMonthYear2);
-          }
-          const isEnabled = key in state ? state[key] !== false : autoDefault;
-          let lastUploadStr = '—';
-          if (ch.lastUploadMs) {
-            const d = new Date(ch.lastUploadMs);
-            if (!isNaN(d)) lastUploadStr = d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
-          } else if (ch.lastUpload) {
-            const d = new Date(ch.lastUpload + 'T12:00:00');
-            if (!isNaN(d)) lastUploadStr = d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
-          }
-          const isLast = idx === groupChannels.length - 1;
-          const item = document.createElement('div');
-          item.className = 'channel-item';
-          item.style.cssText = 'display:flex;align-items:center;gap:10px;background:var(--surface2);border:none;border-bottom:' + (isLast?'none':'1px solid var(--border)') + ';border-radius:0;padding:10px 14px;margin-bottom:0;transition:border-color .2s,opacity .2s;' + (!isEnabled ? 'opacity:.45;' : '');
-
-          item.innerHTML = `
-            <div style="width:36px;text-align:center;flex-shrink:0;">
-              <input type="checkbox" id="scan-cb-${cbKey}" ${isEnabled?'checked':''} style="width:16px;height:16px;accent-color:var(--gold);cursor:pointer;">
-            </div>
-            <div class="channel-avatar" style="flex-shrink:0;">${(ch.efed_name||'?')[0].toUpperCase()}</div>
-            <div class="channel-info" style="flex:1;min-width:0;">
-              <div class="channel-name">${esc(ch.efed_name)}</div>
-              <div id="ch-url-display-${cbKey}" class="channel-url">${hasUrl ? esc(ch.yt_channel_url) : '<span style="color:rgba(255,255,255,.25);font-style:italic;font-size:.84rem;">No YT channel — click ✏️ to add</span>'}</div>
-              ${ch.latestUrl ? `<div style="margin-top:3px;"><a href="${esc(ch.latestUrl)}" target="_blank" style="font-size:1.02rem;color:var(--gold);text-decoration:none;opacity:.8;font-family:'JetBrains Mono',monospace;">▶ ${esc(ch.latestShow || 'Latest Video')} ↗</a></div>` : ''}
-              <div id="ch-url-edit-${cbKey}" style="display:none;margin-top:6px;">
-                <div style="display:flex;gap:6px;align-items:center;">
-                  <input id="ch-url-input-${cbKey}" type="text" value="${hasUrl ? esc(ch.yt_channel_url) : ''}" placeholder="https://www.youtube.com/@ChannelName" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(200,168,75,.4);border-radius:6px;padding:6px 10px;color:#fff;font-family:'JetBrains Mono',monospace;font-size:.86rem;outline:none;">
-                  <button onclick="saveChannelUrl('${cbKey}','${esc(ch.efed_name)}',${ch.id||'null'})" style="padding:5px 12px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.4);border-radius:6px;color:var(--gold);font-family:'DM Sans',sans-serif;font-size:.86rem;font-weight:700;cursor:pointer;white-space:nowrap;">Save</button>
-                  <button onclick="cancelChannelEdit('${cbKey}')" style="padding:5px 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.86rem;cursor:pointer;">✕</button>
-                </div>
-                <div id="ch-url-edit-status-${cbKey}" style="font-size:.84rem;margin-top:4px;display:none;"></div>
-              </div>
-            </div>
-            <div style="width:68px;text-align:center;flex-shrink:0;">
-              <div style="display:inline-flex;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,.12);">
-                <button id="grp-a-${cbKey}" onclick="_setChannelGroup('${key}','${cbKey}','a')" style="padding:4px 10px;border:none;font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:1.5px;cursor:pointer;transition:background .15s,color .15s;"
-                  class="${_getChannelGroup(key)==='a'?'grp-btn-active-a':'grp-btn-inactive'}">A</button>
-                <button id="grp-b-${cbKey}" onclick="_setChannelGroup('${key}','${cbKey}','b')" style="padding:4px 10px;border:none;font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:1.5px;cursor:pointer;transition:background .15s,color .15s;"
-                  class="${_getChannelGroup(key)==='b'?'grp-btn-active-b':'grp-btn-inactive'}">B</button>
-              </div>
-            </div>
-            <div style="width:120px;text-align:right;flex-shrink:0;">
-              <span style="font-size:.86rem;color:${ch.lastUploadMs?'var(--gold)':'var(--muted)'};font-family:'JetBrains Mono',monospace;">${lastUploadStr}</span>
-            </div>
-            <div style="display:flex;gap:6px;flex-shrink:0;width:80px;justify-content:flex-end;">
-              <button onclick="editChannelUrl('${cbKey}')" class="btn btn-ghost btn-sm" title="Edit YouTube URL">✏️</button>
-              ${hasUrl ? `<a href="${esc(ch.yt_channel_url)}" target="_blank" class="btn btn-ghost btn-sm">↗</a>` : ''}
-              <button class="btn btn-red btn-sm" onclick="${ch.id ? `deleteChannel(${ch.id},'${esc(ch.efed_name)}')` : `deleteChannelByName('${esc(ch.efed_name)}')`}">✕</button>
-            </div>`;
-
-          rowsWrap.appendChild(item);
-
-          const cb = item.querySelector('#scan-cb-' + cbKey);
-          if (cb) {
-            cb.addEventListener('change', function() {
-              _setScanState(key, this.checked);
-              item.style.opacity = this.checked ? '1' : '.45';
-              const nowAll = all.every(c => _getScanState()[c.efed_name.toLowerCase()] !== false);
-              const saEl = document.getElementById('scan-select-all');
-              if (saEl) saEl.checked = nowAll;
-              updateScanCountLabel(all);
-            });
-          }
-        });
-      }
-
-      section.appendChild(rowsWrap);
-      list.appendChild(section);
-    }
-
-    renderGroupSection(groupA, 'A', '#ff6b6b', 'rgba(192,0,14,.08)', 'rgba(192,0,14,.25)', 'a');
-    renderGroupSection(groupB, 'B', '#7a90e8', 'rgba(76,100,200,.08)', 'rgba(76,100,200,.25)', 'b');
-
-    // Keep a hidden select-all for compat
-    const hiddenSA = document.createElement('input');
-    hiddenSA.type='checkbox'; hiddenSA.id='scan-select-all'; hiddenSA.style.display='none';
-    list.appendChild(hiddenSA);
-
+    // Render the active group tab
+    _renderActiveChGroup(all);
     updateScanCountLabel(all);
+
+    // Hidden compat checkbox
+    if (!document.getElementById('scan-select-all')) {
+      const hiddenSA = document.createElement('input');
+      hiddenSA.type='checkbox'; hiddenSA.id='scan-select-all'; hiddenSA.style.display='none';
+      list.appendChild(hiddenSA);
+    }
 
   } catch(e) { list.innerHTML = '<div class="empty">Error loading channels: ' + esc(e.message) + '</div>'; }
 }
