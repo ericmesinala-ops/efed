@@ -1263,16 +1263,6 @@ function _getChannelGroup(key) {
 function _setChannelGroup(key, cbKey, grp) {
   const s = _getGroupState(); s[key] = grp;
   localStorage.setItem('efed_scan_groups', JSON.stringify(s));
-  // Also persist to Supabase so index.html can read group counts
-  (async () => {
-    try {
-      // Find the efed_channels row by efed_name (case-insensitive key match)
-      const rows = await sbGet('efed_channels', `efed_name=ilike.${encodeURIComponent(key)}&select=id`).catch(() => []);
-      if (rows.length) {
-        await sbUpdate('efed_channels', { scan_group: grp }, `id=eq.${rows[0].id}`);
-      }
-    } catch(e) {}
-  })();
   // Reload so the channel moves into the correct group section
   loadChannels();
   updateCostPreview();
@@ -1456,7 +1446,7 @@ async function loadChannels() {
   try {
     // Pull registered channels (have YT URL) + all distinct efeds from approved submissions
     const [channels, subs] = await Promise.all([
-      sbGet('efed_channels', 'select=*,scan_group&order=efed_name.asc'),
+      sbGet('efed_channels', 'select=*&order=efed_name.asc'),
       sbGet('submissions', 'status=eq.approved&select=efed,date,date_ms,url,show_name&order=date_ms.desc')
     ]);
 
@@ -1478,8 +1468,6 @@ async function loadChannels() {
     });
 
     // Overlay registered channels (they have YT URLs and may have better names)
-    // Also sync scan_group from Supabase to localStorage
-    const groupState = _getGroupState();
     channels.forEach(ch => {
       const key = ch.efed_name.trim().toLowerCase();
       const existing = map.get(key) || {};
@@ -1492,17 +1480,23 @@ async function loadChannels() {
         latestUrl: existing.latestUrl || null,
         latestShow: existing.latestShow || null
       });
-      // Sync Supabase scan_group to localStorage (Supabase wins if set)
-      if (ch.scan_group && !groupState[key]) {
-        groupState[key] = ch.scan_group;
-      }
     });
-    localStorage.setItem('efed_scan_groups', JSON.stringify(groupState));
 
     // Sort alphabetically by display name
     const all = Array.from(map.values()).sort((a, b) => a.efed_name.localeCompare(b.efed_name));
     window._allChannels = all; // store for month filter
     const scannable = all.filter(ch => ch.yt_channel_url);
+
+    // ── AUTO-SPLIT: if no group assignments exist yet, divide 50/50 alphabetically ──
+    const existingGroups = _getGroupState();
+    const hasAnyAssignment = all.some(ch => existingGroups[ch.efed_name.toLowerCase()]);
+    if (!hasAnyAssignment && all.length > 0) {
+      const half = Math.ceil(all.length / 2);
+      all.forEach((ch, i) => {
+        existingGroups[ch.efed_name.toLowerCase()] = i < half ? 'a' : 'b';
+      });
+      localStorage.setItem('efed_scan_groups', JSON.stringify(existingGroups));
+    }
 
     document.getElementById('ch-count').textContent = all.length ? `· ${all.length} feds` : '';
     document.getElementById('stat-channels').textContent = all.length;
