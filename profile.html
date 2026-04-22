@@ -7684,40 +7684,69 @@ async function loadProfile() {
 
 // ── FEATURED IN THESE VIDEOS ──
 async function loadFeaturedVideos(targetUser) {
+  const featUser = targetUser || resolvedUser;
   const row = document.getElementById('featured-in-row');
   const section = document.getElementById('featured-in-section');
   const countEl = document.getElementById('stat-featured-count');
   if (!row) return;
-  if (section) section.style.display = 'none'; // hide until we confirm there are videos
+  if (section) section.style.display = 'none';
   try {
-    // Get all video_ids this CAW appears in
-    const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(resolvedUser)}&select=video_id,video_url,appeared_at&order=appeared_at.desc`);
-    // Update stat pill
+    // Get all appearances for this user
+    const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(featUser)}&select=video_id,video_url,appeared_at&order=appeared_at.desc`);
     if (countEl) countEl.textContent = appearances.length || '0';
     if (!appearances.length) {
       if (section) section.style.display = 'none';
       return;
     }
-    // Fetch matching submissions for thumbnails + show names
+
+    // Build a map keyed by video_id → video_url (for cases where video_url is stored)
+    const idToUrl = {};
+    appearances.forEach(a => { if (a.video_id && a.video_url) idToUrl[a.video_id] = a.video_url; });
+
+    // Prefer joining by id (reliable); fall back to url if id missing
+    const ids  = appearances.map(a => a.video_id).filter(Boolean);
     const urls = appearances.map(a => a.video_url).filter(Boolean);
-    let subMap = {};
-    if (urls.length) {
+
+    let subMap = {}; // keyed by both id and url for easy lookup
+
+    if (ids.length) {
       try {
-        const subs = await sbGet('submissions', `url=in.(${urls.map(u => encodeURIComponent(u)).join(',')})&select=url,show_name,date,thumb_url`);
-        subs.forEach(s => { subMap[s.url] = s; });
+        // Query submissions by id — no URL-encoding issues
+        const subs = await sbGet('submissions', `id=in.(${ids.join(',')})&select=id,url,show_name,date,thumb_url`);
+        subs.forEach(s => {
+          subMap[s.id]  = s;
+          if (s.url) subMap[s.url] = s;
+        });
       } catch(e) {}
     }
+
+    // If we still have appearances whose ids weren't matched, try by url
+    const missedUrls = urls.filter(u => !subMap[u]);
+    if (missedUrls.length) {
+      try {
+        // PostgREST in() wants a plain comma-separated list — do NOT encodeURIComponent each value
+        const inList = missedUrls.map(u => `"${u.replace(/"/g, '')}"`).join(',');
+        const subs2 = await sbGet('submissions', `url=in.(${inList})&select=id,url,show_name,date,thumb_url`);
+        subs2.forEach(s => { subMap[s.url] = s; if (s.id) subMap[s.id] = s; });
+      } catch(e) {}
+    }
+
     row.innerHTML = '';
     if (section) section.style.display = '';
+
     appearances.forEach(a => {
-      const s = subMap[a.video_url] || {};
-      const card = makeFeaturedVidCard(a.video_url, s.show_name, s.date, s.thumb_url);
+      // Resolve the best match: by id first, then by url
+      const s = (a.video_id && subMap[a.video_id]) || (a.video_url && subMap[a.video_url]) || {};
+      // Resolve the playback URL: from submissions row, then from appearance, then from id→url map
+      const playUrl = s.url || a.video_url || (a.video_id ? idToUrl[a.video_id] : null) || '';
+      const card = makeFeaturedVidCard(playUrl, s.show_name, s.date, s.thumb_url);
       row.appendChild(card);
     });
     setTimeout(updateFeatInArrows, 100);
   } catch(e) {
     if (section) section.style.display = 'none';
     if (countEl) countEl.textContent = '0';
+    console.error('loadFeaturedVideos error:', e);
   }
 }
 
