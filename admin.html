@@ -957,30 +957,35 @@ async function updateCostPreview() {
 let _scanCountdownTimers = { a: null, b: null };
 
 function checkScanLock(grp) {
-  const LOCK_KEY = 'admin_last_scan_' + grp;
-  const last = localStorage.getItem(LOCK_KEY);
-  const btn = document.getElementById('scan-btn-' + grp);
+  // SHARED LOCK: scanning either group locks BOTH for 24h
+  const lastA = parseInt(localStorage.getItem('admin_last_scan_a') || '0');
+  const lastB = parseInt(localStorage.getItem('admin_last_scan_b') || '0');
+  const lastAny = Math.max(lastA, lastB);
+  const lockedByGrp = lastA >= lastB ? 'A' : 'B';
+
+  const btn  = document.getElementById('scan-btn-' + grp);
   const cdEl = document.getElementById('scan-countdown-' + grp);
   if (_scanCountdownTimers[grp]) { clearInterval(_scanCountdownTimers[grp]); _scanCountdownTimers[grp] = null; }
-  if (last) {
-    const remaining = 24*60*60*1000 - (Date.now() - parseInt(last));
+
+  if (lastAny) {
+    const remaining = 24*60*60*1000 - (Date.now() - lastAny);
     if (remaining > 0) {
       btn.disabled = true;
       btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Locked';
       const updateCountdown = () => {
-        const rem = 24*60*60*1000 - (Date.now() - parseInt(last));
+        const rem = 24*60*60*1000 - (Date.now() - lastAny);
         if (rem <= 0) {
           clearInterval(_scanCountdownTimers[grp]); _scanCountdownTimers[grp] = null;
           if (cdEl) cdEl.textContent = '';
           btn.disabled = false;
-          btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg> Scan Group ${grp.toUpperCase()}`;
+          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg> Scan Group ' + grp.toUpperCase();
           _updateNextScanIndicator();
           return;
         }
-        const hrs = Math.floor(rem/3600000);
+        const hrs  = Math.floor(rem/3600000);
         const mins = Math.floor((rem%3600000)/60000);
         const secs = Math.floor((rem%60000)/1000);
-        if (cdEl) cdEl.textContent = `🔒 Next in ${hrs}h ${String(mins).padStart(2,'0')}m ${String(secs).padStart(2,'0')}s`;
+        if (cdEl) cdEl.textContent = '\uD83D\uDD12 Locked by Group ' + lockedByGrp + ' scan \u2014 unlocks in ' + hrs + 'h ' + String(mins).padStart(2,'0') + 'm ' + String(secs).padStart(2,'0') + 's';
       };
       updateCountdown();
       _scanCountdownTimers[grp] = setInterval(updateCountdown, 1000);
@@ -990,7 +995,7 @@ function checkScanLock(grp) {
   }
   if (cdEl) cdEl.textContent = '';
   btn.disabled = false;
-  btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg> Scan Group ${grp.toUpperCase()}`;
+  btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg> Scan Group ' + grp.toUpperCase();
   _updateNextScanIndicator();
   return true;
 }
@@ -998,45 +1003,36 @@ function checkScanLock(grp) {
 function _updateNextScanIndicator() {
   const lastA = parseInt(localStorage.getItem('admin_last_scan_a') || '0');
   const lastB = parseInt(localStorage.getItem('admin_last_scan_b') || '0');
-  const remA = lastA ? Math.max(0, 24*60*60*1000 - (Date.now() - lastA)) : 0;
-  const remB = lastB ? Math.max(0, 24*60*60*1000 - (Date.now() - lastB)) : 0;
+  const lastAny = Math.max(lastA, lastB);
+  const remShared = lastAny ? Math.max(0, 24*60*60*1000 - (Date.now() - lastAny)) : 0;
+  const lockedByGrp = lastA >= lastB ? 'A' : 'B';
 
-  const badgeA = document.getElementById('scan-a-badge');
-  const badgeB = document.getElementById('scan-b-badge');
+  const badgeA    = document.getElementById('scan-a-badge');
+  const badgeB    = document.getElementById('scan-b-badge');
   const indicator = document.getElementById('scan-next-text');
 
   if (badgeA) badgeA.style.display = 'none';
   if (badgeB) badgeB.style.display = 'none';
 
-  // Neither scanned yet
-  if (!lastA && !lastB) {
-    if (indicator) indicator.textContent = '📡 Neither group has been scanned yet — start with Group A!';
+  if (!lastAny) {
+    if (indicator) indicator.textContent = '\uD83D\uDCE1 Neither group has been scanned yet \u2014 start with Group A!';
     if (badgeA) badgeA.style.display = 'inline';
     return;
   }
-  // Both still locked
-  if (remA > 0 && remB > 0) {
-    const nextGrp = remA <= remB ? 'A' : 'B';
-    const remMs = Math.min(remA, remB);
-    const hrs = Math.floor(remMs/3600000), mins = Math.floor((remMs%3600000)/60000), secs = Math.floor((remMs%60000)/1000);
-    if (indicator) indicator.textContent = `🔒 Both groups locked — Group ${nextGrp} unlocks in ${hrs}h ${String(mins).padStart(2,'0')}m ${String(secs).padStart(2,'0')}s`;
+
+  if (remShared > 0) {
+    const hrs  = Math.floor(remShared/3600000);
+    const mins = Math.floor((remShared%3600000)/60000);
+    const secs = Math.floor((remShared%60000)/1000);
+    const nextGrp = lockedByGrp === 'A' ? 'B' : 'A';
+    if (indicator) indicator.textContent = '\uD83D\uDD12 Group ' + lockedByGrp + ' scanned today \u2014 Group ' + nextGrp + ' queued next. Both unlock in ' + hrs + 'h ' + String(mins).padStart(2,'0') + 'm ' + String(secs).padStart(2,'0') + 's';
     return;
   }
-  // A is ready, B is locked
-  if (remA === 0 && remB > 0) {
-    if (indicator) indicator.textContent = '✅ Group A is ready to scan!';
-    if (badgeA) badgeA.style.display = 'inline';
-    return;
-  }
-  // B is ready, A is locked
-  if (remB === 0 && remA > 0) {
-    if (indicator) indicator.textContent = '✅ Group B is ready to scan!';
-    if (badgeB) badgeB.style.display = 'inline';
-    return;
-  }
-  // Both unlocked
-  if (indicator) indicator.textContent = '✅ Both groups are ready to scan — start with Group A!';
-  if (badgeA) badgeA.style.display = 'inline';
+
+  const nextGrp = lockedByGrp === 'A' ? 'B' : 'A';
+  if (indicator) indicator.textContent = '\u2705 Ready to scan \u2014 Group ' + nextGrp + ' is up next!';
+  if (nextGrp === 'A') { if (badgeA) badgeA.style.display = 'inline'; }
+  else                 { if (badgeB) badgeB.style.display = 'inline'; }
 }
 
 async function startScan(grp) {
