@@ -3236,10 +3236,9 @@ html, body { overscroll-behavior-y: none; }
       -ms-overflow-style: none !important;
     }
     .expand-actions::-webkit-scrollbar { display: none !important; }
-    /* On mobile sticky bar, tooltips show above the button instead of below */
+    /* On mobile: hide per-button tooltips — replaced by the onboarding instruction row */
     .expand-actions .expand-action-btn::after {
-      top: auto !important;
-      bottom: calc(100% + 8px) !important;
+      display: none !important;
     }
 
     /* Smaller action buttons on mobile */
@@ -3252,6 +3251,29 @@ html, body { overscroll-behavior-y: none; }
     .expand-action-btn svg {
       width: 13px !important;
       height: 13px !important;
+    }
+
+    /* ── MOBILE ONBOARDING: button highlight glow ── */
+    .expand-action-btn.onboard-highlight {
+      box-shadow: 0 0 0 2px rgba(200,168,75,.55), 0 0 12px 2px rgba(200,168,75,.28) !important;
+      border-color: rgba(200,168,75,.55) !important;
+      animation: onboard-btn-pulse 1.2s ease-in-out infinite !important;
+    }
+    @keyframes onboard-btn-pulse {
+      0%,100% { box-shadow: 0 0 0 2px rgba(200,168,75,.5), 0 0 10px 2px rgba(200,168,75,.22); }
+      50%      { box-shadow: 0 0 0 2px rgba(200,168,75,.85), 0 0 18px 4px rgba(200,168,75,.4); }
+    }
+    /* Instruction row show state */
+    #expand-onboard-row.onboard-visible {
+      max-height: 48px !important;
+      opacity: 1 !important;
+    }
+    html.day-mode #expand-onboard-text {
+      color: rgba(0,0,0,.6) !important;
+    }
+    html.day-mode .expand-action-btn.onboard-highlight {
+      border-color: rgba(168,130,10,.65) !important;
+      box-shadow: 0 0 0 2px rgba(168,130,10,.5), 0 0 12px 2px rgba(168,130,10,.25) !important;
     }
 
     /* Center the 2-col rating grid on mobile */
@@ -4693,6 +4715,11 @@ function a2hsDismiss(){
 
     </div><!-- /expand-actions -->
     </div><!-- /expand-actions-scroll -->
+
+    <!-- ── MOBILE ONBOARDING INSTRUCTION ROW ── -->
+    <div id="expand-onboard-row" style="display:none;overflow:hidden;transition:max-height .3s ease,opacity .3s ease;max-height:0;opacity:0;">
+      <div id="expand-onboard-text" style="text-align:center;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:500;letter-spacing:.2px;padding:6px 16px 10px;color:rgba(255,255,255,.72);line-height:1.4;"></div>
+    </div>
 
     <!-- ── SUPPORTERS ROW ── -->
     <div id="expand-supporters-section" style="margin-bottom:20px;display:none;">
@@ -14748,6 +14775,175 @@ if ('serviceWorker' in navigator) {
       }, 260);
     }
   }, { passive: true });
+})();
+</script>
+
+<script>
+// ── MOBILE VIDEO PAGE ONBOARDING SEQUENCE ──
+// Runs once per user (persisted in localStorage). Shows an instructional
+// text row beneath the action bar with a highlighted button for each step.
+(function() {
+  'use strict';
+
+  const STORAGE_KEY = 'efed_video_onboard_done_v1';
+  const STEP_DURATION = 2000; // ms each step displays
+  const INITIAL_DELAY = 1000; // ms after page load before sequence starts
+
+  // Only run on mobile
+  function isMobile() { return window.innerWidth <= 768; }
+
+  // Check if already done for this user
+  function isDone() {
+    try { return !!localStorage.getItem(STORAGE_KEY); } catch { return false; }
+  }
+  function markDone() {
+    try { localStorage.setItem(STORAGE_KEY, '1'); } catch {}
+  }
+
+  // Build the step list dynamically based on which buttons are currently visible
+  function buildSteps(canRate, ratingAvailable) {
+    const steps = [];
+
+    const likeBtn = document.getElementById('expand-like-btn');
+    if (likeBtn) {
+      steps.push({ btn: likeBtn, text: 'Click to like this video', red: false });
+    }
+
+    const rateBtn = document.getElementById('expand-rate-btn');
+    if (rateBtn) {
+      const msg = ratingAvailable
+        ? 'Click to rate this video'
+        : 'Watch for 10 minutes to rate this video';
+      steps.push({ btn: rateBtn, text: msg, red: false });
+    }
+
+    const appearBtn = document.getElementById('expand-appear-btn');
+    if (appearBtn) {
+      steps.push({ btn: appearBtn, text: 'Click if you are in this episode', red: false });
+    }
+
+    const bookmarkBtn = document.getElementById('expand-bookmark-btn');
+    if (bookmarkBtn) {
+      steps.push({ btn: bookmarkBtn, text: 'Bookmark this video to save it to your profile', red: false });
+    }
+
+    const tagBtn = document.getElementById('expand-tag-btn');
+    if (tagBtn && tagBtn.style.display !== 'none') {
+      steps.push({ btn: tagBtn, text: 'Click to tag this video', red: false });
+    }
+
+    const repostBtn = document.getElementById('expand-repost-btn');
+    if (repostBtn && repostBtn.style.display !== 'none') {
+      steps.push({ btn: repostBtn, text: 'Post this video on your feed to help promote it', red: false });
+    }
+
+    // Delete takes priority over Flag — show whichever is visible
+    const deleteBtn = document.getElementById('expand-delete-btn');
+    if (deleteBtn && deleteBtn.style.display !== 'none') {
+      steps.push({ btn: deleteBtn, text: 'Delete this video', red: true });
+    } else {
+      const flagBtn = document.getElementById('expand-flag-btn');
+      if (flagBtn && flagBtn.style.display !== 'none') {
+        steps.push({ btn: flagBtn, text: 'Flag this video', red: false });
+      }
+    }
+
+    return steps;
+  }
+
+  function runSequence() {
+    if (!isMobile()) return;
+    if (isDone()) return;
+
+    const row = document.getElementById('expand-onboard-row');
+    const textEl = document.getElementById('expand-onboard-text');
+    if (!row || !textEl) return;
+
+    // Determine rating availability from the rate button's current state
+    const rateBar = document.getElementById('rate-watch-bar-wrap');
+    const ratingAvailable = !rateBar || rateBar.style.display === 'none' ||
+                            (rateBar.style.display === 'none');
+    // More reliable: if the rate watch bar is hidden (not in progress), rating is available
+    const watchBarVisible = rateBar && rateBar.style.display !== 'none';
+
+    const steps = buildSteps(!watchBarVisible, !watchBarVisible);
+    if (!steps.length) { markDone(); return; }
+
+    let currentStep = 0;
+    let timeoutId = null;
+
+    function clearHighlight() {
+      steps.forEach(s => s.btn.classList.remove('onboard-highlight'));
+    }
+
+    function showStep(i) {
+      if (i >= steps.length) {
+        // Sequence complete — collapse the row
+        clearHighlight();
+        row.classList.remove('onboard-visible');
+        // After transition, hide completely so no empty space remains
+        setTimeout(() => { row.style.display = 'none'; }, 320);
+        markDone();
+        return;
+      }
+
+      clearHighlight();
+      const step = steps[i];
+
+      // Update text
+      textEl.style.color = step.red ? '#ff6b6b' : '';
+      textEl.textContent = step.text;
+
+      // Show row if not yet visible
+      if (!row.classList.contains('onboard-visible')) {
+        row.style.display = 'block';
+        // Force reflow so transition fires
+        void row.offsetHeight;
+        row.classList.add('onboard-visible');
+      }
+
+      // Highlight button
+      step.btn.classList.add('onboard-highlight');
+
+      timeoutId = setTimeout(() => showStep(i + 1), STEP_DURATION);
+    }
+
+    // Begin after initial delay
+    setTimeout(() => showStep(0), INITIAL_DELAY);
+  }
+
+  // Hook into the video expand open event. The expand overlay uses `open` class.
+  // We observe #card-expand for class changes so we catch each time a video opens.
+  function observeExpand() {
+    const overlay = document.getElementById('card-expand');
+    if (!overlay) { setTimeout(observeExpand, 400); return; }
+
+    let hasRun = false;
+    const observer = new MutationObserver(() => {
+      if (overlay.classList.contains('open')) {
+        if (!hasRun) {
+          hasRun = true;
+          // Give the page a moment to render buttons and their visibility
+          setTimeout(runSequence, 300);
+        }
+      } else {
+        hasRun = false;
+      }
+    });
+    observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+
+    // Also handle the case where ?play= loads the video immediately
+    if (overlay.classList.contains('open') && !hasRun) {
+      hasRun = true;
+      setTimeout(runSequence, 300);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', observeExpand);
+  } else {
+    observeExpand();
+  }
 })();
 </script>
 
