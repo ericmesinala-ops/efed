@@ -7699,7 +7699,7 @@ async function requestClaimReview() {
     <button class="search-tab"        data-tab="shows"   onclick="_soSearch.setTab('shows')">Shows</button>
     <button class="search-tab"        data-tab="matches"  onclick="_soSearch.setTab('matches')">Matches</button>
     <button class="search-tab"        data-tab="efeds"   onclick="_soSearch.setTab('efeds')">eFeds</button>
-    <button class="search-tab"        data-tab="people"  onclick="_soSearch.setTab('people')">People</button>
+    <button class="search-tab"        data-tab="people"  onclick="_soSearch.setTab('people')">CAWs</button>
   </div>
   <div id="search-results-scroll"></div>
 </div>
@@ -7794,7 +7794,7 @@ const _soSearch = (() => {
     if (typeof videos !== 'undefined' && videos.length) return videos;
     if (_videosCache) return _videosCache;
     try {
-      const rows = await sbGet('submissions', 'status=eq.approved&order=submitted_at.desc');
+      const rows = await sbGet('submissions', 'status=eq.approved&order=date_ms.desc');
       _videosCache = rows.map(r => ({
         url: r.url, show: r.show_name || '', efed: r.efed || '',
         date: r.date || '', thumb: r.thumb_url || null
@@ -7804,6 +7804,11 @@ const _soSearch = (() => {
   }
 
   /* ---- main search ---- */
+  function isMatch(v) {
+    const s = ((v.show || '') + ' ' + (v.efed || '')).toLowerCase();
+    return /\bvs\.?\b|match|bout/.test(s);
+  }
+
   async function run(q) {
     showLoading();
     const ql = q.toLowerCase();
@@ -7824,43 +7829,37 @@ const _soSearch = (() => {
       (v.efed||'').toLowerCase().includes(ql))
     );
 
-    // eFeds — dedupe from videos, also match by acronym
+    // eFeds — dedupe from videos
     const efedMap = {};
     allVids.forEach(v => {
       const name = (v.efed||'').trim();
       if (!name) return;
-      if (!efedMap[name]) efedMap[name] = { count: 0 };
+      if (!efedMap[name]) efedMap[name] = { count: 0, logo: null };
       efedMap[name].count++;
     });
-    // Also add eFeds that have no videos but match acronym
+    // Also add eFed owners from people cache (so eFeds with no videos still appear)
     if (_peopleCache) {
-      _peopleCache.filter(u => u.promo_name && u.acronym).forEach(u => {
-        const name = u.promo_name.trim();
-        if (!efedMap[name]) efedMap[name] = { count: 0 };
-        efedMap[name].acronym = (u.acronym||'').toUpperCase();
+      _peopleCache.filter(u => u.is_efed_owner && u.promo_name).forEach(u => {
+        if (!efedMap[u.promo_name]) efedMap[u.promo_name] = { count: 0, logo: null };
+        if (u.promo_logo) efedMap[u.promo_name].logo = u.promo_logo;
+        if (u.acronym) efedMap[u.promo_name].acronym = u.acronym.toUpperCase();
       });
     }
     const efedMatches = Object.entries(efedMap)
       .filter(([name, d]) => name.toLowerCase().includes(ql) || (d.acronym||'').toLowerCase() === ql)
       .sort((a, b) => b[1].count - a[1].count)
-      .map(([name, d]) => ({ name, count: d.count, acronym: d.acronym }));
+      .map(([name, d]) => ({ name, count: d.count, logo: d.logo, acronym: d.acronym }));
 
     // People — query users table
     let peopleMatches = [];
     try {
       if (!_peopleCache) {
-        try {
-          _peopleCache = await sbGet('users', 'select=username,display_name,promo_name,avatar_url,is_efed_owner,role,acronym&limit=500');
-        } catch(e) {
-          // acronym column may not exist yet — fall back without it
-          _peopleCache = await sbGet('users', 'select=username,display_name,promo_name,avatar_url,is_efed_owner,role&limit=500');
-        }
+        _peopleCache = await sbGet('users', 'select=username,display_name,promo_name,avatar_url,promo_logo,is_efed_owner,role,acronym&limit=500');
       }
       peopleMatches = _peopleCache.filter(u =>
         (u.username||'').toLowerCase().includes(ql) ||
         (u.display_name||'').toLowerCase().includes(ql) ||
-        (u.promo_name||'').toLowerCase().includes(ql) ||
-        (u.acronym||'').toLowerCase() === ql
+        (u.promo_name||'').toLowerCase().includes(ql)
       );
     } catch(e) {}
 
@@ -7921,11 +7920,13 @@ const _soSearch = (() => {
     if (doEfeds && efeds.length) {
       html += '<div class="sr-section-label">eFeds <span class="sr-count-badge">' + efeds.length + '</span></div>';
       efeds.forEach(ef => {
-        const acTag = ef.acronym ? `<span style="font-size:.55rem;letter-spacing:1.5px;color:rgba(255,255,255,.35);background:rgba(255,255,255,.06);border-radius:4px;padding:1px 5px;font-weight:700;">${esc(ef.acronym)}</span>` : '';
+        const srLogoHtml = ef.logo
+          ? '<img src="' + esc(ef.logo) + '" style="width:100%;height:100%;object-fit:cover;border-radius:9px;" onerror="this.style.display=\'none\'">'
+          : ef.name[0].toUpperCase();
         html += '<div class="sr-efed-item" onclick="_soSearch.openEfed(\'' + encodeURIComponent(ef.name) + '\')">' +
-          '<div class="sr-efed-icon">🎭</div>' +
+          '<div class="sr-efed-icon">' + srLogoHtml + '</div>' +
           '<div class="sr-efed-info">' +
-            '<div class="sr-efed-name" style="display:flex;align-items:center;gap:6px;">' + esc(ef.name) + acTag + '</div>' +
+            '<div class="sr-efed-name">' + esc(ef.name) + (ef.acronym ? ' <span style="font-size:.55rem;letter-spacing:1.5px;color:rgba(255,255,255,.35);background:rgba(255,255,255,.06);border-radius:4px;padding:1px 5px;font-weight:700;">' + esc(ef.acronym) + '</span>' : '') + '</div>' +
             '<div class="sr-efed-eps">' + ef.count + ' episode' + (ef.count !== 1 ? 's' : '') + '</div>' +
           '</div>' +
           '<div class="sr-arrow">›</div></div>';
@@ -7933,7 +7934,7 @@ const _soSearch = (() => {
     }
 
     if (doPeople && people.length) {
-      html += '<div class="sr-section-label">People <span class="sr-count-badge">' + people.length + '</span></div>';
+      html += '<div class="sr-section-label">CAWs <span class="sr-count-badge">' + people.length + '</span></div>';
       people.forEach(u => {
         const name = esc(u.display_name || u.username || '?');
         const initial = (u.display_name || u.username || '?')[0].toUpperCase();
@@ -7958,6 +7959,7 @@ const _soSearch = (() => {
 
   /* ---- result actions ---- */
   function openVideo(urlEncoded) {
+    if (window._publicVideoBlocked) { close(); _showSignInPrompt(); return; }
     const url = decodeURIComponent(urlEncoded);
     close();
     // If on index.html and openExpand exists, use it; otherwise navigate
@@ -7968,11 +7970,13 @@ const _soSearch = (() => {
     window.location.href = 'index.html?play=' + encodeURIComponent(url);
   }
   function openEfed(nameEncoded) {
+    if (window._publicVideoBlocked) { close(); _showSignInPrompt(); return; }
     const name = decodeURIComponent(nameEncoded);
     close();
     window.location.href = 'efed.html?e=' + encodeURIComponent(name);
   }
   function openProfile(usernameEncoded) {
+    if (window._publicVideoBlocked) { close(); _showSignInPrompt(); return; }
     const username = decodeURIComponent(usernameEncoded);
     close();
     window.location.href = 'profile.html?u=' + encodeURIComponent(username);
