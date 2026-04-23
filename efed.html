@@ -3294,24 +3294,46 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
   });
   if (!allEvents.length) return;
 
-  // Fetch this user's roster row for this eFed
-  let bk = null;
-  try {
-    const rows = await sbGet('roster', 'username=eq.' + encodeURIComponent(session.username) + '&efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=plan_note');
-    const raw = rows[0]?.plan_note;
-    if (raw) bk = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  } catch(e) { return; }
-  if (!bk || !bk.opponent) return;
+  const isAdmin = session.username.toLowerCase() === ADMIN_USERNAME;
 
-  // Fetch avatar info for current user + opponent
+  // Admin: fetch ALL roster rows with a plan_note so every booked match shows
+  // Member: fetch only their own row
+  let rosterRows = [];
+  try {
+    if (isAdmin) {
+      rosterRows = await sbGet('roster', 'efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=username,plan_note');
+    } else {
+      rosterRows = await sbGet('roster', 'username=eq.' + encodeURIComponent(session.username) + '&efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=username,plan_note');
+    }
+  } catch(e) { return; }
+
+  // Parse bookings and deduplicate (A vs B == B vs A)
+  const seen = new Set();
+  const bookings = [];
+  for (const row of rosterRows) {
+    if (!row.plan_note) continue;
+    let bk = null;
+    try { bk = typeof row.plan_note === 'string' ? JSON.parse(row.plan_note) : row.plan_note; } catch(e) { continue; }
+    if (!bk || !bk.opponent || bk.ghost) continue;
+    const key = [row.username, bk.opponent].sort().join('||');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    bookings.push({ ownerUsername: row.username, bk });
+  }
+  if (!bookings.length) return;
+
+  // Collect all usernames needed for avatar lookup
+  const allUsernames = new Set();
+  bookings.forEach(({ ownerUsername, bk }) => {
+    allUsernames.add(ownerUsername);
+    if (bk.opponent && !bk.opponent.startsWith('__')) allUsernames.add(bk.opponent);
+  });
+
   let avatarMap = {};
   try {
-    const uRows = await sbGet('users', 'username=in.(' + [session.username, bk.opponent].map(u=>encodeURIComponent(u)).join(',') + ')&select=username,avatar_url,display_name');
+    const uRows = await sbGet('users', 'username=in.(' + Array.from(allUsernames).map(u=>encodeURIComponent(u)).join(',') + ')&select=username,avatar_url,display_name');
     uRows.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
   } catch(e) {}
-
-  const myName = avatarMap[session.username]?.name || session.username;
-  const oppName = bk.opponentName || avatarMap[bk.opponent]?.name || bk.opponent || '';
 
   const _avCircle = (username, label) => {
     const info = avatarMap[username] || {};
@@ -3320,63 +3342,60 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
       : `<div style="width:26px;height:26px;border-radius:50%;background:rgba(192,0,14,.15);border:1.5px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.7rem;color:#c0000e;flex-shrink:0;">${(label||'?')[0].toUpperCase()}</div>`;
   };
 
-  const _makeBanner = () => {
+  // Clear all existing banners before re-rendering
+  document.querySelectorAll('.sched-booking-banner').forEach(b => b.remove());
+
+  // Render a banner per unique booking
+  bookings.forEach(({ ownerUsername, bk }) => {
+    // isMyMatch = true if the logged-in user is either side of this match
+    const isMyMatch = ownerUsername === session.username || bk.opponent === session.username;
+    const nameA = avatarMap[ownerUsername]?.name || ownerUsername;
+    const nameB = bk.opponentName || avatarMap[bk.opponent]?.name || bk.opponent || '';
     const dateTxt = (bk.tba || bk.date === 'TBA') ? 'TBA' : (bk.date || '');
-    const wrap = document.createElement('div');
-    wrap.className = 'sched-booking-banner';
-    wrap.style.cssText = 'margin-top:8px;padding:12px 14px;background:rgba(192,0,14,.06);border:1px solid rgba(192,0,14,.18);border-radius:10px;';
-    wrap.innerHTML = `
-      <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:#c0000e;font-weight:700;margin-bottom:8px;">Your Match</div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-        <div style="display:flex;align-items:center;gap:6px;">${_avCircle(session.username, myName)}<span style="font-size:.82rem;font-weight:600;color:#fff;">${myName.replace(/</g,'&lt;')}</span></div>
-        <span style="font-size:.65rem;font-weight:700;color:rgba(255,255,255,.3);letter-spacing:1px;">VS</span>
-        <div style="display:flex;align-items:center;gap:6px;">${_avCircle(bk.opponent, oppName)}<span style="font-size:.82rem;font-weight:600;color:#fff;">${oppName.replace(/</g,'&lt;')}</span></div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        ${bk.show ? `<span style="font-size:.7rem;color:rgba(255,255,255,.4);">📺 ${bk.show.replace(/</g,'&lt;')}</span>` : ''}
-        ${dateTxt ? `<span style="font-size:.7rem;color:rgba(255,255,255,.35);">📅 ${dateTxt.replace(/</g,'&lt;')}</span>` : ''}
-      </div>`;
-    return wrap;
-  };
+    const label = isMyMatch ? '⚡ Your Match' : 'Booked Match';
 
-  // Match booking to events by show name (case-insensitive), or fall back to first event
-  const bookingShow = (bk.show || '').trim().toLowerCase();
-  let matched = false;
+    const _makeBanner = () => {
+      const wrap = document.createElement('div');
+      wrap.className = 'sched-booking-banner';
+      if (isMyMatch) {
+        wrap.style.cssText = 'margin-top:8px;padding:12px 14px;background:rgba(192,0,14,.13);border:1.5px solid rgba(192,0,14,.55);border-radius:10px;box-shadow:0 0 18px rgba(192,0,14,.18),inset 0 0 24px rgba(192,0,14,.04);';
+      } else {
+        wrap.style.cssText = 'margin-top:8px;padding:12px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px;';
+      }
+      wrap.innerHTML = `
+        <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:${isMyMatch ? '#ff3b3b' : 'rgba(255,255,255,.3)'};font-weight:700;margin-bottom:8px;">${label}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:6px;">${_avCircle(ownerUsername, nameA)}<span style="font-size:.82rem;font-weight:600;color:${isMyMatch ? '#fff' : 'rgba(255,255,255,.7)'};">${nameA.replace(/</g,'&lt;')}</span></div>
+          <span style="font-size:.65rem;font-weight:700;color:${isMyMatch ? 'rgba(255,255,255,.5)' : 'rgba(255,255,255,.2)'};letter-spacing:1px;">VS</span>
+          <div style="display:flex;align-items:center;gap:6px;">${_avCircle(bk.opponent, nameB)}<span style="font-size:.82rem;font-weight:600;color:${isMyMatch ? '#fff' : 'rgba(255,255,255,.7)'};">${nameB.replace(/</g,'&lt;')}</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          ${bk.show ? `<span style="font-size:.7rem;color:rgba(255,255,255,.4);">📺 ${bk.show.replace(/</g,'&lt;')}</span>` : ''}
+          ${dateTxt ? `<span style="font-size:.7rem;color:rgba(255,255,255,.35);">📅 ${dateTxt.replace(/</g,'&lt;')}</span>` : ''}
+        </div>`;
+      return wrap;
+    };
 
-  allEvents.forEach(evInfo => {
-    const evTitle = (evInfo.title || '').trim().toLowerCase();
-    const isMatch = bookingShow && evTitle && (evTitle === bookingShow || evTitle.includes(bookingShow) || bookingShow.includes(evTitle));
-    if (!isMatch) return;
-    matched = true;
+    // Match to event card by show name, or fall back to first event
+    const bookingShow = (bk.show || '').trim().toLowerCase();
+    let matched = false;
+    allEvents.forEach(evInfo => {
+      const evTitle = (evInfo.title || '').trim().toLowerCase();
+      const isMatch = bookingShow && evTitle && (evTitle === bookingShow || evTitle.includes(bookingShow) || bookingShow.includes(evTitle));
+      if (!isMatch) return;
+      matched = true;
+      let card = evInfo.isExtra
+        ? (document.querySelectorAll('.ev-extra-card')[evInfo.idx] || null)
+        : (document.getElementById('event-card') || document.querySelector('.ev-primary-card'));
+      if (!card) return;
+      card.insertAdjacentElement('afterend', _makeBanner());
+    });
 
-    let card = null;
-    if (!evInfo.isExtra) {
-      card = document.getElementById('event-card') || document.querySelector('.ev-primary-card');
-    } else {
-      const extras = document.querySelectorAll('.ev-extra-card');
-      card = extras[evInfo.idx] || null;
+    if (!matched) {
+      const card = document.getElementById('event-card') || document.querySelector('.ev-primary-card');
+      if (card) card.insertAdjacentElement('afterend', _makeBanner());
     }
-    if (!card) return;
-    // Remove any old banner first
-    const old = card.parentNode?.querySelector('.sched-booking-banner[data-after="' + evInfo.idx + '"]');
-    if (old) old.remove();
-    const banner = _makeBanner();
-    banner.dataset.after = String(evInfo.idx);
-    card.insertAdjacentElement('afterend', banner);
   });
-
-  // No show-name match — attach to first event as fallback
-  if (!matched && allEvents.length) {
-    const firstInfo = allEvents[0];
-    let card = document.getElementById('event-card') || document.querySelector('.ev-primary-card');
-    if (card) {
-      const old = card.parentNode?.querySelector('.sched-booking-banner[data-after="-1"]');
-      if (old) old.remove();
-      const banner = _makeBanner();
-      banner.dataset.after = '-1';
-      card.insertAdjacentElement('afterend', banner);
-    }
-  }
 }
 
 function _initEventCardDrag(container, isOwner) {
