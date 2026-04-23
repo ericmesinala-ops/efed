@@ -3167,7 +3167,8 @@ async function saveEvent() {
     const r=await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_title:primary.title,efed_event_date:primary.date||null,efed_event_location:primary.location||null,efed_event_main:primary.slogan||null,efed_event_hype:hype||null,efed_events_json:extraEvents})});
     if (!r.ok) throw new Error('HTTP '+r.status);
     window._efedExtraEvents = extraEvents;
-    renderEvent({title:primary.title,date:primary.date||null,location:primary.location||null,main:primary.slogan||null,hype:hype||null}, extraEvents);
+    window._efedPrimaryEvent = {title:primary.title,date:primary.date||null,location:primary.location||null,main:primary.slogan||null,hype:hype||null};
+    renderEvent(window._efedPrimaryEvent, extraEvents);
     msg.textContent='Saved!'; msg.style.color='#4caf64'; setTimeout(closeEventModal,800);
   } catch(e) { msg.textContent='Save failed: '+e.message; msg.style.color='#ff6b6b'; }
 }
@@ -3184,9 +3185,11 @@ function _ytId(url) {
   return m ? m[1] : '';
 }
 
-function _makeEventCard(ev, isOwnerOrAdmin, extraEls) {
+function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
+  // extraIndex: undefined/null = primary card, number = extra event index in _efedExtraEvents[]
+  const isExtraCard = (typeof extraIndex === 'number');
   const card = document.createElement('div');
-  card.style.cssText = 'background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.13);border-radius:12px;padding:14px 16px;margin-top:12px;display:flex;align-items:flex-start;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,.35);';
+  card.style.cssText = 'position:relative;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.13);border-radius:12px;padding:14px 16px;margin-top:12px;display:flex;align-items:flex-start;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,.35);transition:background .18s;';
 
   const inner = document.createElement('div');
   inner.style.cssText = 'flex:1;min-width:0;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;';
@@ -3200,6 +3203,86 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls) {
       ${ev.location ? `<div style="display:flex;font-size:.72rem;color:rgba(255,255,255,.55);align-items:center;gap:5px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>${(ev.location||'').replace(/</g,'&lt;')}</div>` : ''}
     </div>`;
   card.appendChild(inner);
+
+  // ── Hover action buttons for owner/admin ──
+  if (isOwnerOrAdmin) {
+    // Edit button — always shown for both primary and extra cards
+    const evEditBtn = document.createElement('button');
+    evEditBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+    evEditBtn.title = 'Edit event';
+    const editRight = isExtraCard ? '44px' : '12px';
+    evEditBtn.style.cssText = `position:absolute;top:50%;right:${editRight};transform:translateY(-50%);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:7px;color:rgba(255,255,255,.4);padding:5px 7px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .18s,background .18s,color .18s;pointer-events:none;line-height:1;`;
+    evEditBtn.onmouseenter = () => { evEditBtn.style.background='rgba(200,168,75,.15)'; evEditBtn.style.borderColor='rgba(200,168,75,.35)'; evEditBtn.style.color='#c8a84b'; };
+    evEditBtn.onmouseleave = () => { evEditBtn.style.background='rgba(255,255,255,.06)'; evEditBtn.style.borderColor='rgba(255,255,255,.12)'; evEditBtn.style.color='rgba(255,255,255,.4)'; };
+    evEditBtn.onclick = (e) => { e.stopPropagation(); openEventModal(); };
+    card.appendChild(evEditBtn);
+
+    // Delete button — only for extra event cards
+    if (isExtraCard) {
+      const evDelBtn = document.createElement('button');
+      evDelBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
+      evDelBtn.title = 'Delete event';
+      evDelBtn.style.cssText = 'position:absolute;top:50%;right:12px;transform:translateY(-50%);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:7px;color:rgba(255,255,255,.4);padding:5px 7px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .18s,background .18s,color .18s;pointer-events:none;line-height:1;';
+      evDelBtn.onmouseenter = () => { evDelBtn.style.background='rgba(192,0,14,.15)'; evDelBtn.style.borderColor='rgba(192,0,14,.35)'; evDelBtn.style.color='#ff6b6b'; };
+      evDelBtn.onmouseleave = () => { evDelBtn.style.background='rgba(255,255,255,.06)'; evDelBtn.style.borderColor='rgba(255,255,255,.12)'; evDelBtn.style.color='rgba(255,255,255,.4)'; };
+      evDelBtn.onclick = (e) => {
+        e.stopPropagation();
+        const evTitle = (ev.title||'Untitled Event').replace(/</g,'&lt;');
+        const confirmBg = document.createElement('div');
+        confirmBg.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:20px;';
+        const confirmBox = document.createElement('div');
+        confirmBox.style.cssText = 'background:#13131a;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:28px 24px;max-width:320px;width:100%;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.8);';
+        confirmBox.innerHTML = `
+          <div style="font-size:1.6rem;margin-bottom:12px;">🗑️</div>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:2px;color:#fff;margin-bottom:8px;">Delete Event?</div>
+          <div style="font-size:.78rem;color:rgba(255,255,255,.45);line-height:1.6;margin-bottom:22px;">${evTitle}<br><span style="font-size:.68rem;opacity:.6;">This event will be permanently removed from the calendar.</span></div>
+          <div style="display:flex;gap:10px;justify-content:center;">
+            <button id="ev-del-cancel" style="flex:1;padding:10px 0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:9px;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s;">Cancel</button>
+            <button id="ev-del-confirm" style="flex:1;padding:10px 0;background:rgba(192,0,14,.2);border:1px solid rgba(192,0,14,.4);border-radius:9px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s;">Delete</button>
+          </div>`;
+        confirmBg.appendChild(confirmBox);
+        document.body.appendChild(confirmBg);
+        confirmBox.querySelector('#ev-del-cancel').onclick = () => confirmBg.remove();
+        confirmBox.querySelector('#ev-del-confirm').onclick = async () => {
+          confirmBg.remove();
+          const session = getSession();
+          if (!session) return;
+          const extras = (window._efedExtraEvents || []).filter((_, i) => i !== extraIndex);
+          try {
+            await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+              method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_events_json: extras })
+            });
+            window._efedExtraEvents = extras;
+            renderEvent(window._efedPrimaryEvent || {}, extras);
+          } catch(err) { console.error('Delete event error:', err); }
+        };
+      };
+      card.appendChild(evDelBtn);
+
+      // Hover shows both edit + delete
+      card.addEventListener('mouseenter', () => {
+        evEditBtn.style.opacity='1'; evEditBtn.style.pointerEvents='auto';
+        evDelBtn.style.opacity='1'; evDelBtn.style.pointerEvents='auto';
+        card.style.background='rgba(255,255,255,.07)';
+      });
+      card.addEventListener('mouseleave', () => {
+        evEditBtn.style.opacity='0'; evEditBtn.style.pointerEvents='none';
+        evDelBtn.style.opacity='0'; evDelBtn.style.pointerEvents='none';
+        card.style.background='rgba(255,255,255,.05)';
+      });
+    } else {
+      // Primary card — hover shows only edit button
+      card.addEventListener('mouseenter', () => {
+        evEditBtn.style.opacity='1'; evEditBtn.style.pointerEvents='auto';
+        card.style.background='rgba(255,255,255,.07)';
+      });
+      card.addEventListener('mouseleave', () => {
+        evEditBtn.style.opacity='0'; evEditBtn.style.pointerEvents='none';
+        card.style.background='rgba(255,255,255,.05)';
+      });
+    }
+  }
+
   if (extraEls) extraEls.push(card);
   return card;
 }
@@ -3268,8 +3351,8 @@ function renderEvent(ev, extraEvents) {
   if (evCardsContainer) {
     evCardsContainer.innerHTML = '';
     if (extraEvents && extraEvents.length) {
-      extraEvents.forEach(xev => {
-        const card = _makeEventCard(xev, isOwnerOrAdmin, null);
+      extraEvents.forEach((xev, xIdx) => {
+        const card = _makeEventCard(xev, isOwnerOrAdmin, null, xIdx);
         card.classList.add('ev-extra-card');
         evCardsContainer.appendChild(card);
       });
@@ -3366,7 +3449,7 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
     const opponents = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
     const oppNames  = Array.isArray(bk.opponentNames) ? bk.opponentNames : (bk.opponentName ? [bk.opponentName] : []);
 
-    const dateTxt = (bk.tba || bk.date === 'TBA') ? 'TBA' : (bk.date || '');
+    const dateTxt = (bk.tba || bk.date === 'TBA') ? '' : (bk.date || '');
     const label = isMyMatch ? '⚡ Your Match' : 'Match';
     const matchType = bk.matchType || '';
 
@@ -3422,17 +3505,77 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
           openBookingModal(ownerUsername, displayName, rowId, bk);
         };
 
-        wrap.appendChild(editBtn);
+        // ── Delete button (owner/admin only, appears on hover) ──
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'sched-banner-delete-btn';
+        deleteBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
+        deleteBtn.title = 'Delete match';
+        deleteBtn.style.cssText = 'position:absolute;top:50%;right:44px;transform:translateY(-50%);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:7px;color:rgba(255,255,255,.4);padding:5px 7px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .18s,background .18s,color .18s;pointer-events:none;line-height:1;';
 
-        // Show/hide edit button on banner hover
+        deleteBtn.onmouseenter = () => { deleteBtn.style.background = 'rgba(192,0,14,.15)'; deleteBtn.style.borderColor = 'rgba(192,0,14,.35)'; deleteBtn.style.color = '#ff6b6b'; };
+        deleteBtn.onmouseleave = () => { deleteBtn.style.background = 'rgba(255,255,255,.06)'; deleteBtn.style.borderColor = 'rgba(255,255,255,.12)'; deleteBtn.style.color = 'rgba(255,255,255,.4)'; };
+
+        deleteBtn.onclick = async (e) => {
+          e.stopPropagation();
+          // Show confirmation popup
+          const confirmBg = document.createElement('div');
+          confirmBg.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:20px;';
+          const confirmBox = document.createElement('div');
+          confirmBox.style.cssText = 'background:#13131a;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:28px 24px;max-width:320px;width:100%;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.8);';
+          const nameA2 = avatarMap[ownerUsername]?.name || ownerUsername;
+          const oppDisplayNames = opponents.map((u,i) => oppNames[i] || avatarMap[u]?.name || u).join(' & ');
+          confirmBox.innerHTML = `
+            <div style="font-size:1.6rem;margin-bottom:12px;">🗑️</div>
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:2px;color:#fff;margin-bottom:8px;">Delete Match?</div>
+            <div style="font-size:.78rem;color:rgba(255,255,255,.45);line-height:1.6;margin-bottom:22px;">${nameA2.replace(/</g,'&lt;')} vs ${oppDisplayNames.replace(/</g,'&lt;')}<br><span style="font-size:.68rem;opacity:.6;">This will clear the booking for all participants.</span></div>
+            <div style="display:flex;gap:10px;justify-content:center;">
+              <button id="match-delete-cancel" style="flex:1;padding:10px 0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:9px;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s;">Cancel</button>
+              <button id="match-delete-confirm" style="flex:1;padding:10px 0;background:rgba(192,0,14,.2);border:1px solid rgba(192,0,14,.4);border-radius:9px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;transition:background .15s;">Delete</button>
+            </div>`;
+          confirmBg.appendChild(confirmBox);
+          document.body.appendChild(confirmBg);
+          confirmBg.querySelector('#match-delete-cancel').onclick = () => confirmBg.remove();
+          confirmBg.querySelector('#match-delete-confirm').onclick = async () => {
+            confirmBg.remove();
+            // Clear booking: set plan_note to null for owner and all opponents
+            try {
+              let rowId = rosterRowId;
+              if (!rowId) {
+                const rows = await sbGet('roster', `username=eq.${encodeURIComponent(ownerUsername)}&efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id&limit=1`);
+                rowId = rows[0]?.id || null;
+              }
+              if (rowId) {
+                await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(rowId), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: null }) });
+              }
+              for (const oppU of opponents) {
+                if (!oppU || oppU.startsWith('__')) continue;
+                try {
+                  const oppRows = await sbGet('roster', `username=eq.${encodeURIComponent(oppU)}&efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id&limit=1`);
+                  if (oppRows[0]?.id) await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(oppRows[0].id), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: null }) });
+                } catch(e) {}
+              }
+            } catch(err) { console.error('Delete match error:', err); }
+            // Re-render
+            _injectScheduleBookingBanners(window._efedPrimaryEvent || {}, window._efedExtraEvents || []);
+          };
+        };
+
+        wrap.appendChild(editBtn);
+        wrap.appendChild(deleteBtn);
+
+        // Show/hide buttons on banner hover
         wrap.addEventListener('mouseenter', () => {
           editBtn.style.opacity = '1';
           editBtn.style.pointerEvents = 'auto';
+          deleteBtn.style.opacity = '1';
+          deleteBtn.style.pointerEvents = 'auto';
           wrap.style.background = isMyMatch ? 'rgba(200,168,75,.11)' : 'rgba(255,255,255,.04)';
         });
         wrap.addEventListener('mouseleave', () => {
           editBtn.style.opacity = '0';
           editBtn.style.pointerEvents = 'none';
+          deleteBtn.style.opacity = '0';
+          deleteBtn.style.pointerEvents = 'none';
           wrap.style.background = isMyMatch ? 'rgba(200,168,75,.07)' : 'rgba(255,255,255,.02)';
         });
       }
@@ -4103,7 +4246,8 @@ async function loadProfile() {
 
     // Upcoming event — pass extra events from DB column
     const _extraEventsFromDB = window._efedExtraEvents;
-    renderEvent({ title: user.efed_event_title, date: user.efed_event_date, location: user.efed_event_location, main: user.efed_event_main, hype: user.efed_event_hype }, _extraEventsFromDB);
+    window._efedPrimaryEvent = { title: user.efed_event_title, date: user.efed_event_date, location: user.efed_event_location, main: user.efed_event_main, hype: user.efed_event_hype };
+    renderEvent(window._efedPrimaryEvent, _extraEventsFromDB);
 
     // Signings toggle state
     _signingsOn = !!user.efed_open_signings;
