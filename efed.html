@@ -2018,8 +2018,9 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     </a>
     <!-- Text -->
     <div style="flex:1;min-width:0;">
-      <div style="font-size:.65rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:3px;">You are part of <span id="rmb-efed-name"></span></div>
-      <div id="rmb-plan" style="font-size:.78rem;color:rgba(255,255,255,.5);line-height:1.5;font-style:italic;">No match plans yet.</div>
+      <div style="font-size:.65rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:6px;">You are part of <span id="rmb-efed-name"></span></div>
+      <div id="rmb-booking-status" style="display:none;margin-bottom:6px;padding:7px 10px;border-radius:8px;font-size:.72rem;font-weight:600;line-height:1.4;"></div>
+      <div id="rmb-plan" style="font-size:.78rem;color:rgba(255,255,255,.5);line-height:1.5;font-style:italic;display:none;"></div>
     </div>
   </div>
 </div>
@@ -3271,6 +3272,107 @@ function renderEvent(ev, extraEvents) {
 
   const editBtn = document.getElementById('event-edit-btn');
   if (editBtn && isOwnerOrAdmin) editBtn.style.display = 'block';
+
+  // ── Inject per-event booking banners for the logged-in CAW ──
+  _injectScheduleBookingBanners(ev, extraEvents);
+}
+
+// Build and inject a booking banner below each event card that matches the CAW's booking
+async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
+  const session = getSession();
+  if (!session) return;
+
+  // Collect all event titles to match against
+  const allEvents = [];
+  if (primaryEv && primaryEv.title) allEvents.push({ title: primaryEv.title, cardId: 'event-card', isExtra: false, idx: -1 });
+  (extraEvents || window._efedExtraEvents || []).forEach((xev, i) => {
+    if (xev && xev.title) allEvents.push({ title: xev.title, cardId: null, isExtra: true, idx: i });
+  });
+  if (!allEvents.length) return;
+
+  // Fetch this user's roster row for this eFed
+  let bk = null;
+  try {
+    const rows = await sbGet('roster', 'username=eq.' + encodeURIComponent(session.username) + '&efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=plan_note');
+    const raw = rows[0]?.plan_note;
+    if (raw) bk = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch(e) { return; }
+  if (!bk || !bk.opponent) return;
+
+  // Fetch avatar info for current user + opponent
+  let avatarMap = {};
+  try {
+    const uRows = await sbGet('users', 'username=in.(' + [session.username, bk.opponent].map(u=>encodeURIComponent(u)).join(',') + ')&select=username,avatar_url,display_name');
+    uRows.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
+  } catch(e) {}
+
+  const myName = avatarMap[session.username]?.name || session.username;
+  const oppName = bk.opponentName || avatarMap[bk.opponent]?.name || bk.opponent || '';
+
+  const _avCircle = (username, label) => {
+    const info = avatarMap[username] || {};
+    return info.avatar
+      ? `<img src="${info.avatar}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(255,255,255,.15);flex-shrink:0;">`
+      : `<div style="width:26px;height:26px;border-radius:50%;background:rgba(192,0,14,.15);border:1.5px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.7rem;color:#c0000e;flex-shrink:0;">${(label||'?')[0].toUpperCase()}</div>`;
+  };
+
+  const _makeBanner = () => {
+    const dateTxt = (bk.tba || bk.date === 'TBA') ? 'TBA' : (bk.date || '');
+    const wrap = document.createElement('div');
+    wrap.className = 'sched-booking-banner';
+    wrap.style.cssText = 'margin-top:8px;padding:12px 14px;background:rgba(192,0,14,.06);border:1px solid rgba(192,0,14,.18);border-radius:10px;';
+    wrap.innerHTML = `
+      <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:#c0000e;font-weight:700;margin-bottom:8px;">Your Match</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:6px;">${_avCircle(session.username, myName)}<span style="font-size:.82rem;font-weight:600;color:#fff;">${myName.replace(/</g,'&lt;')}</span></div>
+        <span style="font-size:.65rem;font-weight:700;color:rgba(255,255,255,.3);letter-spacing:1px;">VS</span>
+        <div style="display:flex;align-items:center;gap:6px;">${_avCircle(bk.opponent, oppName)}<span style="font-size:.82rem;font-weight:600;color:#fff;">${oppName.replace(/</g,'&lt;')}</span></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        ${bk.show ? `<span style="font-size:.7rem;color:rgba(255,255,255,.4);">📺 ${bk.show.replace(/</g,'&lt;')}</span>` : ''}
+        ${dateTxt ? `<span style="font-size:.7rem;color:rgba(255,255,255,.35);">📅 ${dateTxt.replace(/</g,'&lt;')}</span>` : ''}
+      </div>`;
+    return wrap;
+  };
+
+  // Match booking to events by show name (case-insensitive), or fall back to first event
+  const bookingShow = (bk.show || '').trim().toLowerCase();
+  let matched = false;
+
+  allEvents.forEach(evInfo => {
+    const evTitle = (evInfo.title || '').trim().toLowerCase();
+    const isMatch = bookingShow && evTitle && (evTitle === bookingShow || evTitle.includes(bookingShow) || bookingShow.includes(evTitle));
+    if (!isMatch) return;
+    matched = true;
+
+    let card = null;
+    if (!evInfo.isExtra) {
+      card = document.getElementById('event-card') || document.querySelector('.ev-primary-card');
+    } else {
+      const extras = document.querySelectorAll('.ev-extra-card');
+      card = extras[evInfo.idx] || null;
+    }
+    if (!card) return;
+    // Remove any old banner first
+    const old = card.parentNode?.querySelector('.sched-booking-banner[data-after="' + evInfo.idx + '"]');
+    if (old) old.remove();
+    const banner = _makeBanner();
+    banner.dataset.after = String(evInfo.idx);
+    card.insertAdjacentElement('afterend', banner);
+  });
+
+  // No show-name match — attach to first event as fallback
+  if (!matched && allEvents.length) {
+    const firstInfo = allEvents[0];
+    let card = document.getElementById('event-card') || document.querySelector('.ev-primary-card');
+    if (card) {
+      const old = card.parentNode?.querySelector('.sched-booking-banner[data-after="-1"]');
+      if (old) old.remove();
+      const banner = _makeBanner();
+      banner.dataset.after = '-1';
+      card.insertAdjacentElement('afterend', banner);
+    }
+  }
 }
 
 function _initEventCardDrag(container, isOwner) {
@@ -3864,6 +3966,13 @@ async function loadProfile() {
     history.replaceState(null, '', 'efed.html?e=' + encodeURIComponent(EFED_NAME));
   }
 
+  // ── Deep-link tab switching (?tab=schedule etc.) ──
+  const _deepTab = _urlParams.get('tab');
+  if (_deepTab) {
+    const _tabMap = { info: 0, connect: 1, schedule: 2, videos: 3 };
+    if (_deepTab in _tabMap) setTimeout(() => switchEfedTab(_tabMap[_deepTab]), 300);
+  }
+
   // ── PAGE VIEW TRACKING & DISPLAY ──
   try {
     const _pvKey = EFED_NAME.toLowerCase();
@@ -4071,10 +4180,31 @@ function updateEfedRosterUI() {
           if (u.avatar_url) { img.src = u.avatar_url; img.style.display = ''; if (init) init.style.display = 'none'; }
           else if (init) { init.textContent = (u.display_name || session.username || '?')[0].toUpperCase(); }
         }).catch(() => {});
-        // Fetch plan note from roster row
+        // Fetch plan note from roster row — show booking status
         sbGet('roster', 'username=eq.' + encodeURIComponent(session.username) + '&efed=eq.' + encodeURIComponent(EFED_NAME) + '&select=plan_note').then(rows => {
           const planEl = document.getElementById('rmb-plan');
-          if (planEl && rows.length && rows[0].plan_note) planEl.textContent = rows[0].plan_note;
+          const statusEl = document.getElementById('rmb-booking-status');
+          if (!rows.length) return;
+          const raw = rows[0].plan_note;
+          let bk = null;
+          try { bk = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null; } catch(e) {}
+          const isBooked = bk && bk.opponent;
+          if (statusEl) {
+            if (isBooked) {
+              statusEl.style.display = '';
+              statusEl.style.background = 'rgba(200,168,75,.08)';
+              statusEl.style.border = '1px solid rgba(200,168,75,.2)';
+              statusEl.style.color = '#c8a84b';
+              statusEl.innerHTML = '👉 You are booked for the next show. <a href="efed.html?e=' + encodeURIComponent(EFED_NAME) + '&tab=schedule" style="color:#c8a84b;text-decoration:underline;font-weight:700;">View Schedule</a> for details.';
+            } else {
+              statusEl.style.display = '';
+              statusEl.style.background = 'rgba(255,255,255,.03)';
+              statusEl.style.border = '1px solid rgba(255,255,255,.08)';
+              statusEl.style.color = 'rgba(255,255,255,.4)';
+              statusEl.textContent = 'Card not finalized yet.';
+            }
+          }
+          // rmb-plan is hidden — booking status div handles all display
         }).catch(() => {});
       }
     } else {
