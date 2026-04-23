@@ -6041,16 +6041,42 @@ async function loadRoster() {
         if (realUnames.length) {
           uRows = await sbGet('users', `username=in.(${realUnames.map(u=>encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url,avatar_banner`);
         }
-        // Cache for booking dropdown (real members + ghost slots)
-        window._efedRosterMembers = uRows.map(r => ({ username: r.username, display_name: r.display_name || r.username, avatar_url: r.avatar_url || null }));
-        // Add ghost slots to booking dropdown with their ghost names
-        ghostUnames.forEach(gu => {
-          const gr = rosterRows.find(r => r.username === gu);
-          let gName = gu;
-          if (gr?.plan_note) { try { const gd = JSON.parse(gr.plan_note); if (gd.ghostName) gName = gd.ghostName; } catch(e) {} }
-          window._efedRosterMembers.push({ username: gu, display_name: gName + ' 👻', avatar_url: null });
-        });
-        if (owner) window._efedRosterMembers.unshift({ username: owner.username, display_name: owner.display_name || owner.username, avatar_url: owner.avatar_url || null });
+        // ── Booking dropdown: always fetch ALL approved members (independent of display filter) ──
+        // This ensures every roster member appears in the booking popup regardless of viewer permissions.
+        try {
+          const _bkRosterRows = await sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=username,plan_note`);
+          const _bkGhostUnames = _bkRosterRows.map(r=>r.username).filter(u=>u.startsWith('__ghost__'));
+          const _bkRealUnames  = _bkRosterRows.map(r=>r.username).filter(u=>!u.startsWith('__ghost__') && u!==ownerUsername);
+          let _bkURows = [];
+          if (_bkRealUnames.length) {
+            _bkURows = await sbGet('users', `username=in.(${_bkRealUnames.map(u=>encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url`);
+          }
+          const _bkUMap = {};
+          _bkURows.forEach(r => { _bkUMap[r.username] = r; });
+          // Use rosterRows as source of truth so anyone in the roster table appears, even if users lookup misses them
+          window._efedRosterMembers = _bkRealUnames.map(u => ({
+            username: u,
+            display_name: _bkUMap[u]?.display_name || u,
+            avatar_url: _bkUMap[u]?.avatar_url || null
+          }));
+          _bkGhostUnames.forEach(gu => {
+            const gr = _bkRosterRows.find(r => r.username === gu);
+            let gName = gu;
+            if (gr?.plan_note) { try { const gd = JSON.parse(gr.plan_note); if (gd.ghostName) gName = gd.ghostName; } catch(e) {} }
+            window._efedRosterMembers.push({ username: gu, display_name: gName + ' 👻', avatar_url: null });
+          });
+          if (owner) window._efedRosterMembers.unshift({ username: owner.username, display_name: owner.display_name || owner.username, avatar_url: owner.avatar_url || null });
+        } catch(_bkErr) {
+          // Fallback: build from the display uRows if the dedicated fetch fails
+          window._efedRosterMembers = uRows.map(r => ({ username: r.username, display_name: r.display_name || r.username, avatar_url: r.avatar_url || null }));
+          ghostUnames.forEach(gu => {
+            const gr = rosterRows.find(r => r.username === gu);
+            let gName = gu;
+            if (gr?.plan_note) { try { const gd = JSON.parse(gr.plan_note); if (gd.ghostName) gName = gd.ghostName; } catch(e) {} }
+            window._efedRosterMembers.push({ username: gu, display_name: gName + ' 👻', avatar_url: null });
+          });
+          if (owner) window._efedRosterMembers.unshift({ username: owner.username, display_name: owner.display_name || owner.username, avatar_url: owner.avatar_url || null });
+        }
         // Preserve DB order — render real members first, then ghosts
         unames.forEach(uname => {
           const rosterRow = rosterRows.find(r=>r.username===uname);
