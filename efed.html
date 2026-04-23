@@ -3387,8 +3387,8 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
         : (document.getElementById('event-card') || document.querySelector('.ev-primary-card'));
       if (!card) return;
       const banner = _makeBanner();
+      banner.dataset.evKey = evInfo.idx;
       card.insertAdjacentElement('afterend', banner);
-      // Flatten the card's bottom corners so it connects flush into the banner
       card.style.borderBottomLeftRadius = '0';
       card.style.borderBottomRightRadius = '0';
       card.style.borderBottom = 'none';
@@ -3398,12 +3398,106 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
       const card = document.getElementById('event-card') || document.querySelector('.ev-primary-card');
       if (card) {
         const banner = _makeBanner();
+        banner.dataset.evKey = 'fallback';
         card.insertAdjacentElement('afterend', banner);
         card.style.borderBottomLeftRadius = '0';
         card.style.borderBottomRightRadius = '0';
         card.style.borderBottom = 'none';
       }
     }
+  });
+
+  // After all banners inserted: fix radii so only the last banner in each group has bottom curves
+  // and wire up drag-to-reorder for owners/admins
+  _fixBannerRadii();
+  if (isAdmin) _initMatchCardDrag();
+}
+
+// Refreshes border-radius on all banner groups so only the last in each group is curved at the bottom
+function _fixBannerRadii() {
+  // Group banners by their preceding event card
+  document.querySelectorAll('.ev-primary-card, [id="event-card"], .ev-extra-card').forEach(evCard => {
+    const siblings = [];
+    let el = evCard.nextElementSibling;
+    while (el && el.classList.contains('sched-booking-banner')) {
+      siblings.push(el);
+      el = el.nextElementSibling;
+    }
+    siblings.forEach((b, i) => {
+      const isLast = i === siblings.length - 1;
+      b.style.borderRadius = isLast ? '0 0 10px 10px' : '0';
+    });
+  });
+  // Also handle primary card wrap children
+  const wrap = document.getElementById('ev-primary-card-wrap');
+  if (wrap) {
+    const evCard = wrap.querySelector('[style*="border-radius"]') || wrap.firstElementChild;
+    if (evCard) {
+      const siblings = [];
+      let el = evCard.nextElementSibling;
+      while (el && el.classList.contains('sched-booking-banner')) {
+        siblings.push(el);
+        el = el.nextElementSibling;
+      }
+      siblings.forEach((b, i) => {
+        const isLast = i === siblings.length - 1;
+        b.style.borderRadius = isLast ? '0 0 10px 10px' : '0';
+      });
+    }
+  }
+}
+
+// Drag-to-reorder match banners within their event group (owner/admin only)
+function _initMatchCardDrag() {
+  let dragSrc = null;
+
+  document.querySelectorAll('.sched-booking-banner').forEach(banner => {
+    banner.setAttribute('draggable', 'true');
+    banner.style.cursor = 'grab';
+
+    banner.addEventListener('dragstart', e => {
+      dragSrc = banner;
+      banner.style.opacity = '.4';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    banner.addEventListener('dragend', () => {
+      dragSrc.style.opacity = '1';
+      dragSrc.style.cursor = 'grab';
+      document.querySelectorAll('.sched-booking-banner').forEach(b => b.style.outline = '');
+      _fixBannerRadii();
+      dragSrc = null;
+    });
+
+    banner.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (dragSrc && dragSrc !== banner) {
+        banner.style.outline = '1px dashed rgba(200,168,75,.45)';
+      }
+    });
+
+    banner.addEventListener('dragleave', () => {
+      banner.style.outline = '';
+    });
+
+    banner.addEventListener('drop', e => {
+      e.preventDefault();
+      banner.style.outline = '';
+      if (!dragSrc || dragSrc === banner) return;
+      // Only allow reorder within same group (same parent)
+      if (dragSrc.parentNode !== banner.parentNode) return;
+      const parent = banner.parentNode;
+      const allBanners = [...parent.querySelectorAll('.sched-booking-banner')];
+      const srcIdx = allBanners.indexOf(dragSrc);
+      const tgtIdx = allBanners.indexOf(banner);
+      if (srcIdx < tgtIdx) {
+        banner.insertAdjacentElement('afterend', dragSrc);
+      } else {
+        banner.insertAdjacentElement('beforebegin', dragSrc);
+      }
+      _fixBannerRadii();
+    });
   });
 }
 
