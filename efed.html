@@ -4736,10 +4736,10 @@ function bookingSetTab(tab) {
   document.getElementById('bk-panel-external').style.display = isRoster ? 'none' : '';
   const rBtn = document.getElementById('bk-tab-roster');
   const eBtn = document.getElementById('bk-tab-external');
-  rBtn.style.background = isRoster ? '#c0000e' : 'transparent';
-  rBtn.style.color      = isRoster ? '#fff' : 'rgba(255,255,255,.4)';
-  eBtn.style.background = isRoster ? 'transparent' : '#c0000e';
-  eBtn.style.color      = isRoster ? 'rgba(255,255,255,.4)' : '#fff';
+  rBtn.style.background = isRoster ? '#c8a84b' : 'transparent';
+  rBtn.style.color      = isRoster ? '#111' : 'rgba(255,255,255,.4)';
+  eBtn.style.background = isRoster ? 'transparent' : '#c8a84b';
+  eBtn.style.color      = isRoster ? 'rgba(255,255,255,.4)' : '#111';
   // Clear external inputs when switching back to roster
   if (isRoster) {
     document.getElementById('booking-ext-name').value = '';
@@ -4767,36 +4767,170 @@ function bookingExtNameInput(val) {
   preview.style.display = 'flex';
 }
 
-function _buildAvatarGrid(excludeUsername, preselectedUsername) {
+// ── Booking state: ordered list of slots (wrestlers + VS dividers) ─────────────
+window._bkSlots = []; // [{type:'wrestler', username, name, avatar} | {type:'vs'}]
+const BK_MAX = 30;
+
+function _bkAddVs() {
+  if (window._bkSlots.length === 0) return; // nothing to VS yet
+  const last = window._bkSlots[window._bkSlots.length - 1];
+  if (last && last.type === 'vs') return; // no double VS
+  window._bkSlots.push({ type: 'vs' });
+  _bkRenderPreview();
+}
+
+function _bkRemoveSlot(idx) {
+  window._bkSlots.splice(idx, 1);
+  // Clean up orphan VS at start/end or double VS
+  if (window._bkSlots.length && window._bkSlots[0].type === 'vs') window._bkSlots.shift();
+  if (window._bkSlots.length && window._bkSlots[window._bkSlots.length-1].type === 'vs') window._bkSlots.pop();
+  // Remove double VS
+  for (let i = window._bkSlots.length - 1; i > 0; i--) {
+    if (window._bkSlots[i].type === 'vs' && window._bkSlots[i-1].type === 'vs') window._bkSlots.splice(i, 1);
+  }
+  // Deselect card if wrestler removed
+  const remaining = window._bkSlots.filter(s=>s.type==='wrestler').map(s=>s.username);
+  document.querySelectorAll('.bk-avatar-card').forEach(c => {
+    if (!remaining.includes(c.dataset.username)) {
+      c.classList.remove('selected');
+      c.style.borderColor = 'rgba(255,255,255,.1)';
+      c.style.background  = 'rgba(255,255,255,.03)';
+    }
+  });
+  _bkRenderPreview();
+  _bkSyncHiddenFields();
+}
+
+function _bkRenderPreview() {
+  const slots = window._bkSlots;
+  const preview = document.getElementById('bk-match-preview');
+  const container = document.getElementById('bk-preview-slots');
+  const note = document.getElementById('bk-preview-note');
+  if (!slots.length) { preview.style.display = 'none'; return; }
+  preview.style.display = '';
+  const wrestlerCount = slots.filter(s=>s.type==='wrestler').length;
+  const showAvatars = wrestlerCount <= 8;
+  if (note) note.style.display = wrestlerCount >= 9 ? '' : 'none';
+
+  // Build preview — draggable wrestlers + VS chips
+  let dragSrcIdx = null;
+  container.innerHTML = '';
+
+  slots.forEach((slot, i) => {
+    if (slot.type === 'vs') {
+      const chip = document.createElement('div');
+      chip.style.cssText = 'position:relative;display:inline-flex;align-items:center;justify-content:center;padding:3px 8px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:20px;cursor:pointer;group:1;';
+      chip.innerHTML = `<span style="font-size:.58rem;font-weight:700;color:rgba(255,255,255,.3);letter-spacing:1.5px;">VS</span><span class="bk-vs-del" style="display:none;position:absolute;top:-6px;right:-6px;width:14px;height:14px;background:#c0000e;border-radius:50%;font-size:.55rem;color:#fff;align-items:center;justify-content:center;cursor:pointer;line-height:1;">✕</span>`;
+      chip.onmouseenter = () => { chip.querySelector('.bk-vs-del').style.display = 'flex'; };
+      chip.onmouseleave = () => { chip.querySelector('.bk-vs-del').style.display = 'none'; };
+      chip.querySelector('.bk-vs-del').onclick = (e) => { e.stopPropagation(); _bkRemoveSlot(i); };
+      container.appendChild(chip);
+    } else {
+      const m = slot;
+      const el = document.createElement('div');
+      el.draggable = true;
+      el.dataset.slotIdx = i;
+      el.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px;cursor:grab;user-select:none;position:relative;';
+      const initials = (m.name||'?').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+      const avHtml = showAvatars
+        ? (m.avatar
+            ? `<img src="${m.avatar}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;border:2px solid rgba(200,168,75,.4);" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div style="display:none;width:34px;height:34px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.85rem;color:#c0000e;">${initials}</div>`
+            : `<div style="width:34px;height:34px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.85rem;color:#c0000e;">${initials}</div>`)
+        : '';
+      const nameStr = (m.name||'').length > 10 ? (m.name||'').slice(0,9)+'…' : (m.name||'');
+      el.innerHTML = avHtml + `<span style="font-size:.58rem;color:rgba(255,255,255,.7);font-weight:600;text-align:center;max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${nameStr}</span>`;
+
+      // Drag to reorder
+      el.addEventListener('dragstart', e => { dragSrcIdx = i; el.style.opacity = '.4'; e.dataTransfer.effectAllowed = 'move'; });
+      el.addEventListener('dragend', () => { el.style.opacity = '1'; dragSrcIdx = null; });
+      el.addEventListener('dragover', e => { e.preventDefault(); if (dragSrcIdx !== null && dragSrcIdx !== i) el.style.outline = '1px dashed rgba(200,168,75,.5)'; });
+      el.addEventListener('dragleave', () => { el.style.outline = ''; });
+      el.addEventListener('drop', e => {
+        e.preventDefault(); el.style.outline = '';
+        if (dragSrcIdx === null || dragSrcIdx === i) return;
+        const moved = window._bkSlots.splice(dragSrcIdx, 1)[0];
+        const newIdx = dragSrcIdx < i ? i - 1 : i;
+        window._bkSlots.splice(newIdx, 0, moved);
+        _bkRenderPreview();
+        _bkSyncHiddenFields();
+      });
+      container.appendChild(el);
+    }
+  });
+}
+
+function _bkSyncHiddenFields() {
+  // For backward compat with saveBooking — encode all wrestlers into opponent fields
+  const wrestlers = window._bkSlots.filter(s=>s.type==='wrestler');
+  if (wrestlers.length > 1) {
+    // Multi: store as JSON array in hidden field (saveBooking reads it)
+    document.getElementById('booking-opponent-value').value = JSON.stringify(wrestlers.map(w=>w.username));
+    document.getElementById('booking-opponent-label-val').value = JSON.stringify(wrestlers.map(w=>w.name));
+  } else if (wrestlers.length === 1) {
+    document.getElementById('booking-opponent-value').value = wrestlers[0].username;
+    document.getElementById('booking-opponent-label-val').value = wrestlers[0].name;
+  } else {
+    document.getElementById('booking-opponent-value').value = '';
+    document.getElementById('booking-opponent-label-val').value = '';
+  }
+}
+
+function _buildAvatarGrid(excludeUsername, preselectedUsernames) {
   const grid = document.getElementById('booking-avatar-grid');
   grid.innerHTML = '';
+  const preselected = Array.isArray(preselectedUsernames) ? preselectedUsernames : (preselectedUsernames ? [preselectedUsernames] : []);
   const members = (window._efedRosterMembers || []).filter(m => m.username !== excludeUsername);
+
+  // VS button — first in grid
+  const vsBtn = document.createElement('div');
+  vsBtn.id = 'bk-vs-btn';
+  vsBtn.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;border-radius:11px;cursor:pointer;transition:all .15s;border:2px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);user-select:none;grid-column:span 1;';
+  vsBtn.innerHTML = `<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:rgba(255,255,255,.55);letter-spacing:1px;">VS</div><div style="font-size:.6rem;font-weight:600;color:rgba(255,255,255,.35);text-align:center;line-height:1.2;font-family:'DM Sans',sans-serif;">Add VS</div>`;
+  vsBtn.onclick = () => _bkAddVs();
+  vsBtn.onmouseenter = () => { vsBtn.style.borderColor = 'rgba(200,168,75,.5)'; vsBtn.style.background = 'rgba(200,168,75,.07)'; };
+  vsBtn.onmouseleave = () => { vsBtn.style.borderColor = 'rgba(255,255,255,.15)'; vsBtn.style.background = 'rgba(255,255,255,.04)'; };
+  grid.appendChild(vsBtn);
+
   members.forEach(m => {
     const card = document.createElement('div');
     card.className = 'bk-avatar-card';
     card.dataset.username = m.username;
     card.dataset.name = m.display_name || m.username;
-    const isSelected = m.username === preselectedUsername;
-    card.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;border-radius:11px;cursor:pointer;transition:all .15s;border:2px solid ${isSelected ? '#c0000e' : 'rgba(255,255,255,.1)'};background:${isSelected ? 'rgba(192,0,14,.12)' : 'rgba(255,255,255,.03)'};user-select:none;`;
+    const isSelected = preselected.includes(m.username);
+    card.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;border-radius:11px;cursor:pointer;transition:all .15s;border:2px solid ${isSelected ? '#c8a84b' : 'rgba(255,255,255,.1)'};background:${isSelected ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.03)'};user-select:none;`;
     const initials = (m.display_name||m.username||'?').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
     const avHtml = m.avatar_url
-      ? `<img src="${m.avatar_url}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid rgba(200,168,75,.3);" onerror="this.style.display='none';this.nextSibling.style.display='flex'">`
-        + `<div style="display:none;width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;">${initials}</div>`
+      ? `<img src="${m.avatar_url}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid rgba(200,168,75,.3);" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div style="display:none;width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;">${initials}</div>`
       : `<div style="width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;">${initials}</div>`;
     const displayName = (m.display_name||m.username||'').replace(/</g,'&lt;');
     const truncated = displayName.length > 14 ? displayName.slice(0,13)+'…' : displayName;
     card.innerHTML = avHtml + `<div style="font-size:.65rem;font-weight:600;color:#ccc;text-align:center;line-height:1.2;font-family:'DM Sans',sans-serif;">${truncated}</div>`;
+
     card.onclick = () => {
-      document.querySelectorAll('.bk-avatar-card').forEach(c => {
-        c.classList.remove('selected');
-        c.style.borderColor = 'rgba(255,255,255,.1)';
-        c.style.background  = 'rgba(255,255,255,.03)';
-      });
-      card.classList.add('selected');
-      card.style.borderColor = '#c0000e';
-      card.style.background  = 'rgba(192,0,14,.12)';
-      document.getElementById('booking-opponent-value').value = m.username;
-      document.getElementById('booking-opponent-label-val').value = m.display_name || m.username;
+      const slots = window._bkSlots;
+      const alreadyIdx = slots.findIndex(s => s.type === 'wrestler' && s.username === m.username);
+      if (alreadyIdx !== -1) {
+        // Deselect
+        slots.splice(alreadyIdx, 1);
+        card.classList.remove('selected');
+        card.style.borderColor = 'rgba(255,255,255,.1)';
+        card.style.background  = 'rgba(255,255,255,.03)';
+        // Clean orphan VS
+        if (slots.length && slots[0].type === 'vs') slots.shift();
+        if (slots.length && slots[slots.length-1].type === 'vs') slots.pop();
+        for (let i = slots.length - 1; i > 0; i--) {
+          if (slots[i].type === 'vs' && slots[i-1].type === 'vs') slots.splice(i, 1);
+        }
+      } else {
+        const currentWrestlers = slots.filter(s=>s.type==='wrestler').length;
+        if (currentWrestlers >= BK_MAX) return;
+        slots.push({ type: 'wrestler', username: m.username, name: m.display_name || m.username, avatar: m.avatar_url || '' });
+        card.classList.add('selected');
+        card.style.borderColor = '#c8a84b';
+        card.style.background  = 'rgba(200,168,75,.1)';
+      }
+      _bkRenderPreview();
+      _bkSyncHiddenFields();
     };
     grid.appendChild(card);
   });
@@ -4807,25 +4941,37 @@ function openBookingModal(username, displayName, rosterRowId, planNote) {
   _bookingUsername = username;
   _bookingTba = false;
 
-  document.getElementById('booking-wrestler-label').textContent = displayName + ' is competing against…';
+  const safeLabel = (displayName||'').replace(/</g,'&lt;');
+  document.getElementById('booking-wrestler-label').innerHTML = 'Click who <strong style="color:#fff;">' + safeLabel + '</strong> is in the ring with';
   document.getElementById('booking-msg').textContent = '';
   document.getElementById('booking-tba-btn').style.background = 'rgba(255,255,255,.06)';
   document.getElementById('booking-tba-btn').style.color = 'rgba(255,255,255,.5)';
   document.getElementById('booking-tba-btn').style.borderColor = 'rgba(255,255,255,.12)';
 
-  // Determine pre-selected opponent
-  let preselected = null, externalName = '';
+  // Reset slots — start fresh for this wrestler
+  window._bkSlots = [];
+
+  // Determine pre-selected opponents from existing booking
+  let preselected = [], externalName = '';
   let isExternal = false;
   if (planNote) {
     try {
       const bk = typeof planNote === 'string' ? JSON.parse(planNote) : planNote;
-      if (bk.opponent) {
-        preselected = bk.opponent;
-        // Check if opponent is in roster
-        const inRoster = (window._efedRosterMembers||[]).some(m=>m.username===bk.opponent);
-        if (!inRoster) { isExternal = true; externalName = bk.opponentName || bk.opponent; }
-      }
+      // opponents may be array (multi) or single string
+      const opponents = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
+      const oppNames  = Array.isArray(bk.opponentNames) ? bk.opponentNames : (bk.opponentName ? [bk.opponentName] : []);
+      opponents.forEach((opp, idx) => {
+        const inRoster = (window._efedRosterMembers||[]).some(m=>m.username===opp);
+        if (!inRoster && opp.startsWith('__ext__')) {
+          isExternal = true; externalName = oppNames[idx] || opp;
+        } else {
+          const mem = (window._efedRosterMembers||[]).find(m=>m.username===opp);
+          preselected.push(opp);
+          if (mem) window._bkSlots.push({ type:'wrestler', username:mem.username, name:mem.display_name||mem.username, avatar:mem.avatar_url||'' });
+        }
+      });
       document.getElementById('booking-show-input').value = bk.show || '';
+      document.getElementById('booking-type-input').value = bk.matchType || '';
       if (bk.tba) {
         _bookingTba = true;
         document.getElementById('booking-date-input').value = '';
@@ -4840,14 +4986,15 @@ function openBookingModal(username, displayName, rosterRowId, planNote) {
     } catch(e) {}
   } else {
     document.getElementById('booking-show-input').value = '';
+    document.getElementById('booking-type-input').value = '';
     document.getElementById('booking-date-input').value = '';
     document.getElementById('booking-date-input').disabled = false;
   }
 
-  // Build avatar grid
-  _buildAvatarGrid(username, isExternal ? null : preselected);
-  document.getElementById('booking-opponent-value').value = isExternal ? '' : (preselected || '');
-  document.getElementById('booking-opponent-label-val').value = isExternal ? '' : (preselected ? ((window._efedRosterMembers||[]).find(m=>m.username===preselected)?.display_name||preselected) : '');
+  // Build avatar grid (excludes the focal wrestler, pre-highlights existing opponents)
+  _buildAvatarGrid(username, preselected);
+  _bkSyncHiddenFields();
+  _bkRenderPreview();
 
   // Switch to correct tab
   if (isExternal) {
@@ -4884,29 +5031,48 @@ async function saveBooking(clear) {
 
   let opponentUsername = '';
   let opponentName = '';
+  let allParticipants = []; // [{username, name}] for multi-match
 
   if (!clear) {
     if (_bookingTab === 'external') {
-      // External opponent: use a special prefix so it's never confused with a real username
       const extName = document.getElementById('booking-ext-name').value.trim();
       if (!extName) { msg.textContent = 'Please enter an opponent name.'; msg.style.color = '#ff6b6b'; return; }
       opponentName = extName;
-      opponentUsername = '__ext__' + extName; // sentinel — not a real roster username
+      opponentUsername = '__ext__' + extName;
     } else {
-      opponentUsername = document.getElementById('booking-opponent-value').value;
-      opponentName = document.getElementById('booking-opponent-label-val').value || opponentUsername;
-      if (!opponentUsername) { msg.textContent = 'Please select an opponent.'; msg.style.color = '#ff6b6b'; return; }
+      const rawVal = document.getElementById('booking-opponent-value').value;
+      const rawLabel = document.getElementById('booking-opponent-label-val').value;
+      // Multi: JSON array stored by _bkSyncHiddenFields
+      try {
+        const parsed = JSON.parse(rawVal);
+        if (Array.isArray(parsed)) {
+          allParticipants = parsed.map((u, i) => ({ username: u, name: (JSON.parse(rawLabel)||[])[i] || u }));
+          opponentUsername = parsed[0] || '';
+          opponentName = (JSON.parse(rawLabel)||[])[0] || opponentUsername;
+        } else { opponentUsername = rawVal; opponentName = rawLabel || rawVal; }
+      } catch(e) { opponentUsername = rawVal; opponentName = rawLabel || rawVal; }
+      if (!opponentUsername) { msg.textContent = 'Please select at least one participant.'; msg.style.color = '#ff6b6b'; return; }
     }
   }
 
   const show = document.getElementById('booking-show-input').value.trim();
+  const matchType = document.getElementById('booking-type-input').value.trim();
   const date = _bookingTba ? 'TBA' : document.getElementById('booking-date-input').value.trim();
   const isExternal = opponentUsername.startsWith('__ext__');
 
-  // Build both booking payloads (wrestler ↔ opponent)
-  const planNoteA = clear ? null : JSON.stringify({ opponent: opponentUsername, opponentName, show, date, tba: _bookingTba, external: isExternal || undefined });
+  // For multi-participant matches, store full arrays
   const myDisplayName = (window._efedRosterMembers||[]).find(m=>m.username===_bookingUsername)?.display_name || _bookingUsername;
-  const planNoteB = clear ? null : JSON.stringify({ opponent: _bookingUsername, opponentName: myDisplayName, show, date, tba: _bookingTba });
+  const vsSlots = (window._bkSlots||[]);
+  const buildPlanNote = (focusUsername, focusName) => {
+    if (allParticipants.length > 1) {
+      const others = allParticipants.filter(p=>p.username!==focusUsername);
+      return JSON.stringify({ opponents: others.map(p=>p.username), opponentNames: others.map(p=>p.name), show, matchType, date, tba: _bookingTba, slots: vsSlots.map(s=>s.type==='vs'?'vs':s.username) });
+    }
+    return JSON.stringify({ opponent: opponentUsername, opponentName, show, matchType, date, tba: _bookingTba, external: isExternal||undefined });
+  };
+
+  const planNoteA = clear ? null : buildPlanNote(_bookingUsername, myDisplayName);
+  const planNoteB = clear ? null : JSON.stringify({ opponent: _bookingUsername, opponentName: myDisplayName, show, matchType, date, tba: _bookingTba });
 
   try {
     // Save wrestler A
@@ -4917,40 +5083,49 @@ async function saveBooking(clear) {
       if (!rA.ok) throw new Error('Save failed: ' + await rA.text());
     }
 
-    // Find and save wrestler B (only for real roster opponents)
-    if (!clear && opponentUsername && !isExternal) {
+    // Save plan_note for all other participants
+    const saveTargets = allParticipants.length > 1
+      ? allParticipants.filter(p => p.username !== _bookingUsername && !p.username.startsWith('__ext__'))
+      : (!isExternal && opponentUsername ? [{ username: opponentUsername, name: opponentName }] : []);
+    for (const target of saveTargets) {
       try {
-        const oppRows = await sbGet('roster', `username=eq.${encodeURIComponent(opponentUsername)}&efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id`);
+        const oppRows = await sbGet('roster', `username=eq.${encodeURIComponent(target.username)}&efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id`);
         if (oppRows[0]?.id) {
+          const noteForTarget = clear ? null : buildPlanNote(target.username, target.name);
           await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(oppRows[0].id), {
-            method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: planNoteB })
+            method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: noteForTarget })
           });
         }
-      } catch(e) { /* opponent booking non-critical */ }
+      } catch(e) { /* non-critical */ }
     }
 
     // Notifications
     if (!clear) {
+      const typePart = matchType ? ` [${matchType}]` : '';
       const showPart = show ? ` at ${show}` : '';
       const efedPart = EFED_NAME ? ` (${EFED_NAME})` : '';
       const datePart = (date && date !== 'TBA') ? ` on ${date}` : date === 'TBA' ? ' — date TBA' : '';
       try {
         await sbInsert('notifications', { username: _bookingUsername, type: 'booking',
-          message: `Your next match will be against ${opponentName}${showPart}${efedPart}${datePart}.`,
+          message: `Your next match${typePart} will be against ${opponentName}${showPart}${efedPart}${datePart}.`,
           read: false, created_at: new Date().toISOString() });
       } catch(e) {}
       if (opponentUsername && !isExternal) {
         try {
           await sbInsert('notifications', { username: opponentUsername, type: 'booking',
-            message: `Your next match will be against ${myDisplayName}${showPart}${efedPart}${datePart}.`,
+            message: `Your next match${typePart} will be against ${myDisplayName}${showPart}${efedPart}${datePart}.`,
             read: false, created_at: new Date().toISOString() });
         } catch(e) {}
       }
     }
 
-    // Update ✍️ indicator
+    // Update ✍️ indicator for all participants
     _updateBookingIndicator(_bookingUsername, !clear);
-    if (opponentUsername && !isExternal) _updateBookingIndicator(opponentUsername, !clear);
+    if (allParticipants.length > 1) {
+      allParticipants.forEach(p => { if (p.username !== _bookingUsername) _updateBookingIndicator(p.username, !clear); });
+    } else if (opponentUsername && !isExternal) {
+      _updateBookingIndicator(opponentUsername, !clear);
+    }
 
     closeBookingModal();
     showToast(clear ? 'Booking cleared' : 'Booking saved!');
@@ -6988,7 +7163,7 @@ function closeEmblemConfirm() {
 
 <!-- ── BOOKING MODAL ── -->
 <div id="booking-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:16px;">
-  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:18px;width:100%;max-width:480px;max-height:88vh;box-shadow:0 24px 60px rgba(0,0,0,.85);display:flex;flex-direction:column;overflow:hidden;">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:18px;width:100%;max-width:520px;max-height:92vh;box-shadow:0 24px 60px rgba(0,0,0,.85);display:flex;flex-direction:column;overflow:hidden;">
 
     <!-- Header -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px 12px;border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;">
@@ -7004,23 +7179,31 @@ function closeEmblemConfirm() {
 
       <!-- Tab toggle: Roster vs External -->
       <div style="display:flex;gap:6px;margin-bottom:16px;background:rgba(255,255,255,.04);border-radius:10px;padding:4px;">
-        <button id="bk-tab-roster" onclick="bookingSetTab('roster')" style="flex:1;padding:8px;border:none;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .18s;background:#c0000e;color:#fff;">Roster</button>
+        <button id="bk-tab-roster" onclick="bookingSetTab('roster')" style="flex:1;padding:8px;border:none;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .18s;background:#c8a84b;color:#111;">Roster</button>
         <button id="bk-tab-external" onclick="bookingSetTab('external')" style="flex:1;padding:8px;border:none;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .18s;background:transparent;color:rgba(255,255,255,.4);">External Opponent</button>
       </div>
 
       <!-- ── ROSTER PICKER PANEL ── -->
       <div id="bk-panel-roster">
-        <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:10px;">Select Opponent</div>
-        <div id="booking-avatar-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:10px;"></div>
+        <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Build your match — click wrestlers, add VS between them</div>
+        <div style="font-size:.6rem;color:rgba(255,255,255,.25);margin-bottom:10px;line-height:1.5;">Note: Do not use VS for teams (e.g. tag matches — just select all members).</div>
+        <div id="booking-avatar-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px;"></div>
         <input type="hidden" id="booking-opponent-value">
         <input type="hidden" id="booking-opponent-label-val">
+
+        <!-- Match card preview -->
+        <div id="bk-match-preview" style="margin-top:14px;display:none;">
+          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:8px;">Match Preview</div>
+          <div id="bk-preview-slots" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;min-height:54px;"></div>
+          <div id="bk-preview-note" style="font-size:.6rem;color:rgba(200,168,75,.6);margin-top:6px;display:none;">⚠️ 9+ participants — avatars won't show on the banner, but all wrestlers will be notified.</div>
+        </div>
       </div>
 
       <!-- ── EXTERNAL OPPONENT PANEL ── -->
       <div id="bk-panel-external" style="display:none;">
         <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Opponent Name</div>
         <input id="booking-ext-name" type="text" maxlength="60" placeholder="e.g. John Cena" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.85rem;outline:none;box-sizing:border-box;" oninput="bookingExtNameInput(this.value)">
-        <div id="booking-ext-preview" style="display:none;margin-top:12px;padding:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;display:flex;align-items:center;gap:12px;">
+        <div id="booking-ext-preview" style="display:none;margin-top:12px;padding:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;align-items:center;gap:12px;">
           <div id="booking-ext-avatar" style="width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#c0000e;flex-shrink:0;"></div>
           <div>
             <div id="booking-ext-fullname" style="font-size:.85rem;font-weight:600;color:#e8e8e8;"></div>
@@ -7033,11 +7216,15 @@ function closeEmblemConfirm() {
       <!-- Divider -->
       <div style="height:1px;background:rgba(255,255,255,.06);margin:16px 0;"></div>
 
-      <!-- Show + Date -->
+      <!-- Show + Match Type + Date -->
       <div style="display:flex;flex-direction:column;gap:12px;">
         <div>
           <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Show Name</div>
-          <input id="booking-show-input" type="text" maxlength="80" placeholder="e.g. FSW Maximum" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+          <input id="booking-show-input" type="text" maxlength="80" placeholder="e.g. Blood, Sweat & Tears" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+        </div>
+        <div>
+          <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Match Type</div>
+          <input id="booking-type-input" type="text" maxlength="60" placeholder="e.g. Singles, Tag Team, Battle Royal…" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
         </div>
         <div>
           <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Date</div>
