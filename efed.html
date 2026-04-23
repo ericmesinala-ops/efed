@@ -1377,6 +1377,8 @@ html.day-mode #upcoming-event-section [style*="color:rgba(255,255,255"] { color:
 html.day-mode #upcoming-event-section [style*="background:rgba(255,255,255"] { background: rgba(0,0,0,.03) !important; }
 html.day-mode #upcoming-event-section [style*="border:1px solid rgba(255,255,255"] { border-color: rgba(0,0,0,.09) !important; }
 html.day-mode #upcoming-event-section [style*="height:1px"] { background: rgba(0,0,0,.07) !important; }
+html.day-mode .sched-banner-edit-btn { background: rgba(0,0,0,.05) !important; border-color: rgba(0,0,0,.12) !important; color: rgba(0,0,0,.4) !important; }
+html.day-mode .sched-banner-edit-btn:hover { background: rgba(168,130,10,.1) !important; border-color: rgba(168,130,10,.3) !important; color: var(--gold) !important; }
 html.day-mode #event-edit-btn { color: rgba(0,0,0,.3) !important; }
 html.day-mode #event-edit-btn:hover { color: rgba(0,0,0,.65) !important; }
 
@@ -3295,38 +3297,47 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
   if (!allEvents.length) return;
 
   const isAdmin = session.username.toLowerCase() === ADMIN_USERNAME;
+  const canEditAll = isAdmin || _isOwnProfile; // owner or admin can see + edit all bookings
 
-  // Admin: fetch ALL roster rows with a plan_note so every booked match shows
-  // Member: fetch only their own row
+  // Fetch roster rows — include `id` so we can open the booking modal for editing
   let rosterRows = [];
   try {
-    if (isAdmin) {
-      rosterRows = await sbGet('roster', 'efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=username,plan_note');
+    if (canEditAll) {
+      rosterRows = await sbGet('roster', 'efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=id,username,plan_note');
     } else {
-      rosterRows = await sbGet('roster', 'username=eq.' + encodeURIComponent(session.username) + '&efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=username,plan_note');
+      rosterRows = await sbGet('roster', 'username=eq.' + encodeURIComponent(session.username) + '&efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=id,username,plan_note');
     }
   } catch(e) { return; }
 
-  // Parse bookings and deduplicate (A vs B == B vs A)
+  // Parse bookings and deduplicate (A vs B == B vs A), handling both old & new formats
   const seen = new Set();
   const bookings = [];
   for (const row of rosterRows) {
     if (!row.plan_note) continue;
     let bk = null;
     try { bk = typeof row.plan_note === 'string' ? JSON.parse(row.plan_note) : row.plan_note; } catch(e) { continue; }
-    if (!bk || !bk.opponent || bk.ghost) continue;
-    const key = [row.username, bk.opponent].sort().join('||');
+    if (!bk || bk.ghost) continue;
+
+    // Normalise: support both old {opponent} and new {opponents:[]}
+    const isMulti = Array.isArray(bk.opponents) && bk.opponents.length > 0;
+    const primaryOpponent = isMulti ? bk.opponents[0] : bk.opponent;
+    if (!primaryOpponent) continue;
+
+    const key = isMulti
+      ? [row.username, ...bk.opponents].sort().join('||')
+      : [row.username, bk.opponent].sort().join('||');
     if (seen.has(key)) continue;
     seen.add(key);
-    bookings.push({ ownerUsername: row.username, bk });
+    bookings.push({ rosterRowId: row.id, ownerUsername: row.username, bk });
   }
   if (!bookings.length) return;
 
-  // Collect all usernames needed for avatar lookup
+  // Collect all real usernames for avatar lookup
   const allUsernames = new Set();
   bookings.forEach(({ ownerUsername, bk }) => {
     allUsernames.add(ownerUsername);
-    if (bk.opponent && !bk.opponent.startsWith('__')) allUsernames.add(bk.opponent);
+    const opponents = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
+    opponents.forEach(u => { if (u && !u.startsWith('__')) allUsernames.add(u); });
   });
 
   let avatarMap = {};
@@ -3346,31 +3357,86 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
   document.querySelectorAll('.sched-booking-banner').forEach(b => b.remove());
 
   // Render a banner per unique booking
-  bookings.forEach(({ ownerUsername, bk }) => {
-    // isMyMatch = true if the logged-in user is either side of this match
-    const isMyMatch = ownerUsername === session.username || bk.opponent === session.username;
+  bookings.forEach(({ rosterRowId, ownerUsername, bk }) => {
+    const isMyMatch = ownerUsername === session.username || bk.opponent === session.username ||
+      (Array.isArray(bk.opponents) && bk.opponents.includes(session.username));
     const nameA = avatarMap[ownerUsername]?.name || ownerUsername;
-    const nameB = bk.opponentName || avatarMap[bk.opponent]?.name || bk.opponent || '';
+
+    // Build opponent list for multi vs single format
+    const opponents = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
+    const oppNames  = Array.isArray(bk.opponentNames) ? bk.opponentNames : (bk.opponentName ? [bk.opponentName] : []);
+
     const dateTxt = (bk.tba || bk.date === 'TBA') ? 'TBA' : (bk.date || '');
     const label = isMyMatch ? '⚡ Your Match' : 'Match';
+    const matchType = bk.matchType || '';
 
     const _makeBanner = () => {
       const wrap = document.createElement('div');
       wrap.className = 'sched-booking-banner';
-      // Indented, secondary feel — sits visually under the event card
-      if (isMyMatch) {
-        wrap.style.cssText = 'margin:0;padding:10px 16px;background:rgba(200,168,75,.07);border:1px solid rgba(200,168,75,.3);border-top:none;border-radius:0 0 10px 10px;';
-      } else {
-        wrap.style.cssText = 'margin:0;padding:10px 16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);border-top:none;border-radius:0 0 10px 10px;';
-      }
-      wrap.innerHTML = `
-        <div style="font-size:.48rem;letter-spacing:2px;text-transform:uppercase;color:${isMyMatch ? '#c8a84b' : 'rgba(255,255,255,.25)'};font-weight:700;margin-bottom:7px;">${label}</div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:5px;">${_avCircle(ownerUsername, nameA)}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.45)'};">${nameA.replace(/</g,'&lt;')}</span></div>
+      wrap.style.cssText = isMyMatch
+        ? 'position:relative;margin:0;padding:10px 16px;background:rgba(200,168,75,.07);border:1px solid rgba(200,168,75,.3);border-top:none;border-radius:0 0 10px 10px;transition:background .18s;'
+        : 'position:relative;margin:0;padding:10px 16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);border-top:none;border-radius:0 0 10px 10px;transition:background .18s;';
+
+      // Build participant chips: ownerUsername VS opp1 VS opp2 ...
+      let participantsHtml = `<div style="display:flex;align-items:center;gap:5px;">${_avCircle(ownerUsername, nameA)}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.45)'};">${nameA.replace(/</g,'&lt;')}</span></div>`;
+      opponents.forEach((oppU, i) => {
+        const oppN = oppNames[i] || avatarMap[oppU]?.name || oppU || '';
+        const isExt = oppU.startsWith('__ext__');
+        const oppAvHtml = isExt
+          ? `<div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.65rem;color:rgba(255,255,255,.5);flex-shrink:0;">${(oppN||'?')[0].toUpperCase()}</div>`
+          : _avCircle(oppU, oppN);
+        participantsHtml += `
           <span style="font-size:.6rem;font-weight:700;color:${isMyMatch ? 'rgba(200,168,75,.6)' : 'rgba(255,255,255,.15)'};letter-spacing:1px;">VS</span>
-          <div style="display:flex;align-items:center;gap:5px;">${_avCircle(bk.opponent, nameB)}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.45)'};">${nameB.replace(/</g,'&lt;')}</span></div>
+          <div style="display:flex;align-items:center;gap:5px;">${oppAvHtml}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.45)'};">${oppN.replace(/</g,'&lt;')}</span></div>`;
+      });
+
+      wrap.innerHTML = `
+        <div style="font-size:.48rem;letter-spacing:2px;text-transform:uppercase;color:${isMyMatch ? '#c8a84b' : 'rgba(255,255,255,.25)'};font-weight:700;margin-bottom:7px;">${label}${matchType ? `<span style="margin-left:6px;opacity:.7;">&middot; ${matchType.replace(/</g,'&lt;')}</span>` : ''}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          ${participantsHtml}
           ${dateTxt ? `<span style="margin-left:auto;font-size:.65rem;color:rgba(255,255,255,.25);">📅 ${dateTxt.replace(/</g,'&lt;')}</span>` : ''}
         </div>`;
+
+      // ── Edit button (owner/admin only, appears on hover) ──
+      if (canEditAll) {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'sched-banner-edit-btn';
+        editBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+        editBtn.title = 'Edit match card';
+        editBtn.style.cssText = 'position:absolute;top:50%;right:12px;transform:translateY(-50%);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:7px;color:rgba(255,255,255,.4);padding:5px 7px;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .18s,background .18s,color .18s;pointer-events:none;line-height:1;';
+
+        editBtn.onmouseenter = () => { editBtn.style.background = 'rgba(200,168,75,.15)'; editBtn.style.borderColor = 'rgba(200,168,75,.35)'; editBtn.style.color = '#c8a84b'; };
+        editBtn.onmouseleave = () => { editBtn.style.background = 'rgba(255,255,255,.06)'; editBtn.style.borderColor = 'rgba(255,255,255,.12)'; editBtn.style.color = 'rgba(255,255,255,.4)'; };
+
+        editBtn.onclick = async (e) => {
+          e.stopPropagation();
+          // Fetch the roster row id for ownerUsername if not already known
+          let rowId = rosterRowId;
+          if (!rowId) {
+            try {
+              const rows = await sbGet('roster', `username=eq.${encodeURIComponent(ownerUsername)}&efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id,plan_note&limit=1`);
+              rowId = rows[0]?.id || null;
+            } catch(err) {}
+          }
+          const displayName = avatarMap[ownerUsername]?.name || ownerUsername;
+          openBookingModal(ownerUsername, displayName, rowId, bk);
+        };
+
+        wrap.appendChild(editBtn);
+
+        // Show/hide edit button on banner hover
+        wrap.addEventListener('mouseenter', () => {
+          editBtn.style.opacity = '1';
+          editBtn.style.pointerEvents = 'auto';
+          wrap.style.background = isMyMatch ? 'rgba(200,168,75,.11)' : 'rgba(255,255,255,.04)';
+        });
+        wrap.addEventListener('mouseleave', () => {
+          editBtn.style.opacity = '0';
+          editBtn.style.pointerEvents = 'none';
+          wrap.style.background = isMyMatch ? 'rgba(200,168,75,.07)' : 'rgba(255,255,255,.02)';
+        });
+      }
+
       return wrap;
     };
 
@@ -3407,10 +3473,9 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
     }
   });
 
-  // After all banners inserted: fix radii so only the last banner in each group has bottom curves
-  // and wire up drag-to-reorder for owners/admins
+  // Fix radii + drag
   _fixBannerRadii();
-  if (isAdmin) _initMatchCardDrag();
+  if (canEditAll) _initMatchCardDrag();
 }
 
 // Refreshes border-radius on all banner groups so only the last in each group is curved at the bottom
