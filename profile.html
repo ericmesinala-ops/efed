@@ -5350,16 +5350,49 @@ async function loadAppearances(targetUser, isOwn) {
       if (!r.plan_note) return;
       try {
         const bk = typeof r.plan_note === 'string' ? JSON.parse(r.plan_note) : r.plan_note;
-        if (!bk || !bk.opponent) return;
+        if (!bk) return;
+
+        // Normalise both old (opponent) and new (opponents[]) formats into a unified structure
+        const isMulti = Array.isArray(bk.opponents) && bk.opponents.length > 0;
+        const hasSingle = !isMulti && bk.opponent;
+        if (!isMulti && !hasSingle) return; // no participants — skip
+
+        // Build a flat opponents list: [{ username, name, isExternal }]
+        let opponentList = [];
+        if (isMulti) {
+          opponentList = bk.opponents.map((u, i) => ({
+            username: u,
+            name: (bk.opponentNames || [])[i] || u,
+            isExternal: u.startsWith('__ext__')
+          }));
+        } else {
+          opponentList = [{
+            username: bk.opponent,
+            name: bk.opponentName || bk.opponent,
+            isExternal: !!(bk.external || (bk.opponent && bk.opponent.startsWith('__ext__')))
+          }];
+        }
+
+        // Filter out expired matches (past by > 1 day)
         if (bk.date && !bk.tba && bk.date !== 'TBA') {
           const d = new Date(bk.date);
           if (!isNaN(d) && (now - d.getTime()) > oneDayMs) return;
         }
-        bookings.push({ id: r.id, efed: r.efed, ...bk });
+
+        bookings.push({
+          id: r.id,
+          efed: r.efed,
+          opponentList,
+          slots: bk.slots || null, // vs/participant ordering for multi-man
+          show: bk.show || '',
+          matchType: bk.matchType || '',
+          date: bk.date || '',
+          tba: bk.tba || false
+        });
       } catch(e) {}
     });
 
-    // Sort: soonest date first, TBA at end, no-date after TBA
+    // Sort: soonest first, TBA near end, no-date last
     bookings.sort((a, b) => {
       const parse = bk => {
         if (bk.tba || bk.date === 'TBA') return Infinity - 1;
@@ -5370,24 +5403,40 @@ async function loadAppearances(targetUser, isOwn) {
       return parse(a) - parse(b);
     });
 
-    // Fetch avatars for current user + all opponents in one shot
-    const opponentUsernames = [...new Set(bookings.map(b => b.opponent).filter(Boolean))];
+    // Collect all real (non-external) usernames for bulk avatar fetch
+    const allRealOpponents = [...new Set(
+      bookings.flatMap(b => b.opponentList.map(o => o.username).filter(u => !u.startsWith('__ext__')))
+    )];
     let avatarMap = {};
-    let myAvatarUrl = null;
     try {
-      const allUsers = [targetUser, ...opponentUsernames];
+      const allUsers = [targetUser, ...allRealOpponents];
       const uRows = await sbGet('users', `username=in.(${allUsers.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
       uRows.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
-      myAvatarUrl = avatarMap[targetUser]?.avatar || null;
     } catch(e) {}
 
-    const avHtml = (username, label) => {
-      const info = avatarMap[username] || {};
-      const av = info.avatar
-        ? `<img src="${_esc(info.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(255,255,255,.15);">`
-        : `<div style="width:28px;height:28px;border-radius:50%;background:rgba(192,0,14,.15);border:1.5px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.75rem;color:#c0000e;flex-shrink:0;">${(label||'?')[0].toUpperCase()}</div>`;
-      return `<div style="display:flex;align-items:center;gap:7px;">${av}<span style="font-size:.88rem;font-weight:600;color:#fff;">${_esc(label)}</span></div>`;
+    // Render a single participant chip (avatar + name)
+    const avChip = (username, label, isExternal, clickable) => {
+      let av;
+      if (isExternal) {
+        // External opponents get initials only, no link
+        const initials = label.split(/\s+/).map(w => w[0]?.toUpperCase()||'').slice(0,2).join('');
+        av = `<div style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.72rem;color:rgba(255,255,255,.55);flex-shrink:0;">${initials||'?'}</div>`;
+      } else {
+        const info = avatarMap[username] || {};
+        const resolvedName = info.name || label;
+        av = info.avatar
+          ? `<img src="${_esc(info.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(255,255,255,.15);">`
+          : `<div style="width:28px;height:28px;border-radius:50%;background:rgba(192,0,14,.15);border:1.5px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.75rem;color:#c0000e;flex-shrink:0;">${(resolvedName||'?')[0].toUpperCase()}</div>`;
+        label = resolvedName;
+      }
+      const nameSpan = `<span style="font-size:.88rem;font-weight:600;color:#fff;">${_esc(label)}</span>`;
+      if (!isExternal && clickable) {
+        return `<div onclick="window.location.href='profile.html?u=${encodeURIComponent(username)}'" style="cursor:pointer;display:flex;align-items:center;gap:7px;">${av}${nameSpan}</div>`;
+      }
+      return `<div style="display:flex;align-items:center;gap:7px;">${av}${nameSpan}</div>`;
     };
+
+    const vsSep = `<span style="font-size:.7rem;font-weight:700;color:rgba(255,255,255,.3);letter-spacing:1px;text-transform:uppercase;flex-shrink:0;">vs</span>`;
 
     sec.style.display = '';
     list.innerHTML = '';
@@ -5397,21 +5446,24 @@ async function loadAppearances(targetUser, isOwn) {
       if (isHidden && !isOwn) return;
 
       const myName = avatarMap[targetUser]?.name || targetUser;
-      const oppName = bk.opponentName || avatarMap[bk.opponent]?.name || bk.opponent || '';
       const dateTxt = (bk.tba || bk.date === 'TBA') ? 'TBA' : (bk.date || '');
+
+      // Build the participant row: me + vs + each opponent (with vs between each)
+      // For multi-man, use the slots order if available; otherwise just list sequentially
+      let participantHtml = avChip(targetUser, myName, false, false);
+      bk.opponentList.forEach(opp => {
+        participantHtml += vsSep + avChip(opp.username, opp.name, opp.isExternal, true);
+      });
 
       const card = document.createElement('div');
       card.style.cssText = `position:relative;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:14px 16px;transition:opacity .2s;${isHidden ? 'opacity:.3;' : ''}`;
 
       card.innerHTML = `
         <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:10px;cursor:pointer;" onclick="window.location.href='efed.html?e=${encodeURIComponent(bk.efed||'')}';">${_esc(bk.efed || '')}</div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-          <div onclick="window.location.href='profile.html?u=${encodeURIComponent(targetUser)}'" style="cursor:pointer;">${avHtml(targetUser, myName)}</div>
-          <span style="font-size:.7rem;font-weight:700;color:rgba(255,255,255,.3);letter-spacing:1px;text-transform:uppercase;">vs</span>
-          <div onclick="window.location.href='profile.html?u=${encodeURIComponent(bk.opponent||'')}'" style="cursor:pointer;">${avHtml(bk.opponent, oppName)}</div>
-        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">${participantHtml}</div>
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           ${bk.show ? `<span style="font-size:.72rem;color:rgba(255,255,255,.45);">📺 ${_esc(bk.show)}</span>` : ''}
+          ${bk.matchType ? `<span style="font-size:.72rem;color:rgba(255,255,255,.4);">🥊 ${_esc(bk.matchType)}</span>` : ''}
           ${dateTxt ? `<span style="font-size:.72rem;color:rgba(255,255,255,.35);">📅 ${_esc(dateTxt)}</span>` : ''}
         </div>`;
 
