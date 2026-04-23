@@ -6416,8 +6416,68 @@ const HERO_DUR  = 20;
 let heroIdx   = 0;
 let heroTimer = null;
 window._heroFirstLoad = true;
-// Randomize starting hero slide on each page load
-window._heroStartIdx = Math.floor(Math.random() * 999); // resolved after videos load
+
+// ── HERO POOL SYSTEM ──────────────────────────────────────────────────────────
+// Every 12 hours, 30 random videos are selected from the full library and stored
+// as the active hero pool in localStorage. Within that cycle the hero rotates
+// only through those 30 videos (shuffled, no back-to-back repeats).
+// When the cycle expires a brand-new 30-video pool is generated automatically.
+const HERO_POOL_SIZE     = 30;
+const HERO_POOL_DURATION = 12 * 60 * 60 * 1000; // 12 hours in ms
+const HERO_POOL_KEY      = 'efed_hero_pool';
+
+// Fisher-Yates shuffle (returns a new array)
+function _shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Build or restore the 12-hour hero pool.
+// Returns an ordered array of video objects for this cycle.
+function getHeroPool(allVideos) {
+  const eligible = allVideos.filter(v => (!v.platform || v.platform !== 'twitch') && v.url);
+  if (!eligible.length) return [];
+
+  const now = Date.now();
+  try {
+    const stored = JSON.parse(localStorage.getItem(HERO_POOL_KEY) || 'null');
+    // Validate: must exist, be unexpired, and still have valid URLs in the library
+    if (
+      stored &&
+      stored.expires > now &&
+      Array.isArray(stored.pool) &&
+      stored.pool.length > 0
+    ) {
+      // Re-hydrate stored URL list against current video objects
+      // (preserves pool order while picking up any metadata changes)
+      const urlMap = new Map(eligible.map(v => [v.url, v]));
+      const rehydrated = stored.pool
+        .map(url => urlMap.get(url))
+        .filter(Boolean);
+      if (rehydrated.length > 0) return rehydrated;
+    }
+  } catch(e) { /* corrupt storage — fall through to rebuild */ }
+
+  // Build a fresh 30-video pool
+  const shuffled  = _shuffleArray(eligible);
+  const pool      = shuffled.slice(0, Math.min(HERO_POOL_SIZE, shuffled.length));
+  const poolUrls  = pool.map(v => v.url);
+  const expires   = now + HERO_POOL_DURATION;
+
+  try {
+    localStorage.setItem(HERO_POOL_KEY, JSON.stringify({ expires, pool: poolUrls }));
+  } catch(e) { /* storage full — run in memory only */ }
+
+  return pool;
+}
+
+// Active pool for this session (populated once videos are loaded)
+let _heroPool = [];
+let _heroLastIdx = -1; // track previous slide to prevent back-to-back repeats
 
 setTimeout(()=>{ if(typeof loadVerifiedUsers==="function") loadVerifiedUsers(); }, 1000);
 // Fast-path: if ?play= param exists, open video immediately + load hub in background
@@ -6561,25 +6621,30 @@ function heroSrc(id) {
 }
 
 function buildHeroDots() {
-  const list = sortByDate([...videos].filter(v => (!v.platform || v.platform !== 'twitch') && v.url));
-  if (window._heroFirstLoad && list.length) {
-    heroIdx = Math.floor(Math.random() * list.length);
-    window._heroFirstLoad = false;
-  }
+  // Build / restore the 12-hour pool from the full video library
+  _heroPool = getHeroPool(videos);
+  if (!_heroPool.length) return;
+
+  // Start at a random position in the pool each page load
+  heroIdx = Math.floor(Math.random() * _heroPool.length);
+  _heroLastIdx = -1;
+  window._heroFirstLoad = false;
+
   const inner = document.getElementById('hero-dots-inner');
   inner.innerHTML = '';
-  list.forEach((_, i) => {
+  _heroPool.forEach((_, i) => {
     const d = document.createElement('div');
-    d.className = 'hero-dot' + (i === 0 ? ' active' : '');
+    d.className = 'hero-dot' + (i === heroIdx ? ' active' : '');
     d.onclick = () => {
       clearTimeout(heroTimer);
+      _heroLastIdx = heroIdx;
       heroIdx = i;
       loadSlide();
     };
     inner.appendChild(d);
   });
   document.getElementById('hero-dots').classList.add('show');
-  setHeroDot(0);
+  setHeroDot(heroIdx);
 }
 
 function setHeroDot(idx) {
@@ -6642,10 +6707,9 @@ function showHeroText(v) {
 }
 
 function loadSlide() {
-  const list = sortByDate([...videos].filter(v => (!v.platform || v.platform !== 'twitch') && v.url));
-  if (!list.length) return;
-  if (heroIdx >= list.length) heroIdx = 0;
-  const v      = list[heroIdx];
+  if (!_heroPool.length) return;
+  if (heroIdx >= _heroPool.length) heroIdx = 0;
+  const v      = _heroPool[heroIdx];
   if (!v || !v.url) return;
   const id     = heroExtractId(v.url);
   const fade   = document.getElementById('hero-fade');
@@ -6654,10 +6718,21 @@ function loadSlide() {
 
   setHeroDot(heroIdx);
 
+  // Helper: advance to next index without repeating the current one
+  function nextHeroIdx() {
+    if (_heroPool.length <= 1) return 0;
+    let next;
+    let attempts = 0;
+    do {
+      next = Math.floor(Math.random() * _heroPool.length);
+      attempts++;
+    } while (next === heroIdx && attempts < 20);
+    return next;
+  }
+
   if (window._heroFirstLoad) {
     window._heroFirstLoad = false;
     thumb.classList.add('hidden');
-    // Update iframe to match the actual first video in sorted order
     const firstSrc = heroSrc(id);
     if (!iframe.src.includes(id)) {
       iframe.src = firstSrc;
@@ -6665,7 +6740,8 @@ function loadSlide() {
     showHeroText(v);
     setTimeout(() => fade.classList.remove('active'), 800);
     heroTimer = setTimeout(() => {
-      heroIdx = (heroIdx + 1) % list.length;
+      _heroLastIdx = heroIdx;
+      heroIdx = nextHeroIdx();
       loadSlide();
     }, HERO_DUR * 1000);
     return;
@@ -6680,15 +6756,16 @@ function loadSlide() {
     setTimeout(() => fade.classList.remove('active'), 300);
     clearTimeout(heroTimer);
     heroTimer = setTimeout(() => {
-      heroIdx = (heroIdx + 1) % list.length;
+      _heroLastIdx = heroIdx;
+      heroIdx = nextHeroIdx();
       loadSlide();
     }, HERO_DUR * 1000);
   }, 600);
 }
 
 function heroWatchNow() {
-  const list = sortByDate([...videos].filter(v => (!v.platform || v.platform !== 'twitch') && v.url));
-  openExpand(list[heroIdx]);
+  if (!_heroPool.length) return;
+  openExpand(_heroPool[heroIdx]);
 }
 
 // ── UPCOMING EVENTS ──────────────────────────────────────────────────────────
@@ -8705,6 +8782,8 @@ function doSubmitPost(submissionType) {
     loadPodcastRow(videos);
             window._heroFirstLoad = true;
             heroIdx = 0;
+            // Force-rebuild the hero pool so the newly submitted video is eligible
+            try { localStorage.removeItem(HERO_POOL_KEY); } catch(e) {}
             buildHeroDots();
             loadSlide();
           } catch(refreshErr) { console.warn('Page refresh error after submit:', refreshErr); }
