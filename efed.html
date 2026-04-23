@@ -482,7 +482,7 @@ html.day-mode .stamp-btn:hover { background: rgba(0,0,0,.1); }
 #efed-tab-ink {
   position: absolute; bottom: 0; left: 0;
   height: 2px; background: #c0000e;
-  width: 25%;
+  width: 25%; /* updated to 20% dynamically when book tab shows */
   transform: translateX(0%);
   transition: transform .28s cubic-bezier(.4,0,.2,1);
   pointer-events: none;
@@ -1722,7 +1722,8 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 <script>
 // ── EFED TAB BAR ──────────────────────────────────────────────────────────
 (function() {
-  const ETABS = ['info', 'connect', 'schedule', 'videos'];
+  const ETABS_FULL = ['info', 'connect', 'book', 'schedule', 'videos'];
+  let ETABS = ['info', 'connect', 'schedule', 'videos']; // book tab injected for owners
 
   // On first load, move sections into the correct panels
   function _moveSection(id, panelId) {
@@ -1747,25 +1748,50 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     }
   }
 
-  function _goTo(idx, animate) {
-    idx = Math.max(0, Math.min(ETABS.length - 1, idx));
-    // Tab buttons
-    document.querySelectorAll('.efed-tab').forEach((t, i) =>
-      t.classList.toggle('active', i === idx));
-    // Ink slider
+  function _updateInkWidth() {
     const ink = document.getElementById('efed-tab-ink');
-    if (ink) ink.style.transform = 'translateX(' + (idx * 100) + '%)';
-    // Panels
-    document.querySelectorAll('.efed-tab-panel').forEach((p, i) =>
-      p.classList.toggle('active', i === idx));
-    // Scroll tab bar into view if needed
-    const tabEl = document.querySelectorAll('.efed-tab')[idx];
-    if (tabEl) tabEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    if (!ink) return;
+    const visibleTabs = document.querySelectorAll('.efed-tab:not([style*="display:none"])').length;
+    ink.style.width = (100 / (visibleTabs || 4)) + '%';
+  }
+
+  // Called by owner code after load to reveal the Book tab
+  window.enableBookTab = function() {
+    const btn = document.getElementById('efed-tab-book');
+    if (btn) btn.style.display = '';
+    ETABS = ETABS_FULL.slice();
+    _updateInkWidth();
+  };
+
+  function _goTo(nameOrIdx) {
+    const idx = typeof nameOrIdx === 'number' ? nameOrIdx : ETABS.indexOf(nameOrIdx);
+    const safeIdx = Math.max(0, Math.min(ETABS.length - 1, idx));
+    const allBtns = Array.from(document.querySelectorAll('.efed-tab'));
+    const allPanels = document.querySelectorAll('.efed-tab-panel');
+    // Map ETABS name to button/panel index
+    allBtns.forEach(btn => btn.classList.remove('active'));
+    allPanels.forEach(p => p.classList.remove('active'));
+    const tabName = ETABS[safeIdx];
+    const btn = document.querySelector(`.efed-tab[data-tab="${tabName}"]`);
+    const panelIdx = ETABS_FULL.indexOf(tabName);
+    const panel = allPanels[panelIdx];
+    if (btn) { btn.classList.add('active'); btn.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+    if (panel) panel.classList.add('active');
+    if (tabName === 'book' && typeof bkTabPopulateShows === 'function') {
+      setTimeout(bkTabPopulateShows, 50);
+    }
+    // Ink
+    const ink = document.getElementById('efed-tab-ink');
+    if (ink) {
+      const visibleBtns = allBtns.filter(b => b.style.display !== 'none');
+      const visIdx = visibleBtns.indexOf(btn);
+      ink.style.transform = 'translateX(' + (visIdx * 100) + '%)';
+    }
   }
 
   window.switchEfedTab = function(tabOrIdx) {
-    const idx = typeof tabOrIdx === 'number' ? tabOrIdx : ETABS.indexOf(tabOrIdx);
-    _goTo(idx, true);
+    if (typeof tabOrIdx === 'number') _goTo(ETABS[tabOrIdx] || tabOrIdx);
+    else _goTo(tabOrIdx);
   };
 
   if (document.readyState === 'loading') {
@@ -1923,10 +1949,11 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 
 <!-- ── EFED TAB BAR (sticky, inside header) ── -->
 <div id="efed-tab-bar">
-  <button class="efed-tab active" data-tab="info"     onclick="switchEfedTab(0)">Info</button>
-  <button class="efed-tab"        data-tab="connect"  onclick="switchEfedTab(1)">Connect</button>
-  <button class="efed-tab"        data-tab="schedule" onclick="switchEfedTab(2)">Schedule</button>
-  <button class="efed-tab"        data-tab="videos"   onclick="switchEfedTab(3)">Videos</button>
+  <button class="efed-tab active" data-tab="info"     onclick="switchEfedTab('info')">Info</button>
+  <button class="efed-tab"        data-tab="connect"  onclick="switchEfedTab('connect')">Connect</button>
+  <button class="efed-tab"        data-tab="book"     onclick="switchEfedTab('book')" id="efed-tab-book" style="display:none;">Book</button>
+  <button class="efed-tab"        data-tab="schedule" onclick="switchEfedTab('schedule')">Schedule</button>
+  <button class="efed-tab"        data-tab="videos"   onclick="switchEfedTab('videos')">Videos</button>
   <div id="efed-tab-ink"></div>
 </div>
 
@@ -2297,6 +2324,73 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 </div>
 
 </div><!-- /efed-panel-connect -->
+
+<!-- ── BOOK TAB (owner only) ── -->
+<div class="efed-tab-panel" id="efed-panel-book">
+  <div class="section" style="padding-bottom:0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div class="sec-title" style="margin-bottom:0;">Book a Match</div>
+    </div>
+    <div style="margin-bottom:18px;">
+      <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:7px;">Select Show</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="bk-tab-show-sel" onchange="bkTabOnShowChange()" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:9px;padding:10px 13px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l5 5 5-5' stroke='rgba(255,255,255,0.3)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px;">
+          <option value="">— Pick a show —</option>
+        </select>
+        <button onclick="bkTabNewShow()" style="flex-shrink:0;padding:10px 14px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.25);border-radius:9px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;" onmouseover="this.style.background='rgba(200,168,75,.2)'" onmouseout="this.style.background='rgba(200,168,75,.1)'">+ New Show</button>
+      </div>
+    </div>
+    <div id="bk-tab-roster-wrap" style="display:none;">
+      <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:7px;">Roster — click to book</div>
+      <div id="bk-tab-roster-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px;margin-bottom:4px;"></div>
+    </div>
+  </div>
+  <div id="bk-tab-form" style="display:none;">
+    <div class="section" style="padding-top:12px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <div id="bk-tab-form-av" style="width:40px;height:40px;border-radius:50%;background:rgba(192,0,14,.12);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;flex-shrink:0;overflow:hidden;"></div>
+        <div><div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;">Booking</div><div id="bk-tab-form-name" style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:2px;color:#fff;"></div></div>
+        <button onclick="bkTabClearForm()" style="margin-left:auto;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:7px;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.6rem;cursor:pointer;padding:5px 10px;transition:all .15s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.3)'">✕ Clear</button>
+      </div>
+      <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:4px;">Create Matchcard</div>
+      <div style="font-size:.6rem;color:rgba(255,255,255,.2);margin-bottom:10px;line-height:1.5;">Click avatars to select opponents. Tap VS to add dividers.</div>
+      <div id="bk-tab-opp-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px;"></div>
+      <div id="bk-tab-preview" style="margin-top:14px;display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;">Match Preview</div>
+          <button onclick="bkTabClearSlots()" style="padding:3px 9px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.6rem;cursor:pointer;transition:all .15s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,.35)'">Clear</button>
+        </div>
+        <div id="bk-tab-preview-slots" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;min-height:54px;"></div>
+      </div>
+      <div style="margin-top:14px;">
+        <div style="height:1px;background:rgba(255,255,255,.07);margin-bottom:12px;"></div>
+        <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:3px;">Add a Ghost Competitor</div>
+        <div style="font-size:.6rem;color:rgba(255,255,255,.2);margin-bottom:10px;line-height:1.5;">Ghost competitors are saved permanently. Hover ghost cards to delete.</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="bk-tab-ghost-input" type="text" maxlength="50" placeholder="e.g. John Cena" style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;" onkeydown="if(event.key==='Enter'){event.preventDefault();bkTabAddGhost();}">
+          <button onclick="bkTabAddGhost()" style="padding:8px 12px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;" onmouseover="this.style.background='rgba(200,168,75,.15)';this.style.color='#c8a84b';this.style.borderColor='rgba(200,168,75,.3)';" onmouseout="this.style.background='rgba(255,255,255,.07)';this.style.color='rgba(255,255,255,.55)';this.style.borderColor='rgba(255,255,255,.12)';">+ Add</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
+        <div>
+          <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Match Type</div>
+          <input id="bk-tab-type" type="text" maxlength="60" placeholder="e.g. Singles, Tag Team, Battle Royal…" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+        </div>
+        <div>
+          <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Date</div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="bk-tab-date" type="text" maxlength="30" placeholder="e.g. May 10, 2026" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+            <button id="bk-tab-tba-btn" onclick="bkTabToggleTba()" style="padding:10px 14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1px;cursor:pointer;white-space:nowrap;transition:all .15s;">TBA</button>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:18px;">
+        <div id="bk-tab-msg" style="font-size:.68rem;min-height:14px;margin-bottom:10px;"></div>
+        <button onclick="bkTabSaveBooking()" style="width:100%;padding:13px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'" id="bk-tab-save-btn">Save Booking</button>
+      </div>
+    </div>
+  </div>
+</div><!-- /efed-panel-book -->
 
 <!-- ── SCHEDULE: hype video + calendar of events ── -->
 <div class="efed-tab-panel" id="efed-panel-schedule">
@@ -3505,16 +3599,34 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
 
         editBtn.onclick = async (e) => {
           e.stopPropagation();
-          // Fetch the roster row id for ownerUsername if not already known
-          let rowId = rosterRowId;
-          if (!rowId) {
-            try {
-              const rows = await sbGet('roster', `username=eq.${encodeURIComponent(ownerUsername)}&efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id,plan_note&limit=1`);
-              rowId = rows[0]?.id || null;
-            } catch(err) {}
+          if (_isOwnProfile) {
+            // Go to Book tab, pre-select this show and wrestler
+            const showName = bk.show || '';
+            switchEfedTab('book');
+            setTimeout(async () => {
+              if (showName) {
+                _bkTab.show = showName;
+                const sel = document.getElementById('bk-tab-show-sel');
+                if (sel) sel.value = showName;
+                document.getElementById('bk-tab-roster-wrap').style.display = 'block';
+                await bkTabLoadRoster();
+                // Pre-select the focal wrestler
+                const m = _bkTab.rosterCache.find(r => r.username === ownerUsername);
+                if (m) bkTabSelectWrestler(m);
+              }
+            }, 200);
+          } else {
+            // Non-admin: open legacy modal
+            let rowId = rosterRowId;
+            if (!rowId) {
+              try {
+                const rows = await sbGet('roster', `username=eq.${encodeURIComponent(ownerUsername)}&efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id,plan_note&limit=1`);
+                rowId = rows[0]?.id || null;
+              } catch(err) {}
+            }
+            const displayName = avatarMap[ownerUsername]?.name || ownerUsername;
+            openBookingModal(ownerUsername, displayName, rowId, bk);
           }
-          const displayName = avatarMap[ownerUsername]?.name || ownerUsername;
-          openBookingModal(ownerUsername, displayName, rowId, bk);
         };
 
         // ── Delete button (owner/admin only, appears on hover) ──
@@ -4175,6 +4287,10 @@ async function loadProfile() {
         if (sec) sec.style.display = 'block';
         const evBtn = document.getElementById('event-edit-btn');
         if (evBtn) evBtn.style.display = 'block';
+        // Enable Book tab for owner
+        if (typeof window.enableBookTab === 'function') window.enableBookTab();
+        // Populate shows after events data is loaded (deferred)
+        setTimeout(() => { if (typeof bkTabPopulateShows === 'function') bkTabPopulateShows(); }, 600);
       }
       // Admin always sees chat
       if (!_isMember && session.username.toLowerCase() === ADMIN_USERNAME) {
@@ -4316,7 +4432,7 @@ async function loadProfile() {
   // ── Deep-link tab switching (?tab=schedule etc.) ──
   const _deepTab = _urlParams.get('tab');
   if (_deepTab) {
-    const _tabMap = { info: 0, connect: 1, schedule: 2, videos: 3 };
+    const _tabMap = { info: 'info', connect: 'connect', book: 'book', schedule: 'schedule', videos: 'videos' };
     if (_deepTab in _tabMap) setTimeout(() => switchEfedTab(_tabMap[_deepTab]), 300);
   }
 
@@ -4716,13 +4832,6 @@ function openRosterActionMenu(username, displayName, avatarUrl, rosterRowId, pla
   _ram = { username, displayName, avatarUrl, rosterRowId, planNote };
   const nameEl = document.getElementById('ram-name');
   if (nameEl) nameEl.textContent = displayName;
-  // Show "Edit Booking" if already booked, otherwise "Book Wrestler"
-  const bookLbl = document.getElementById('ram-book-label');
-  if (bookLbl) {
-    let isBooked = false;
-    if (planNote) { try { const bk = JSON.parse(planNote); isBooked = !!(bk && bk.opponent); } catch(e) {} }
-    bookLbl.textContent = isBooked ? 'Edit Booking' : 'Book Wrestler';
-  }
   const bg = document.getElementById('roster-action-bg');
   const card = document.getElementById('roster-action-card');
   bg.style.display = 'flex';
@@ -4894,12 +5003,6 @@ function openGhostActionMenu(username, ghostName, rosterRowId, planNote) {
   _ghostRam = { username, ghostName, rosterRowId, planNote };
   const nameEl = document.getElementById('ghost-action-name');
   if (nameEl) nameEl.textContent = ghostName;
-  const bookLbl = document.getElementById('ghost-book-label');
-  if (bookLbl) {
-    let isBooked = false;
-    if (planNote) { try { const bk = JSON.parse(planNote); isBooked = !!(bk && bk.opponent); } catch(e) {} }
-    bookLbl.textContent = isBooked ? 'Edit Booking' : 'Book Wrestler';
-  }
   document.getElementById('ghost-action-bg').style.display = 'flex';
 }
 function closeGhostActionMenu() {
@@ -5545,6 +5648,494 @@ function _updateBookingIndicator(username, booked) {
   ind.style.cssText = 'position:absolute;bottom:5px;left:6px;font-size:.65rem;opacity:.45;z-index:4;line-height:1;pointer-events:none;';
   ind.textContent = '✍️';
   card.appendChild(ind);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ── BOOK TAB — inline booking form (owner only) ──────────────────
+// ═══════════════════════════════════════════════════════════════════
+let _bkTab = {
+  show: '',          // currently selected show name
+  username: null,    // focal wrestler being booked
+  rosterRowId: null, // focal wrestler's roster row id
+  displayName: '',
+  avatarUrl: '',
+  tba: false,
+  slots: [],         // same format as window._bkSlots
+  rosterCache: [],   // [{username,display_name,avatar_url,rosterRowId,planNote,bookedForShow}]
+  bookedUsernames: new Set(), // usernames already booked for the current show
+};
+
+// ── Populate show dropdown from _efedPrimaryEvent + _efedExtraEvents ──
+function bkTabPopulateShows() {
+  const sel = document.getElementById('bk-tab-show-sel');
+  if (!sel) return;
+  const shows = _bkTabGetAllShows();
+  sel.innerHTML = '<option value="">— Pick a show —</option>';
+  shows.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    if (s === _bkTab.show) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+function _bkTabGetAllShows() {
+  const shows = [];
+  const seen = new Set();
+  const add = (t) => { if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); shows.push(t); } };
+  if (window._efedPrimaryEvent?.title) add(window._efedPrimaryEvent.title);
+  (window._efedExtraEvents || []).forEach(ev => { if (ev?.title) add(ev.title); });
+  return shows;
+}
+
+async function bkTabNewShow() {
+  const name = window.prompt('New show name:');
+  if (!name || !name.trim()) return;
+  const title = name.trim();
+  const extras = window._efedExtraEvents || [];
+  // Check duplicate
+  const exists = _bkTabGetAllShows().some(s => s.toLowerCase() === title.toLowerCase());
+  if (exists) { showToast('Show already exists'); return; }
+  // If no primary event title, set this as primary
+  const session = getSession(); if (!session) return;
+  try {
+    if (!window._efedPrimaryEvent?.title) {
+      await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+        method: 'PATCH', headers: SB_HEADERS,
+        body: JSON.stringify({ efed_event_title: title })
+      });
+      if (!window._efedPrimaryEvent) window._efedPrimaryEvent = {};
+      window._efedPrimaryEvent.title = title;
+    } else {
+      const newExtras = [...extras, { title, date: '', location: '', slogan: '' }];
+      await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+        method: 'PATCH', headers: SB_HEADERS,
+        body: JSON.stringify({ efed_events_json: newExtras })
+      });
+      window._efedExtraEvents = newExtras;
+    }
+    bkTabPopulateShows();
+    // Auto-select new show
+    _bkTab.show = title;
+    document.getElementById('bk-tab-show-sel').value = title;
+    bkTabOnShowChange();
+    showToast('Show created: ' + title);
+  } catch(e) { showToast('Could not save show'); }
+}
+
+async function bkTabOnShowChange() {
+  const sel = document.getElementById('bk-tab-show-sel');
+  _bkTab.show = sel ? sel.value : '';
+  bkTabClearForm();
+  if (!_bkTab.show) {
+    document.getElementById('bk-tab-roster-wrap').style.display = 'none';
+    return;
+  }
+  document.getElementById('bk-tab-roster-wrap').style.display = 'block';
+  await bkTabLoadRoster();
+}
+
+async function bkTabLoadRoster() {
+  const grid = document.getElementById('bk-tab-roster-grid');
+  if (!grid) return;
+  grid.innerHTML = '<div style="font-size:.75rem;color:rgba(255,255,255,.25);padding:16px 0;">Loading…</div>';
+  try {
+    const rosterRows = await sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id,username,plan_note`);
+    const nonGhostRows = rosterRows.filter(r => !r.username.startsWith('__ghost__'));
+    const ghostRows = rosterRows.filter(r => r.username.startsWith('__ghost__'));
+    const usernames = nonGhostRows.map(r => r.username);
+
+    let uMap = {};
+    if (usernames.length) {
+      const uRows = await sbGet('users', `username=in.(${usernames.map(u => encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url`);
+      uRows.forEach(u => { uMap[u.username] = u; });
+    }
+
+    _bkTab.bookedUsernames = new Set();
+    _bkTab.rosterCache = [];
+
+    // Check who's already booked for this show
+    rosterRows.forEach(row => {
+      if (!row.plan_note) return;
+      try {
+        const bk = typeof row.plan_note === 'string' ? JSON.parse(row.plan_note) : row.plan_note;
+        if (bk?.show && bk.show.toLowerCase() === _bkTab.show.toLowerCase()) {
+          _bkTab.bookedUsernames.add(row.username);
+          // Also mark opponents as booked
+          const opps = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
+          opps.forEach(u => { if (u && !u.startsWith('__')) _bkTab.bookedUsernames.add(u); });
+        }
+      } catch(e) {}
+    });
+
+    nonGhostRows.forEach(row => {
+      const u = uMap[row.username] || { username: row.username, display_name: row.username, avatar_url: null };
+      _bkTab.rosterCache.push({ username: u.username, display_name: u.display_name || u.username, avatar_url: u.avatar_url || null, rosterRowId: row.id, planNote: row.plan_note });
+    });
+    ghostRows.forEach(row => {
+      let gName = row.username;
+      try { const gd = JSON.parse(row.plan_note); if (gd.ghostName) gName = gd.ghostName; } catch(e) {}
+      _bkTab.rosterCache.push({ username: row.username, display_name: gName, avatar_url: null, rosterRowId: row.id, planNote: row.plan_note, isGhost: true });
+    });
+
+    bkTabRenderRosterGrid();
+  } catch(e) {
+    grid.innerHTML = '<div style="font-size:.72rem;color:#ff6b6b;padding:12px 0;">Could not load roster.</div>';
+  }
+}
+
+function bkTabRenderRosterGrid() {
+  const grid = document.getElementById('bk-tab-roster-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  _bkTab.rosterCache.forEach(m => {
+    const isBooked = _bkTab.bookedUsernames.has(m.username);
+    const isSelected = m.username === _bkTab.username;
+    const isGhost = m.isGhost;
+    const initials = (m.display_name||'?').replace(/ 👻$/,'').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+    const card = document.createElement('div');
+    card.className = 'bk-avatar-card';
+    card.dataset.username = m.username;
+    card.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;border-radius:11px;cursor:${isBooked && !isSelected ? 'default' : 'pointer'};transition:all .15s;border:2px ${isGhost ? 'dashed' : 'solid'} ${isSelected ? '#c8a84b' : (isGhost ? 'rgba(255,255,255,.15)' : 'rgba(255,255,255,.1)')};background:${isSelected ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.03)'};user-select:none;opacity:${isBooked && !isSelected ? '0.35' : '1'};position:relative;`;
+    const avHtml = isGhost
+      ? `<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.04);border:2px dashed rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:1.2rem;">👻</div>`
+      : (m.avatar_url
+          ? `<img src="${m.avatar_url}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid rgba(200,168,75,.3);">`
+          : `<div style="width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;">${initials}</div>`);
+    const dname = (m.display_name||'').replace(/</g,'&lt;');
+    const short = dname.length > 12 ? dname.slice(0,11)+'…' : dname;
+    const bookedBadge = isBooked ? `<div style="font-size:.46rem;letter-spacing:.8px;text-transform:uppercase;color:rgba(200,168,75,.55);margin-top:-2px;font-weight:700;">✍️ booked</div>` : '';
+    card.innerHTML = avHtml + `<div style="font-size:.65rem;font-weight:600;color:${isGhost ? 'rgba(255,255,255,.5)' : '#ccc'};text-align:center;line-height:1.2;font-family:'DM Sans',sans-serif;">${short}</div>${bookedBadge}`;
+    if (!isBooked || isSelected) {
+      card.onclick = () => bkTabSelectWrestler(m);
+      card.onmouseenter = () => { if (!isSelected) card.style.borderColor = 'rgba(255,255,255,.28)'; };
+      card.onmouseleave = () => { if (!isSelected) card.style.borderColor = isGhost ? 'rgba(255,255,255,.15)' : 'rgba(255,255,255,.1)'; };
+    }
+    grid.appendChild(card);
+  });
+}
+
+function bkTabSelectWrestler(m) {
+  _bkTab.username = m.username;
+  _bkTab.rosterRowId = m.rosterRowId;
+  _bkTab.displayName = m.display_name || m.username;
+  _bkTab.avatarUrl = m.avatar_url || '';
+  _bkTab.slots = [{ type: 'wrestler', username: m.username, name: _bkTab.displayName, avatar: _bkTab.avatarUrl, locked: true }];
+  _bkTab.tba = false;
+  // Reset form fields
+  const typeInp = document.getElementById('bk-tab-type');
+  const dateInp = document.getElementById('bk-tab-date');
+  if (typeInp) typeInp.value = '';
+  if (dateInp) dateInp.value = '';
+  const msg = document.getElementById('bk-tab-msg');
+  if (msg) msg.textContent = '';
+  // Pre-fill if already has booking
+  if (m.planNote) {
+    try {
+      const bk = typeof m.planNote === 'string' ? JSON.parse(m.planNote) : m.planNote;
+      if (typeInp) typeInp.value = bk.matchType || '';
+      if (dateInp && bk.date && bk.date !== 'TBA') dateInp.value = bk.date;
+      _bkTab.tba = !!bk.tba;
+    } catch(e) {}
+  }
+  _bkTabSyncTbaBtn();
+  // Update form header
+  const nameEl = document.getElementById('bk-tab-form-name');
+  const avEl = document.getElementById('bk-tab-form-av');
+  if (nameEl) nameEl.textContent = _bkTab.displayName;
+  if (avEl) {
+    const initials = _bkTab.displayName.replace(/ 👻$/,'').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+    avEl.innerHTML = _bkTab.avatarUrl
+      ? `<img src="${_bkTab.avatarUrl}" style="width:100%;height:100%;object-fit:cover;">`
+      : `<span style="font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;">${initials}</span>`;
+  }
+  // Show form, highlight selected card
+  document.getElementById('bk-tab-form').style.display = 'block';
+  bkTabRenderRosterGrid();  // re-render to update selection highlight
+  bkTabBuildOppGrid();
+  document.getElementById('bk-tab-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function bkTabBuildOppGrid() {
+  const grid = document.getElementById('bk-tab-opp-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  // VS button
+  const vsBtn = document.createElement('div');
+  vsBtn.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;border-radius:11px;cursor:pointer;transition:all .15s;border:2px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);user-select:none;';
+  vsBtn.innerHTML = `<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:rgba(255,255,255,.55);letter-spacing:1px;">VS</div><div style="font-size:.6rem;font-weight:600;color:rgba(255,255,255,.35);text-align:center;font-family:'DM Sans',sans-serif;">Add VS</div>`;
+  vsBtn.onmouseenter = () => { vsBtn.style.borderColor='rgba(200,168,75,.5)'; vsBtn.style.background='rgba(200,168,75,.07)'; };
+  vsBtn.onmouseleave = () => { vsBtn.style.borderColor='rgba(255,255,255,.15)'; vsBtn.style.background='rgba(255,255,255,.04)'; };
+  vsBtn.onclick = () => {
+    if (_bkTab.slots.length === 0) return;
+    const last = _bkTab.slots[_bkTab.slots.length - 1];
+    if (last.type !== 'wrestler') return;
+    _bkTab.slots.push({ type: 'vs' });
+    bkTabRenderPreview();
+  };
+  grid.appendChild(vsBtn);
+
+  // Mystery card
+  const mystCard = document.createElement('div');
+  mystCard.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;border-radius:11px;cursor:pointer;transition:all .15s;border:2px dashed rgba(180,140,255,.25);background:rgba(80,60,120,.08);user-select:none;';
+  mystCard.innerHTML = `<div style="width:44px;height:44px;border-radius:50%;background:rgba(80,60,120,.2);border:2px dashed rgba(180,140,255,.3);display:flex;align-items:center;justify-content:center;font-size:1.3rem;">❓</div><div style="font-size:.6rem;font-weight:600;color:rgba(180,140,255,.55);text-align:center;font-family:'DM Sans',sans-serif;">???</div>`;
+  mystCard.onmouseenter = () => { mystCard.style.borderColor='rgba(180,140,255,.5)'; mystCard.style.background='rgba(80,60,120,.18)'; };
+  mystCard.onmouseleave = () => { mystCard.style.borderColor='rgba(180,140,255,.25)'; mystCard.style.background='rgba(80,60,120,.08)'; };
+  mystCard.onclick = () => {
+    const cnt = _bkTab.slots.filter(s=>s.type==='wrestler').length;
+    if (cnt >= 30) return;
+    _bkTab.slots.push({ type: 'wrestler', username: '__mystery__' + Date.now(), name: '???', avatar: '' });
+    bkTabRenderPreview();
+  };
+  grid.appendChild(mystCard);
+
+  // Roster members (excluding focal wrestler)
+  _bkTab.rosterCache.filter(m => m.username !== _bkTab.username).forEach(m => {
+    const isGhost = m.isGhost;
+    const isSelected = _bkTab.slots.some(s=>s.type==='wrestler' && s.username===m.username);
+    const initials = (m.display_name||'?').replace(/ 👻$/,'').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+    const card = document.createElement('div');
+    card.className = 'bk-avatar-card';
+    card.dataset.username = m.username;
+    card.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;border-radius:11px;cursor:pointer;transition:all .15s;border:2px ${isGhost ? 'dashed' : 'solid'} ${isSelected ? '#c8a84b' : (isGhost ? 'rgba(255,255,255,.15)' : 'rgba(255,255,255,.1)')};background:${isSelected ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.03)'};user-select:none;position:relative;`;
+    const avHtml = isGhost
+      ? `<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.04);border:2px dashed rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:1.2rem;">👻</div>`
+      : (m.avatar_url
+          ? `<img src="${m.avatar_url}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid rgba(200,168,75,.3);">`
+          : `<div style="width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;">${initials}</div>`);
+    if (isGhost) {
+      // Hover delete button for ghost
+      const delBtn = document.createElement('button');
+      delBtn.innerHTML = '✕'; delBtn.title = 'Delete ghost';
+      delBtn.style.cssText = 'position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:rgba(192,0,14,.7);border:none;color:#fff;font-size:.55rem;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:opacity .15s;z-index:10;line-height:1;padding:0;';
+      delBtn.onclick = async (e) => {
+        e.stopPropagation();
+        await fetch(SUPABASE_URL + '/rest/v1/roster?username=eq.' + encodeURIComponent(m.username) + '&efed=eq.' + encodeURIComponent(EFED_NAME), { method: 'DELETE', headers: SB_HEADERS });
+        if (window._efedRosterMembers) window._efedRosterMembers = window._efedRosterMembers.filter(r=>r.username!==m.username);
+        await bkTabLoadRoster(); bkTabBuildOppGrid(); showToast('Ghost removed');
+      };
+      card.appendChild(delBtn);
+      card.onmouseenter = () => { card.style.borderColor='rgba(255,255,255,.3)'; delBtn.style.opacity='1'; };
+      card.onmouseleave = () => { card.style.borderColor=isSelected?'#c8a84b':'rgba(255,255,255,.15)'; delBtn.style.opacity='0'; };
+    } else {
+      card.onmouseenter = () => { if (!isSelected) card.style.borderColor='rgba(255,255,255,.28)'; };
+      card.onmouseleave = () => { if (!isSelected) card.style.borderColor='rgba(255,255,255,.1)'; };
+    }
+    const dname = (m.display_name||'').replace(/</g,'&lt;');
+    const short = dname.length > 12 ? dname.slice(0,11)+'…' : dname;
+    const nameLabel = isGhost ? 'rgba(255,255,255,.5)' : '#ccc';
+    card.innerHTML += `<div style="font-size:.65rem;font-weight:600;color:${nameLabel};text-align:center;line-height:1.2;font-family:'DM Sans',sans-serif;">${short}</div>`;
+    if (isGhost) card.innerHTML += `<div style="font-size:.46rem;color:rgba(255,255,255,.25);text-transform:uppercase;letter-spacing:.8px;font-weight:700;">ghost</div>`;
+    card.onclick = () => {
+      const alreadyIdx = _bkTab.slots.findIndex(s=>s.type==='wrestler'&&s.username===m.username);
+      if (alreadyIdx !== -1) {
+        _bkTab.slots.splice(alreadyIdx, 1);
+        // clean orphan VS
+        if (_bkTab.slots.length && _bkTab.slots[0].type==='vs') _bkTab.slots.shift();
+        if (_bkTab.slots.length && _bkTab.slots[_bkTab.slots.length-1].type==='vs') _bkTab.slots.pop();
+        for (let i=_bkTab.slots.length-1;i>0;i--) { if (_bkTab.slots[i].type==='vs'&&_bkTab.slots[i-1].type==='vs') _bkTab.slots.splice(i,1); }
+      } else {
+        const cnt = _bkTab.slots.filter(s=>s.type==='wrestler').length;
+        if (cnt >= 30) return;
+        _bkTab.slots.push({ type:'wrestler', username:m.username, name:m.display_name||m.username, avatar:m.avatar_url||'' });
+      }
+      bkTabBuildOppGrid();
+      bkTabRenderPreview();
+    };
+    grid.appendChild(card);
+  });
+}
+
+function bkTabRenderPreview() {
+  const wrap = document.getElementById('bk-tab-preview');
+  const slots = document.getElementById('bk-tab-preview-slots');
+  if (!wrap || !slots) return;
+  const wrestlers = _bkTab.slots.filter(s=>s.type==='wrestler');
+  if (wrestlers.length <= 1) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  slots.innerHTML = '';
+  _bkTab.slots.forEach(s => {
+    if (s.type === 'vs') {
+      const vs = document.createElement('span');
+      vs.style.cssText = 'font-size:.5rem;font-weight:800;color:rgba(255,255,255,.2);letter-spacing:2px;';
+      vs.textContent = 'VS';
+      slots.appendChild(vs);
+    } else {
+      const chip = document.createElement('div');
+      chip.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:4px 8px 4px 6px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:20px;font-size:.68rem;color:#ccc;font-family:"DM Sans",sans-serif;cursor:default;';
+      const initials = (s.name||'?').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+      const avHtml = s.avatar
+        ? `<img src="${s.avatar}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;flex-shrink:0;">`
+        : `<div style="width:20px;height:20px;border-radius:50%;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.2);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.6rem;color:#c0000e;flex-shrink:0;">${initials}</div>`;
+      chip.innerHTML = avHtml + `<span>${(s.name||'').length>14?(s.name||'').slice(0,13)+'…':s.name||'?'}</span>`;
+      if (!s.locked) {
+        chip.style.cursor = 'pointer';
+        chip.onclick = () => {
+          const idx = _bkTab.slots.indexOf(s);
+          if (idx > -1) { _bkTab.slots.splice(idx,1); bkTabBuildOppGrid(); bkTabRenderPreview(); }
+        };
+      }
+      slots.appendChild(chip);
+    }
+  });
+}
+
+function bkTabClearSlots() {
+  _bkTab.slots = _bkTab.slots.filter(s=>s.locked);
+  bkTabBuildOppGrid();
+  bkTabRenderPreview();
+}
+
+function bkTabClearForm() {
+  _bkTab.username = null; _bkTab.rosterRowId = null; _bkTab.displayName = ''; _bkTab.avatarUrl = '';
+  _bkTab.slots = []; _bkTab.tba = false;
+  document.getElementById('bk-tab-form').style.display = 'none';
+  const ti = document.getElementById('bk-tab-type'); if (ti) ti.value = '';
+  const di = document.getElementById('bk-tab-date'); if (di) di.value = '';
+  const msg = document.getElementById('bk-tab-msg'); if (msg) msg.textContent = '';
+  bkTabRenderRosterGrid();
+}
+
+function bkTabToggleTba() {
+  _bkTab.tba = !_bkTab.tba;
+  _bkTabSyncTbaBtn();
+}
+function _bkTabSyncTbaBtn() {
+  const btn = document.getElementById('bk-tab-tba-btn');
+  const inp = document.getElementById('bk-tab-date');
+  if (!btn) return;
+  if (_bkTab.tba) {
+    btn.style.background='rgba(200,168,75,.2)'; btn.style.color='#c8a84b'; btn.style.borderColor='rgba(200,168,75,.4)';
+    if (inp) { inp.value=''; inp.disabled=true; }
+  } else {
+    btn.style.background='rgba(255,255,255,.06)'; btn.style.color='rgba(255,255,255,.5)'; btn.style.borderColor='rgba(255,255,255,.12)';
+    if (inp) inp.disabled=false;
+  }
+}
+
+async function bkTabAddGhost() {
+  const input = document.getElementById('bk-tab-ghost-input');
+  if (!input) return;
+  const name = input.value.trim(); if (!name) return;
+  const session = getSession(); if (!session) return;
+  const btn = input.nextElementSibling;
+  if (btn) { btn.disabled=true; btn.textContent='…'; btn.style.opacity='.5'; }
+  input.disabled = true;
+  const ghostUsername = '__ghost__' + Date.now();
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/roster', {
+      method: 'POST', headers: { ...SB_HEADERS, 'Prefer': 'return=representation' },
+      body: JSON.stringify({ username: ghostUsername, efed: EFED_NAME, status: 'approved', joined_at: new Date().toISOString(), plan_note: JSON.stringify({ ghost: true, ghostName: name }) })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    if (!window._efedRosterMembers) window._efedRosterMembers = [];
+    window._efedRosterMembers.push({ username: ghostUsername, display_name: name + ' 👻', avatar_url: null });
+    input.value = '';
+    await bkTabLoadRoster();
+    bkTabBuildOppGrid();
+    showToast('👻 ' + name + ' saved as ghost competitor');
+  } catch(e) { showToast('Could not save ghost: ' + (e.message||'error')); }
+  finally { input.disabled=false; if (btn) { btn.disabled=false; btn.textContent='+ Add'; btn.style.opacity=''; } input.focus(); }
+}
+
+async function bkTabSaveBooking() {
+  const session = getSession(); if (!session) return;
+  if (!_bkTab.username) { document.getElementById('bk-tab-msg').textContent='Select a wrestler first.'; return; }
+
+  const wrestlers = _bkTab.slots.filter(s=>s.type==='wrestler' && !s.locked);
+  if (!wrestlers.length) { document.getElementById('bk-tab-msg').textContent='Select at least one opponent.'; return; }
+
+  const matchType = document.getElementById('bk-tab-type').value.trim();
+  const date = _bkTab.tba ? 'TBA' : (document.getElementById('bk-tab-date').value.trim());
+  const show = _bkTab.show;
+
+  const realWrestlers = wrestlers.filter(s => !s.username.startsWith('__mystery__'));
+  const ghostWrestlers = wrestlers.filter(s => s.username.startsWith('__mystery__'));
+  const ghostOpponents = ghostWrestlers.map(s => ({ name: s.name }));
+  const vsSlots = _bkTab.slots;
+
+  const myName = _bkTab.displayName;
+  const buildNote = (focusUsername) => {
+    const base = { show, matchType, date, tba: _bkTab.tba };
+    if (ghostOpponents.length) base.ghostOpponents = ghostOpponents;
+    if (realWrestlers.length > 1) {
+      const others = realWrestlers.filter(s=>s.username!==focusUsername);
+      return JSON.stringify({ ...base, opponents: others.map(s=>s.username), opponentNames: others.map(s=>s.name), slots: vsSlots.map(s=>s.type==='vs'?'vs':s.username) });
+    }
+    const opp = realWrestlers[0];
+    const isExt = opp?.username?.startsWith('__ext__');
+    return JSON.stringify({ ...base, opponent: opp?.username||'', opponentName: opp?.name||'', external: isExt||undefined });
+  };
+
+  const saveBtn = document.getElementById('bk-tab-save-btn');
+  const msg = document.getElementById('bk-tab-msg');
+  if (saveBtn) { saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+  if (msg) msg.textContent='';
+  try {
+    // Save focal wrestler
+    await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(_bkTab.rosterRowId), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: buildNote(_bkTab.username) })
+    });
+    // Save opponents
+    for (const w of realWrestlers) {
+      if (w.username.startsWith('__')) continue;
+      try {
+        const rows = await sbGet('roster', `username=eq.${encodeURIComponent(w.username)}&efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id`);
+        if (rows[0]?.id) {
+          await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(rows[0].id), {
+            method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: buildNote(w.username) })
+          });
+        }
+      } catch(e) {}
+    }
+    // Notifications
+    const typePart = matchType ? ` [${matchType}]` : '';
+    const showPart = show ? ` at ${show}` : '';
+    const datePart = (date && date!=='TBA') ? ` on ${date}` : (date==='TBA' ? ' — date TBA' : '');
+    const efedPart = EFED_NAME ? ` (${EFED_NAME})` : '';
+    try {
+      await sbInsert('notifications', { username: _bkTab.username, type:'booking', message:`Your next match${typePart} will be against ${realWrestlers.map(s=>s.name).join(' & ')}${showPart}${efedPart}${datePart}.`, read:false, created_at:new Date().toISOString() });
+    } catch(e) {}
+    for (const w of realWrestlers) {
+      if (w.username.startsWith('__')) continue;
+      try { await sbInsert('notifications', { username:w.username, type:'booking', message:`Your next match${typePart} will be against ${myName}${showPart}${efedPart}${datePart}.`, read:false, created_at:new Date().toISOString() }); } catch(e) {}
+    }
+
+    // ── Confirmation popup ──
+    const names = [myName, ...realWrestlers.map(s=>s.name)].join(' vs ');
+    _showBookingConfirm(names, show);
+
+    // Refresh roster grid to show booked state
+    const savedUsername = _bkTab.username;
+    bkTabClearForm();
+    await bkTabLoadRoster();
+  } catch(e) {
+    if (msg) { msg.textContent='Could not save — ' + e.message; msg.style.color='#ff6b6b'; }
+  } finally {
+    if (saveBtn) { saveBtn.disabled=false; saveBtn.textContent='Save Booking'; }
+  }
+}
+
+function _showBookingConfirm(matchLabel, show) {
+  // Remove any existing
+  const old = document.getElementById('bk-confirm-popup');
+  if (old) old.remove();
+  const popup = document.createElement('div');
+  popup.id = 'bk-confirm-popup';
+  popup.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;padding:24px;';
+  popup.innerHTML = `
+    <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:20px;width:100%;max-width:360px;padding:32px 28px;text-align:center;box-shadow:0 32px 80px rgba(0,0,0,.8);">
+      <div style="font-size:2.2rem;margin-bottom:14px;">✅</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:3px;color:#fff;margin-bottom:8px;">Match Booked!</div>
+      <div style="font-size:.82rem;color:rgba(255,255,255,.55);line-height:1.6;margin-bottom:6px;">${matchLabel.replace(/</g,'&lt;')}</div>
+      ${show ? `<div style="font-size:.7rem;color:#c8a84b;font-weight:700;margin-bottom:16px;">@ ${show.replace(/</g,'&lt;')}</div>` : '<div style="margin-bottom:16px;"></div>'}
+      <div style="font-size:.7rem;color:rgba(255,255,255,.3);margin-bottom:24px;line-height:1.5;">Competitors have been notified. This match can be viewed and edited on the <strong style="color:rgba(255,255,255,.5);">Schedule</strong> tab.</div>
+      <button onclick="document.getElementById('bk-confirm-popup').remove();switchEfedTab('schedule');" style="width:100%;padding:12px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;margin-bottom:10px;transition:opacity .15s;" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">View Schedule →</button>
+      <button onclick="document.getElementById('bk-confirm-popup').remove();" style="width:100%;padding:11px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.78rem;cursor:pointer;transition:opacity .15s;">Book Another</button>
+    </div>`;
+  document.body.appendChild(popup);
 }
 
 function openApplyLinkModal() {
@@ -7111,11 +7702,6 @@ function triggerInstall() {
       </button>
       -->
 
-      <button class="ram-btn" id="ram-book-btn" onclick="closeRosterActionMenu();setTimeout(()=>_ram_openBook(),80)">
-        <span class="ram-btn-icon">✍️</span>
-        <span id="ram-book-label">Book Wrestler</span>
-      </button>
-
       <button class="ram-btn" onclick="closeRosterActionMenu();setTimeout(()=>_ram_viewProfile(),80)">
         <span class="ram-btn-icon">👤</span>
         View Profile
@@ -7172,10 +7758,6 @@ function triggerInstall() {
       <button onclick="closeGhostActionMenu()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;padding:4px;">✕</button>
     </div>
     <div style="padding:20px 22px;display:flex;flex-direction:column;gap:8px;">
-      <button class="ram-btn" id="ghost-book-btn" onclick="closeGhostActionMenu();setTimeout(()=>_ghostAction_book(),80)">
-        <span class="ram-btn-icon">✍️</span>
-        <span id="ghost-book-label">Book Wrestler</span>
-      </button>
       <button class="ram-btn" style="border-color:rgba(200,168,75,.3);color:#c8a84b;" onclick="closeGhostActionMenu();setTimeout(()=>_ghostAction_merge(),80)">
         <span class="ram-btn-icon" style="background:rgba(200,168,75,.08);border-color:rgba(200,168,75,.2);">🔗</span>
         Merge with Real Account
