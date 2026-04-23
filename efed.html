@@ -4976,6 +4976,7 @@ function _bkAddVs() {
 }
 
 function _bkRemoveSlot(idx) {
+  if (window._bkSlots[idx]?.locked) return; // cannot remove the focal wrestler
   window._bkSlots.splice(idx, 1);
   // Clean up orphan VS at start/end or double VS
   if (window._bkSlots.length && window._bkSlots[0].type === 'vs') window._bkSlots.shift();
@@ -5069,6 +5070,24 @@ function _bkRenderPreview() {
         window._bkSlots.splice(newIdx, 0, moved);
         _bkRenderPreview(); _bkSyncHiddenFields();
       });
+
+      // Remove button on hover — not shown for locked (focal) wrestler
+      if (!m.locked) {
+        const delBtn = document.createElement('div');
+        delBtn.style.cssText = 'display:none;position:absolute;top:-5px;right:-5px;width:16px;height:16px;background:#c0000e;border-radius:50%;font-size:.6rem;color:#fff;align-items:center;justify-content:center;cursor:pointer;line-height:1;z-index:2;flex-shrink:0;';
+        delBtn.textContent = '✕';
+        delBtn.onclick = (e) => { e.stopPropagation(); _bkRemoveSlot(i); };
+        el.appendChild(delBtn);
+        el.addEventListener('mouseenter', () => { delBtn.style.display = 'flex'; });
+        el.addEventListener('mouseleave', () => { delBtn.style.display = 'none'; });
+      } else {
+        // Locked badge
+        const lockBadge = document.createElement('div');
+        lockBadge.style.cssText = 'position:absolute;top:-5px;right:-5px;width:14px;height:14px;background:rgba(200,168,75,.9);border-radius:50%;font-size:.55rem;color:#000;display:flex;align-items:center;justify-content:center;line-height:1;';
+        lockBadge.textContent = '★';
+        lockBadge.title = 'Focal wrestler — cannot be removed';
+        el.appendChild(lockBadge);
+      }
       container.appendChild(el);
     }
   });
@@ -5076,7 +5095,8 @@ function _bkRenderPreview() {
 
 function _bkSyncHiddenFields() {
   // For backward compat with saveBooking — encode all wrestlers into opponent fields
-  const wrestlers = window._bkSlots.filter(s=>s.type==='wrestler');
+  // Exclude the locked focal wrestler (they are wrestler A, not an opponent)
+  const wrestlers = window._bkSlots.filter(s=>s.type==='wrestler' && !s.locked);
   if (wrestlers.length > 1) {
     // Multi: store as JSON array in hidden field (saveBooking reads it)
     document.getElementById('booking-opponent-value').value = JSON.stringify(wrestlers.map(w=>w.username));
@@ -5107,19 +5127,79 @@ function _buildAvatarGrid(excludeUsername, preselectedUsernames) {
   grid.appendChild(vsBtn);
 
   members.forEach(m => {
+    const isGhostCard = m.username.startsWith('__ghost__');
     const card = document.createElement('div');
     card.className = 'bk-avatar-card';
     card.dataset.username = m.username;
     card.dataset.name = m.display_name || m.username;
     const isSelected = preselected.includes(m.username);
-    card.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;border-radius:11px;cursor:pointer;transition:all .15s;border:2px solid ${isSelected ? '#c8a84b' : 'rgba(255,255,255,.1)'};background:${isSelected ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.03)'};user-select:none;`;
-    const initials = (m.display_name||m.username||'?').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
-    const avHtml = m.avatar_url
-      ? `<img src="${m.avatar_url}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid rgba(200,168,75,.3);" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div style="display:none;width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;">${initials}</div>`
-      : `<div style="width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;">${initials}</div>`;
-    const displayName = (m.display_name||m.username||'').replace(/</g,'&lt;');
+
+    // Ghost cards get dashed border; selected ghosts keep gold
+    const baseBorder = isGhostCard
+      ? (isSelected ? '#c8a84b' : 'rgba(255,255,255,.18)')
+      : (isSelected ? '#c8a84b' : 'rgba(255,255,255,.1)');
+    const baseBg = isGhostCard
+      ? (isSelected ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.02)')
+      : (isSelected ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.03)');
+    const borderStyle = isGhostCard ? 'dashed' : 'solid';
+    card.style.cssText = `display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;border-radius:11px;cursor:pointer;transition:all .15s;border:2px ${borderStyle} ${baseBorder};background:${baseBg};user-select:none;position:relative;`;
+
+    const initials = (m.display_name||m.username||'?').replace(/ 👻$/,'').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+    const avHtml = isGhostCard
+      ? `<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.04);border:2px dashed rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;font-size:1.3rem;opacity:.75;">👻</div>`
+      : (m.avatar_url
+          ? `<img src="${m.avatar_url}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid rgba(200,168,75,.3);" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div style="display:none;width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;">${initials}</div>`
+          : `<div style="width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c0000e;">${initials}</div>`);
+
+    const rawName = (m.display_name||m.username||'').replace(/ 👻$/,'');
+    const displayName = rawName.replace(/</g,'&lt;');
     const truncated = displayName.length > 14 ? displayName.slice(0,13)+'…' : displayName;
-    card.innerHTML = avHtml + `<div style="font-size:.65rem;font-weight:600;color:#ccc;text-align:center;line-height:1.2;font-family:'DM Sans',sans-serif;">${truncated}</div>`;
+    const ghostLabel = isGhostCard ? `<div style="font-size:.48rem;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.25);margin-top:1px;font-weight:700;">ghost</div>` : '';
+    card.innerHTML = avHtml + `<div style="font-size:.65rem;font-weight:600;color:${isGhostCard ? 'rgba(255,255,255,.55)' : '#ccc'};text-align:center;line-height:1.2;font-family:'DM Sans',sans-serif;">${truncated}</div>${ghostLabel}`;
+
+    // ── Ghost hover-delete button ──
+    if (isGhostCard) {
+      const delBtn = document.createElement('button');
+      delBtn.innerHTML = '✕';
+      delBtn.title = 'Delete ghost competitor';
+      delBtn.style.cssText = 'position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:rgba(192,0,14,.7);border:none;color:#fff;font-size:.55rem;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;transition:opacity .15s;z-index:10;line-height:1;padding:0;font-family:"DM Sans",sans-serif;';
+      delBtn.onclick = async (e) => {
+        e.stopPropagation();
+        delBtn.style.pointerEvents = 'none';
+        delBtn.innerHTML = '…';
+        try {
+          await fetch(SUPABASE_URL + '/rest/v1/roster?username=eq.' + encodeURIComponent(m.username) + '&efed=eq.' + encodeURIComponent(EFED_NAME), {
+            method: 'DELETE',
+            headers: SB_HEADERS
+          });
+          // Remove from cache + slots
+          window._efedRosterMembers = (window._efedRosterMembers||[]).filter(r => r.username !== m.username);
+          window._bkSlots = (window._bkSlots||[]).filter(s => s.username !== m.username);
+          window._bkPreselected = (window._bkPreselected||[]).filter(u => u !== m.username);
+          _buildAvatarGrid(_bookingUsername, window._bkPreselected);
+          _bkRenderPreview();
+          _bkSyncHiddenFields();
+          showToast('Ghost removed');
+        } catch(err) {
+          delBtn.innerHTML = '✕';
+          delBtn.style.pointerEvents = '';
+          showToast('Could not delete ghost');
+        }
+      };
+      card.appendChild(delBtn);
+
+      card.onmouseenter = () => {
+        if (!isSelected) card.style.borderColor = 'rgba(255,255,255,.4)';
+        delBtn.style.opacity = '1';
+      };
+      card.onmouseleave = () => {
+        if (!isSelected) card.style.borderColor = 'rgba(255,255,255,.18)';
+        delBtn.style.opacity = '0';
+      };
+    } else {
+      card.onmouseenter = () => { if (!isSelected) card.style.borderColor = 'rgba(255,255,255,.28)'; };
+      card.onmouseleave = () => { if (!isSelected) card.style.borderColor = 'rgba(255,255,255,.1)'; };
+    }
 
     card.onclick = () => {
       const slots = window._bkSlots;
@@ -5127,8 +5207,8 @@ function _buildAvatarGrid(excludeUsername, preselectedUsernames) {
       if (alreadyIdx !== -1) {
         slots.splice(alreadyIdx, 1);
         card.classList.remove('selected');
-        card.style.borderColor = 'rgba(255,255,255,.1)';
-        card.style.background  = 'rgba(255,255,255,.03)';
+        card.style.borderColor = isGhostCard ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.1)';
+        card.style.background  = isGhostCard ? 'rgba(255,255,255,.02)' : 'rgba(255,255,255,.03)';
         if (slots.length && slots[0].type === 'vs') slots.shift();
         if (slots.length && slots[slots.length-1].type === 'vs') slots.pop();
         for (let i = slots.length - 1; i > 0; i--) {
@@ -5137,7 +5217,7 @@ function _buildAvatarGrid(excludeUsername, preselectedUsernames) {
       } else {
         const currentWrestlers = slots.filter(s=>s.type==='wrestler').length;
         if (currentWrestlers >= BK_MAX) return;
-        slots.push({ type: 'wrestler', username: m.username, name: m.display_name || m.username, avatar: m.avatar_url || '' });
+        slots.push({ type: 'wrestler', username: m.username, name: rawName, avatar: m.avatar_url || '' });
         card.classList.add('selected');
         card.style.borderColor = '#c8a84b';
         card.style.background  = 'rgba(200,168,75,.1)';
@@ -5170,35 +5250,68 @@ function _buildAvatarGrid(excludeUsername, preselectedUsernames) {
   ghostSep.innerHTML = `
     <div style="height:1px;background:rgba(255,255,255,.07);margin-bottom:12px;"></div>
     <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:3px;">Add a Ghost Competitor</div>
-    <div style="font-size:.6rem;color:rgba(255,255,255,.2);margin-bottom:10px;line-height:1.5;">Ghost competitors don't appear on the roster list and don't affect rankings or stats — use them for special appearances or mystery entrants.</div>
+    <div style="font-size:.6rem;color:rgba(255,255,255,.2);margin-bottom:10px;line-height:1.5;">Ghost competitors are saved permanently and appear above for future bookings. Hover any ghost card to delete it. Don't affect rankings or stats.</div>
     <div style="display:flex;gap:6px;align-items:center;">
       <input id="bk-ghost-input" type="text" maxlength="50" placeholder="e.g. John Cena" style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;" onkeydown="if(event.key==='Enter'){event.preventDefault();_bkAddGhost();}">
       <button onclick="_bkAddGhost()" style="padding:8px 12px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;" onmouseover="this.style.background='rgba(200,168,75,.15)';this.style.color='#c8a84b';this.style.borderColor='rgba(200,168,75,.3)';" onmouseout="this.style.background='rgba(255,255,255,.07)';this.style.color='rgba(255,255,255,.55)';this.style.borderColor='rgba(255,255,255,.12)';">+ Add</button>
-    </div>
-    <div id="bk-ghost-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>`;
+    </div>`;
   grid.appendChild(ghostSep);
 }
 
-function _bkAddGhost() {
+async function _bkAddGhost() {
   const input = document.getElementById('bk-ghost-input');
   if (!input) return;
   const name = input.value.trim();
   if (!name) return;
   const cnt = window._bkSlots.filter(s=>s.type==='wrestler').length;
   if (cnt >= BK_MAX) return;
-  const uid = '__ghost_bk__' + name.toLowerCase().replace(/[^a-z0-9]/g,'_') + '_' + Date.now();
-  window._bkSlots.push({ type: 'wrestler', username: uid, name: name, avatar: '' });
-  // Add chip to ghost chips area
-  const chips = document.getElementById('bk-ghost-chips');
-  if (chips) {
-    const chip = document.createElement('div');
-    chip.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:4px 8px 4px 6px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:20px;font-size:.62rem;color:rgba(255,255,255,.5);font-family:"DM Sans",sans-serif;cursor:default;';
-    const initials = name.split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
-    chip.innerHTML = `<div style="width:18px;height:18px;border-radius:50%;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.2);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.55rem;color:#c0000e;flex-shrink:0;">${initials}</div><span title="${name.replace(/"/g,'&quot;')}">${name.length>16?name.slice(0,15)+'…':name}</span>`;
-    chips.appendChild(chip);
+
+  const session = getSession();
+  if (!session) return;
+
+  // Disable button & input while saving
+  const btn = input.nextElementSibling;
+  const origBtnText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '…'; btn.style.opacity = '.5'; }
+  input.disabled = true;
+
+  const ghostUsername = '__ghost__' + Date.now();
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/roster', {
+      method: 'POST',
+      headers: { ...SB_HEADERS, 'Prefer': 'return=representation' },
+      body: JSON.stringify({
+        username: ghostUsername,
+        efed: EFED_NAME,
+        status: 'approved',
+        joined_at: new Date().toISOString(),
+        plan_note: JSON.stringify({ ghost: true, ghostName: name })
+      })
+    });
+    if (!r.ok) throw new Error(await r.text());
+
+    // Push ghost into roster members cache so it appears in the grid immediately
+    if (!window._efedRosterMembers) window._efedRosterMembers = [];
+    window._efedRosterMembers.push({ username: ghostUsername, display_name: name + ' 👻', avatar_url: null });
+
+    // Auto-select: add to _bkSlots for current booking
+    window._bkSlots.push({ type: 'wrestler', username: ghostUsername, name: name, avatar: '' });
+
+    // Rebuild avatar grid — ghost card will appear + be auto-selected
+    window._bkPreselected = (window._bkPreselected || []).concat([ghostUsername]);
+    _buildAvatarGrid(_bookingUsername, window._bkPreselected);
+
+    input.value = '';
+    _bkRenderPreview();
+    _bkSyncHiddenFields();
+    showToast('👻 ' + name + ' saved as ghost competitor');
+  } catch(e) {
+    showToast('Could not save ghost: ' + (e.message || 'unknown error'));
+  } finally {
+    input.disabled = false;
+    if (btn) { btn.disabled = false; btn.textContent = origBtnText; btn.style.opacity = ''; }
+    input.focus();
   }
-  input.value = '';
-  _bkRenderPreview(); _bkSyncHiddenFields();
 }
 
 function openBookingModal(username, displayName, rosterRowId, planNote) {
@@ -5213,8 +5326,16 @@ function openBookingModal(username, displayName, rosterRowId, planNote) {
   document.getElementById('booking-tba-btn').style.color = 'rgba(255,255,255,.5)';
   document.getElementById('booking-tba-btn').style.borderColor = 'rgba(255,255,255,.12)';
 
-  // Reset slots — start fresh for this wrestler
+  // Reset slots — start with the focal wrestler as a locked first slot
   window._bkSlots = [];
+  const _focalMember = (window._efedRosterMembers||[]).find(m => m.username === username);
+  window._bkSlots.push({
+    type: 'wrestler',
+    username: username,
+    name: displayName || username,
+    avatar: _focalMember?.avatar_url || '',
+    locked: true
+  });
 
   // Determine pre-selected opponents from existing booking
   let preselected = [], externalName = '';
@@ -5235,6 +5356,13 @@ function openBookingModal(username, displayName, rosterRowId, planNote) {
           if (mem) window._bkSlots.push({ type:'wrestler', username:mem.username, name:mem.display_name||mem.username, avatar:mem.avatar_url||'' });
         }
       });
+      // Restore ghost opponents
+      if (Array.isArray(bk.ghostOpponents)) {
+        bk.ghostOpponents.forEach(g => {
+          const uid = '__ghost_bk__' + (g.name||'').toLowerCase().replace(/[^a-z0-9]/g,'_') + '_' + Date.now();
+          window._bkSlots.push({ type:'wrestler', username:uid, name:g.name||'Ghost', avatar:'' });
+        });
+      }
       document.getElementById('booking-show-input').value = bk.show || '';
       document.getElementById('booking-type-input').value = bk.matchType || '';
       if (bk.tba) {
@@ -5257,6 +5385,7 @@ function openBookingModal(username, displayName, rosterRowId, planNote) {
   }
 
   // Build avatar grid (excludes the focal wrestler, pre-highlights existing opponents)
+  window._bkPreselected = preselected;
   _buildAvatarGrid(username, preselected);
   _bkSyncHiddenFields();
   _bkRenderPreview();
@@ -7495,7 +7624,7 @@ function closeEmblemConfirm() {
         <div id="bk-match-preview" style="margin-top:14px;display:none;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
             <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;">Match Preview</div>
-            <button onclick="window._bkSlots=[];document.querySelectorAll('.bk-avatar-card.selected').forEach(c=>{c.classList.remove('selected');c.style.borderColor='rgba(255,255,255,.1)';c.style.background='rgba(255,255,255,.03)';});document.getElementById('bk-ghost-chips').innerHTML='';_bkRenderPreview();_bkSyncHiddenFields();" style="padding:3px 9px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.6rem;cursor:pointer;transition:all .15s;" onmouseover="this.style.color='#fff';this.style.borderColor='rgba(255,255,255,.25)'" onmouseout="this.style.color='rgba(255,255,255,.35)';this.style.borderColor='rgba(255,255,255,.1)'">Clear</button>
+            <button onclick="window._bkSlots=window._bkSlots.filter(s=>s.locked);document.querySelectorAll('.bk-avatar-card.selected').forEach(c=>{c.classList.remove('selected');c.style.borderColor='rgba(255,255,255,.1)';c.style.background='rgba(255,255,255,.03)';});_bkRenderPreview();_bkSyncHiddenFields();" style="padding:3px 9px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.6rem;cursor:pointer;transition:all .15s;" onmouseover="this.style.color='#fff';this.style.borderColor='rgba(255,255,255,.25)'" onmouseout="this.style.color='rgba(255,255,255,.35)';this.style.borderColor='rgba(255,255,255,.1)'">Clear</button>
           </div>
           <div id="bk-preview-slots" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;min-height:54px;"></div>
           <div id="bk-preview-note" style="font-size:.6rem;color:rgba(200,168,75,.6);margin-top:6px;display:none;">⚠️ 9+ participants — avatars won't show on the banner, but all wrestlers will be notified.</div>
