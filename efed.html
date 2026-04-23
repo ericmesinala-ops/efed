@@ -2127,7 +2127,10 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 </div>
 
 <div class="section" id="roster-section">
-  <div class="sec-title" style="cursor:pointer;" id="roster-sec-title" onclick="openRosterModal()"><span>Roster</span></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+  <div class="sec-title" style="cursor:pointer;margin-bottom:0;" id="roster-sec-title" onclick="openRosterModal()"><span>Roster</span></div>
+  <button id="ghost-add-btn" onclick="openAddGhostModal()" style="display:none;padding:5px 12px;background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.18);border-radius:20px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:all .2s;white-space:nowrap;" onmouseover="this.style.borderColor='rgba(200,168,75,.4)';this.style.color='#c8a84b';" onmouseout="this.style.borderColor='rgba(255,255,255,.18)';this.style.color='rgba(255,255,255,.4)';">👻 Add Ghost</button>
+</div>
 
   <div style="display:flex;align-items:center;gap:4px;">
     <div class="prof-arr-col">
@@ -4212,6 +4215,10 @@ function updateEfedRosterUI() {
     }
   }
 
+  // Show ghost-add-btn only for eFed owner
+  const ghostAddBtn = document.getElementById('ghost-add-btn');
+  if (ghostAddBtn) ghostAddBtn.style.display = _isOwnProfile ? 'block' : 'none';
+
   if (_efedRosterState === 'in') {
     if (btn) { btn.style.background = 'rgba(200,168,75,.2)'; btn.style.borderColor = 'rgba(200,168,75,.5)'; btn.style.color = 'var(--gold)'; }
     if (label) label.textContent = 'On Roster';
@@ -4389,6 +4396,184 @@ function closeRosterActionMenu() {
   if (bg) { bg.classList.remove('open'); bg.style.display = 'none'; }
   if (card) card.classList.remove('open');
 }
+// ── GHOST WRESTLER SYSTEM ──
+// Ghost username format: __ghost__<timestamp>
+// Stored in roster table with status='approved', display_name stored in plan_note as ghost metadata
+// plan_note for ghost: JSON { ghost: true, ghostName: "Display Name", opponent, opponentName, show, date, tba }
+
+let _ghostMergeRosterId = null;
+let _ghostMergeGhostUsername = null;
+let _ghostMergeGhostName = null;
+let _ghostMergePlanNote = null;
+
+function openAddGhostModal() {
+  const inp = document.getElementById('ghost-name-input');
+  const msg = document.getElementById('ghost-add-msg');
+  if (inp) inp.value = '';
+  if (msg) msg.textContent = '';
+  document.getElementById('ghost-add-bg').style.display = 'flex';
+  setTimeout(() => inp && inp.focus(), 80);
+}
+function closeAddGhostModal() {
+  document.getElementById('ghost-add-bg').style.display = 'none';
+}
+
+async function saveAddGhost() {
+  const session = getSession(); if (!session) return;
+  const inp = document.getElementById('ghost-name-input');
+  const msg = document.getElementById('ghost-add-msg');
+  const name = (inp?.value || '').trim();
+  if (!name) { if (msg) { msg.textContent = 'Please enter a name.'; } return; }
+  if (msg) msg.textContent = '';
+
+  const ghostUsername = '__ghost__' + Date.now();
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/roster', {
+      method: 'POST',
+      headers: { ...SB_HEADERS, 'Prefer': 'return=representation' },
+      body: JSON.stringify({
+        username: ghostUsername,
+        efed: EFED_NAME,
+        status: 'approved',
+        joined_at: new Date().toISOString(),
+        plan_note: JSON.stringify({ ghost: true, ghostName: name })
+      })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    closeAddGhostModal();
+    showToast('Ghost slot added for ' + name);
+    loadRoster();
+  } catch(e) {
+    if (msg) msg.textContent = 'Could not add — ' + e.message;
+  }
+}
+
+function openGhostMergeModal(ghostUsername, ghostName, rosterRowId, planNote) {
+  _ghostMergeRosterId = rosterRowId;
+  _ghostMergeGhostUsername = ghostUsername;
+  _ghostMergeGhostName = ghostName;
+  _ghostMergePlanNote = planNote;
+  const lbl = document.getElementById('ghost-merge-name-lbl');
+  if (lbl) lbl.textContent = 'Ghost slot: ' + ghostName;
+  const inp = document.getElementById('ghost-merge-input');
+  const msg = document.getElementById('ghost-merge-msg');
+  if (inp) inp.value = '';
+  if (msg) { msg.textContent = 'Booking data from this ghost slot will transfer to the real account.'; msg.style.color = 'rgba(255,255,255,.35)'; }
+  document.getElementById('ghost-merge-bg').style.display = 'flex';
+  setTimeout(() => inp && inp.focus(), 80);
+}
+function closeGhostMergeModal() {
+  document.getElementById('ghost-merge-bg').style.display = 'none';
+}
+
+async function saveGhostMerge() {
+  const session = getSession(); if (!session) return;
+  const inp = document.getElementById('ghost-merge-input');
+  const msg = document.getElementById('ghost-merge-msg');
+  const realUsername = (inp?.value || '').trim().replace('@', '');
+  if (!realUsername) { if (msg) { msg.textContent = 'Please enter a username.'; msg.style.color = '#ff6b6b'; } return; }
+
+  if (msg) { msg.textContent = 'Looking up account…'; msg.style.color = 'rgba(255,255,255,.4)'; }
+
+  try {
+    // 1. Verify the real user exists
+    const users = await sbGet('users', 'username=eq.' + encodeURIComponent(realUsername) + '&select=username,display_name');
+    if (!users.length) { msg.textContent = 'No Hub account found for @' + realUsername + '. Make sure they've signed up first.'; msg.style.color = '#ff6b6b'; return; }
+
+    // 2. Check if they already have a roster row for this eFed
+    const existing = await sbGet('roster', 'username=eq.' + encodeURIComponent(realUsername) + '&efed=eq.' + encodeURIComponent(EFED_NAME) + '&select=id,plan_note');
+
+    // 3. Extract booking data from ghost plan_note (strip ghost metadata)
+    let transferPlanNote = null;
+    if (_ghostMergePlanNote) {
+      try {
+        const bk = typeof _ghostMergePlanNote === 'string' ? JSON.parse(_ghostMergePlanNote) : _ghostMergePlanNote;
+        if (bk.opponent) {
+          // Transfer booking data only, strip ghost flags
+          transferPlanNote = JSON.stringify({ opponent: bk.opponent, opponentName: bk.opponentName, show: bk.show, date: bk.date, tba: bk.tba });
+        }
+      } catch(e) {}
+    }
+
+    if (existing.length) {
+      // Update their existing row with the booking data
+      if (transferPlanNote) {
+        await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(existing[0].id), {
+          method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: transferPlanNote, status: 'approved' })
+        });
+      }
+    } else {
+      // Create a new approved roster row for them
+      await fetch(SUPABASE_URL + '/rest/v1/roster', {
+        method: 'POST',
+        headers: { ...SB_HEADERS, 'Prefer': 'return=representation' },
+        body: JSON.stringify({ username: realUsername, efed: EFED_NAME, status: 'approved', joined_at: new Date().toISOString(), plan_note: transferPlanNote })
+      });
+    }
+
+    // 4. If the opponent's booking pointed to the ghost, update that too
+    if (_ghostMergeGhostUsername) {
+      try {
+        const oppRows = await sbGet('roster', 'efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=id,username,plan_note');
+        for (const row of oppRows) {
+          if (!row.plan_note) continue;
+          try {
+            const bk = typeof row.plan_note === 'string' ? JSON.parse(row.plan_note) : row.plan_note;
+            if (bk.opponent === _ghostMergeGhostUsername) {
+              const realName = users[0].display_name || realUsername;
+              const updated = JSON.stringify({ ...bk, opponent: realUsername, opponentName: realName });
+              await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(row.id), {
+                method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: updated })
+              });
+            }
+          } catch(e) {}
+        }
+      } catch(e) {}
+    }
+
+    // 5. Delete the ghost roster row
+    await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(_ghostMergeRosterId), {
+      method: 'DELETE', headers: SB_HEADERS
+    });
+
+    closeGhostMergeModal();
+    showToast('Merged! ' + _ghostMergeGhostName + ' → @' + realUsername);
+    loadRoster();
+
+  } catch(e) {
+    if (msg) { msg.textContent = 'Merge failed — ' + e.message; msg.style.color = '#ff6b6b'; }
+  }
+}
+
+
+let _ghostRam = { username: '', ghostName: '', rosterRowId: null, planNote: null };
+
+function openGhostActionMenu(username, ghostName, rosterRowId, planNote) {
+  _ghostRam = { username, ghostName, rosterRowId, planNote };
+  const nameEl = document.getElementById('ghost-action-name');
+  if (nameEl) nameEl.textContent = ghostName;
+  const bookLbl = document.getElementById('ghost-book-label');
+  if (bookLbl) {
+    let isBooked = false;
+    if (planNote) { try { const bk = JSON.parse(planNote); isBooked = !!(bk && bk.opponent); } catch(e) {} }
+    bookLbl.textContent = isBooked ? 'Edit Booking' : 'Book Wrestler';
+  }
+  document.getElementById('ghost-action-bg').style.display = 'flex';
+}
+function closeGhostActionMenu() {
+  document.getElementById('ghost-action-bg').style.display = 'none';
+}
+function _ghostAction_book() {
+  openBookingModal(_ghostRam.username, _ghostRam.ghostName, _ghostRam.rosterRowId, _ghostRam.planNote);
+}
+function _ghostAction_merge() {
+  openGhostMergeModal(_ghostRam.username, _ghostRam.ghostName, _ghostRam.rosterRowId, _ghostRam.planNote);
+}
+function _ghostAction_remove() {
+  openRemoveRosterConfirm(_ghostRam.username, _ghostRam.ghostName, _ghostRam.rosterRowId);
+}
+
+
 function _ram_openChamp()        { openSetChampModal(_ram.username, _ram.displayName, _ram.avatarUrl); }
 function _ram_openBook()         { openBookingModal(_ram.username, _ram.displayName, _ram.rosterRowId, _ram.planNote); }
 function _ram_viewProfile()      { window.location.href = 'profile.html?u=' + encodeURIComponent(_ram.username); }
@@ -5010,6 +5195,20 @@ async function loadRoster() {
     window._efedRosterMembers = [];
 
     function makeCard(u, role, rosterRowId, status, planNote) {
+      // ── Ghost detection ──
+      let ghostName = null;
+      if (u.username && u.username.startsWith('__ghost__')) {
+        try {
+          const gd = typeof planNote === 'string' ? JSON.parse(planNote) : planNote;
+          if (gd && gd.ghost) ghostName = gd.ghostName || 'Unknown';
+        } catch(e) { ghostName = u.display_name || 'Ghost'; }
+      }
+      const isGhost = !!ghostName;
+      if (isGhost) {
+        // Override display name for ghost
+        u = { ...u, display_name: ghostName, avatar_url: null };
+      }
+
       const isOwnerCard = role === 'OWNER';
       const isPending   = status === 'pending';
       const isMe        = session && u.username === session.username;
@@ -5021,7 +5220,8 @@ async function loadRoster() {
       const bannerBg = hasBanner
         ? `background:var(--surface);`
         : `background:var(--surface);`;
-      card.style.cssText = `flex-shrink:0;width:130px;border:1px solid ${isPending ? 'rgba(200,168,75,.2)' : 'rgba(255,255,255,.07)'};border-radius:10px;padding:14px 10px;text-align:center;position:relative;user-select:none;cursor:pointer;transition:border-color .2s,opacity .2s;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;${isPending ? 'opacity:.35;' : ''}`;
+      const ghostBorder = isGhost ? 'rgba(255,255,255,.22)' : null;
+      card.style.cssText = `flex-shrink:0;width:130px;border:1px ${isGhost ? 'dashed' : 'solid'} ${isGhost ? 'rgba(255,255,255,.2)' : (isPending ? 'rgba(200,168,75,.2)' : 'rgba(255,255,255,.07)')};border-radius:10px;padding:14px 10px;text-align:center;position:relative;user-select:none;cursor:${isGhost && !_isOwnProfile ? 'default' : 'pointer'};transition:border-color .2s,opacity .2s;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;${isPending ? 'opacity:.35;' : ''}${isGhost ? 'opacity:.7;' : ''}`;
 
       // Blurred banner background layer
       if (hasBanner) {
@@ -5041,20 +5241,29 @@ async function loadRoster() {
       card.dataset.name = u.display_name || u.username || '';
 
       // ── CLICK HANDLER ──
-      // Pending cards (owner only) → approve/deny
-      if (isPending && _isOwnProfile) {
+      if (isGhost) {
+        if (_isOwnProfile) {
+          card.onclick = () => openGhostActionMenu(u.username, ghostName, rosterRowId, planNote);
+        }
+        // Non-owners: no click action on ghost cards
+      } else if (isPending && _isOwnProfile) {
         card.onclick = () => openRosterModerateModal(u.username, u.display_name||u.username, rosterRowId);
       } else if (!isPending) {
         if (_isOwnProfile) {
-          // Owner clicking any card (including own) → action popup
           card.onclick = () => openRosterActionMenu(u.username, u.display_name||u.username, u.avatar_url||null, rosterRowId, planNote);
         } else {
           card.onclick = () => window.location.href = 'profile.html?u=' + encodeURIComponent(u.username);
         }
       }
       if (isPending && !_isOwnProfile) card.style.cursor = 'default';
-      card.onmouseenter = () => { if (!isPending) card.style.borderColor = (hasBanner || !document.documentElement.classList.contains('day-mode')) ? 'rgba(255,255,255,.28)' : 'rgba(0,0,0,.25)'; };
-      card.onmouseleave = () => card.style.borderColor = isPending ? 'rgba(200,168,75,.2)' : ((!hasBanner && document.documentElement.classList.contains('day-mode')) ? 'rgba(0,0,0,.1)' : 'rgba(255,255,255,.07)');
+      card.onmouseenter = () => {
+        if (isGhost) { if (_isOwnProfile) card.style.borderColor = 'rgba(255,255,255,.45)'; return; }
+        if (!isPending) card.style.borderColor = (hasBanner || !document.documentElement.classList.contains('day-mode')) ? 'rgba(255,255,255,.28)' : 'rgba(0,0,0,.25)';
+      };
+      card.onmouseleave = () => {
+        if (isGhost) { card.style.borderColor = 'rgba(255,255,255,.2)'; return; }
+        card.style.borderColor = isPending ? 'rgba(200,168,75,.2)' : ((!hasBanner && document.documentElement.classList.contains('day-mode')) ? 'rgba(0,0,0,.1)' : 'rgba(255,255,255,.07)');
+      };
 
       const avColor     = isOwnerCard ? 'rgba(200,168,75,.1)' : 'rgba(192,0,14,.1)';
       const avBorder    = isOwnerCard ? '2px solid rgba(200,168,75,.3)' : '2px solid rgba(192,0,14,.2)';
@@ -5067,13 +5276,21 @@ async function loadRoster() {
       const nameColor  = hasBanner ? '#fff' : '';
       const roleColor  = hasBanner ? 'rgba(255,255,255,.65)' : '#7a7a8a';
 
+      const ghostAvColor  = 'rgba(255,255,255,.06)';
+      const ghostAvBorder = '1.5px dashed rgba(255,255,255,.25)';
+      const ghostAvText   = 'rgba(255,255,255,.5)';
+      const finalAvColor  = isGhost ? ghostAvColor  : avColor;
+      const finalAvBorder = isGhost ? ghostAvBorder : avBorder;
+      const finalAvText   = isGhost ? ghostAvText   : avTextColor;
+      const ghostBadgeHtml = isGhost ? `<div style="font-size:.5rem;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-top:4px;font-weight:700;">👻 Ghost Slot</div>` : '';
+
       const contentWrap = document.createElement('div');
       contentWrap.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;width:100%;';
       contentWrap.innerHTML = `
-        <div style="width:44px;height:44px;border-radius:50%;background:${avColor};border:${avBorder};display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:${avTextColor};margin:0 auto 8px;overflow:hidden;">${avInner}</div>
-        <div class="roster-card-name" style="font-size:.78rem;font-weight:600;${nameColor ? 'color:'+nameColor+';' : ''}">${(u.display_name||u.username||'').replace(/</g,'&lt;')}</div>
-        <div style="font-size:.62rem;letter-spacing:1px;margin-top:3px;color:${roleColor};">${role}</div>
-        ${pendingBadge}`;
+        <div style="width:44px;height:44px;border-radius:50%;background:${finalAvColor};border:${finalAvBorder};display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:${finalAvText};margin:0 auto 8px;overflow:hidden;">${avInner}</div>
+        <div class="roster-card-name" style="font-size:.78rem;font-weight:600;${nameColor ? 'color:'+nameColor+';' : ''}${isGhost ? 'color:rgba(255,255,255,.6);' : ''}">${(u.display_name||u.username||'').replace(/</g,'&lt;')}</div>
+        <div style="font-size:.62rem;letter-spacing:1px;margin-top:3px;color:${roleColor};">${isGhost ? '' : role}</div>
+        ${pendingBadge}${ghostBadgeHtml}`;
       card.appendChild(contentWrap);
 
       // ── ✍️ INDICATOR if booked (owner view) ──
@@ -5170,15 +5387,38 @@ async function loadRoster() {
     if (rosterRows.length) {
       const unames = rosterRows.map(r=>r.username).filter(u=>u!==ownerUsername);
       if (unames.length) {
-        const uRows = await sbGet('users', `username=in.(${unames.map(u=>encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url,avatar_banner`);
-        // Cache for booking dropdown
+        // Separate ghost slots from real members
+        const ghostUnames = unames.filter(u => u.startsWith('__ghost__'));
+        const realUnames  = unames.filter(u => !u.startsWith('__ghost__'));
+
+        let uRows = [];
+        if (realUnames.length) {
+          uRows = await sbGet('users', `username=in.(${realUnames.map(u=>encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url,avatar_banner`);
+        }
+        // Cache for booking dropdown (real members + ghost slots)
         window._efedRosterMembers = uRows.map(r => ({ username: r.username, display_name: r.display_name || r.username }));
+        // Add ghost slots to booking dropdown with their ghost names
+        ghostUnames.forEach(gu => {
+          const gr = rosterRows.find(r => r.username === gu);
+          let gName = gu;
+          if (gr?.plan_note) { try { const gd = JSON.parse(gr.plan_note); if (gd.ghostName) gName = gd.ghostName; } catch(e) {} }
+          window._efedRosterMembers.push({ username: gu, display_name: gName + ' 👻' });
+        });
         if (owner) window._efedRosterMembers.unshift({ username: owner.username, display_name: owner.display_name || owner.username });
-        // Preserve DB order (last_active_at desc from query) — no client-side re-sort
+        // Preserve DB order — render real members first, then ghosts
         unames.forEach(uname => {
+          const rosterRow = rosterRows.find(r=>r.username===uname);
+          if (uname.startsWith('__ghost__')) {
+            // Ghost card — synthesize a user object from plan_note
+            let gName = uname;
+            if (rosterRow?.plan_note) { try { const gd = JSON.parse(rosterRow.plan_note); if (gd.ghostName) gName = gd.ghostName; } catch(e) {} }
+            const ghostUser = { username: uname, display_name: gName, avatar_url: null, avatar_banner: null };
+            wrap.appendChild(makeCard(ghostUser, 'Ghost', rosterRow?.id, rosterRow?.status || 'approved', hasPlanNote ? (rosterRow?.plan_note || null) : null));
+            if (rosterRow?.status === 'approved') cardCount++;
+            return;
+          }
           const u = uRows.find(r=>r.username===uname);
           if (!u) return;
-          const rosterRow = rosterRows.find(r=>r.username===uname);
           wrap.appendChild(makeCard(u, 'Member', rosterRow?.id, rosterRow?.status || 'approved', hasPlanNote ? (rosterRow?.plan_note || null) : null));
           if (rosterRow?.status === 'approved') cardCount++;
         });
@@ -6091,6 +6331,84 @@ function triggerInstall() {
 
     </div>
 
+  </div>
+</div>
+
+
+<!-- ── ADD GHOST WRESTLER MODAL ── -->
+<div id="ghost-add-bg" onclick="if(event.target===this)closeAddGhostModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:360px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.7);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px 14px;border-bottom:1px solid rgba(255,255,255,.06);">
+      <div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;">Add Ghost Wrestler</div>
+        <div style="font-size:.56rem;color:rgba(255,255,255,.3);letter-spacing:2px;text-transform:uppercase;margin-top:4px;font-family:'DM Sans',sans-serif;font-weight:700;">Placeholder — not yet on the Hub</div>
+      </div>
+      <button onclick="closeAddGhostModal()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;padding:4px;">✕</button>
+    </div>
+    <div style="padding:20px 22px;">
+      <div style="font-size:.7rem;color:rgba(255,255,255,.35);line-height:1.6;margin-bottom:16px;">Enter the wrestler's name. A placeholder card with their initials will appear on the roster. Once they join the Hub, you can merge this slot with their real account.</div>
+      <input id="ghost-name-input" type="text" maxlength="40" placeholder="e.g. Stone Cold Steve Austin" autocomplete="off"
+        style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:11px 13px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.85rem;outline:none;box-sizing:border-box;margin-bottom:8px;"
+        onkeydown="if(event.key==='Enter')saveAddGhost()">
+      <div id="ghost-add-msg" style="font-size:.7rem;color:#ff6b6b;min-height:18px;margin-bottom:12px;"></div>
+      <button onclick="saveAddGhost()" style="width:100%;padding:12px;background:#c0000e;border:none;border-radius:9px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Add to Roster</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── GHOST ACTION MENU ── -->
+<div id="ghost-action-bg" onclick="if(event.target===this)closeGhostActionMenu()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
+  <div id="ghost-action-card" style="background:#111114;border:1px dashed rgba(255,255,255,.18);border-radius:16px;width:100%;max-width:360px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.7);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px 14px;border-bottom:1px solid rgba(255,255,255,.06);">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:1rem;">👻</span>
+          <div id="ghost-action-name" style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#fff;"></div>
+        </div>
+        <div style="font-size:.56rem;color:rgba(255,255,255,.3);letter-spacing:2px;text-transform:uppercase;margin-top:4px;font-family:'DM Sans',sans-serif;font-weight:700;">Ghost Slot — Not yet on the Hub</div>
+      </div>
+      <button onclick="closeGhostActionMenu()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;padding:4px;">✕</button>
+    </div>
+    <div style="padding:20px 22px;display:flex;flex-direction:column;gap:8px;">
+      <button class="ram-btn" id="ghost-book-btn" onclick="closeGhostActionMenu();setTimeout(()=>_ghostAction_book(),80)">
+        <span class="ram-btn-icon">✍️</span>
+        <span id="ghost-book-label">Book Wrestler</span>
+      </button>
+      <button class="ram-btn" style="border-color:rgba(200,168,75,.3);color:#c8a84b;" onclick="closeGhostActionMenu();setTimeout(()=>_ghostAction_merge(),80)">
+        <span class="ram-btn-icon" style="background:rgba(200,168,75,.08);border-color:rgba(200,168,75,.2);">🔗</span>
+        Merge with Real Account
+      </button>
+      <div style="height:1px;background:rgba(255,255,255,.06);margin:4px 0;"></div>
+      <button class="ram-btn ram-btn-danger" onclick="closeGhostActionMenu();setTimeout(()=>_ghostAction_remove(),80)">
+        <span class="ram-btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff6060" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></svg></span>
+        Remove Ghost Slot
+      </button>
+    </div>
+  </div>
+</div>
+<!-- ── MERGE GHOST MODAL ── -->
+<div id="ghost-merge-bg" onclick="if(event.target===this)closeGhostMergeModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#111114;border:1px solid rgba(200,168,75,.2);border-radius:16px;width:100%;max-width:380px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.7);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px 14px;border-bottom:1px solid rgba(255,255,255,.06);">
+      <div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:3px;color:#c8a84b;">Merge Ghost Slot</div>
+        <div id="ghost-merge-name-lbl" style="font-size:.62rem;color:rgba(255,255,255,.3);letter-spacing:1px;margin-top:4px;font-family:'DM Sans',sans-serif;"></div>
+      </div>
+      <button onclick="closeGhostMergeModal()" style="background:none;border:none;color:#5a5a6a;font-size:1rem;cursor:pointer;padding:4px;">✕</button>
+    </div>
+    <div style="padding:20px 22px;">
+      <div style="font-size:.7rem;color:rgba(255,255,255,.35);line-height:1.6;margin-bottom:16px;">Enter the Hub username of the real account. Their booking data and roster slot will be transferred. The ghost slot will be removed.</div>
+      <div style="font-size:.6rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(200,168,75,.6);font-weight:700;margin-bottom:6px;">Hub Username</div>
+      <input id="ghost-merge-input" type="text" maxlength="40" placeholder="e.g. stonecold_steve" autocomplete="off"
+        style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:11px 13px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.85rem;outline:none;box-sizing:border-box;margin-bottom:8px;"
+        onkeydown="if(event.key==='Enter')saveGhostMerge()">
+      <div id="ghost-merge-msg" style="font-size:.7rem;min-height:18px;margin-bottom:12px;color:rgba(255,255,255,.4);line-height:1.5;"></div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="saveGhostMerge()" style="flex:1;padding:12px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:9px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(200,168,75,.25)'" onmouseout="this.style.background='rgba(200,168,75,.15)'">Merge Account</button>
+        <button onclick="closeGhostMergeModal()" style="padding:12px 16px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:9px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.78rem;cursor:pointer;">Cancel</button>
+      </div>
+    </div>
   </div>
 </div>
 
