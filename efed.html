@@ -4730,31 +4730,8 @@ let _bookingTba = false;
 let _bookingTab = 'roster'; // 'roster' | 'external'
 
 function bookingSetTab(tab) {
-  _bookingTab = tab;
-  const isRoster = tab === 'roster';
-  document.getElementById('bk-panel-roster').style.display = isRoster ? '' : 'none';
-  document.getElementById('bk-panel-external').style.display = isRoster ? 'none' : '';
-  const rBtn = document.getElementById('bk-tab-roster');
-  const eBtn = document.getElementById('bk-tab-external');
-  rBtn.style.background = isRoster ? '#c8a84b' : 'transparent';
-  rBtn.style.color      = isRoster ? '#111' : 'rgba(255,255,255,.4)';
-  eBtn.style.background = isRoster ? 'transparent' : '#c8a84b';
-  eBtn.style.color      = isRoster ? 'rgba(255,255,255,.4)' : '#111';
-  // Clear external inputs when switching back to roster
-  if (isRoster) {
-    document.getElementById('booking-ext-name').value = '';
-    document.getElementById('booking-ext-preview').style.display = 'none';
-  }
-  // Clear roster selection when switching to external
-  if (!isRoster) {
-    document.querySelectorAll('.bk-avatar-card.selected').forEach(c => {
-      c.classList.remove('selected');
-      c.style.borderColor = 'rgba(255,255,255,.1)';
-      c.style.background  = 'rgba(255,255,255,.03)';
-    });
-    document.getElementById('booking-opponent-value').value = '';
-    document.getElementById('booking-opponent-label-val').value = '';
-  }
+  // Tabs removed — unified panel only. No-op kept for backward compat.
+  _bookingTab = 'roster';
 }
 
 function bookingExtNameInput(val) {
@@ -4812,47 +4789,66 @@ function _bkRenderPreview() {
   const showAvatars = wrestlerCount <= 8;
   if (note) note.style.display = wrestlerCount >= 9 ? '' : 'none';
 
-  // Build preview — draggable wrestlers + VS chips
-  let dragSrcIdx = null;
+  // Module-level drag state (persists across slot renders)
+  if (typeof window._bkDragSrcIdx === 'undefined') window._bkDragSrcIdx = null;
   container.innerHTML = '';
 
   slots.forEach((slot, i) => {
     if (slot.type === 'vs') {
       const chip = document.createElement('div');
-      chip.style.cssText = 'position:relative;display:inline-flex;align-items:center;justify-content:center;padding:3px 8px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:20px;cursor:pointer;group:1;';
+      chip.dataset.slotIdx = i;
+      chip.style.cssText = 'position:relative;display:inline-flex;align-items:center;justify-content:center;padding:3px 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:20px;cursor:default;transition:background .1s,border-color .1s;';
       chip.innerHTML = `<span style="font-size:.58rem;font-weight:700;color:rgba(255,255,255,.3);letter-spacing:1.5px;">VS</span><span class="bk-vs-del" style="display:none;position:absolute;top:-6px;right:-6px;width:14px;height:14px;background:#c0000e;border-radius:50%;font-size:.55rem;color:#fff;align-items:center;justify-content:center;cursor:pointer;line-height:1;">✕</span>`;
       chip.onmouseenter = () => { chip.querySelector('.bk-vs-del').style.display = 'flex'; };
       chip.onmouseleave = () => { chip.querySelector('.bk-vs-del').style.display = 'none'; };
       chip.querySelector('.bk-vs-del').onclick = (e) => { e.stopPropagation(); _bkRemoveSlot(i); };
+      // Allow dropping a wrestler onto/around a VS chip — insert after the VS
+      chip.addEventListener('dragover', e => {
+        e.preventDefault();
+        if (window._bkDragSrcIdx !== null) { chip.style.background = 'rgba(200,168,75,.15)'; chip.style.borderColor = 'rgba(200,168,75,.5)'; }
+      });
+      chip.addEventListener('dragleave', () => { chip.style.background = 'rgba(255,255,255,.05)'; chip.style.borderColor = 'rgba(255,255,255,.1)'; });
+      chip.addEventListener('drop', e => {
+        e.preventDefault(); chip.style.background = 'rgba(255,255,255,.05)'; chip.style.borderColor = 'rgba(255,255,255,.1)';
+        const src = window._bkDragSrcIdx;
+        if (src === null || src === i) return;
+        const moved = window._bkSlots.splice(src, 1)[0];
+        // Insert after the VS position (adjust for removal)
+        const vsNewIdx = src < i ? i - 1 : i;
+        window._bkSlots.splice(vsNewIdx + 1, 0, moved);
+        _bkRenderPreview(); _bkSyncHiddenFields();
+      });
       container.appendChild(chip);
     } else {
       const m = slot;
       const el = document.createElement('div');
       el.draggable = true;
       el.dataset.slotIdx = i;
-      el.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px;cursor:grab;user-select:none;position:relative;';
+      el.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:3px;cursor:grab;user-select:none;position:relative;transition:opacity .15s;';
       const initials = (m.name||'?').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+      const isMysterious = m.username && m.username.startsWith('__mystery__');
       const avHtml = showAvatars
-        ? (m.avatar
-            ? `<img src="${m.avatar}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;border:2px solid rgba(200,168,75,.4);" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div style="display:none;width:34px;height:34px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.85rem;color:#c0000e;">${initials}</div>`
-            : `<div style="width:34px;height:34px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.85rem;color:#c0000e;">${initials}</div>`)
+        ? (isMysterious
+            ? `<div style="width:34px;height:34px;border-radius:50%;background:rgba(80,60,120,.25);border:2px dashed rgba(180,140,255,.3);display:flex;align-items:center;justify-content:center;font-size:1rem;">❓</div>`
+            : (m.avatar
+                ? `<img src="${m.avatar}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;border:2px solid rgba(200,168,75,.4);" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div style="display:none;width:34px;height:34px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.85rem;color:#c0000e;">${initials}</div>`
+                : `<div style="width:34px;height:34px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.85rem;color:#c0000e;">${initials}</div>`))
         : '';
       const nameStr = (m.name||'').length > 10 ? (m.name||'').slice(0,9)+'…' : (m.name||'');
-      el.innerHTML = avHtml + `<span style="font-size:.58rem;color:rgba(255,255,255,.7);font-weight:600;text-align:center;max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${nameStr}</span>`;
+      el.innerHTML = avHtml + `<span style="font-size:.58rem;color:${isMysterious ? 'rgba(180,140,255,.7)' : 'rgba(255,255,255,.7)'};font-weight:600;text-align:center;max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${nameStr}</span>`;
 
-      // Drag to reorder
-      el.addEventListener('dragstart', e => { dragSrcIdx = i; el.style.opacity = '.4'; e.dataTransfer.effectAllowed = 'move'; });
-      el.addEventListener('dragend', () => { el.style.opacity = '1'; dragSrcIdx = null; });
-      el.addEventListener('dragover', e => { e.preventDefault(); if (dragSrcIdx !== null && dragSrcIdx !== i) el.style.outline = '1px dashed rgba(200,168,75,.5)'; });
+      el.addEventListener('dragstart', e => { window._bkDragSrcIdx = i; el.style.opacity = '.4'; e.dataTransfer.effectAllowed = 'move'; });
+      el.addEventListener('dragend', () => { el.style.opacity = '1'; window._bkDragSrcIdx = null; });
+      el.addEventListener('dragover', e => { e.preventDefault(); if (window._bkDragSrcIdx !== null && window._bkDragSrcIdx !== i) el.style.outline = '1px dashed rgba(200,168,75,.5)'; });
       el.addEventListener('dragleave', () => { el.style.outline = ''; });
       el.addEventListener('drop', e => {
         e.preventDefault(); el.style.outline = '';
-        if (dragSrcIdx === null || dragSrcIdx === i) return;
-        const moved = window._bkSlots.splice(dragSrcIdx, 1)[0];
-        const newIdx = dragSrcIdx < i ? i - 1 : i;
+        const src = window._bkDragSrcIdx;
+        if (src === null || src === i) return;
+        const moved = window._bkSlots.splice(src, 1)[0];
+        const newIdx = src < i ? i - 1 : i;
         window._bkSlots.splice(newIdx, 0, moved);
-        _bkRenderPreview();
-        _bkSyncHiddenFields();
+        _bkRenderPreview(); _bkSyncHiddenFields();
       });
       container.appendChild(el);
     }
@@ -4910,12 +4906,10 @@ function _buildAvatarGrid(excludeUsername, preselectedUsernames) {
       const slots = window._bkSlots;
       const alreadyIdx = slots.findIndex(s => s.type === 'wrestler' && s.username === m.username);
       if (alreadyIdx !== -1) {
-        // Deselect
         slots.splice(alreadyIdx, 1);
         card.classList.remove('selected');
         card.style.borderColor = 'rgba(255,255,255,.1)';
         card.style.background  = 'rgba(255,255,255,.03)';
-        // Clean orphan VS
         if (slots.length && slots[0].type === 'vs') slots.shift();
         if (slots.length && slots[slots.length-1].type === 'vs') slots.pop();
         for (let i = slots.length - 1; i > 0; i--) {
@@ -4934,6 +4928,58 @@ function _buildAvatarGrid(excludeUsername, preselectedUsernames) {
     };
     grid.appendChild(card);
   });
+
+  // ── ??? Mystery opponent — can be added multiple times ──────────────────────
+  const mystCard = document.createElement('div');
+  mystCard.className = 'bk-avatar-card bk-mystery-card';
+  mystCard.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;border-radius:11px;cursor:pointer;transition:all .15s;border:2px dashed rgba(180,140,255,.25);background:rgba(80,60,120,.08);user-select:none;';
+  mystCard.innerHTML = `<div style="width:44px;height:44px;border-radius:50%;background:rgba(80,60,120,.2);border:2px dashed rgba(180,140,255,.3);display:flex;align-items:center;justify-content:center;font-size:1.3rem;">❓</div><div style="font-size:.6rem;font-weight:600;color:rgba(180,140,255,.55);text-align:center;line-height:1.2;font-family:'DM Sans',sans-serif;">???</div>`;
+  mystCard.onmouseenter = () => { mystCard.style.borderColor = 'rgba(180,140,255,.5)'; mystCard.style.background = 'rgba(80,60,120,.18)'; };
+  mystCard.onmouseleave = () => { mystCard.style.borderColor = 'rgba(180,140,255,.25)'; mystCard.style.background = 'rgba(80,60,120,.08)'; };
+  mystCard.onclick = () => {
+    const cnt = window._bkSlots.filter(s=>s.type==='wrestler').length;
+    if (cnt >= BK_MAX) return;
+    const uid = '__mystery__' + Date.now();
+    window._bkSlots.push({ type: 'wrestler', username: uid, name: '???', avatar: '' });
+    _bkRenderPreview(); _bkSyncHiddenFields();
+  };
+  grid.appendChild(mystCard);
+
+  // ── Divider + Ghost competitor section ─────────────────────────────────────
+  const ghostSep = document.createElement('div');
+  ghostSep.style.cssText = 'grid-column:1/-1;margin-top:6px;';
+  ghostSep.innerHTML = `
+    <div style="height:1px;background:rgba(255,255,255,.07);margin-bottom:12px;"></div>
+    <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:3px;">Add a Ghost Competitor</div>
+    <div style="font-size:.6rem;color:rgba(255,255,255,.2);margin-bottom:10px;line-height:1.5;">Ghost competitors don't appear on the roster list and don't affect rankings or stats — use them for special appearances or mystery entrants.</div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <input id="bk-ghost-input" type="text" maxlength="50" placeholder="e.g. John Cena" style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;" onkeydown="if(event.key==='Enter'){event.preventDefault();_bkAddGhost();}">
+      <button onclick="_bkAddGhost()" style="padding:8px 12px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;" onmouseover="this.style.background='rgba(200,168,75,.15)';this.style.color='#c8a84b';this.style.borderColor='rgba(200,168,75,.3)';" onmouseout="this.style.background='rgba(255,255,255,.07)';this.style.color='rgba(255,255,255,.55)';this.style.borderColor='rgba(255,255,255,.12)';">+ Add</button>
+    </div>
+    <div id="bk-ghost-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>`;
+  grid.appendChild(ghostSep);
+}
+
+function _bkAddGhost() {
+  const input = document.getElementById('bk-ghost-input');
+  if (!input) return;
+  const name = input.value.trim();
+  if (!name) return;
+  const cnt = window._bkSlots.filter(s=>s.type==='wrestler').length;
+  if (cnt >= BK_MAX) return;
+  const uid = '__ghost_bk__' + name.toLowerCase().replace(/[^a-z0-9]/g,'_') + '_' + Date.now();
+  window._bkSlots.push({ type: 'wrestler', username: uid, name: name, avatar: '' });
+  // Add chip to ghost chips area
+  const chips = document.getElementById('bk-ghost-chips');
+  if (chips) {
+    const chip = document.createElement('div');
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:4px 8px 4px 6px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:20px;font-size:.62rem;color:rgba(255,255,255,.5);font-family:"DM Sans",sans-serif;cursor:default;';
+    const initials = name.split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+    chip.innerHTML = `<div style="width:18px;height:18px;border-radius:50%;background:rgba(192,0,14,.15);border:1px solid rgba(192,0,14,.2);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.55rem;color:#c0000e;flex-shrink:0;">${initials}</div><span title="${name.replace(/"/g,'&quot;')}">${name.length>16?name.slice(0,15)+'…':name}</span>`;
+    chips.appendChild(chip);
+  }
+  input.value = '';
+  _bkRenderPreview(); _bkSyncHiddenFields();
 }
 
 function openBookingModal(username, displayName, rosterRowId, planNote) {
@@ -4942,7 +4988,7 @@ function openBookingModal(username, displayName, rosterRowId, planNote) {
   _bookingTba = false;
 
   const safeLabel = (displayName||'').replace(/</g,'&lt;');
-  document.getElementById('booking-wrestler-label').innerHTML = 'Click who <strong style="color:#fff;">' + safeLabel + '</strong> is in the ring with';
+  document.getElementById('booking-wrestler-label').textContent = 'Create the matchcard by clicking the buttons below';
   document.getElementById('booking-msg').textContent = '';
   document.getElementById('booking-tba-btn').style.background = 'rgba(255,255,255,.06)';
   document.getElementById('booking-tba-btn').style.color = 'rgba(255,255,255,.5)';
@@ -7177,40 +7223,30 @@ function closeEmblemConfirm() {
     <!-- Scrollable body -->
     <div style="overflow-y:auto;flex:1;padding:16px 20px;">
 
-      <!-- Tab toggle: Roster vs External -->
-      <div style="display:flex;gap:6px;margin-bottom:16px;background:rgba(255,255,255,.04);border-radius:10px;padding:4px;">
-        <button id="bk-tab-roster" onclick="bookingSetTab('roster')" style="flex:1;padding:8px;border:none;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .18s;background:#c8a84b;color:#111;">Roster</button>
-        <button id="bk-tab-external" onclick="bookingSetTab('external')" style="flex:1;padding:8px;border:none;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;cursor:pointer;transition:all .18s;background:transparent;color:rgba(255,255,255,.4);">External Opponent</button>
-      </div>
-
-      <!-- ── ROSTER PICKER PANEL ── -->
+      <!-- ── ROSTER PICKER PANEL (unified — no tabs) ── -->
       <div id="bk-panel-roster">
-        <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Build your match — click wrestlers, add VS between them</div>
-        <div style="font-size:.6rem;color:rgba(255,255,255,.25);margin-bottom:10px;line-height:1.5;">Note: Do not use VS for teams (e.g. tag matches — just select all members).</div>
+        <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:4px;">Create the matchcard by clicking the buttons below</div>
+        <div style="font-size:.6rem;color:rgba(255,255,255,.2);margin-bottom:10px;line-height:1.5;">Note: Do not use VS for teams — just select all team members without a VS divider.</div>
         <div id="booking-avatar-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px;"></div>
         <input type="hidden" id="booking-opponent-value">
         <input type="hidden" id="booking-opponent-label-val">
+        <input type="hidden" id="bk-tab-roster">
+        <input type="hidden" id="bk-tab-external">
+        <input type="hidden" id="booking-ext-name">
+        <input type="hidden" id="booking-ext-avatar">
+        <input type="hidden" id="booking-ext-fullname">
+        <input type="hidden" id="booking-ext-preview">
+        <input type="hidden" id="bk-panel-external">
 
         <!-- Match card preview -->
         <div id="bk-match-preview" style="margin-top:14px;display:none;">
-          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:8px;">Match Preview</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;">Match Preview</div>
+            <button onclick="window._bkSlots=[];document.querySelectorAll('.bk-avatar-card.selected').forEach(c=>{c.classList.remove('selected');c.style.borderColor='rgba(255,255,255,.1)';c.style.background='rgba(255,255,255,.03)';});document.getElementById('bk-ghost-chips').innerHTML='';_bkRenderPreview();_bkSyncHiddenFields();" style="padding:3px 9px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.6rem;cursor:pointer;transition:all .15s;" onmouseover="this.style.color='#fff';this.style.borderColor='rgba(255,255,255,.25)'" onmouseout="this.style.color='rgba(255,255,255,.35)';this.style.borderColor='rgba(255,255,255,.1)'">Clear</button>
+          </div>
           <div id="bk-preview-slots" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;min-height:54px;"></div>
           <div id="bk-preview-note" style="font-size:.6rem;color:rgba(200,168,75,.6);margin-top:6px;display:none;">⚠️ 9+ participants — avatars won't show on the banner, but all wrestlers will be notified.</div>
         </div>
-      </div>
-
-      <!-- ── EXTERNAL OPPONENT PANEL ── -->
-      <div id="bk-panel-external" style="display:none;">
-        <div style="font-size:.55rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Opponent Name</div>
-        <input id="booking-ext-name" type="text" maxlength="60" placeholder="e.g. John Cena" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.85rem;outline:none;box-sizing:border-box;" oninput="bookingExtNameInput(this.value)">
-        <div id="booking-ext-preview" style="display:none;margin-top:12px;padding:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;align-items:center;gap:12px;">
-          <div id="booking-ext-avatar" style="width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.1);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#c0000e;flex-shrink:0;"></div>
-          <div>
-            <div id="booking-ext-fullname" style="font-size:.85rem;font-weight:600;color:#e8e8e8;"></div>
-            <div style="font-size:.62rem;color:#5a5a7a;margin-top:2px;letter-spacing:.5px;">External · Not on roster</div>
-          </div>
-        </div>
-        <div style="font-size:.68rem;color:#5a5a7a;margin-top:10px;line-height:1.5;">This opponent is not in the eFed system. They won't be added to the roster or counted in member stats.</div>
       </div>
 
       <!-- Divider -->
