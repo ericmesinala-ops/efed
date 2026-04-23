@@ -5783,14 +5783,12 @@ const _MOVE_DESTINATIONS = {
   latest:   { label: 'Episode or PLE',  icon: '📺', color: 'rgba(192,0,14,.15)',    border: 'rgba(192,0,14,.4)',    text: '#ff6b6b',    override: 'latest',   type: null },
   matches:  { label: 'Match Only',      icon: '🥊', color: 'rgba(200,168,75,.15)',  border: 'rgba(200,168,75,.4)', text: 'var(--gold)', override: 'matches',  type: 'match' },
   showcase: { label: 'Showcase',        icon: '🎬', color: 'rgba(155,89,182,.15)',  border: 'rgba(155,89,182,.4)', text: '#b98be0',     override: null,       type: 'showcase' },
-  promo:    { label: 'Promo',           icon: '🎤', color: 'rgba(230,126,34,.15)',  border: 'rgba(230,126,34,.4)', text: '#e6923e',     override: null,       type: 'promo' },
-  podcast:  { label: 'Podcast',         icon: '🎙️', color: 'rgba(46,204,113,.15)',  border: 'rgba(46,204,113,.4)', text: '#2ecc71',     override: null,       type: 'podcast' }
+  promo:    { label: 'Promo',           icon: '🎤', color: 'rgba(230,126,34,.15)',  border: 'rgba(230,126,34,.4)', text: '#e6923e',     override: null,       type: 'promo' }
 };
 
 function _getCurrentSection(v) {
   if (v.submission_type === 'showcase') return 'showcase';
   if (v.submission_type === 'promo') return 'promo';
-  if (v.submission_type === 'podcast') return 'podcast';
   if (isMatch(v)) return 'matches';
   return 'latest';
 }
@@ -8572,8 +8570,29 @@ async function fetchSubmitPreview() {
     const catWrap = document.getElementById('submit-category-wrap');
     if (catWrap) catWrap.style.display = 'block';
 
-    // Pre-fill date if available
-    // uploadDate stored in _fetchedMeta for submission
+    // If YouTube reports this as a scheduled upcoming stream, pre-select Upcoming
+    if (_fetchedMeta.isUpcoming && _fetchedMeta.scheduledMs) {
+      screenEl.textContent = '⏰ YouTube reports this as a scheduled upcoming stream — pre-selected below. Change the category if needed.';
+      screenEl.style.background = 'rgba(200,168,75,.08)';
+      screenEl.style.border = '1px solid rgba(200,168,75,.25)';
+      screenEl.style.color = '#c8a84b';
+      // Pre-select Upcoming in the dropdown label (user can still change it)
+      const trigger = document.getElementById('submit-cat-label');
+      const placement = document.getElementById('submit-cat-placement');
+      if (trigger) trigger.textContent = 'Upcoming';
+      if (placement) { placement.textContent = '→ Will appear in Upcoming Shows'; placement.style.display = 'block'; }
+      // Store the pre-selection so clicking Submit uses it — user can override by picking another
+      if (catWrap) catWrap.dataset.preselect = 'upcoming';
+      // Wire up a one-time submit with 'upcoming' if user doesn't manually change it
+      const postBtn = document.getElementById('submit-post-btn');
+      if (postBtn) {
+        postBtn.style.display = 'block';
+        postBtn.onclick = (e) => { e.preventDefault(); e.stopPropagation();
+          const sel = catWrap.dataset.preselect || 'upcoming';
+          doSubmitPost(sel);
+        };
+      }
+    }
   } catch(e) {
     console.warn('Preview fetch failed', e);
     showSubmitStatus('', '');
@@ -8686,7 +8705,12 @@ function doSubmitPost(submissionType) {
       // Use upload date from YouTube API
       const dateStr = _fetchedMeta.uploadDate || '';
       const dateMs = _fetchedMeta.uploadDateMs || Date.now();
-      const submitStatus = (submissionType === 'upcoming' || (_fetchedMeta.isUpcoming && _fetchedMeta.scheduledMs)) ? 'upcoming' : 'approved';
+      // Only auto-route to upcoming if:
+      //   (a) user explicitly chose 'upcoming', OR
+      //   (b) YouTube says it's a scheduled stream AND user did not explicitly choose a different category
+      const userChoseExplicitly = !!submissionType && submissionType !== 'upcoming';
+      const ytSaysUpcoming = _fetchedMeta.isUpcoming && _fetchedMeta.scheduledMs;
+      const submitStatus = (submissionType === 'upcoming' || (ytSaysUpcoming && !userChoseExplicitly)) ? 'upcoming' : 'approved';
 
       let thumbUrl;
       if (_fetchedMeta.isTwitch) {
@@ -8912,6 +8936,9 @@ function selectSubmitCat(type, label, rowName) {
   if (arrow) arrow.style.transform = '';
   if (trigger) { trigger.textContent = label; trigger.parentElement.style.color = '#fff'; }
   if (placement) { placement.textContent = 'This clip will appear on ' + rowName + '.'; placement.style.display = 'block'; }
+  // Clear any pre-selection so user's explicit choice wins
+  const catWrap = document.getElementById('submit-category-wrap');
+  if (catWrap) catWrap.dataset.preselect = type;
   onSubmitCategorySelect(type);
 }
 
