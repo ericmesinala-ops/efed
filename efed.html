@@ -2138,7 +2138,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 <div class="section" id="roster-section">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
   <div class="sec-title" style="cursor:pointer;margin-bottom:0;" id="roster-sec-title" onclick="openRosterModal()"><span>Roster</span></div>
-  <button id="ghost-add-btn" onclick="openAddGhostModal()" style="display:none;padding:5px 12px;background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.18);border-radius:20px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:all .2s;white-space:nowrap;" onmouseover="this.style.borderColor='rgba(200,168,75,.4)';this.style.color='#c8a84b';" onmouseout="this.style.borderColor='rgba(255,255,255,.18)';this.style.color='rgba(255,255,255,.4)';">👻 Add Ghost</button>
+
 </div>
 
   <div style="display:flex;align-items:center;gap:4px;">
@@ -3404,11 +3404,14 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
     // Normalise: support both old {opponent} and new {opponents:[]}
     const isMulti = Array.isArray(bk.opponents) && bk.opponents.length > 0;
     const primaryOpponent = isMulti ? bk.opponents[0] : bk.opponent;
-    if (!primaryOpponent) continue;
+    // Allow ghost-only bookings (ghostOpponents present but no real opponent)
+    const hasGhostOpps = Array.isArray(bk.ghostOpponents) && bk.ghostOpponents.length > 0;
+    if (!primaryOpponent && !hasGhostOpps) continue;
 
     const key = isMulti
       ? [row.username, ...bk.opponents].sort().join('||')
-      : [row.username, bk.opponent].sort().join('||');
+      : primaryOpponent ? [row.username, bk.opponent].sort().join('||')
+      : row.username + '||ghost:' + (bk.ghostOpponents||[]).map(g=>g.name).join(',');
     if (seen.has(key)) continue;
     seen.add(key);
     bookings.push({ rosterRowId: row.id, ownerUsername: row.username, bk });
@@ -3460,7 +3463,7 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
         ? 'position:relative;margin:0;padding:10px 16px;background:rgba(200,168,75,.07);border:1px solid rgba(200,168,75,.3);border-top:none;border-radius:0 0 10px 10px;transition:background .18s;'
         : 'position:relative;margin:0;padding:10px 16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);border-top:none;border-radius:0 0 10px 10px;transition:background .18s;';
 
-      // Build participant chips: ownerUsername VS opp1 VS opp2 ...
+      // Build participant chips: ownerUsername VS opp1 VS opp2 ... VS ghostOpp1 ...
       let participantsHtml = `<div style="display:flex;align-items:center;gap:5px;">${_avCircle(ownerUsername, nameA)}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.45)'};">${nameA.replace(/</g,'&lt;')}</span></div>`;
       opponents.forEach((oppU, i) => {
         const oppN = oppNames[i] || avatarMap[oppU]?.name || oppU || '';
@@ -3472,6 +3475,19 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
           <span style="font-size:.6rem;font-weight:700;color:${isMyMatch ? 'rgba(200,168,75,.6)' : 'rgba(255,255,255,.15)'};letter-spacing:1px;">VS</span>
           <div style="display:flex;align-items:center;gap:5px;">${oppAvHtml}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.45)'};">${oppN.replace(/</g,'&lt;')}</span></div>`;
       });
+      // Append ghost/mystery opponents (stored in bk.ghostOpponents)
+      if (Array.isArray(bk.ghostOpponents)) {
+        bk.ghostOpponents.forEach(ghost => {
+          const gName = (ghost.name || '???').replace(/</g,'&lt;');
+          const isMystery = gName === '???';
+          const ghostAvHtml = isMystery
+            ? `<div style="width:26px;height:26px;border-radius:50%;background:rgba(80,60,120,.2);border:1.5px dashed rgba(180,140,255,.3);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0;">❓</div>`
+            : `<div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px dashed rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.65rem;color:rgba(255,255,255,.45);flex-shrink:0;">${gName[0].toUpperCase()}</div>`;
+          participantsHtml += `
+            <span style="font-size:.6rem;font-weight:700;color:${isMyMatch ? 'rgba(200,168,75,.6)' : 'rgba(255,255,255,.15)'};letter-spacing:1px;">VS</span>
+            <div style="display:flex;align-items:center;gap:5px;">${ghostAvHtml}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? 'rgba(255,255,255,.7)' : 'rgba(255,255,255,.35)'};font-style:italic;">${gName}</span></div>`;
+        });
+      }
 
       wrap.innerHTML = `
         <div style="font-size:.48rem;letter-spacing:2px;text-transform:uppercase;color:${isMyMatch ? '#c8a84b' : 'rgba(255,255,255,.25)'};font-weight:700;margin-bottom:7px;">${label}${matchType ? `<span style="margin-left:6px;opacity:.7;">&middot; ${matchType.replace(/</g,'&lt;')}</span>` : ''}</div>
@@ -4547,9 +4563,7 @@ function updateEfedRosterUI() {
     }
   }
 
-  // Show ghost-add-btn only for eFed owner
-  const ghostAddBtn = document.getElementById('ghost-add-btn');
-  if (ghostAddBtn) ghostAddBtn.style.display = _isOwnProfile ? 'block' : 'none';
+
 
   if (_efedRosterState === 'in') {
     if (btn) { btn.style.background = 'rgba(200,168,75,.2)'; btn.style.borderColor = 'rgba(200,168,75,.5)'; btn.style.color = 'var(--gold)'; }
@@ -5315,15 +5329,23 @@ async function saveBooking(clear) {
   const date = _bookingTba ? 'TBA' : document.getElementById('booking-date-input').value.trim();
   const isExternal = opponentUsername.startsWith('__ext__');
 
+  // Separate real roster participants from ghost/mystery competitors
+  const realParticipants = allParticipants.filter(p => !p.username.startsWith('__ghost_bk__') && !p.username.startsWith('__mystery__'));
+  const ghostParticipants = allParticipants.filter(p => p.username.startsWith('__ghost_bk__') || p.username.startsWith('__mystery__'));
+  // ghostOpponents: [{name}] — stored in plan_note for display on schedule cards
+  const ghostOpponents = ghostParticipants.map(p => ({ name: p.name }));
+
   // For multi-participant matches, store full arrays
   const myDisplayName = (window._efedRosterMembers||[]).find(m=>m.username===_bookingUsername)?.display_name || _bookingUsername;
   const vsSlots = (window._bkSlots||[]);
   const buildPlanNote = (focusUsername, focusName) => {
+    const base = { show, matchType, date, tba: _bookingTba };
+    if (ghostOpponents.length) base.ghostOpponents = ghostOpponents;
     if (allParticipants.length > 1) {
-      const others = allParticipants.filter(p=>p.username!==focusUsername);
-      return JSON.stringify({ opponents: others.map(p=>p.username), opponentNames: others.map(p=>p.name), show, matchType, date, tba: _bookingTba, slots: vsSlots.map(s=>s.type==='vs'?'vs':s.username) });
+      const others = realParticipants.filter(p=>p.username!==focusUsername);
+      return JSON.stringify({ ...base, opponents: others.map(p=>p.username), opponentNames: others.map(p=>p.name), slots: vsSlots.map(s=>s.type==='vs'?'vs':s.username) });
     }
-    return JSON.stringify({ opponent: opponentUsername, opponentName, show, matchType, date, tba: _bookingTba, external: isExternal||undefined });
+    return JSON.stringify({ ...base, opponent: opponentUsername, opponentName, external: isExternal||undefined });
   };
 
   const planNoteA = clear ? null : buildPlanNote(_bookingUsername, myDisplayName);
@@ -5338,10 +5360,10 @@ async function saveBooking(clear) {
       if (!rA.ok) throw new Error('Save failed: ' + await rA.text());
     }
 
-    // Save plan_note for all other participants
-    const saveTargets = allParticipants.length > 1
-      ? allParticipants.filter(p => p.username !== _bookingUsername && !p.username.startsWith('__ext__'))
-      : (!isExternal && opponentUsername ? [{ username: opponentUsername, name: opponentName }] : []);
+    // Save plan_note for all other REAL participants (skip ghost/mystery usernames)
+    const saveTargets = realParticipants.length > 1
+      ? realParticipants.filter(p => p.username !== _bookingUsername && !p.username.startsWith('__ext__'))
+      : (!isExternal && opponentUsername && !opponentUsername.startsWith('__ghost_bk__') && !opponentUsername.startsWith('__mystery__') ? [{ username: opponentUsername, name: opponentName }] : []);
     for (const target of saveTargets) {
       try {
         const oppRows = await sbGet('roster', `username=eq.${encodeURIComponent(target.username)}&efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id`);
@@ -5365,7 +5387,7 @@ async function saveBooking(clear) {
           message: `Your next match${typePart} will be against ${opponentName}${showPart}${efedPart}${datePart}.`,
           read: false, created_at: new Date().toISOString() });
       } catch(e) {}
-      if (opponentUsername && !isExternal) {
+      if (opponentUsername && !isExternal && !opponentUsername.startsWith('__ghost_bk__') && !opponentUsername.startsWith('__mystery__')) {
         try {
           await sbInsert('notifications', { username: opponentUsername, type: 'booking',
             message: `Your next match${typePart} will be against ${myDisplayName}${showPart}${efedPart}${datePart}.`,
@@ -5377,8 +5399,8 @@ async function saveBooking(clear) {
     // Update ✍️ indicator for all participants
     _updateBookingIndicator(_bookingUsername, !clear);
     if (allParticipants.length > 1) {
-      allParticipants.forEach(p => { if (p.username !== _bookingUsername) _updateBookingIndicator(p.username, !clear); });
-    } else if (opponentUsername && !isExternal) {
+      realParticipants.forEach(p => { if (p.username !== _bookingUsername) _updateBookingIndicator(p.username, !clear); });
+    } else if (opponentUsername && !isExternal && !opponentUsername.startsWith('__ghost_bk__') && !opponentUsername.startsWith('__mystery__')) {
       _updateBookingIndicator(opponentUsername, !clear);
     }
 
