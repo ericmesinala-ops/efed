@@ -1053,6 +1053,10 @@ async function startScan(grp) {
   if(!channels.length){toast(`No channels in Group ${grp.toUpperCase()} are enabled for scanning. Assign channels to this group in the eFed Channels tab.`);return;}
   const btn=document.getElementById('scan-btn-'+grp);
   btn.disabled=true; btn.innerHTML='<div class="spinner"></div> Scanning…';
+  // Gray out the OTHER group's button while this scan is running
+  const otherGrp = grp === 'a' ? 'b' : 'a';
+  const otherBtn = document.getElementById('scan-btn-' + otherGrp);
+  if (otherBtn) { otherBtn.disabled = true; otherBtn.classList.add('grp-btn-inactive'); }
   const progressWrap=document.getElementById('progress-wrap-'+grp);
   const fill=document.getElementById('progress-fill-'+grp);
   const label=document.getElementById('progress-label-'+grp);
@@ -1120,6 +1124,8 @@ async function startScan(grp) {
   showScanResults(results, grp);
   btn.innerHTML=`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg> Scan Group ${grp.toUpperCase()}`;
   checkScanLock(grp);
+  // Restore the other group's button
+  if (otherBtn) { otherBtn.classList.remove('grp-btn-inactive'); checkScanLock(otherGrp); }
 }
 
 async function resolveChannelId(url) {
@@ -1634,6 +1640,15 @@ async function addChannel() {
     await sbInsert('efed_channels',{efed_name:efedName,yt_channel_url:url});
     document.getElementById('ch-url').value='';
     document.getElementById('ch-name-preview').style.display='none';
+    // Auto-assign new channel to the group with fewer shows (tie → Group A)
+    {
+      const gs = _getGroupState();
+      const allKeys = Object.keys(gs);
+      const aCount = allKeys.filter(k => gs[k] === 'a').length;
+      const bCount = allKeys.filter(k => gs[k] === 'b').length;
+      gs[efedName.toLowerCase()] = bCount < aCount ? 'b' : 'a';
+      localStorage.setItem('efed_scan_groups', JSON.stringify(gs));
+    }
     toast('✅ Added: '+efedName); loadChannels(); loadStats();
   } catch(e){toast('Error: '+e.message);}
   finally{btn.disabled=false;btn.textContent='+ Add';}
