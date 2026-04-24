@@ -1827,6 +1827,64 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     else _goTo(tabOrIdx);
   };
 
+  // ── SWIPE TO SWITCH TABS (mobile) ──────────────────────────────
+  // Fires after DOM ready so panels exist
+  function _initTabSwipe() {
+    let _sx = 0, _sy = 0, _swiping = false;
+    const SWIPE_THRESHOLD = 48;   // px horizontal to count as swipe
+    const ANGLE_MAX = 0.6;        // tan(angle) — rejects near-vertical drags
+
+    // Zones that have their own horizontal scroll / swipe — never intercept these
+    function _isProtected(el) {
+      while (el && el !== document.body) {
+        const id = el.id || '';
+        const cls = (el.className || '').toString();
+        // Episode thumbnail row, post feed track, champions/roster scroll strips
+        if (
+          id === 'episodes-row' ||
+          id === 'posts-track' ||
+          id === 'efed-posts-track' ||
+          id === 'champions-grid' ||
+          id === 'roster-grid' ||
+          cls.includes('posts-track') ||
+          cls.includes('episodes-row') ||
+          cls.includes('overflow-x') ||
+          el.getAttribute('data-no-swipe') === 'true' ||
+          (el.scrollWidth > el.clientWidth + 4 && getComputedStyle(el).overflowX !== 'hidden' && getComputedStyle(el).overflowX !== 'visible')
+        ) return true;
+        el = el.parentElement;
+      }
+      return false;
+    }
+
+    document.addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) return;
+      _sx = e.touches[0].clientX;
+      _sy = e.touches[0].clientY;
+      _swiping = !_isProtected(e.target);
+    }, { passive: true });
+
+    document.addEventListener('touchend', e => {
+      if (!_swiping || e.changedTouches.length !== 1) return;
+      const dx = e.changedTouches[0].clientX - _sx;
+      const dy = e.changedTouches[0].clientY - _sy;
+      _swiping = false;
+      if (Math.abs(dx) < SWIPE_THRESHOLD) return;
+      if (Math.abs(dy / dx) > ANGLE_MAX) return; // too vertical
+      const cur = ETABS.indexOf(
+        (document.querySelector('.efed-tab.active') || {}).dataset?.tab || ETABS[0]
+      );
+      if (dx < 0) _goTo(Math.min(cur + 1, ETABS.length - 1)); // swipe left → next
+      else         _goTo(Math.max(cur - 1, 0));                 // swipe right → prev
+    }, { passive: true });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _initTabSwipe);
+  } else {
+    _initTabSwipe();
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', _initSections);
   } else {
@@ -1931,9 +1989,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 <div class="page-card">
 
 <!-- ── STICKY BANNER + NAV ROW ── -->
-<div id="profile-sticky-header" style="position:sticky;top:57px;z-index:90;background:var(--bg);overflow:visible;">
-
-<!-- ── BANNER ── -->
+<!-- ── BANNER (not sticky, scrolls with page) ── -->
 <div class="profile-banner" id="profile-banner-el">
   <div class="banner-noise"></div>
   <div class="banner-glow"></div>
@@ -1950,9 +2006,10 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     <div style="flex:1;min-width:0;">
       <div class="profile-name" id="efed-name">—</div>
     </div>
-
   </div>
 </div>
+
+<div id="profile-sticky-header" style="position:sticky;top:57px;z-index:90;background:var(--bg);overflow:visible;">
 
 <!-- ── 3-COLUMN NAV ROW ── -->
 <div class="profile-nav-row" id="profile-nav-row">
@@ -3099,7 +3156,7 @@ function renderSocialLinks(yt, ig, x, web) {
     web ? `<a href="${web.startsWith('http')?web:'https://'+web}" target="_blank" rel="noopener" style="${s}" ${h} title="Website"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></a>` : ''
   ].filter(Boolean);
   left.innerHTML = links.join('');
-  row.style.display = 'flex';
+  // Visibility is controlled by _goTo (connect tab only) — don't override here
   // show/hide support button (hidden for owner, shown for visitors)
   updateActionButtonsVisibility();
 }
@@ -4310,9 +4367,8 @@ async function loadProfile() {
         } catch(e) {}
       }
       loadEpisodes();
-      // Always show action row even on orphaned pages — watchlist, support, and roster still work
-      const _unclaimedRow = document.getElementById('efed-social-action-row');
-      if (_unclaimedRow) _unclaimedRow.style.display = 'flex';
+      // Always init action buttons even on orphaned pages — watchlist, support, and roster still work
+      // (row visibility is controlled by _goTo — only shown on connect tab)
       // Hide support btn tooltip (no owner but support still works)
       const _unclaimedSupBtn = document.getElementById('efed-support-action-btn');
       if (_unclaimedSupBtn) { _unclaimedSupBtn.style.display = ''; }
@@ -4335,9 +4391,7 @@ async function loadProfile() {
         const _rosterHint = document.getElementById('roster-owner-hint');
         if (_rosterHint) _rosterHint.style.display = 'block';
         document.querySelectorAll('.sec-help-btn').forEach(b => b.style.display = 'inline-block');
-        // Show action row immediately so support btn is visible (always lit for owner)
-        const _ownerRow = document.getElementById('efed-social-action-row');
-        if (_ownerRow) _ownerRow.style.display = 'flex';
+        // Show action row on connect tab (controlled by _goTo)
         updateActionButtonsVisibility();
         // Show compose button immediately for owner (don't wait for feed load)
         const _ownerCompose = document.getElementById('efed-feed-compose');
@@ -4552,14 +4606,10 @@ let _efedRosterState = 'out'; // 'out' | 'pending' | 'in'
 async function initVisitorActionBar() {
   const session = getSession();
   if (!session) {
-    // No session — still show action row (clicking will prompt sign-in)
-    const _row = document.getElementById('efed-social-action-row');
-    if (_row) _row.style.display = 'flex';
+    // No session — action buttons still need state set, but row visibility is handled by _goTo
     return;
   }
-  // Always show action row
-  const _row = document.getElementById('efed-social-action-row');
-  if (_row) _row.style.display = 'flex';
+  // Row visibility is controlled by _goTo (only shown on connect tab)
   // Owner of this efed sees owner banner, not visitor banners
   const ownerCheck = await sbGet('users', 'username=eq.' + encodeURIComponent(session.username) + '&select=promo_name');
   const isOwnerOfThis = ownerCheck.length && ownerCheck[0].promo_name && ownerCheck[0].promo_name.toLowerCase() === EFED_NAME.toLowerCase();
