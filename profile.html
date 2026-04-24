@@ -4332,7 +4332,7 @@ async function deleteEmblem(emblemId, username) {
       <button class="prof-pill-arr hidden" id="feat-arr-left" onclick="scrollFeatInRow(-1)">&#8249;</button>
       <button class="prof-jump-btn hidden" id="feat-jump-left" onclick="jumpFeatInRow('start')" title="Jump to first">&#171;&#171;</button>
     </div>
-    <div class="vid-row" id="featured-in-row" style="flex:1;" onscroll="updateFeatInArrows()"><div class="featured-empty-state"><span class="featured-empty-btn" aria-hidden="true"><span style="filter:grayscale(1) brightness(10);font-size:.95rem;">🤼</span></span><span class="featured-empty-text">Tap the <span class="featured-empty-btn" aria-hidden="true"><span style="filter:grayscale(1) brightness(10);font-size:.95rem;">🤼</span></span> on a video you appear in — it'll show up here.</span></div></div>
+    <div class="vid-row" id="featured-in-row" style="flex:1;" onscroll="updateFeatInArrows()"><div class="featured-empty-state"><span class="featured-empty-text">Click <span class="featured-empty-btn" aria-hidden="true"><span style="filter:grayscale(1) brightness(10);font-size:.95rem;">🤼</span></span> on a video page of the show you are in and the videos will show up here.</span></div></div>
     <div class="prof-arr-col">
       <button class="prof-pill-arr hidden" id="feat-arr-right" onclick="scrollFeatInRow(1)">&#8250;</button>
       <button class="prof-jump-btn hidden" id="feat-jump-right" onclick="jumpFeatInRow('end')" title="Jump to last">&#187;&#187;</button>
@@ -8304,53 +8304,22 @@ async function loadFeaturedVideos(targetUser) {
   if (!row) return;
   if (section) section.style.display = 'none';
   try {
-    // Get all appearances for this user
     const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(featUser)}&select=video_id,video_url,appeared_at&order=appeared_at.desc`);
     if (countEl) countEl.textContent = appearances.length || '0';
-    if (!appearances.length) {
-      if (section) section.style.display = 'none';
-      return;
-    }
+    if (!appearances.length) { if (section) section.style.display = 'none'; return; }
 
-    // Build a map keyed by video_id → video_url (for cases where video_url is stored)
-    const idToUrl = {};
-    appearances.forEach(a => { if (a.video_id && a.video_url) idToUrl[a.video_id] = a.video_url; });
-
-    // Prefer joining by id (reliable); fall back to url if id missing
-    const ids  = appearances.map(a => a.video_id).filter(Boolean);
-    const urls = appearances.map(a => a.video_url).filter(Boolean);
-
-    let subMap = {}; // keyed by both id and url for easy lookup
-
+    const ids = appearances.map(a => a.video_id).filter(Boolean);
+    let subs = [];
     if (ids.length) {
-      try {
-        const subs = await sbGet('submissions', `id=in.(${ids.join(',')})&select=id,url,show_name,date,thumb_url`);
-        subs.forEach(s => {
-          subMap[s.id]  = s;
-          if (s.url) subMap[s.url] = s;
-        });
-      } catch(e) {}
+      subs = await sbGet('submissions', `id=in.(${ids.join(',')})&select=id,url,show_name,date,thumb_url`);
     }
 
-    // If we still have appearances whose ids weren't matched, try by url
-    const missedUrls = urls.filter(u => !subMap[u]);
-    if (missedUrls.length) {
-      try {
-        const inList = missedUrls.map(u => `"${u.replace(/"/g, '')}"`).join(',');
-        const subs2 = await sbGet('submissions', `url=in.(${inList})&select=id,url,show_name,date,thumb_url`);
-        subs2.forEach(s => { subMap[s.url] = s; if (s.id) subMap[s.id] = s; });
-      } catch(e) {}
-    }
+    if (countEl) countEl.textContent = subs.length || appearances.length;
+    row.innerHTML = subs.length
+      ? subs.map(s => makeVidCard(s.url, s.show_name, s.date, s.thumb_url)).join('')
+      : appearances.map(a => makeVidCard(a.video_url || '', '', '', '')).join('');
 
-    row.innerHTML = '';
     if (section) section.style.display = '';
-
-    appearances.forEach(a => {
-      const s = (a.video_id && subMap[a.video_id]) || (a.video_url && subMap[a.video_url]) || {};
-      const playUrl = s.url || a.video_url || (a.video_id ? idToUrl[a.video_id] : null) || '';
-      const card = makeFeaturedVidCard(playUrl, s.show_name, s.date, s.thumb_url);
-      row.appendChild(card);
-    });
     setTimeout(updateFeatInArrows, 100);
   } catch(e) {
     console.error('loadFeaturedVideos error:', e);
