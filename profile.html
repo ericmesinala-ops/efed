@@ -7846,6 +7846,10 @@ async function loadProfile() {
   const resolvedUser = targetUser || session.username;
   _isOwnProfile = resolvedUser.toLowerCase() === session.username.toLowerCase();
 
+  // Hide nav bar on own profile — redundant when you're already on it
+  const _navRow = document.getElementById('profile-nav-row');
+  if (_navRow) _navRow.style.display = _isOwnProfile ? 'none' : '';
+
   // Rename My eFeds title based on profile ownership
   const myEfedsTitle = document.getElementById('my-efeds-title');
   if (myEfedsTitle) myEfedsTitle.textContent = 'eFeds';
@@ -8300,25 +8304,11 @@ async function loadFeaturedVideos(targetUser) {
   if (!row) return;
   if (section) section.style.display = 'none';
   try {
-    // Get all appearances for this user — try fetching show_name/date directly if stored
-    const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(featUser)}&select=video_id,video_url,appeared_at,show_name,date,thumb_url&order=appeared_at.desc`).catch(() =>
-      sbGet('video_appearances', `username=eq.${encodeURIComponent(featUser)}&select=video_id,video_url,appeared_at&order=appeared_at.desc`)
-    );
+    // Get all appearances for this user
+    const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(featUser)}&select=video_id,video_url,appeared_at&order=appeared_at.desc`);
     if (countEl) countEl.textContent = appearances.length || '0';
     if (!appearances.length) {
-      // For guests, show the section with a sign-in nudge (RLS may have returned empty)
-      const _noAppSess = typeof getSession === 'function' ? getSession() : null;
-      if (!_noAppSess && section) {
-        section.style.display = '';
-        if (row) row.innerHTML = `<div class="featured-empty-state" style="flex-direction:column;gap:8px;padding:20px 0;">
-          <span style="font-size:1.4rem;">🔒</span>
-          <span class="featured-empty-text" style="text-align:center;">
-            <a href="index.html" style="color:#c0000e;text-decoration:none;font-weight:700;">Sign in</a> to see videos this person is featured in.
-          </span>
-        </div>`;
-      } else {
-        if (section) section.style.display = 'none';
-      }
+      if (section) section.style.display = 'none';
       return;
     }
 
@@ -8334,83 +8324,40 @@ async function loadFeaturedVideos(targetUser) {
 
     if (ids.length) {
       try {
-        // Query submissions by id — no URL-encoding issues
         const subs = await sbGet('submissions', `id=in.(${ids.join(',')})&select=id,url,show_name,date,thumb_url`);
         subs.forEach(s => {
           subMap[s.id]  = s;
           if (s.url) subMap[s.url] = s;
         });
-      } catch(e) { console.error('loadFeaturedVideos: submissions by id failed:', e); }
+      } catch(e) {}
     }
 
     // If we still have appearances whose ids weren't matched, try by url
     const missedUrls = urls.filter(u => !subMap[u]);
     if (missedUrls.length) {
       try {
-        // PostgREST in() wants a plain comma-separated list — do NOT encodeURIComponent each value
         const inList = missedUrls.map(u => `"${u.replace(/"/g, '')}"`).join(',');
         const subs2 = await sbGet('submissions', `url=in.(${inList})&select=id,url,show_name,date,thumb_url`);
         subs2.forEach(s => { subMap[s.url] = s; if (s.id) subMap[s.id] = s; });
-      } catch(e) { console.error('loadFeaturedVideos: submissions by url failed:', e); }
-    }
-
-    // Last-resort: for any appearance still unmatched, try querying submissions by video_url directly
-    const stillMissed = appearances.filter(a => {
-      const s = (a.video_id && subMap[a.video_id]) || (a.video_url && subMap[a.video_url]);
-      return !s || !s.show_name;
-    });
-    if (stillMissed.length) {
-      const missedVidUrls = [...new Set(stillMissed.map(a => a.video_url).filter(Boolean))];
-      if (missedVidUrls.length) {
-        try {
-          const inList2 = missedVidUrls.map(u => `"${u.replace(/"/g,'')}"` ).join(',');
-          const subs3 = await sbGet('submissions', `video_url=in.(${inList2})&select=id,url,video_url,show_name,date,thumb_url`);
-          subs3.forEach(s => {
-            if (s.video_url) subMap[s.video_url] = s;
-            if (s.url) subMap[s.url] = s;
-            if (s.id) subMap[s.id] = s;
-          });
-        } catch(e) {}
-      }
+      } catch(e) {}
     }
 
     row.innerHTML = '';
     if (section) section.style.display = '';
 
     appearances.forEach(a => {
-      // Resolve the best match: by id first, then by url, then by video_url
       const s = (a.video_id && subMap[a.video_id]) || (a.video_url && subMap[a.video_url]) || {};
-      // Resolve the playback URL: from submissions row, then from appearance, then from id→url map
       const playUrl = s.url || a.video_url || (a.video_id ? idToUrl[a.video_id] : null) || '';
-      // Resolve title/date: from submissions join, then directly from appearance row if stored there
-      const showName = s.show_name || a.show_name || '';
-      const showDate = s.date || a.date || '';
-      const thumbUrl = s.thumb_url || a.thumb_url || '';
-      const card = makeFeaturedVidCard(playUrl, showName, showDate, thumbUrl);
+      const card = makeFeaturedVidCard(playUrl, s.show_name, s.date, s.thumb_url);
       row.appendChild(card);
     });
     setTimeout(updateFeatInArrows, 100);
   } catch(e) {
     console.error('loadFeaturedVideos error:', e);
-    // If not logged in, Supabase RLS may block the query — show the section
-    // with a sign-in prompt rather than hiding it entirely
-    const _sess = typeof getSession === 'function' ? getSession() : null;
-    if (!_sess && section) {
-      section.style.display = '';
-      if (countEl) countEl.textContent = '—';
-      if (row) row.innerHTML = `<div class="featured-empty-state" style="flex-direction:column;gap:8px;padding:20px 0;">
-        <span style="font-size:1.4rem;">🔒</span>
-        <span class="featured-empty-text" style="text-align:center;">
-          <a href="index.html" style="color:#c0000e;text-decoration:none;font-weight:700;">Sign in</a> to see videos this person is featured in.
-        </span>
-      </div>`;
-    } else {
-      if (section) section.style.display = 'none';
-      if (countEl) countEl.textContent = '0';
-    }
+    if (section) section.style.display = 'none';
+    if (countEl) countEl.textContent = '0';
   }
 }
-
 function makeFeaturedVidCard(url, showName, date, thumbUrl) {
   const id = extractId ? extractId(url) : null;
   const thumb = thumbUrl || (id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '');
@@ -8434,7 +8381,7 @@ function makeFeaturedVidCard(url, showName, date, thumbUrl) {
   card.appendChild(thumbDiv);
   const titleDiv = document.createElement('div');
   titleDiv.className = 'vid-title';
-  titleDiv.textContent = showName || 'View Video';
+  titleDiv.textContent = showName || '';
   card.appendChild(titleDiv);
   const dateDiv = document.createElement('div');
   dateDiv.className = 'vid-date';
