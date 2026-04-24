@@ -8302,7 +8302,19 @@ async function loadFeaturedVideos(targetUser) {
     const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(featUser)}&select=video_id,video_url,appeared_at&order=appeared_at.desc`);
     if (countEl) countEl.textContent = appearances.length || '0';
     if (!appearances.length) {
-      if (section) section.style.display = 'none';
+      // For guests, show the section with a sign-in nudge (RLS may have returned empty)
+      const _noAppSess = typeof getSession === 'function' ? getSession() : null;
+      if (!_noAppSess && section) {
+        section.style.display = '';
+        if (row) row.innerHTML = `<div class="featured-empty-state" style="flex-direction:column;gap:8px;padding:20px 0;">
+          <span style="font-size:1.4rem;">🔒</span>
+          <span class="featured-empty-text" style="text-align:center;">
+            <a href="index.html" style="color:#c0000e;text-decoration:none;font-weight:700;">Sign in</a> to see videos this person is featured in.
+          </span>
+        </div>`;
+      } else {
+        if (section) section.style.display = 'none';
+      }
       return;
     }
 
@@ -8351,9 +8363,23 @@ async function loadFeaturedVideos(targetUser) {
     });
     setTimeout(updateFeatInArrows, 100);
   } catch(e) {
-    if (section) section.style.display = 'none';
-    if (countEl) countEl.textContent = '0';
     console.error('loadFeaturedVideos error:', e);
+    // If not logged in, Supabase RLS may block the query — show the section
+    // with a sign-in prompt rather than hiding it entirely
+    const _sess = typeof getSession === 'function' ? getSession() : null;
+    if (!_sess && section) {
+      section.style.display = '';
+      if (countEl) countEl.textContent = '—';
+      if (row) row.innerHTML = `<div class="featured-empty-state" style="flex-direction:column;gap:8px;padding:20px 0;">
+        <span style="font-size:1.4rem;">🔒</span>
+        <span class="featured-empty-text" style="text-align:center;">
+          <a href="index.html" style="color:#c0000e;text-decoration:none;font-weight:700;">Sign in</a> to see videos this person is featured in.
+        </span>
+      </div>`;
+    } else {
+      if (section) section.style.display = 'none';
+      if (countEl) countEl.textContent = '0';
+    }
   }
 }
 
