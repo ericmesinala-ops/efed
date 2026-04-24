@@ -1726,6 +1726,8 @@ html, body { overscroll-behavior-y: none; }
     .hero-vid-wrap iframe { opacity: 1 !important; }
     nav { padding: 14px 20px; gap: 0; }
     #online-counter { display: none; }
+@keyframes hubPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.2)} }
+#hub-view-wrap { transition: opacity .3s; }
     .logo-eyebrow { display: none; }
     .nav-right { gap: 10px; }
     /* Move invite out of nav on mobile */
@@ -3778,6 +3780,15 @@ html.day-mode .myefed-popup-cancel:hover { color: rgba(0,0,0,.6); background: rg
   </a>
   <div class="nav-right">
 
+    <!-- Hub view time + live watchers (always visible) -->
+    <div id="hub-view-wrap" style="display:none;align-items:center;gap:8px;font-size:.7rem;letter-spacing:.5px;color:rgba(255,255,255,.45);font-family:DM Sans,sans-serif;font-weight:500;white-space:nowrap;align-self:center;">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="opacity:.55;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <span id="hub-view-time-label" title="Total hub watch time across all viewers">—</span>
+      <div id="hub-live-wrap" style="display:none;align-items:center;gap:5px;margin-left:4px;padding:2px 7px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.25);border-radius:20px;">
+        <div style="width:5px;height:5px;border-radius:50%;background:#ff4444;box-shadow:0 0 5px rgba(255,68,68,.8);animation:hubPulse 1.4s ease-in-out infinite;"></div>
+        <span id="hub-live-count-label" style="font-size:.65rem;font-weight:700;color:#ff6b6b;letter-spacing:.8px;">2 watching</span>
+      </div>
+    </div>
     <div id="online-counter" style="display:none;align-items:center;gap:12px;font-size:.72rem;letter-spacing:1px;color:rgba(255,255,255,.7);font-family:DM Sans,sans-serif;font-weight:500;white-space:nowrap;align-self:center;padding-right:16px;position:relative;">
       <div style="display:flex;align-items:center;gap:5px;">
         <div style="width:6px;height:6px;border-radius:50%;background:#4caf64;box-shadow:0 0 6px rgba(76,175,100,.7);flex-shrink:0;"></div>
@@ -6364,6 +6375,18 @@ async function initHub() {
     console.warn('Could not load upcoming submissions:', e);
   }
 
+  // Back-mark any video in the main videos[] array that has a matching upcoming submission
+  // so isLatest() correctly excludes it from the Latest Videos row
+  if (upcomingVideos.length) {
+    const upcomingIds = new Set(upcomingVideos.map(u => extractId(u.url)).filter(Boolean));
+    const upcomingUrls = new Set(upcomingVideos.map(u => u.url).filter(Boolean));
+    videos.forEach(v => {
+      if (upcomingUrls.has(v.url) || (v.url && upcomingIds.has(extractId(v.url)))) {
+        v.status = 'upcoming';
+      }
+    });
+  }
+
   // Fetch display names for community video posters
   try {
     const usernames = [...new Set(videos.filter(v => v.community && v.submittedBy).map(v => v.submittedBy))];
@@ -6658,6 +6681,172 @@ window.addEventListener('popstate', function(e) {
   window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') heartbeat();
   });
+})();
+
+// ═══════════════════════════════════════════════════════════════════
+// ── HUB VIEW TIMER — tracks total seconds all viewers watch on hub
+// ═══════════════════════════════════════════════════════════════════
+(function() {
+  const HUB_TICK_SECS    = 15;   // increment server every 15s while watching
+  const HUB_REFRESH_SECS = 30;   // re-read total from DB every 30s
+  const HUB_WATCH_TTL    = 90000; // 90s — viewer considered "watching" if heartbeat < 90s old
+  const HUB_WATCH_HB     = 30000; // watcher heartbeat every 30s
+
+  const _hubVid = () => typeof _expandVideo !== 'undefined' ? _expandVideo : null;
+  let _hubWatching   = false;  // true while a hub video is open
+  let _hubTickTimer  = null;
+  let _hubWatchHb    = null;
+  let _hubRefreshT   = null;
+  let _hubTotalSecs  = 0;
+  let _hubLiveCount  = 0;
+
+  // Unique per-tab session key
+  const _hubSessionId = 'hvt_' + Math.random().toString(36).slice(2) + '_' + Date.now();
+
+  // ── Format seconds as Xh Ym or Xm ──
+  function _fmtHubTime(secs) {
+    if (!secs || secs < 60) return secs + 's';
+    const m = Math.floor(secs / 60);
+    const h = Math.floor(m / 60);
+    const rm = m % 60;
+    if (h > 0) return h.toLocaleString() + 'h ' + (rm > 0 ? rm + 'm' : '');
+    return m.toLocaleString() + 'm';
+  }
+
+  // ── Update the nav display ──
+  function _renderHubTime() {
+    const wrap  = document.getElementById('hub-view-wrap');
+    const lbl   = document.getElementById('hub-view-time-label');
+    const live  = document.getElementById('hub-live-wrap');
+    const liveLbl = document.getElementById('hub-live-count-label');
+    if (!lbl) return;
+
+    // Show the wrap once we have data
+    if (wrap && _hubTotalSecs > 0) wrap.style.display = 'flex';
+
+    if (_hubTotalSecs > 0) {
+      lbl.textContent = _fmtHubTime(_hubTotalSecs) + ' hub watch time';
+    }
+
+    // Live watchers badge — only show when > 1
+    if (live && liveLbl) {
+      if (_hubLiveCount > 1) {
+        liveLbl.textContent = _hubLiveCount + ' watching';
+        live.style.display = 'flex';
+      } else {
+        live.style.display = 'none';
+      }
+    }
+  }
+
+  // ── Load total from DB ──
+  async function _loadHubStats() {
+    try {
+      const rows = await fetch(SUPABASE_URL + '/rest/v1/hub_stats?id=eq.main&select=total_seconds', {
+        headers: SB_HEADERS
+      }).then(r => r.json()).catch(() => []);
+      if (rows[0]?.total_seconds != null) {
+        _hubTotalSecs = Number(rows[0].total_seconds) || 0;
+      }
+    } catch(e) {}
+    _renderHubTime();
+  }
+
+  // ── Increment total seconds on server (+HUB_TICK_SECS for this viewer) ──
+  async function _hubTick() {
+    if (!_hubWatching || document.visibilityState === 'hidden') return;
+    // Check we're still on a hub video (not YouTube)
+    const v = _hubVid();
+    if (!v) { _hubStopWatching(); return; }
+
+    try {
+      // Upsert: if row doesn't exist create it, if it does increment
+      await fetch(SUPABASE_URL + '/rest/v1/rpc/increment_hub_seconds', {
+        method: 'POST',
+        headers: { ...SB_HEADERS, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inc: HUB_TICK_SECS })
+      }).catch(() => null);
+      // Optimistically update local display
+      _hubTotalSecs += HUB_TICK_SECS;
+      _renderHubTime();
+    } catch(e) {}
+  }
+
+  // ── Upsert watcher heartbeat + count live watchers ──
+  async function _hubWatcherHb() {
+    if (!_hubWatching) return;
+    try {
+      const cutoff = Date.now() - HUB_WATCH_TTL;
+      // Upsert own row
+      await fetch(SUPABASE_URL + '/rest/v1/hub_watchers', {
+        method: 'POST',
+        headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates' },
+        body: JSON.stringify({ session_id: _hubSessionId, last_seen: Date.now() })
+      });
+      // Clean stale
+      await fetch(SUPABASE_URL + '/rest/v1/hub_watchers?last_seen=lt.' + cutoff, {
+        method: 'DELETE', headers: SB_HEADERS
+      });
+      // Count live
+      const r = await fetch(SUPABASE_URL + '/rest/v1/hub_watchers?select=session_id', {
+        headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' }
+      });
+      _hubLiveCount = parseInt(r.headers.get('Content-Range')?.split('/')[1] || '1', 10);
+      _renderHubTime();
+    } catch(e) {}
+  }
+
+  // ── Remove own watcher row when stopping ──
+  async function _removeHubWatcher() {
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/hub_watchers?session_id=eq.' + encodeURIComponent(_hubSessionId), {
+        method: 'DELETE', headers: SB_HEADERS
+      });
+    } catch(e) {}
+  }
+
+  // ── Start tracking (called when video expands in hub) ──
+  window.hubStartWatching = function() {
+    if (_hubWatching) return;
+    _hubWatching = true;
+    _hubTickTimer = setInterval(_hubTick, HUB_TICK_SECS * 1000);
+    _hubWatchHb   = setInterval(_hubWatcherHb, HUB_WATCH_HB);
+    _hubWatcherHb(); // immediate heartbeat
+  };
+
+  // ── Stop tracking (called on closeExpand or YouTube click) ──
+  window.hubStopWatching = function() {
+    _hubStopWatching();
+  };
+  function _hubStopWatching() {
+    if (!_hubWatching) return;
+    _hubWatching = false;
+    clearInterval(_hubTickTimer); _hubTickTimer = null;
+    clearInterval(_hubWatchHb);   _hubWatchHb   = null;
+    _removeHubWatcher();
+    _hubLiveCount = Math.max(0, _hubLiveCount - 1);
+    _renderHubTime();
+  }
+
+  // ── Init: load current total, start refresh loop ──
+  _loadHubStats();
+  _hubRefreshT = setInterval(() => {
+    _loadHubStats();
+    // Also refresh live count even when not watching
+    fetch(SUPABASE_URL + '/rest/v1/hub_watchers?select=session_id', {
+      headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' }
+    }).then(r => {
+      _hubLiveCount = parseInt(r.headers.get('Content-Range')?.split('/')[1] || '0', 10);
+      _renderHubTime();
+    }).catch(() => {});
+  }, HUB_REFRESH_SECS * 1000);
+
+  // Stop on page hide
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') _hubStopWatching();
+    else if (_hubWatching || _hubVid()) _hubWatcherHb();
+  });
+  window.addEventListener('beforeunload', _hubStopWatching);
 })();
 
 
@@ -9023,6 +9212,7 @@ function openExpand(v) {
   const tab = document.getElementById('chat-tab');
   if (tab) { tab.style.display = 'none'; tab.classList.remove('roster-visible'); }
   _expandVideo = v;
+  if (typeof hubStartWatching === 'function') hubStartWatching();
   if (v.efed) {
     _INDEX_EFED_SET = getEfedEmojis(v.efed);
     _INDEX_EFED_MOODLET = _getMoodletForEfed(v.efed);
@@ -9567,6 +9757,7 @@ function closeExpand(fromPopState) {
     stopWatchTimer(_expandVideo.url);
     delete _watchSessionSecs[_expandVideo.url];
   }
+  if (typeof hubStopWatching === 'function') hubStopWatching();
   overlay.classList.remove('open');
   document.body.style.overflow = '';
   document.getElementById('expand-frame').src = '';
