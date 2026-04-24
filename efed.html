@@ -2465,7 +2465,11 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
       </div>
     </div>
     <div class="bk-step-nav">
-      <button class="bk-edit-show-btn" id="bk-edit-show-btn" onclick="bkEditShow()" style="display:none;">Edit Show ✎</button>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="bk-edit-show-btn" id="bk-edit-show-btn" onclick="bkEditShow()" style="display:none;">Edit Show ✎</button>
+        <button id="bk-archive-show-btn" onclick="bkConfirmArchiveShow()" style="display:none;padding:9px 13px;background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.35);border-radius:9px;color:rgba(59,130,246,.7);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:all .15s;opacity:.75;" onmouseover="this.style.opacity='1';this.style.background='rgba(59,130,246,.25)';" onmouseout="this.style.opacity='.75';this.style.background='rgba(59,130,246,.15)';">Archive 🗄</button>
+        <button id="bk-delete-show-btn" onclick="bkConfirmDeleteShow()" style="display:none;padding:9px 13px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);border-radius:9px;color:rgba(220,60,60,.7);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:all .15s;opacity:.75;" onmouseover="this.style.opacity='1';this.style.background='rgba(192,0,14,.25)';" onmouseout="this.style.opacity='.75';this.style.background='rgba(192,0,14,.12)';">Delete 🗑</button>
+      </div>
       <button class="bk-next-btn" id="bk-next-0" onclick="bkNext()" disabled>Next →</button>
     </div>
   </div>
@@ -5916,6 +5920,10 @@ function bkTabReset() {
   bkSyncChampToggle();
   const eb = document.getElementById('bk-edit-show-btn');
   if (eb) eb.style.display = 'none';
+  const ab = document.getElementById('bk-archive-show-btn');
+  if (ab) ab.style.display = 'none';
+  const db = document.getElementById('bk-delete-show-btn');
+  if (db) db.style.display = 'none';
   bkGoStep(0);
   bkRenderShowList();
 }
@@ -5950,6 +5958,10 @@ function bkRenderShowList() {
       if (nb) nb.disabled = false;
       const eb = document.getElementById('bk-edit-show-btn');
       if (eb) eb.style.display = 'block';
+      const ab = document.getElementById('bk-archive-show-btn');
+      if (ab) ab.style.display = 'block';
+      const db = document.getElementById('bk-delete-show-btn');
+      if (db) db.style.display = 'block';
       bkSyncPreview();
     };
     list.appendChild(card);
@@ -6394,6 +6406,102 @@ async function bkEditShow() {
 }
 
 // ── Update existing show metadata (called from pre-filled form's Update button) ──
+
+// ── Archive Show ─────────────────────────────────────────────────────────
+function bkConfirmArchiveShow() {
+  if (!_bkTab.show) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'bk-confirm-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  overlay.innerHTML = `
+    <div style="background:#1a1a1f;border:1px solid rgba(59,130,246,.3);border-radius:16px;padding:28px 24px;max-width:360px;width:100%;text-align:center;font-family:'DM Sans',sans-serif;">
+      <div style="font-size:1.6rem;margin-bottom:12px;">🗄️</div>
+      <div style="font-size:.95rem;font-weight:700;color:#e0e0e0;margin-bottom:8px;">Archive this show?</div>
+      <div style="font-size:.75rem;color:rgba(255,255,255,.4);margin-bottom:24px;line-height:1.5;">"<strong style="color:rgba(255,255,255,.7);">${(_bkTab.show||'').replace(/</g,'&lt;')}</strong>" will be marked as archived. You can restore it from the archive page later.</div>
+      <div style="display:flex;gap:10px;justify-content:center;">
+        <button onclick="document.getElementById('bk-confirm-overlay').remove()" style="padding:10px 20px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:9px;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Cancel</button>
+        <button onclick="bkDoArchiveShow();document.getElementById('bk-confirm-overlay').remove();" style="padding:10px 20px;background:rgba(59,130,246,.2);border:1px solid rgba(59,130,246,.45);border-radius:9px;color:rgba(100,160,255,.9);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Yes, Archive</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function bkDoArchiveShow() {
+  const session = getSession();
+  if (!session || !_bkTab.show) return;
+  try {
+    const showTitle = _bkTab.show.toLowerCase();
+    const isPrimary = window._efedPrimaryEvent?.title?.toLowerCase() === showTitle;
+    // Get current archived list
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=efed_archived_shows`);
+    const archived = Array.isArray(rows[0]?.efed_archived_shows) ? rows[0].efed_archived_shows : [];
+    const showObj = _bkTab.showObj || _bkGetAllShows().find(s => s.title.toLowerCase() === showTitle) || {};
+    archived.push({ ...showObj, status: 'archived', archived_at: new Date().toISOString() });
+    const patch = { efed_archived_shows: archived };
+    if (isPrimary) {
+      patch.efed_event_title = null; patch.efed_event_date = null;
+      patch.efed_event_location = null; patch.efed_event_main = null; patch.efed_event_hype = null;
+      window._efedPrimaryEvent = {};
+    } else {
+      const extras = (window._efedExtraEvents || []).filter(e => e.title.toLowerCase() !== showTitle);
+      patch.efed_events_json = extras;
+      window._efedExtraEvents = extras;
+    }
+    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(patch)
+    });
+    showToast('🗄 Show archived successfully');
+    _bkTab.show = ''; _bkTab.showObj = null;
+    bkRenderShowList();
+    const nb = document.getElementById('bk-next-0'); if (nb) nb.disabled = true;
+  } catch(e) { showToast('Archive failed: ' + (e.message || 'unknown error')); }
+}
+
+// ── Delete Show ──────────────────────────────────────────────────────────
+function bkConfirmDeleteShow() {
+  if (!_bkTab.show) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'bk-confirm-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  overlay.innerHTML = `
+    <div style="background:#1a1a1f;border:1px solid rgba(192,0,14,.3);border-radius:16px;padding:28px 24px;max-width:360px;width:100%;text-align:center;font-family:'DM Sans',sans-serif;">
+      <div style="font-size:1.6rem;margin-bottom:12px;">🗑️</div>
+      <div style="font-size:.95rem;font-weight:700;color:#e0e0e0;margin-bottom:8px;">Delete this show?</div>
+      <div style="font-size:.75rem;color:rgba(255,255,255,.4);margin-bottom:24px;line-height:1.5;">"<strong style="color:rgba(255,255,255,.7);">${(_bkTab.show||'').replace(/</g,'&lt;')}</strong>" will be permanently removed. This cannot be undone.</div>
+      <div style="display:flex;gap:10px;justify-content:center;">
+        <button onclick="document.getElementById('bk-confirm-overlay').remove()" style="padding:10px 20px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:9px;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Cancel</button>
+        <button onclick="bkDoDeleteShow();document.getElementById('bk-confirm-overlay').remove();" style="padding:10px 20px;background:rgba(192,0,14,.2);border:1px solid rgba(192,0,14,.45);border-radius:9px;color:rgba(255,80,80,.9);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Yes, Delete</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function bkDoDeleteShow() {
+  const session = getSession();
+  if (!session || !_bkTab.show) return;
+  try {
+    const showTitle = _bkTab.show.toLowerCase();
+    const isPrimary = window._efedPrimaryEvent?.title?.toLowerCase() === showTitle;
+    const patch = {};
+    if (isPrimary) {
+      patch.efed_event_title = null; patch.efed_event_date = null;
+      patch.efed_event_location = null; patch.efed_event_main = null; patch.efed_event_hype = null;
+      window._efedPrimaryEvent = {};
+    } else {
+      const extras = (window._efedExtraEvents || []).filter(e => e.title.toLowerCase() !== showTitle);
+      patch.efed_events_json = extras;
+      window._efedExtraEvents = extras;
+    }
+    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(patch)
+    });
+    showToast('🗑 Show deleted');
+    _bkTab.show = ''; _bkTab.showObj = null;
+    bkRenderShowList();
+    const nb = document.getElementById('bk-next-0'); if (nb) nb.disabled = true;
+  } catch(e) { showToast('Delete failed: ' + (e.message || 'unknown error')); }
+}
+
 async function bkUpdateShow() {
   const nameEl = document.getElementById('bk-ns-name');
   const locEl  = document.getElementById('bk-ns-location');
