@@ -3708,30 +3708,59 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
         ? 'position:relative;margin:0;padding:10px 16px;background:rgba(200,168,75,.07);border:1px solid rgba(200,168,75,.3);border-top:none;border-radius:0 0 10px 10px;transition:background .18s;'
         : 'position:relative;margin:0;padding:10px 16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);border-top:none;border-radius:0 0 10px 10px;transition:background .18s;';
 
-      // Build participant chips: ownerUsername VS opp1 VS opp2 ... VS ghostOpp1 ...
-      let participantsHtml = `<div style="display:flex;align-items:center;gap:5px;">${_avCircle(ownerUsername, nameA)}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.45)'};">${nameA.replace(/</g,'&lt;')}</span></div>`;
-      opponents.forEach((oppU, i) => {
-        const oppN = oppNames[i] || avatarMap[oppU]?.name || oppU || '';
-        const isExt = oppU.startsWith('__ext__');
-        const oppAvHtml = isExt
-          ? `<div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:.65rem;color:rgba(255,255,255,.5);flex-shrink:0;">${(oppN||'?')[0].toUpperCase()}</div>`
-          : _avCircle(oppU, oppN);
-        participantsHtml += `
-          <span style="font-size:.6rem;font-weight:700;color:${isMyMatch ? 'rgba(200,168,75,.6)' : 'rgba(255,255,255,.15)'};letter-spacing:1px;">VS</span>
-          <div style="display:flex;align-items:center;gap:5px;">${oppAvHtml}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.45)'};">${oppN.replace(/</g,'&lt;')}</span></div>`;
-      });
-      // Append ghost/mystery opponents (stored in bk.ghostOpponents)
-      if (Array.isArray(bk.ghostOpponents)) {
-        bk.ghostOpponents.forEach(ghost => {
-          const gName = (ghost.name || '???').replace(/</g,'&lt;');
-          const isMystery = gName === '???';
-          const ghostAvHtml = isMystery
-            ? `<div style="width:26px;height:26px;border-radius:50%;background:rgba(80,60,120,.2);border:1.5px dashed rgba(180,140,255,.3);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0;">❓</div>`
-            : `<div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px dashed rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:.65rem;color:rgba(255,255,255,.45);flex-shrink:0;">${gName[0].toUpperCase()}</div>`;
-          participantsHtml += `
-            <span style="font-size:.6rem;font-weight:700;color:${isMyMatch ? 'rgba(200,168,75,.6)' : 'rgba(255,255,255,.15)'};letter-spacing:1px;">VS</span>
-            <div style="display:flex;align-items:center;gap:5px;">${ghostAvHtml}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? 'rgba(255,255,255,.7)' : 'rgba(255,255,255,.35)'};font-style:italic;">${gName}</span></div>`;
+      // Build participant chips using bk.slots (respects user-placed VS) or fall back to opponents array
+      const _vsChip = () => `<span style="font-size:.6rem;font-weight:700;color:${isMyMatch ? 'rgba(200,168,75,.6)' : 'rgba(255,255,255,.15)'};letter-spacing:1px;">VS</span>`;
+      const _wrestlerChip = (avHtml, name, italic) => `<div style="display:flex;align-items:center;gap:5px;">${avHtml}<span style="font-size:.78rem;font-weight:600;color:${isMyMatch ? (italic?'rgba(255,255,255,.7)':'rgba(255,255,255,.95)') : (italic?'rgba(255,255,255,.35)':'rgba(255,255,255,.45)')};${italic?'font-style:italic;':''}">${name}</span></div>`;
+      let participantsHtml = '';
+      if (Array.isArray(bk.slots) && bk.slots.length) {
+        // Use slots array — VS only appears where the user placed it
+        const slotNameMap = {};
+        slotNameMap[ownerUsername] = nameA;
+        opponents.forEach((u,i) => { slotNameMap[u] = oppNames[i] || avatarMap[u]?.name || u; });
+        let ghostSlotCount = 0;
+        bk.slots.forEach(s => {
+          if (s === 'vs') {
+            participantsHtml += _vsChip();
+          } else if (s === ownerUsername) {
+            participantsHtml += _wrestlerChip(_avCircle(ownerUsername, nameA), nameA.replace(/</g,'&lt;'), false);
+          } else if (s.startsWith('__mystery__')) {
+            const ghost = Array.isArray(bk.ghostOpponents) ? bk.ghostOpponents[ghostSlotCount++] : null;
+            const gName = ((ghost?.name) || '???').replace(/</g,'&lt;');
+            const isMystery = gName === '???';
+            const ghostAv = isMystery
+              ? `<div style="width:26px;height:26px;border-radius:50%;background:rgba(80,60,120,.2);border:1.5px dashed rgba(180,140,255,.3);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0;">❓</div>`
+              : `<div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px dashed rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.65rem;color:rgba(255,255,255,.45);flex-shrink:0;">${gName[0].toUpperCase()}</div>`;
+            participantsHtml += _wrestlerChip(ghostAv, gName, true);
+          } else {
+            const oppN = (slotNameMap[s] || s).replace(/</g,'&lt;');
+            const isExt = s.startsWith('__ext__');
+            const avHtml = isExt
+              ? `<div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.65rem;color:rgba(255,255,255,.5);flex-shrink:0;">${(oppN||'?')[0].toUpperCase()}</div>`
+              : _avCircle(s, oppN);
+            participantsHtml += _wrestlerChip(avHtml, oppN, false);
+          }
         });
+      } else {
+        // Fallback: no slots saved — put VS between every participant
+        participantsHtml = _wrestlerChip(_avCircle(ownerUsername, nameA), nameA.replace(/</g,'&lt;'), false);
+        opponents.forEach((oppU, i) => {
+          const oppN = (oppNames[i] || avatarMap[oppU]?.name || oppU || '').replace(/</g,'&lt;');
+          const isExt = oppU.startsWith('__ext__');
+          const oppAvHtml = isExt
+            ? `<div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.65rem;color:rgba(255,255,255,.5);flex-shrink:0;">${(oppN||'?')[0].toUpperCase()}</div>`
+            : _avCircle(oppU, oppN);
+          participantsHtml += _vsChip() + _wrestlerChip(oppAvHtml, oppN, false);
+        });
+        if (Array.isArray(bk.ghostOpponents)) {
+          bk.ghostOpponents.forEach(ghost => {
+            const gName = (ghost.name || '???').replace(/</g,'&lt;');
+            const isMystery = gName === '???';
+            const ghostAvHtml = isMystery
+              ? `<div style="width:26px;height:26px;border-radius:50%;background:rgba(80,60,120,.2);border:1.5px dashed rgba(180,140,255,.3);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0;">❓</div>`
+              : `<div style="width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px dashed rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.65rem;color:rgba(255,255,255,.45);flex-shrink:0;">${gName[0].toUpperCase()}</div>`;
+            participantsHtml += _vsChip() + _wrestlerChip(ghostAvHtml, gName, true);
+          });
+        }
       }
 
       wrap.innerHTML = `
@@ -6005,17 +6034,35 @@ async function bkRenderMatchList() {
     const matchType  = bk.matchType || '';
     const champLine  = bk.champName ? `<span style="font-size:.6rem;color:#c8a84b;font-weight:700;">🏆 ${bk.champName.replace(/</g,'&lt;')}</span>` : '';
 
-    // Build participant row
-    let parts = [_avChip(ownerUsername, avatarMap[ownerUsername]?.name || ownerUsername, false)];
-    opponents.forEach((u, i) => {
-      const isExt = u.startsWith('__ext__');
-      parts.push(`<span style="font-size:.55rem;font-weight:800;color:rgba(255,255,255,.18);letter-spacing:1px;">VS</span>`);
-      parts.push(_avChip(u, oppNames[i] || avatarMap[u]?.name || u, false));
-    });
-    ghosts.forEach(g => {
-      parts.push(`<span style="font-size:.55rem;font-weight:800;color:rgba(255,255,255,.18);letter-spacing:1px;">VS</span>`);
-      parts.push(_avChip('', g.name || 'Ghost', true));
-    });
+    // Build participant row — use bk.slots for VS placement if available
+    const _vsSpan = () => `<span style="font-size:.55rem;font-weight:800;color:rgba(255,255,255,.18);letter-spacing:1px;">VS</span>`;
+    let parts = [];
+    if (Array.isArray(bk.slots) && bk.slots.length) {
+      const slotNameMap = {};
+      slotNameMap[ownerUsername] = avatarMap[ownerUsername]?.name || ownerUsername;
+      opponents.forEach((u,i) => { slotNameMap[u] = oppNames[i] || avatarMap[u]?.name || u; });
+      let ghostSlotCount = 0;
+      bk.slots.forEach(s => {
+        if (s === 'vs') {
+          parts.push(_vsSpan());
+        } else if (s.startsWith('__mystery__')) {
+          const g = ghosts[ghostSlotCount++];
+          parts.push(_avChip('', g?.name || 'Ghost', true));
+        } else {
+          parts.push(_avChip(s, slotNameMap[s] || s, false));
+        }
+      });
+    } else {
+      parts = [_avChip(ownerUsername, avatarMap[ownerUsername]?.name || ownerUsername, false)];
+      opponents.forEach((u, i) => {
+        parts.push(_vsSpan());
+        parts.push(_avChip(u, oppNames[i] || avatarMap[u]?.name || u, false));
+      });
+      ghosts.forEach(g => {
+        parts.push(_vsSpan());
+        parts.push(_avChip('', g.name || 'Ghost', true));
+      });
+    }
 
     const card = document.createElement('div');
     card.style.cssText = 'position:relative;display:flex;flex-direction:column;gap:5px;padding:11px 13px;border-radius:11px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.03);cursor:pointer;transition:all .15s;';
