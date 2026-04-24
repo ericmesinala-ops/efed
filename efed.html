@@ -6100,11 +6100,24 @@ async function bkLoadRoster() {
       const u = uMap[row.username] || { username: row.username, display_name: row.username, avatar_url: null };
       _bkTab.rosterCache.push({ username: u.username, display_name: u.display_name||u.username, avatar_url: u.avatar_url||null, rosterRowId: row.id, planNote: row.plan_note });
     });
-    for (const row of ghosts) {
-      let gName = row.username;
-      try { const gd = JSON.parse(row.plan_note); if (gd.ghostName) gName = gd.ghostName; } catch(e) {}
-      _bkTab.rosterCache.push({ username: row.username, display_name: gName, avatar_url: null, rosterRowId: row.id, planNote: row.plan_note, isGhost: true });
-    }
+    // Ghosts from users.efed_ghosts (avoids FK constraint on roster table)
+    try {
+      const ownerRows = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=efed_ghosts&limit=1`);
+      const ghosts = Array.isArray(ownerRows[0]?.efed_ghosts) ? ownerRows[0].efed_ghosts : [];
+      window._efedGhosts = ghosts;
+      ghosts.forEach(g => {
+        _bkTab.rosterCache.push({
+          username:     g.id,
+          display_name: g.name,
+          avatar_url:   null,
+          rosterRowId:  null,
+          planNote:     null,
+          isGhost:      true,
+          ghostId:      g.id
+        });
+      });
+    } catch(e) { window._efedGhosts = []; }
+
     bkRenderCompGrid();
   } catch(e) {
     if (grid) grid.innerHTML = '<div style="grid-column:1/-1;font-size:.72rem;color:#ff6b6b;padding:12px 0;">Could not load roster.</div>';
@@ -6163,15 +6176,25 @@ function bkRenderCompGrid() {
       del.onclick = async (ev) => {
         ev.stopPropagation();
         try {
-          await fetch(SUPABASE_URL+'/rest/v1/roster?username=eq.'+encodeURIComponent(m.username)+'&efed=eq.'+encodeURIComponent(EFED_NAME), { method:'DELETE', headers:SB_HEADERS });
-          if (window._efedRosterMembers) window._efedRosterMembers = window._efedRosterMembers.filter(r=>r.username!==m.username);
-          _bkTab.slots = _bkTab.slots.filter(s=>s.username!==m.username);
-          await bkLoadRoster(); bkSyncPreview(); showToast('Ghost removed');
-        } catch(e) { showToast('Delete failed'); }
+          const session = getSession();
+          if (session) {
+            const ownerRows = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=efed_ghosts,username&limit=1`);
+            if (ownerRows[0]) {
+              const updated = (Array.isArray(ownerRows[0].efed_ghosts) ? ownerRows[0].efed_ghosts : []).filter(g => g.id !== m.username && g.id !== m.ghostId);
+              await sbPatch('users', `username=eq.${encodeURIComponent(ownerRows[0].username)}`, { efed_ghosts: updated });
+              window._efedGhosts = updated;
+            }
+          }
+          _bkTab.slots = _bkTab.slots.filter(s => s.username !== m.username);
+          bkInjectGhostsIntoRosterCache();
+          bkRenderCompGrid();
+          bkSyncPreview();
+          showToast('Ghost removed');
+        } catch(e) { showToast('Delete failed: ' + (e.message||'')); }
       };
       // Long press for mobile
       let _lpTimer = null;
-      card.addEventListener('touchstart', () => { _lpTimer = setTimeout(() => { if (confirm('Delete "' + (m.display_name||'') + '"?')) del.onclick(new Event('click')); }, 600); }, { passive: true });
+      card.addEventListener('touchstart', () => { _lpTimer = setTimeout(() => { if (confirm('Remove ghost "' + (m.display_name||'') + '"?')) del.onclick(new Event('click')); }, 600); }, { passive: true });
       card.addEventListener('touchend', () => clearTimeout(_lpTimer));
       card.appendChild(del);
       card.onmouseenter = () => { if (!isSelected) card.style.borderColor='rgba(255,255,255,.28)'; del.style.opacity='1'; };
@@ -6366,10 +6389,12 @@ function bkSyncPreview() {
 }
 
 // ── Ghost competitor (step 2) ─────────────────────────────────────────────
+// ── Ghost competitors are stored in users.efed_ghosts (JSON array)
+// to avoid the roster.username FK constraint
 async function bkAddGhost() {
-  const input  = document.getElementById('bk-ghost-name');
-  const btn    = document.getElementById('bk-ghost-btn');
-  const errEl  = document.getElementById('bk-ghost-err');
+  const input = document.getElementById('bk-ghost-name');
+  const btn   = document.getElementById('bk-ghost-btn');
+  const errEl = document.getElementById('bk-ghost-err');
 
   const showErr = (msg) => {
     if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
@@ -6378,36 +6403,37 @@ async function bkAddGhost() {
   };
 
   const name = input?.value.trim();
-  if (!name)     { showErr('Enter a name first.'); return; }
-
+  if (!name)   { showErr('Enter a name first.'); return; }
   const session = getSession();
-  if (!session)  { showErr('Not signed in.'); return; }
-
-  const efed = typeof EFED_NAME !== 'undefined' ? EFED_NAME : '';
-  if (!efed)     { showErr('eFed name not loaded — refresh the page.'); return; }
-
+  if (!session) { showErr('Not signed in.'); return; }
+  if (!EFED_NAME) { showErr('eFed name not loaded — refresh the page.'); return; }
   if (errEl) errEl.textContent = '';
   if (btn)  { btn.disabled = true; btn.textContent = '…'; btn.style.opacity = '.5'; }
   if (input) input.disabled = true;
 
-  const ghostUsername = '__ghost__' + Date.now();
-  const payload = {
-    username:  ghostUsername,
-    efed:      efed,
-    status:    'approved',
-    joined_at: Date.now(),
-    plan_note: JSON.stringify({ ghost: true, ghostName: name })
-  };
-
   try {
-    await sbInsert('roster', payload);
+    // Load current ghost list from the owner's users row
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=efed_ghosts`);
+    const existing = Array.isArray(rows[0]?.efed_ghosts) ? rows[0].efed_ghosts : [];
 
-    // Update local cache so the card appears immediately
-    if (!window._efedRosterMembers) window._efedRosterMembers = [];
-    window._efedRosterMembers.push({ username: ghostUsername, display_name: name + ' 👻', avatar_url: null });
+    // Deduplicate by name (case-insensitive)
+    if (existing.some(g => g.name.toLowerCase() === name.toLowerCase())) {
+      showErr('A ghost with that name already exists.');
+      return;
+    }
+
+    const ghost = { id: '__ghost__' + Date.now(), name };
+    const updated = [...existing, ghost];
+
+    await sbPatch('users', `username=eq.${encodeURIComponent(session.username)}`, { efed_ghosts: updated });
+
+    // Update in-memory cache
+    if (!window._efedGhosts) window._efedGhosts = [];
+    window._efedGhosts.push(ghost);
 
     input.value = '';
-    await bkLoadRoster();        // re-fetch + re-render grid
+    bkInjectGhostsIntoRosterCache();
+    bkRenderCompGrid();
     showToast('👻 ' + name + ' added as ghost competitor');
   } catch(e) {
     showErr('Ghost save failed: ' + (e.message || 'unknown error'));
@@ -6416,6 +6442,24 @@ async function bkAddGhost() {
     if (btn)   { btn.disabled = false; btn.textContent = '+ Add'; btn.style.opacity = ''; }
     input?.focus();
   }
+}
+
+// Sync _efedGhosts into rosterCache so they appear as selectable cards
+function bkInjectGhostsIntoRosterCache() {
+  // Remove old ghost entries first
+  _bkTab.rosterCache = _bkTab.rosterCache.filter(m => !m.isGhost);
+  // Re-add from current _efedGhosts
+  (window._efedGhosts || []).forEach(g => {
+    _bkTab.rosterCache.push({
+      username:    g.id,
+      display_name: g.name,
+      avatar_url:  null,
+      rosterRowId: null,
+      planNote:    null,
+      isGhost:     true,
+      ghostId:     g.id
+    });
+  });
 }
 
 // ── Save booking ──────────────────────────────────────────────────────────
