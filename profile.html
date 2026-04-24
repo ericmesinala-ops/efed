@@ -7595,6 +7595,9 @@ function _applyPublicNav() {
   // Hide bottom nav entirely
   const bnav = document.getElementById('bottom-nav');
   if (bnav) bnav.style.display = 'none';
+  // Hide profile nav row in guest mode
+  const pnav = document.getElementById('profile-nav-row');
+  if (pnav) pnav.style.display = 'none';
 }
 
 async function _loadPublicProfile(username) {
@@ -7731,7 +7734,6 @@ async function _loadPublicProfile(username) {
     // Hide all owner-only controls
     const hideIds = ['open-post-modal-btn','post-btn-wrap','inline-record-form','inline-rivalry-form','edit-profile-dd-btn','add-to-roster-btn'];
     hideIds.forEach(id => { const el=document.getElementById(id); if(el) el.style.display='none'; });
-    document.querySelectorAll('.hub-back-bar').forEach(el => el.style.display='none');
     document.getElementById('profile-av-box').style.cursor = 'default';
 
     // Stats
@@ -7848,7 +7850,7 @@ async function loadProfile() {
 
   // Hide nav bar on own profile — redundant when you're already on it
   const _navRow = document.getElementById('profile-nav-row');
-  if (_navRow) _navRow.style.display = _isOwnProfile ? 'none' : '';
+  if (_navRow) _navRow.style.display = '';
 
   // Rename My eFeds title based on profile ownership
   const myEfedsTitle = document.getElementById('my-efeds-title');
@@ -8241,7 +8243,7 @@ async function loadProfile() {
   loadWatchlistSection(_wlTargetUser);
 
   // Featured in These Videos — visible to everyone
-  loadFeaturedVideos(targetUser);
+  loadFeaturedVideos(resolvedUser);
 
   // Bookmarks — only load for owner or admin
   const bmRow = document.getElementById('bookmarks-row');
@@ -8302,11 +8304,17 @@ async function loadFeaturedVideos(targetUser) {
   const section = document.getElementById('featured-in-section');
   const countEl = document.getElementById('stat-featured-count');
   if (!row) return;
-  if (section) section.style.display = 'none';
+  // Always show the section — show empty state while loading
+  if (section) section.style.display = '';
+  row.innerHTML = '<div class="featured-empty-state"><span class="featured-empty-text" style="color:rgba(255,255,255,.25)">Loading…</span></div>';
   try {
     const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(featUser)}&select=video_id,video_url,appeared_at&order=appeared_at.desc`);
     if (countEl) countEl.textContent = appearances.length || '0';
-    if (!appearances.length) { if (section) section.style.display = 'none'; return; }
+    if (!appearances.length) {
+      // Show empty state but keep section visible
+      row.innerHTML = '<div class="featured-empty-state"><span class="featured-empty-text">Click <span class="featured-empty-btn" aria-hidden="true"><span style="filter:grayscale(1) brightness(10);font-size:.95rem;">🤼</span></span> on a video page of the show you are in and the videos will show up here.</span></div>';
+      return;
+    }
 
     const ids = appearances.map(a => a.video_id).filter(Boolean);
     let subs = [];
@@ -8315,15 +8323,17 @@ async function loadFeaturedVideos(targetUser) {
     }
 
     if (countEl) countEl.textContent = subs.length || appearances.length;
-    row.innerHTML = subs.length
-      ? subs.map(s => makeVidCard(s.url, s.show_name, s.date, s.thumb_url)).join('')
-      : appearances.map(a => makeVidCard(a.video_url || '', '', '', '')).join('');
+    if (subs.length) {
+      row.innerHTML = subs.map(s => makeVidCard(s.url, s.show_name, s.date, s.thumb_url)).join('');
+    } else {
+      // Fall back to appearance URLs — try to extract show name from URL or use a placeholder
+      row.innerHTML = appearances.map(a => makeVidCard(a.video_url || '', '', '', '')).join('');
+    }
 
-    if (section) section.style.display = '';
     setTimeout(updateFeatInArrows, 100);
   } catch(e) {
     console.error('loadFeaturedVideos error:', e);
-    if (section) section.style.display = 'none';
+    row.innerHTML = '<div class="featured-empty-state"><span class="featured-empty-text">Click <span class="featured-empty-btn" aria-hidden="true"><span style="filter:grayscale(1) brightness(10);font-size:.95rem;">🤼</span></span> on a video page of the show you are in and the videos will show up here.</span></div>';
     if (countEl) countEl.textContent = '0';
   }
 }
