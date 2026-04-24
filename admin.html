@@ -774,6 +774,7 @@ async function loadPending() {
           <a href="${esc(s.url)}" target="_blank" style="font-size:1.02rem;color:var(--muted);text-decoration:none;">▶ Watch</a>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
+          <select id="psec-${s.id}" class="section-pick" style="margin-bottom:2px;"><option value="">Auto</option><option value="show">Show</option><option value="match">Match</option><option value="showcase">Showcase</option><option value="promo">Promo</option><option value="podcast">Podcast</option><option value="upcoming">Upcoming</option></select>
           <button class="btn btn-red btn-sm" onclick="adminApprove(${s.id})">Approve</button>
           <button class="btn btn-ghost btn-sm" onclick="adminReject(${s.id})">Reject</button>
         </div>`;
@@ -785,7 +786,12 @@ async function loadPending() {
 async function adminApprove(id) {
   const row=document.getElementById('prow-'+id); if(row) row.style.opacity='.4';
   try {
-    await sbUpdate('submissions',{status:'approved'},`id=eq.${id}`);
+    // Check if admin designated this as upcoming via the section selector
+    const secEl=document.getElementById('psec-'+id);
+    const section=secEl?secEl.value:'';
+    const patchData={status:(section==='upcoming')?'upcoming':'approved'};
+    if(section&&section!=='upcoming') patchData.submission_type=section;
+    await sbUpdate('submissions',patchData,`id=eq.${id}`);
     if(row) row.remove();
     toast('✅ Approved!');
     loadStats();
@@ -1218,10 +1224,10 @@ async function approveScanned(idx) {
   const btn=document.querySelector(`#result-${idx} .btn-green`);
   btn.disabled=true; btn.textContent='Adding…';
   try {
-    const _status=r.isUpcoming?'upcoming':'approved';
     const _durSecs=r.durationSecs||null;
     const secEl=document.getElementById('scan-sec-'+idx);
     const section=secEl?secEl.value:'';
+    const _status=(section==='upcoming'||r.isUpcoming)?'upcoming':'approved';
     await sbInsert('submissions',{
       url:r.url,video_id:r.videoId,show_name:r.title,efed:r.efed,
       date:r.date,date_ms:r.dateMs||Date.now(),
