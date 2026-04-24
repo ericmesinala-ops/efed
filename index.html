@@ -5796,10 +5796,12 @@ const _MOVE_DESTINATIONS = {
   latest:   { label: 'Episode or PLE',  icon: '📺', color: 'rgba(192,0,14,.15)',    border: 'rgba(192,0,14,.4)',    text: '#ff6b6b',    override: 'latest',   type: null },
   matches:  { label: 'Match Only',      icon: '🤼', color: 'rgba(200,168,75,.15)',  border: 'rgba(200,168,75,.4)', text: 'var(--gold)', override: 'matches',  type: 'match' },
   showcase: { label: 'Showcase',        icon: '🎬', color: 'rgba(155,89,182,.15)',  border: 'rgba(155,89,182,.4)', text: '#b98be0',     override: null,       type: 'showcase' },
-  promo:    { label: 'Promo',           icon: '🎤', color: 'rgba(230,126,34,.15)',  border: 'rgba(230,126,34,.4)', text: '#e6923e',     override: null,       type: 'promo' }
+  promo:    { label: 'Promo',           icon: '🎤', color: 'rgba(230,126,34,.15)',  border: 'rgba(230,126,34,.4)', text: '#e6923e',     override: null,       type: 'promo' },
+  upcoming: { label: 'Upcoming',        icon: '⏰', color: 'rgba(200,168,75,.1)',   border: 'rgba(200,168,75,.35)', text: '#c8a84b',    override: null,       type: null,   status: 'upcoming' }
 };
 
 function _getCurrentSection(v) {
+  if (v.status === 'upcoming') return 'upcoming';
   if (v.submission_type === 'showcase') return 'showcase';
   if (v.submission_type === 'promo') return 'promo';
   if (isMatch(v)) return 'matches';
@@ -5863,10 +5865,12 @@ function confirmMoveCategory(destKey) {
   optBtns.forEach(b => { b.disabled = true; b.style.opacity = '.4'; });
 
   const patchData = {};
-  // Set submission_type for showcase/promo, clear it for latest/matches
+  // Set submission_type for showcase/promo, clear it for others
   patchData.submission_type = dest.type || null;
-  // Set section_override for latest/matches, clear it for showcase/promo
+  // Set section_override for latest/matches
   patchData.section_override = dest.override || null;
+  // Set status: 'upcoming' when moving to upcoming, otherwise restore 'approved'
+  patchData.status = dest.status === 'upcoming' ? 'upcoming' : 'approved';
 
   fetch(SUPABASE_URL + '/rest/v1/submissions?url=eq.' + encodeURIComponent(v.url), {
     method: 'PATCH', headers: SB_HEADERS,
@@ -5875,14 +5879,17 @@ function confirmMoveCategory(destKey) {
     if (r.ok) {
       v.submission_type = dest.type || null;
       v.sectionOverride = dest.override || null;
+      v.status = patchData.status;
       closeMoveModal();
       showToast('✅ Moved to ' + dest.label);
       buildPills(); renderGrid();
       loadBestMatches(videos);
       loadShowcaseRow(videos);
       loadPromosRow(videos);
-    loadPodcastRow(videos);
+      loadPodcastRow(videos);
       loadRecentlyAdded(videos);
+      // Refresh upcoming row if needed
+      if (typeof loadUpcomingRow === 'function') loadUpcomingRow();
     } else {
       showToast('Could not move. Try again.');
       optBtns.forEach(b => { b.disabled = false; b.style.opacity = '1'; });
