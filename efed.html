@@ -1839,14 +1839,14 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
       while (el && el !== document.body) {
         const id = el.id || '';
         const cls = (el.className || '').toString();
-        // Episode thumbnail row, post feed track, champions/roster scroll strips
+        // Episode thumbnail row, champions/roster scroll strips
+        // NOTE: efed-posts-track intentionally NOT blocked — feed manages its own
+        // pagination, and tab-swipe must still work on the Connect panel.
         if (
           id === 'episodes-row' ||
           id === 'posts-track' ||
-          id === 'efed-posts-track' ||
           id === 'champions-grid' ||
           id === 'roster-grid' ||
-          cls.includes('posts-track') ||
           cls.includes('episodes-row') ||
           cls.includes('overflow-x') ||
           el.getAttribute('data-no-swipe') === 'true' ||
@@ -1871,6 +1871,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
       _swiping = false;
       if (Math.abs(dx) < SWIPE_THRESHOLD) return;
       if (Math.abs(dy / dx) > ANGLE_MAX) return; // too vertical
+      if (window._feedSwipeConsumed) { window._feedSwipeConsumed = false; return; } // feed handled it
       const cur = ETABS.indexOf(
         (document.querySelector('.efed-tab.active') || {}).dataset?.tab || ETABS[0]
       );
@@ -12202,8 +12203,8 @@ const _efedFeed = (() => {
     requestAnimationFrame(() => requestAnimationFrame(() => _syncWrapHeight(_idx, false)));
   }
 
-  function prev() { if (_idx > 0) { _idx--; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); } }
-  function next() { if (_idx < _items.length - 1) { _idx++; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); } }
+  function prev() { if (_idx > 0) { _idx--; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); return true; } return false; }
+  function next() { if (_idx < _items.length - 1) { _idx++; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); return true; } return false; }
   function goTo(i) { _idx = i; _slide(i); _setNav(i, _items.length); _setDots(i, _items.length); }
   function jumpCurrent() { goTo(0); }
 
@@ -12231,7 +12232,10 @@ const _efedFeed = (() => {
     document.addEventListener('touchend', e => {
       if (!_active || _locked || !_swiping) return;
       const dx = e.changedTouches[0].clientX - _tx;
-      if (Math.abs(dx) > 22) dx < 0 ? next() : prev();
+      if (Math.abs(dx) > 22) {
+        const consumed = dx < 0 ? next() : prev();
+        if (consumed) window._feedSwipeConsumed = true;
+      }
       _active = false;
     }, {passive: true});
     let _wLock = false;
