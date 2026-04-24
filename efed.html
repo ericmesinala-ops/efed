@@ -2374,7 +2374,10 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
         </div>
       </div>
     </div>
-    <div class="bk-step-nav"><div></div><button class="bk-next-btn" id="bk-next-0" onclick="bkNext()" disabled>Next →</button></div>
+    <div class="bk-step-nav">
+      <button class="bk-edit-show-btn" id="bk-edit-show-btn" onclick="bkEditShow()" style="display:none;">Edit Show ✎</button>
+      <button class="bk-next-btn" id="bk-next-0" onclick="bkNext()" disabled>Next →</button>
+    </div>
   </div>
 
   <!-- ════════ STEP 2: SELECT COMPETITORS ════════ -->
@@ -4928,7 +4931,7 @@ async function saveAddGhost() {
         username: ghostUsername,
         efed: EFED_NAME,
         status: 'approved',
-        joined_at: new Date().toISOString(),
+        joined_at: Date.now(),
         plan_note: JSON.stringify({ ghost: true, ghostName: name })
       })
     });
@@ -5000,7 +5003,7 @@ async function saveGhostMerge() {
       await fetch(SUPABASE_URL + '/rest/v1/roster', {
         method: 'POST',
         headers: { ...SB_HEADERS, 'Prefer': 'return=representation' },
-        body: JSON.stringify({ username: realUsername, efed: EFED_NAME, status: 'approved', joined_at: new Date().toISOString(), plan_note: transferPlanNote })
+        body: JSON.stringify({ username: realUsername, efed: EFED_NAME, status: 'approved', joined_at: Date.now(), plan_note: transferPlanNote })
       });
     }
 
@@ -5429,7 +5432,7 @@ async function _bkAddGhost() {
         username: ghostUsername,
         efed: EFED_NAME,
         status: 'approved',
-        joined_at: new Date().toISOString(),
+        joined_at: Date.now(),
         plan_note: JSON.stringify({ ghost: true, ghostName: name })
       })
     });
@@ -5776,6 +5779,8 @@ function bkTabReset() {
   const ge = document.getElementById('bk-ghost-err'); if (ge) ge.textContent = '';
   const se = document.getElementById('bk-save-err'); if (se) se.textContent = '';
   bkSyncChampToggle();
+  const eb = document.getElementById('bk-edit-show-btn');
+  if (eb) eb.style.display = 'none';
   bkGoStep(0);
   bkRenderShowList();
 }
@@ -5808,6 +5813,8 @@ function bkRenderShowList() {
       bkRenderShowList();
       const nb = document.getElementById('bk-next-0');
       if (nb) nb.disabled = false;
+      const eb = document.getElementById('bk-edit-show-btn');
+      if (eb) eb.style.display = 'block';
       bkSyncPreview();
     };
     list.appendChild(card);
@@ -5896,6 +5903,173 @@ async function bkCreateNewShow() {
 }
 
 // ── Step 2: Roster grid ───────────────────────────────────────────────────
+// ── Edit existing show — pre-fills all 3 steps ──────────────────────────────
+async function bkEditShow() {
+  if (!_bkTab.show) return;
+
+  // ── Pre-fill step 1: open the new-show form with current show data ──
+  const showObj = _bkTab.showObj || _bkGetAllShows().find(s => s.title.toLowerCase() === _bkTab.show.toLowerCase()) || {};
+  const form = document.getElementById('bk-new-show-form');
+  const toggle = document.getElementById('bk-new-show-toggle');
+  const nsName = document.getElementById('bk-ns-name');
+  const nsLoc  = document.getElementById('bk-ns-location');
+  const nsDate = document.getElementById('bk-ns-date');
+  const nsBtn  = document.getElementById('bk-ns-save-btn');
+
+  // Flip the save button to "Update Show" and swap the action
+  if (nsBtn) {
+    nsBtn.textContent = 'Update Show';
+    nsBtn.onclick = bkUpdateShow;
+  }
+
+  // Pre-fill fields
+  if (nsName) nsName.value = showObj.title || _bkTab.show;
+
+  const locIsTba = showObj.location === 'TBA';
+  _bkNsLocTba = locIsTba;
+  if (nsLoc) {
+    nsLoc.disabled = locIsTba;
+    nsLoc.value = locIsTba ? '' : (showObj.location || '');
+    nsLoc.placeholder = locIsTba ? 'TBA' : 'Location';
+  }
+  const locTbaBtn = document.getElementById('bk-ns-loc-tba');
+  if (locTbaBtn) {
+    locTbaBtn.style.background    = locIsTba ? 'rgba(200,168,75,.2)' : 'rgba(255,255,255,.06)';
+    locTbaBtn.style.color         = locIsTba ? '#c8a84b' : 'rgba(255,255,255,.45)';
+    locTbaBtn.style.borderColor   = locIsTba ? 'rgba(200,168,75,.4)' : 'rgba(255,255,255,.1)';
+  }
+
+  const dateIsTba = showObj.date === 'TBA';
+  _bkNsDateTba = dateIsTba;
+  if (nsDate) {
+    nsDate.disabled = dateIsTba;
+    nsDate.value = dateIsTba ? '' : (showObj.date || '');
+    nsDate.placeholder = dateIsTba ? 'TBA' : 'Date (e.g. June 12, 2026)';
+  }
+  const dateTbaBtn = document.getElementById('bk-ns-date-tba');
+  if (dateTbaBtn) {
+    dateTbaBtn.style.background   = dateIsTba ? 'rgba(200,168,75,.2)' : 'rgba(255,255,255,.06)';
+    dateTbaBtn.style.color        = dateIsTba ? '#c8a84b' : 'rgba(255,255,255,.45)';
+    dateTbaBtn.style.borderColor  = dateIsTba ? 'rgba(200,168,75,.4)' : 'rgba(255,255,255,.1)';
+  }
+
+  if (form) form.style.display = 'block';
+  if (toggle) toggle.style.display = 'none';
+  nsName?.focus();
+
+  // ── Pre-fill step 2: load roster + pre-select booked competitors from plan_notes ──
+  await bkLoadRoster();
+
+  // Find all roster rows booked for this show and pre-populate slots
+  const preFilled = [];
+  for (const m of _bkTab.rosterCache) {
+    if (!m.planNote) continue;
+    try {
+      const bk = typeof m.planNote === 'string' ? JSON.parse(m.planNote) : m.planNote;
+      if (!bk?.show || bk.show.toLowerCase() !== _bkTab.show.toLowerCase()) continue;
+      // This member has a booking for the current show
+      // Build slots from their stored data
+      const isAlreadyInSlots = preFilled.some(s => s.username === m.username);
+      if (!isAlreadyInSlots) {
+        preFilled.push({ type: 'wrestler', username: m.username, name: m.display_name || m.username, avatar: m.avatar_url || '' });
+        // Add their opponents if not already added
+        const opponents = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
+        for (const oppU of opponents) {
+          if (!oppU || oppU.startsWith('__')) continue;
+          if (preFilled.some(s => s.username === oppU)) continue;
+          const oppM = _bkTab.rosterCache.find(r => r.username === oppU);
+          if (oppM) preFilled.push({ type: 'wrestler', username: oppM.username, name: oppM.display_name || oppM.username, avatar: oppM.avatar_url || '' });
+        }
+        // Ghost opponents
+        const ghostOpps = Array.isArray(bk.ghostOpponents) ? bk.ghostOpponents : [];
+        for (const g of ghostOpps) {
+          if (g?.name) preFilled.push({ type: 'wrestler', username: '__mystery__' + Date.now() + Math.random(), name: g.name, avatar: '' });
+        }
+        // Pre-fill step 3 fields from first booking found
+        if (!_bkTab.champOn && bk.champName) {
+          _bkTab.champOn = true;
+          _bkTab.champName = bk.champName;
+        }
+        // Match type
+        const mt = document.getElementById('bk-match-type');
+        if (mt && !mt.value && bk.matchType) mt.value = bk.matchType;
+      }
+    } catch(e) {}
+  }
+
+  if (preFilled.length) {
+    // Rebuild as proper VS-separated slots
+    const rebuilt = [];
+    preFilled.forEach((w, i) => {
+      if (i > 0) rebuilt.push({ type: 'vs' });
+      rebuilt.push(w);
+    });
+    _bkTab.slots = rebuilt;
+  }
+
+  // Sync championship toggle UI
+  bkSyncChampToggle();
+  const champNameInp = document.getElementById('bk-champ-name');
+  if (champNameInp && _bkTab.champName) champNameInp.value = _bkTab.champName;
+
+  bkSyncPreview();
+  bkRenderCompGrid();
+
+  // Scroll the create-show form into view
+  form?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Update existing show metadata (called from pre-filled form's Update button) ──
+async function bkUpdateShow() {
+  const nameEl = document.getElementById('bk-ns-name');
+  const locEl  = document.getElementById('bk-ns-location');
+  const dateEl = document.getElementById('bk-ns-date');
+  const errEl  = document.getElementById('bk-ns-err');
+  const saveBtn = document.getElementById('bk-ns-save-btn');
+  const newTitle = nameEl?.value.trim();
+  if (!newTitle) { if (errEl) errEl.textContent = 'Show name is required.'; return; }
+  if (errEl) errEl.textContent = '';
+  const location = _bkNsLocTba ? 'TBA' : (locEl?.value.trim() || '');
+  const date     = _bkNsDateTba ? 'TBA' : (dateEl?.value.trim() || '');
+  const session = getSession(); if (!session) return;
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+  try {
+    const oldTitle = _bkTab.show;
+    // Update primary or extra events
+    if (window._efedPrimaryEvent?.title?.toLowerCase() === oldTitle.toLowerCase()) {
+      Object.assign(window._efedPrimaryEvent, { title: newTitle, location, date });
+      await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+        method: 'PATCH', headers: SB_HEADERS,
+        body: JSON.stringify({ efed_event_title: newTitle, efed_event_location: location || null, efed_event_date: date || null })
+      });
+    } else {
+      const extras = (window._efedExtraEvents || []).map(ev =>
+        ev.title?.toLowerCase() === oldTitle.toLowerCase() ? { ...ev, title: newTitle, location, date } : ev
+      );
+      window._efedExtraEvents = extras;
+      await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+        method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_events_json: extras })
+      });
+    }
+    _bkTab.show = newTitle;
+    _bkTab.showObj = { title: newTitle, location, date };
+    // Restore form to Add mode
+    document.getElementById('bk-new-show-form').style.display = 'none';
+    document.getElementById('bk-new-show-toggle').style.display = '';
+    if (saveBtn) { saveBtn.textContent = 'Add Show'; saveBtn.onclick = bkCreateNewShow; }
+    bkRenderShowList();
+    bkSyncPreview();
+    if (typeof _injectScheduleBookingBanners === 'function') {
+      setTimeout(() => _injectScheduleBookingBanners(window._efedPrimaryEvent||{}, window._efedExtraEvents||[]), 300);
+    }
+    showToast('Show updated');
+  } catch(e) {
+    if (errEl) errEl.textContent = 'Save failed: ' + (e.message || 'error');
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; }
+  }
+}
+
 async function bkLoadRoster() {
   const grid = document.getElementById('bk-comp-grid');
   if (!grid) return;
@@ -6209,7 +6383,7 @@ async function bkAddGhost() {
     const r = await fetch(SUPABASE_URL + '/rest/v1/roster', {
       method: 'POST',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-      body: JSON.stringify({ username: ghostUsername, efed: EFED_NAME, status: 'approved', joined_at: new Date().toISOString(), plan_note: JSON.stringify({ ghost: true, ghostName: name }) })
+      body: JSON.stringify({ username: ghostUsername, efed: EFED_NAME, status: 'approved', joined_at: Date.now(), plan_note: JSON.stringify({ ghost: true, ghostName: name }) })
     });
     if (!r.ok) throw new Error(await r.text());
     if (!window._efedRosterMembers) window._efedRosterMembers = [];
@@ -6276,6 +6450,10 @@ async function bkSubmitBooking() {
       if (w.username.startsWith('__')) continue;
       const others = realWrestlers.filter(s=>s.username!==w.username).map(s=>s.name).join(' & ');
       if (others) try { await sbInsert('notifications', { username:w.username, type:'booking', message:`Your next match${typePart} is booked against ${others}${showPart} (${EFED_NAME}).`, read:false, created_at:new Date().toISOString() }); } catch(e) {}
+    }
+    // Refresh schedule banners so the booking appears immediately
+    if (typeof _injectScheduleBookingBanners === 'function') {
+      setTimeout(() => _injectScheduleBookingBanners(window._efedPrimaryEvent || {}, window._efedExtraEvents || []), 200);
     }
     // Success popup
     _bkShowConfirm(realWrestlers.map(s=>s.name).join(' vs '), show);
@@ -7878,6 +8056,14 @@ body.bk-tab-active .stats-bar { display: none !important; }
   font-size: .8rem; font-weight: 700; cursor: pointer; transition: all .15s;
 }
 .bk-back-btn:hover { color: #fff; border-color: rgba(255,255,255,.25); }
+.bk-edit-show-btn {
+  padding: 11px 18px;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px; color: rgba(255,255,255,.5);
+  font-family: "DM Sans", sans-serif; font-size: .8rem; font-weight: 700;
+  cursor: pointer; transition: all .15s;
+}
+.bk-edit-show-btn:hover { color: #c8a84b; border-color: rgba(200,168,75,.35); background: rgba(200,168,75,.06); }
 .bk-step-dot {
   width: 28px; height: 28px; border-radius: 50%;
   background: rgba(255,255,255,.05); border: 1.5px solid rgba(255,255,255,.1);
