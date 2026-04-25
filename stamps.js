@@ -58,7 +58,6 @@
   document.head.appendChild(s);
 })();
 
-})();
 
 // ── WRESTLING EMOJI FALLBACK SET ─────────────────────────────
 const WRESTLING_EMOJIS = [
