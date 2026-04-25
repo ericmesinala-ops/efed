@@ -26,12 +26,13 @@
     html.day-mode .hub-link:hover { color: #1558aa; }
     .x-embed-wrap {
       margin-top: 8px; max-width: 480px; width: 100%;
-      border-radius: 14px; overflow: hidden;
+      border-radius: 14px;
     }
     /* Force the Twitter iframe to fit cleanly */
     .x-embed-wrap iframe.twitter-tweet-rendered {
-      border-radius: 14px !important;
+      border-radius: 12px !important;
       max-width: 100% !important;
+      width: 100% !important;
     }
     .x-embed-wrap .twitter-tweet {
       margin: 0 !important;
