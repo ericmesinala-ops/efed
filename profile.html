@@ -449,7 +449,8 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 
 /* ── SECTIONS ── */
 .section { padding: 22px 20px; border-bottom: 1px solid var(--border); }
-.section:last-child { border-bottom: none; padding-bottom: 100px; }
+.section:last-child { border-bottom: none; padding-bottom: 120px; }
+#page-bottom-spacer { height: 80px; }
 .sec-title { font-size: .58rem; letter-spacing: 3px; text-transform: uppercase; color: var(--gold); font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 .sec-help-btn { background: none; border: none; cursor: default; font-size: .82rem; line-height: 1; padding: 0; opacity: .35; transition: opacity .2s; position: relative; flex-shrink: 0; }
 .sec-help-btn:hover { opacity: .8; }
@@ -3620,29 +3621,15 @@ async function recEdit(idx) {
   _rm2UndoStack = [];
 
   // Rehydrate slot system — prefer saved slots array, fall back to parsing opponents string
-  // Note: isSelf is always stripped on save, so we re-prepend it here from the session.
-  const selfAvImg2 = document.getElementById('profile-av-img');
-  const selfAvatarSrc2 = selfAvImg2 && selfAvImg2.style.display !== 'none' ? selfAvImg2.src : '';
-  const selfNameEl2 = document.getElementById('identity-row-name');
-  const selfNameRaw2 = selfNameEl2 ? (selfNameEl2.textContent || '').replace(/On Roster.*$/, '').trim() : (session.displayName || session.username || '');
-  const selfSlotObj = {
-    type: 'wrestler',
-    username: session.username || '',
-    name: selfNameRaw2 || session.username || 'Me',
-    avatar: selfAvatarSrc2 || session.avatarUrl || '',
-    isSelf: true
-  };
-
   window._rm2Slots = [];
   if (Array.isArray(r.slots) && r.slots.length) {
-    // Filter out any stale isSelf entries from old saves, then prepend fresh one
-    window._rm2Slots = [selfSlotObj, ...r.slots.filter(s => !s.isSelf)];
+    window._rm2Slots = r.slots.map(s => ({ ...s }));
   } else if (r.opponents) {
-    // Legacy format: opponents string = just the opponent(s), self is always prepended
-    window._rm2Slots = [selfSlotObj];
+    // Legacy format: "PartnerA & PartnerB vs Opp1 & Opp2 vs Opp3"
+    // Each VS-separated segment is a team; within each team "&" separates members
     const teamParts = r.opponents.split(/\s+vs\.?\s+/i);
     teamParts.forEach((teamStr, ti) => {
-      window._rm2Slots.push({ type: 'vs' });
+      if (ti > 0) window._rm2Slots.push({ type: 'vs' });
       const members = teamStr.split(/\s*&\s*/);
       members.forEach(nm => {
         nm = nm.trim();
@@ -3657,9 +3644,9 @@ async function recEdit(idx) {
           }
           window._rm2Slots.push({
             type: 'wrestler',
-            username: matched ? matched.username : (ti === 0 && !window._rm2Slots.some(s => s.type === 'wrestler' && !s.isSelf) ? (r.opponent_username || '') : ''),
+            username: matched ? matched.username : (r.opponent_username && !window._rm2Slots.some(s => s.type === 'wrestler') ? r.opponent_username : ''),
             name: nm,
-            avatar: matched ? (matched.avatar_url || '') : (ti === 0 && !window._rm2Slots.some(s => s.type === 'wrestler' && !s.isSelf) ? (r.opponent_avatar || '') : '')
+            avatar: matched ? (matched.avatar_url || '') : (!window._rm2Slots.some(s => s.type === 'wrestler') ? (r.opponent_avatar || '') : '')
           });
         }
       });
@@ -3678,12 +3665,10 @@ async function recEdit(idx) {
   document.getElementById('rm2-msg-2').textContent = '';
   rm2SetResult(_rm2Result); rm2SetChamp(_rm2ChampOn); rm2SetRole(_rm2Role);
   rm2RenderSlotPreview();
-  // Always start at step 1 (opponent selection) when editing so the user can
-  // see who's in the match and add/remove opponents before hitting Next.
-  // If no eFed is set yet, start at step 0 to pick one first.
-  if (_rm2SelectedEfed) {
-    rm2GoStep(1);
-    await rm2LoadEfeds(session.username); // populate eFed list in background (needed for roster)
+  // Jump straight to step 2 if we have efed + opponents already
+  if (_rm2SelectedEfed && window._rm2Slots.length) {
+    rm2GoStep(2);
+    rm2UpdatePreview();
   } else {
     rm2GoStep(0);
     await rm2LoadEfeds(session.username);
@@ -3917,11 +3902,8 @@ function rm2SlotAddVs() {
 }
 
 function rm2SlotAddQuestion() {
-  // ??? = unknown wrestler — auto-VS if first opponent being added
+  // ??? = unknown wrestler — joins the current team (no auto-VS)
   _rm2SnapshotUndo();
-  const nonSelf = window._rm2Slots.filter(s => s.type === 'wrestler' && !s.isSelf);
-  const hasVs = window._rm2Slots.some(s => s.type === 'vs');
-  if (nonSelf.length === 0 && !hasVs) window._rm2Slots.push({ type: 'vs' });
   window._rm2Slots.push({ type: 'wrestler', username: '__mystery__', name: '???', avatar: '' });
   rm2RenderSlotPreview();
 }
@@ -3934,18 +3916,12 @@ function rm2SlotAddManual() {
   const dd = document.getElementById('rm2-opp-dropdown');
   if (dd) dd.innerHTML = '';
   _rm2SnapshotUndo();
-  // Auto-VS if this is the first opponent being added
-  const nonSelf = window._rm2Slots.filter(s => s.type === 'wrestler' && !s.isSelf);
-  const hasVs = window._rm2Slots.some(s => s.type === 'vs');
-  if (nonSelf.length === 0 && !hasVs) window._rm2Slots.push({ type: 'vs' });
   window._rm2Slots.push({ type: 'wrestler', username: '', name: v, avatar: '' });
   inp.value = '';
   rm2RenderSlotPreview();
 }
 
 function rm2SlotRemove(idx) {
-  // Never allow the self (owner) slot to be removed — you're always in your own match
-  if (window._rm2Slots[idx] && window._rm2Slots[idx].isSelf) return;
   _rm2SnapshotUndo();
   window._rm2Slots.splice(idx, 1);
   // Clean orphan VS at start/end or double VS
@@ -3970,13 +3946,6 @@ function rm2SlotAddFromRoster(m) {
     return;
   }
   _rm2SnapshotUndo();
-  // If the only wrestler so far is the self slot (no VS yet), auto-insert VS
-  // so the result is "Me VS Opponent" not "Me & Opponent".
-  const nonSelf = window._rm2Slots.filter(s => s.type === 'wrestler' && !s.isSelf);
-  const hasVs = window._rm2Slots.some(s => s.type === 'vs');
-  if (nonSelf.length === 0 && !hasVs) {
-    window._rm2Slots.push({ type: 'vs' });
-  }
   // No auto-VS — wrestlers added consecutively are on the same team.
   // User taps + VS to separate teams.
   window._rm2Slots.push({ type: 'wrestler', username: m.username, name: m.display_name || m.username, avatar: m.avatar_url || '' });
@@ -5773,7 +5742,7 @@ const _posts = (() => {
         <div class="post-card-header">
           <div class="post-av-wrap">${_avHtml(p)}</div>
           <div class="post-meta-wrap">
-            <div class="post-op-name">${withProfileVerified(p.display_name||p.username||'', p.username||'')}</div>
+            <div class="post-op-name">${_esc(p.display_name||p.username||'')}</div>
             <div class="post-op-time" style="display:flex;align-items:center;gap:5px;">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
               reposted · ${_timeAgo(p.created_at)}
@@ -5840,7 +5809,7 @@ const _posts = (() => {
       <div class="post-card-header">
         <div class="post-av-wrap">${_avHtml(p)}</div>
         <div class="post-meta-wrap">
-          <div class="post-op-name">${withProfileVerified(p.display_name||p.username||'', p.username||'')}</div>
+          <div class="post-op-name">${_esc(p.display_name||p.username||'')}</div>
           <div class="post-op-time">${_timeAgo(p.created_at)}${editedLabel}</div>
         </div>
       </div>
@@ -6286,7 +6255,7 @@ const _posts = (() => {
         <div class="post-reply-thread-line"></div>
       </div>
       <div class="post-reply-body">
-        <div class="post-reply-name">${withProfileVerified(r.display_name||r.username||'', r.username||'')} <span class="post-reply-time-sm">${_timeAgo(r.created_at)}</span></div>
+        <div class="post-reply-name">${_esc(r.display_name||r.username||'')} <span class="post-reply-time-sm">${_timeAgo(r.created_at)}</span></div>
         ${r.text ? `<div class="post-reply-text-sm">${_esc(r.text)}</div>` : ''}
         ${imgHtml}
         <div class="post-reply-footer-sm">${likeReplyBtn}${replyToReplyBtn}${deleteReplyBtn}</div>
@@ -6560,8 +6529,9 @@ const _posts = (() => {
   </div>
 </div>
 
+<div id="page-bottom-spacer"></div>
+
 <script>
-let _hasAvatar = false;
 let _isOwnProfile = false;
 let _ownerEfedName = '';
 
@@ -7411,7 +7381,7 @@ function openLinksModal() {
         html += `<a class="links-person" href="profile.html?u=${encodeURIComponent(m.username)}">
           <div class="links-av">${avHtml}</div>
           <div>
-            <div class="links-name">${withProfileVerified(m.display_name || m.username, m.username)}${alreadySeen ? ' <span style="font-size:.55rem;color:rgba(255,255,255,.25);">also here</span>' : ''}</div>
+            <div class="links-name">${m.display_name || m.username}${alreadySeen ? ' <span style="font-size:.55rem;color:rgba(255,255,255,.25);">also here</span>' : ''}</div>
             <div class="links-efed-tag">via ${efed}</div>
           </div>
         </a>`;
@@ -7556,7 +7526,7 @@ async function openEditModal(tab) {
   // Fetch own user data fresh from DB
   let _ownData = {};
   try {
-    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio,avatar_side,avatar_banner_dim,championships`);
+    const _rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=display_name,avatar_url,ig_handle,x_handle,twitch_channel,bio,avatar_side,avatar_banner_dim,championships,username_last_changed`);
     _ownData = _rows[0] || {};
   } catch(e) {}
 
@@ -8444,6 +8414,14 @@ async function saveEditProfile() {
   if (!isLinks && newUsername && newUsername !== session.username) {
     if (newUsername.length < 3) { if(unMsg){unMsg.textContent='Min 3 characters.';unMsg.style.color='#ff6b6b';} return; }
     try {
+      const _unRow = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=username_last_changed`);
+      const _ulc = _unRow[0]?.username_last_changed ? new Date(_unRow[0].username_last_changed).getTime() : null;
+      if (_ulc && (Date.now() - _ulc) < 30*24*60*60*1000) {
+        const _dLeft = Math.ceil(((_ulc + 30*24*60*60*1000) - Date.now()) / (24*60*60*1000));
+        if(unMsg){unMsg.textContent=`Not available — try again in ${_dLeft} day${_dLeft===1?'':'s'}.`;unMsg.style.color='#ff6b6b';} return;
+      }
+    } catch(e) {}
+    try {
       const taken = await sbGet('users', `username=eq.${encodeURIComponent(newUsername)}&select=username`);
       if (taken.length) { if(unMsg){unMsg.textContent='Username taken.';unMsg.style.color='#ff6b6b';} return; }
     } catch(e) {}
@@ -8463,7 +8441,7 @@ async function saveEditProfile() {
     const bannerDim = parseInt(document.getElementById('ep-dim-slider')?.value) || 0;
     const usernameChanged = !isLinks && newUsername && newUsername !== session.username;
     const updates = { display_name: name || null, ig_handle: ig ? '@'+ig : null, x_handle: x ? '@'+x : null, twitch_channel: twitch || null, reddit_handle: reddit || null, spotify_handle: spotify || null, discord_handle: discord || null, facebook_handle: facebook || null, avatar_side: avatarSide, avatar_banner_dim: bannerDim, bio: bio || null };
-    if (usernameChanged) updates.username = newUsername;
+    if (usernameChanged) { updates.username = newUsername; updates.username_last_changed = new Date().toISOString(); }
     const _saveUpdates = async (payload) => {
       const r = await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(payload) });
       if (!r.ok) {
@@ -10003,7 +9981,7 @@ async function _galPerformMove(fromSlot, toSlot) {
   } catch(e) { showToast('Reorder failed'); }
 }
 
-  document.addEventListener('DOMContentLoaded', () => { initNav(); loadProfile(); loadChatVerifiedOwners(); });
+  document.addEventListener('DOMContentLoaded', () => { initNav(); loadProfile(); });
 } else {
   initNav(); loadProfile();
 }
@@ -11279,21 +11257,14 @@ const _soSearch = (() => {
     if (doPeople && people.length) {
       html += '<div class="sr-section-label">CAWs <span class="sr-count-badge">' + people.length + '</span></div>';
       people.forEach(u => {
-        const name = withProfileVerified(u.display_name || u.username || '?', u.username);
+        const name = esc(u.display_name || u.username || '?');
         const initial = (u.display_name || u.username || '?')[0].toUpperCase();
         const avatarInner = u.avatar_url
           ? '<img src="' + esc(u.avatar_url) + '" alt="" onerror="this.style.display=\'none\'">'
           : initial;
-        const isOwner = (u.is_efed_owner || u.role === 'owner') && u.promo_name;
-        let sub;
-        if (isOwner) {
-          const logoHtml = u.promo_logo
-            ? '<img src="' + esc(u.promo_logo) + '" style="width:13px;height:13px;border-radius:3px;object-fit:cover;display:inline-block;vertical-align:middle;margin-right:3px;" onerror="this.style.display=\'none\'">'
-            : '';
-          sub = logoHtml + esc(u.promo_name);
-        } else {
-          sub = '@' + esc(u.username || '');
-        }
+        const sub = (u.is_efed_owner || u.role === 'owner') && u.promo_name
+          ? '🎬 ' + esc(u.promo_name)
+          : '@' + esc(u.username||'');
         html += '<div class="sr-profile-item" onclick="_soSearch.openProfile(\'' + encodeURIComponent(u.username) + '\')">' +
           '<div class="sr-profile-avatar">' + avatarInner + '</div>' +
           '<div class="sr-profile-info">' +
