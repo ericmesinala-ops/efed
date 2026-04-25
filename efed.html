@@ -178,6 +178,46 @@ function getEmblemSVG(designId) {
   const SUPABASE_URL = 'https://osbarvhklizidsffytye.supabase.co';
   const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
   const ADMIN_USERNAME = 'derrick_maximus';
+
+  // ── VERIFIED BADGE SYSTEM ──
+  const VERIFIED_BADGE_GOLD = `<svg title="Admin" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.15)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const VERIFIED_BADGE_BLUE  = `<svg title="Verified eFed Owner" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(59,130,246,.15)" stroke="#3b82f6" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const _verifiedOwners = new Set(); // blue — efed owners with 10+ real roster members
+
+  function withVerified(displayName, username, useAdminLabel = true) {
+    if (!username) return _esc(displayName || '');
+    const uLower = username.toLowerCase();
+    if (uLower === ADMIN_USERNAME) {
+      const name = _esc(useAdminLabel ? 'Admin' : (displayName || username));
+      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_GOLD}</span>`;
+    }
+    if (_verifiedOwners.has(uLower)) {
+      const name = _esc(displayName || username);
+      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_BLUE}</span>`;
+    }
+    return _esc(displayName || username);
+  }
+
+  async function loadVerifiedUsers() {
+    _verifiedOwners.clear();
+    try {
+      const [efedOwners, roleOwners] = await Promise.all([
+        sbGet('users', 'select=username,promo_name&is_efed_owner=eq.true'),
+        sbGet('users', 'select=username,promo_name&role=eq.owner')
+      ]);
+      const ownerMap = {};
+      [...efedOwners, ...roleOwners].forEach(u => { if (u.username) ownerMap[u.username.toLowerCase()] = u; });
+      await Promise.all(Object.keys(ownerMap).map(async uLower => {
+        const u = ownerMap[uLower];
+        if (!u.promo_name) return;
+        try {
+          const rows = await sbGet('roster', `efed=ilike.${encodeURIComponent(u.promo_name)}&status=eq.approved&select=username`);
+          if (rows.filter(r => !r.username.startsWith('__ghost__')).length >= 10) _verifiedOwners.add(uLower);
+        } catch(e) {}
+      }));
+    } catch(e) {}
+  }
+
   const SB_HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
   function _esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function getSession() { try { return JSON.parse(localStorage.getItem('efed_session')); } catch { return null; } }
@@ -2901,6 +2941,7 @@ function goToProfile() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  loadVerifiedUsers();
   // search handled by _soSearch overlay
 });
 
@@ -7554,7 +7595,7 @@ async function loadRoster() {
       contentWrap.style.cssText = 'position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;width:100%;';
       contentWrap.innerHTML = `
         <div style="width:44px;height:44px;border-radius:50%;background:${finalAvColor};border:${finalAvBorder};display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:1.1rem;color:${finalAvText};margin:0 auto 8px;overflow:hidden;">${avInner}</div>
-        <div class="roster-card-name" style="font-size:.78rem;font-weight:600;${nameColor ? 'color:'+nameColor+';' : ''}${isGhost ? 'color:rgba(255,255,255,.6);' : ''}">${(u.display_name||u.username||'').replace(/</g,'&lt;')}</div>
+        <div class="roster-card-name" style="font-size:.78rem;font-weight:600;${nameColor ? 'color:'+nameColor+';' : ''}${isGhost ? 'color:rgba(255,255,255,.6);' : ''}">${isGhost ? (u.display_name||u.username||'').replace(/</g,'&lt;') : withVerified(u.display_name||u.username||'', u.username, false)}</div>
         <div style="font-size:.62rem;letter-spacing:1px;margin-top:3px;color:${roleColor};">${isGhost ? '' : role}</div>
         ${pendingBadge}${ghostBadgeHtml}`;
       card.appendChild(contentWrap);
@@ -10029,7 +10070,7 @@ function renderChampions() {
     content.style.cssText = 'position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;width:100%;';
     content.innerHTML = `
       <div style="width:44px;height:44px;border-radius:50%;background:rgba(200,168,75,.08);border:2px solid rgba(200,168,75,.35);display:flex;align-items:center;justify-content:center;margin:0 auto 8px;overflow:hidden;">${avInner}</div>
-      <div style="font-size:.78rem;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px;">${(champ.displayName||'').replace(/</g,'&lt;')}</div>
+      <div style="font-size:.78rem;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px;">${withVerified(champ.displayName||'', champ.username, false)}</div>
       <div style="font-size:.58rem;color:rgba(200,168,75,.8);margin-top:4px;line-height:1.35;text-align:center;word-break:break-word;max-width:110px;">${(champ.title||'').replace(/</g,'&lt;')}</div>`;
     card.appendChild(content);
 
@@ -10786,13 +10827,14 @@ const _soSearch = (() => {
     if (doPeople && people.length) {
       html += '<div class="sr-section-label">CAWs <span class="sr-count-badge">' + people.length + '</span></div>';
       people.forEach(u => {
-        const name = esc(u.display_name || u.username || '?');
+        const name = withVerified(u.display_name || u.username || '?', u.username, false);
         const initial = (u.display_name || u.username || '?')[0].toUpperCase();
         const avatarInner = u.avatar_url
           ? '<img src="' + esc(u.avatar_url) + '" alt="" onerror="this.style.display=\'none\'">'
           : initial;
-        const sub = (u.is_efed_owner || u.role === 'owner') && u.promo_name
-          ? '🎬 ' + esc(u.promo_name)
+        const isOwner = (u.is_efed_owner || u.role === 'owner') && u.promo_name;
+        const sub = isOwner
+          ? (u.promo_logo ? '<img src="' + esc(u.promo_logo) + '" style="width:13px;height:13px;border-radius:3px;object-fit:cover;display:inline-block;vertical-align:middle;margin-right:3px;" onerror="this.style.display=\'none\'">' : '') + esc(u.promo_name)
           : '@' + esc(u.username||'');
         html += '<div class="sr-profile-item" onclick="_soSearch.openProfile(\'' + encodeURIComponent(u.username) + '\')">' +
           '<div class="sr-profile-avatar">' + avatarInner + '</div>' +
@@ -12056,7 +12098,7 @@ function _efedAppendMsg(r) {
   const div = document.createElement('div');
   div.className = 'efed-chat-msg';
   div.dataset.id = r.id || '';
-  div.innerHTML = `${avHtml}<div class="efed-chat-bubble"><div class="efed-chat-meta"><strong>${_esc(r.display_name||r.username)}</strong>${ago}${deleteBtn}</div><div class="efed-chat-text">${_efedRenderMsg(r.message)}</div></div>`;
+  div.innerHTML = `${avHtml}<div class="efed-chat-bubble"><div class="efed-chat-meta"><strong>${withVerified(r.display_name||r.username, r.username, false)}</strong>${ago}${deleteBtn}</div><div class="efed-chat-text">${_efedRenderMsg(r.message)}</div></div>`;
   box.appendChild(div);
 }
 
@@ -12197,7 +12239,7 @@ const _efedFeed = (() => {
         <div class="efed-post-card-header">
           <div class="efed-post-av-wrap">${_avHtml(p)}</div>
           <div class="efed-post-meta-wrap">
-            <div class="efed-post-op-name">${_e(p.display_name||p.username||'')}</div>
+            <div class="efed-post-op-name">${withVerified(p.display_name||p.username||'', p.username||'', false)}</div>
             <div class="efed-post-op-time" style="display:flex;align-items:center;gap:5px;">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
               reposted · ${_timeAgo(p.created_at)}
@@ -12255,7 +12297,7 @@ const _efedFeed = (() => {
       <div class="efed-post-card-header">
         <div class="efed-post-av-wrap">${_avHtml(p)}</div>
         <div class="efed-post-meta-wrap">
-          <div class="efed-post-op-name">${_e(p.display_name||p.username||'')}</div>
+          <div class="efed-post-op-name">${withVerified(p.display_name||p.username||'', p.username||'', false)}</div>
           <div class="efed-post-op-time">${_timeAgo(p.created_at)}${editedLabel}</div>
         </div>
       </div>
@@ -12311,7 +12353,7 @@ const _efedFeed = (() => {
         <div class="efed-post-reply-thread-line"></div>
       </div>
       <div class="efed-post-reply-body">
-        <div class="efed-post-reply-name">${_e(r.display_name||r.username||'')} <span class="efed-post-reply-time-sm">${_timeAgo(r.created_at)}</span></div>
+        <div class="efed-post-reply-name">${withVerified(r.display_name||r.username||'', r.username||'', false)} <span class="efed-post-reply-time-sm">${_timeAgo(r.created_at)}</span></div>
         ${r.text ? `<div class="efed-post-reply-text-sm">${_e(r.text)}</div>` : ''}
         ${imgHtml}
         <div class="efed-post-reply-footer-sm">${likeBtn}${replyToReplyBtn}${deleteBtn}</div>
