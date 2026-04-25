@@ -25,12 +25,22 @@
     html.day-mode .hub-link { color: #1a6fd4; text-decoration-color: rgba(26,111,212,.3); }
     html.day-mode .hub-link:hover { color: #1558aa; }
     .x-embed-wrap {
-      margin-top: 10px; border-radius: 14px; overflow: hidden; max-width: 100%;
+      margin-top: 8px; max-width: 480px; width: 100%;
+      border-radius: 14px; overflow: hidden;
     }
-    .x-embed-wrap .twitter-tweet { margin: 0 !important; }
+    /* Force the Twitter iframe to fit cleanly */
+    .x-embed-wrap iframe.twitter-tweet-rendered {
+      border-radius: 14px !important;
+      max-width: 100% !important;
+    }
+    .x-embed-wrap .twitter-tweet {
+      margin: 0 !important;
+      max-width: 100% !important;
+    }
     .x-embed-skeleton {
       padding: 14px 16px; background: rgba(255,255,255,.04);
       border: 1px solid rgba(255,255,255,.08); border-radius: 14px;
+      max-width: 480px;
     }
     .x-embed-sk-line {
       height: 10px; background: rgba(255,255,255,.08); border-radius: 6px;
@@ -493,6 +503,8 @@ function _autoLink(rawText) {
       if (!d.html) { wrap.remove(); return; }
       wrap.innerHTML = d.html;
       _loadTwttr();
+      // Hide the raw hub-link text above — the embed card replaces it visually
+      link.style.cssText = 'display:none;';
       // If widgets.js already ready, render immediately
       if (window.twttr?.widgets?.load) window.twttr.widgets.load(wrap);
     } catch(e) { wrap.remove(); }
