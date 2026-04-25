@@ -24,6 +24,21 @@
     .hub-link:hover { color: #90c8ff; text-decoration-color: rgba(144,200,255,.6); }
     html.day-mode .hub-link { color: #1a6fd4; text-decoration-color: rgba(26,111,212,.3); }
     html.day-mode .hub-link:hover { color: #1558aa; }
+    .x-embed-wrap {
+      margin-top: 10px; border-radius: 14px; overflow: hidden; max-width: 100%;
+    }
+    .x-embed-wrap .twitter-tweet { margin: 0 !important; }
+    .x-embed-skeleton {
+      padding: 14px 16px; background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.08); border-radius: 14px;
+    }
+    .x-embed-sk-line {
+      height: 10px; background: rgba(255,255,255,.08); border-radius: 6px;
+      animation: x-embed-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes x-embed-pulse {
+      0%,100% { opacity: .5; } 50% { opacity: 1; }
+    }
   `;
   document.head.appendChild(s);
 })();
@@ -417,8 +432,9 @@ function getGeneralStamps() {
 }
 
 // ── AUTO-LINK — converts raw text to HTML with clickable URLs ─
-// Processes raw (unescaped) text; returns HTML string.
-// Non-URL portions are HTML-escaped; URLs become <a> tags.
+// X/Twitter status URLs get data-x-embed so the embed engine picks them up.
+const _X_STATUS_RE = /^https?:\/\/(www\.)?(twitter\.com|x\.com)\/\w+\/status\/\d+/i;
+
 function _autoLink(rawText) {
   if (!rawText) return '';
   const URL_RE = /https?:\/\/[^\s\])"'<>\u200B]+/g;
@@ -427,16 +443,82 @@ function _autoLink(rawText) {
   const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   while ((m = URL_RE.exec(rawText)) !== null) {
     if (m.index > last) out.push(esc(rawText.slice(last, m.index)));
-    let url = m[0].replace(/[.,;:!?)]+$/, ''); // strip trailing punctuation
+    let url = m[0].replace(/[.,;:!?)]+$/, '');
     const trailing = esc(m[0].slice(url.length));
+    const isXPost = _X_STATUS_RE.test(url);
     const display = url.length > 42 ? url.slice(0, 39) + '…' : url;
-    out.push(`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="hub-link">${esc(display)}</a>`);
+    out.push(`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="hub-link"${isXPost ? ' data-x-embed="1"' : ''}>${esc(display)}</a>`);
     if (trailing) out.push(trailing);
     last = m.index + m[0].length;
   }
   if (last < rawText.length) out.push(esc(rawText.slice(last)));
   return out.join('');
 }
+
+// ── X / TWITTER POST EMBED ENGINE ────────────────────────────
+// Watches the DOM for hub-link[data-x-embed] anchors (set by _autoLink),
+// fetches Twitter oEmbed, and renders an inline tweet card beneath the post text.
+(function _initXEmbeds() {
+  function _loadTwttr() {
+    if (window._twttrScriptLoading) return;
+    if (document.querySelector('script[src*="platform.twitter.com/widgets"]')) return;
+    window._twttrScriptLoading = true;
+    const s = document.createElement('script');
+    s.src = 'https://platform.twitter.com/widgets.js';
+    s.async = true; s.charset = 'utf-8';
+    document.head.appendChild(s);
+  }
+
+  async function _doEmbed(link) {
+    const url = link.getAttribute('href');
+    if (!url) return;
+
+    // Find insertion point — right after the text block that contains this link
+    const textBlock = link.closest('.post-card-text, .efed-post-card-text') || link.parentElement;
+    const parent = textBlock.parentElement;
+    if (!parent) return;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'x-embed-wrap';
+    // Insert after the text block
+    textBlock.after ? textBlock.after(wrap) : parent.insertBefore(wrap, textBlock.nextSibling);
+
+    // Skeleton while loading
+    wrap.innerHTML = `<div class="x-embed-skeleton"><div class="x-embed-sk-line" style="width:60%"></div><div class="x-embed-sk-line" style="width:80%;margin-top:6px"></div><div class="x-embed-sk-line" style="width:45%;margin-top:6px"></div></div>`;
+
+    try {
+      const r = await fetch(`https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&theme=dark&dnt=true&omit_script=true`);
+      if (!r.ok) { wrap.remove(); return; }
+      const d = await r.json();
+      if (!d.html) { wrap.remove(); return; }
+      wrap.innerHTML = d.html;
+      _loadTwttr();
+      // If widgets.js already ready, render immediately
+      if (window.twttr?.widgets?.load) window.twttr.widgets.load(wrap);
+    } catch(e) { wrap.remove(); }
+  }
+
+  function _scan(root) {
+    (root.querySelectorAll ? root.querySelectorAll('a.hub-link[data-x-embed]') : [])
+      .forEach(link => { link.removeAttribute('data-x-embed'); _doEmbed(link); });
+  }
+
+  const obs = new MutationObserver(muts => {
+    muts.forEach(({ addedNodes }) => addedNodes.forEach(n => {
+      if (n.nodeType !== 1) return;
+      if (n.matches?.('a.hub-link[data-x-embed]')) { n.removeAttribute('data-x-embed'); _doEmbed(n); }
+      else _scan(n);
+    }));
+  });
+
+  function _start() {
+    obs.observe(document.body, { childList: true, subtree: true });
+    _scan(document.body);
+  }
+
+  if (document.body) _start();
+  else document.addEventListener('DOMContentLoaded', _start);
+})();
 function _getMoodletForEfed(name) {
   // legacy: returns single stamp for the eFed (cat 1 only, seeded)
   const pool = getStampsByCategory(1);
