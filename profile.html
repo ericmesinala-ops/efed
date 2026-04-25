@@ -8355,9 +8355,8 @@ async function saveEditProfile() {
     localStorage.setItem('efed_session', JSON.stringify(session));
     // Update display name on page
     const _dispName = name || '';
-    document.getElementById('profile-name').textContent = _dispName;
-    const _irn = document.getElementById('identity-row-name');
-    if (_irn) { const badge = _irn.querySelector('.on-roster-badge'); const tn=_irn.childNodes[0]; if(tn&&tn.nodeType===3)tn.textContent=_dispName; else _irn.insertBefore(document.createTextNode(_dispName),_irn.firstChild); }
+    setProfileName(_dispName, session.username);
+    setIdentityName(_dispName, session.username);
     document.getElementById('profile-av-initial').textContent = _dispName[0].toUpperCase();
     // Update @username elements
     if (usernameChanged || !isLinks) {
@@ -8748,9 +8747,8 @@ async function _loadPublicProfile(username) {
 
     const name = user.display_name || user.username;
     document.title = name + ' — EFED Hub';
-    document.getElementById('profile-name').textContent = name;
-    const _irn = document.getElementById('identity-row-name');
-    if (_irn) { const _b=_irn.querySelector('.on-roster-badge'); _irn.textContent=name; if(_b)_irn.appendChild(_b); }
+    setProfileName(name, user.username);
+    setIdentityName(name, user.username);
     const _iru = document.getElementById('identity-row-username');
     if (_iru) _iru.textContent = '@' + user.username;
     const _but = document.getElementById('banner-username-tag');
@@ -9082,8 +9080,8 @@ async function loadProfile() {
   if (_isOwnProfile) {
     const _cachedName = session.displayName || session.username || '';
     if (_cachedName) {
-      document.getElementById('profile-name').textContent = _cachedName;
-      const _irn0 = document.getElementById('identity-row-name'); if (_irn0) { const _b0=_irn0.querySelector('.on-roster-badge'); _irn0.textContent=_cachedName; if(_b0)_irn0.appendChild(_b0); }
+      setProfileName(_cachedName, session.username);
+      setIdentityName(_cachedName, session.username);
       document.getElementById('profile-av-initial').textContent = _cachedName[0].toUpperCase();
       if (session.avatarUrl) setAvatar(session.avatarUrl);
       if (session.igHandle || session.xHandle) renderSocialLinks(session.igHandle || '', session.xHandle || '', '', '', '', '', '');
@@ -9122,14 +9120,9 @@ async function loadProfile() {
     const uname = user.username;
     _atrTargetName = name;
     document.title = name + ' — EFED Hub';
-    document.getElementById('profile-name').textContent = name;
+    setProfileName(name, uname);
     // Identity row: display name + @username
-    const _irn1 = document.getElementById('identity-row-name');
-    if (_irn1) {
-      const _badge = _irn1.querySelector('.on-roster-badge');
-      _irn1.textContent = name;
-      if (_badge) _irn1.appendChild(_badge);
-    }
+    setIdentityName(name, uname);
     const _iru = document.getElementById('identity-row-username');
     if (_iru) _iru.textContent = '@' + uname;
     // Banner username tag
@@ -9223,8 +9216,8 @@ async function loadProfile() {
   } catch(e) {
     console.error('Profile user fetch failed:', e);
     const fallbackName = session.displayName || session.username || '';
-    document.getElementById('profile-name').textContent = fallbackName;
-    const _irn2 = document.getElementById('identity-row-name'); if (_irn2) { const _b2=_irn2.querySelector('.on-roster-badge'); _irn2.textContent=fallbackName; if(_b2)_irn2.appendChild(_b2); }
+    setProfileName(fallbackName, session.username);
+    setIdentityName(fallbackName, session.username);
     if (fallbackName) document.getElementById('profile-av-initial').textContent = fallbackName[0].toUpperCase();
   }
 
@@ -11783,14 +11776,63 @@ const CHAT_ADMIN_USERNAME = 'derrick_maximus';
 
 const CHAT_SB_HEADERS = { 'apikey': SUPABASE_KEY_CHAT, 'Authorization': 'Bearer ' + SUPABASE_KEY_CHAT, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
 
-const CHAT_VERIFIED_BADGE = `<svg style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.15)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const CHAT_VERIFIED_BADGE_GOLD = `<svg title="Admin" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.15)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const CHAT_VERIFIED_BADGE_BLUE = `<svg title="Verified eFed Owner" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(59,130,246,.15)" stroke="#3b82f6" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const CHAT_VERIFIED_BADGE = CHAT_VERIFIED_BADGE_GOLD; // legacy alias
+const _chatVerifiedOwners = new Set(); // blue — populated on load
 
 function chatEsc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function isChatVerified(u) { return u && u.toLowerCase() === CHAT_ADMIN_USERNAME; }
+function isChatVerified(u) { return u && (u.toLowerCase() === CHAT_ADMIN_USERNAME || _chatVerifiedOwners.has(u.toLowerCase())); }
+
+// Profile name badge helper
+function withProfileVerified(displayName, username) {
+  if (!username) return chatEsc(displayName || "");
+  const uLower = username.toLowerCase();
+  if (uLower === CHAT_ADMIN_USERNAME) return `<span style="display:inline-flex;align-items:center;gap:6px;">${chatEsc(displayName || username)}${CHAT_VERIFIED_BADGE_GOLD}</span>`;
+  if (_chatVerifiedOwners.has(uLower)) return `<span style="display:inline-flex;align-items:center;gap:6px;">${chatEsc(displayName || username)}${CHAT_VERIFIED_BADGE_BLUE}</span>`;
+  return chatEsc(displayName || username);
+}
+function setProfileName(displayName, username) {
+  const el = document.getElementById("profile-name");
+  if (el) el.innerHTML = withProfileVerified(displayName, username);
+}
+function setIdentityName(displayName, username) {
+  const el = document.getElementById("identity-row-name");
+  if (!el) return;
+  const rosterBadge = el.querySelector(".on-roster-badge");
+  el.innerHTML = withProfileVerified(displayName, username);
+  if (rosterBadge) el.appendChild(rosterBadge);
+}
 function withChatVerified(displayName, username) {
-  if (!isChatVerified(username)) return chatEsc(displayName || username);
-  const name = chatEsc(username.toLowerCase() === CHAT_ADMIN_USERNAME ? 'Admin' : (displayName || username));
-  return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${CHAT_VERIFIED_BADGE}</span>`;
+  if (!username) return chatEsc(displayName || '');
+  const uLower = username.toLowerCase();
+  if (uLower === CHAT_ADMIN_USERNAME) {
+    return `<span style="display:inline-flex;align-items:center;gap:4px;">${chatEsc('Admin')}${CHAT_VERIFIED_BADGE_GOLD}</span>`;
+  }
+  if (_chatVerifiedOwners.has(uLower)) {
+    return `<span style="display:inline-flex;align-items:center;gap:4px;">${chatEsc(displayName || username)}${CHAT_VERIFIED_BADGE_BLUE}</span>`;
+  }
+  return chatEsc(displayName || username);
+}
+async function loadChatVerifiedOwners() {
+  try {
+    const [efedOwners, roleOwners] = await Promise.all([
+      chatSbGet('users', 'select=username,promo_name&is_efed_owner=eq.true'),
+      chatSbGet('users', 'select=username,promo_name&role=eq.owner')
+    ]);
+    const ownerMap = {};
+    [...efedOwners, ...roleOwners].forEach(u => { if (u.username) ownerMap[u.username.toLowerCase()] = u; });
+    const ownerUsernames = Object.keys(ownerMap);
+    await Promise.all(ownerUsernames.map(async uLower => {
+      const u = ownerMap[uLower];
+      if (!u.promo_name) return;
+      try {
+        const rosterRows = await chatSbGet('roster', `efed=ilike.${encodeURIComponent(u.promo_name)}&status=eq.approved&select=username`);
+        const realCount = rosterRows.filter(r => !r.username.startsWith('__ghost__')).length;
+        if (realCount >= 10) _chatVerifiedOwners.add(uLower);
+      } catch(e) {}
+    }));
+  } catch(e) {}
 }
 async function chatSbGet(table, filters='') {
   const r = await fetch(SUPABASE_URL_CHAT+'/rest/v1/'+table+'?'+filters, { headers: CHAT_SB_HEADERS });
@@ -11887,6 +11929,7 @@ function toggleChat() {
 }
 
 function initChat() {
+  loadChatVerifiedOwners(); // load blue checkmark owners
   const session = getSession();
   const loggedOut = document.getElementById('chat-logged-out-msg');
   if (session) {

@@ -31,23 +31,31 @@
   const SUPABASE_URL = 'https://osbarvhklizidsffytye.supabase.co';
   const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM';
 
-  // ── VERIFIED BADGE (defined early so available everywhere) ──
-  const VERIFIED_BADGE = `<svg style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.15)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  // ── VERIFIED BADGES ──
+  const VERIFIED_BADGE_GOLD = `<svg title="Admin" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.15)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const VERIFIED_BADGE_BLUE = `<svg title="Verified eFed Owner" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(59,130,246,.15)" stroke="#3b82f6" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const VERIFIED_BADGE = VERIFIED_BADGE_GOLD; // legacy alias
   function _esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   const _verifiedUsers = new Set([ADMIN_USERNAME]);
+  const _verifiedOwners = new Set(); // blue checkmark — efed owners with 10+ real roster members
   function isVerifiedUser(username) {
     if (!username) return false;
-    return _verifiedUsers.has(username.toLowerCase());
+    return _verifiedUsers.has(username.toLowerCase()) || _verifiedOwners.has(username.toLowerCase());
   }
 
-
   function withVerified(displayName, username, useAdminLabel = true) {
-    if (!isVerifiedUser(username)) {
-      return _esc(displayName || username);
+    if (!username) return _esc(displayName || '');
+    const uLower = username.toLowerCase();
+    const isAdmin = uLower === ADMIN_USERNAME;
+    if (isAdmin) {
+      const name = _esc(useAdminLabel ? 'Admin' : (displayName || username));
+      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_GOLD}</span>`;
     }
-    const isAdmin = username && username.toLowerCase() === ADMIN_USERNAME;
-    const name = _esc(isAdmin && useAdminLabel ? 'Admin' : (displayName || username));
-    return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE}</span>`;
+    if (_verifiedOwners.has(uLower)) {
+      const name = _esc(displayName || username);
+      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_BLUE}</span>`;
+    }
+    return _esc(displayName || username);
   }
   const SB_HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json' };
 
@@ -6265,8 +6273,13 @@ async function initHub() {
     }
     const dbApprovedUrls = new Set(subs.map(s => s.url));
     // Remove hardcoded videos that were submitted to DB but later deleted
-    // Fetch all submissions regardless of status to know which hardcoded ones exist in DB
-    const allDbUrls = await sbGet('submissions', 'select=url').then(rows => new Set(rows.map(r => r.url))).catch(() => new Set());
+    // Only check hardcoded (non-community) videos instead of fetching entire submissions table
+    const hardcodedUrls = videos.filter(v => !v.community).map(v => encodeURIComponent(v.url));
+    let allDbUrls = new Set();
+    if (hardcodedUrls.length) {
+      const inFilter = hardcodedUrls.join(',');
+      allDbUrls = await sbGet('submissions', `select=url&url=in.(${inFilter})`).then(rows => new Set(rows.map(r => r.url))).catch(() => new Set());
+    }
     for (let i = videos.length - 1; i >= 0; i--) {
       if (!videos[i].community && allDbUrls.has(videos[i].url) && !dbApprovedUrls.has(videos[i].url)) {
         videos.splice(i, 1);
@@ -7423,7 +7436,7 @@ const _soSearch = (() => {
     if (doPeople && people.length) {
       html += '<div class="sr-section-label">CAWs <span class="sr-count-badge">' + people.length + '</span></div>';
       people.forEach(u => {
-        const name = esc(u.display_name || u.username || '?');
+        const name = withVerified(u.display_name || u.username || '?', u.username, false);
         const initial = (u.display_name || u.username || '?')[0].toUpperCase();
         const avatarInner = u.avatar_url
           ? '<img src="' + esc(u.avatar_url) + '" alt="" onerror="this.style.display=\'none\'">'
@@ -11132,7 +11145,11 @@ async function loadVideoRating(url) {
 // Load ratings for all visible cards
 async function loadAllCardRatings() {
   try {
-    const allRatings = await sbGet('ratings', 'select=video_url,video_id,overall');
+    const cards = document.querySelectorAll('.card');
+    const ids = [...new Set([...cards].map(c => extractId(c._videoUrl)).filter(Boolean))];
+    if (!ids.length) return;
+    const inFilter = ids.map(id => encodeURIComponent(id)).join(',');
+    const allRatings = await sbGet('ratings', `select=video_url,video_id,overall&video_id=in.(${inFilter})`);
     const grouped = {};
     allRatings.forEach(r => {
       const key = r.video_id || r.video_url;
@@ -11564,36 +11581,29 @@ async function checkUnreadNotifications() {
 async function loadVerifiedUsers() {
   _verifiedUsers.add(ADMIN_USERNAME);
   try {
-    // Get all efed owners with their yt_channel
-    const owners = await sbGet('users', 'select=username,yt_channel&is_efed_owner=eq.true');
-    // Get all approved submissions
-    const subs = await sbGet('submissions', 'select=submitted_by,url&status=eq.approved');
-
-    owners.forEach(u => {
-      if (!u.yt_channel) return;
-      const channel = u.yt_channel.toLowerCase().replace('https://youtube.com/@','').replace('https://www.youtube.com/@','').replace('@','').trim();
-      // Check if any approved submission from this user matches their channel
-      const hasProof = subs.some(s => {
-        if ((s.submitted_by || '').toLowerCase() !== u.username.toLowerCase()) return false;
-        const url = (s.url || '').toLowerCase();
-        return url.includes(channel) || channel.length > 3 && url.includes(channel);
-      });
-      if (hasProof) _verifiedUsers.add(u.username.toLowerCase());
+    // Get all potential owners (is_efed_owner OR role=owner)
+    const [efedOwners, roleOwners] = await Promise.all([
+      sbGet('users', 'select=username,promo_name&is_efed_owner=eq.true'),
+      sbGet('users', 'select=username,promo_name&role=eq.owner')
+    ]);
+    // Merge, deduplicate
+    const ownerMap = {};
+    [...efedOwners, ...roleOwners].forEach(u => {
+      if (u.username) ownerMap[u.username.toLowerCase()] = u;
     });
+    const ownerUsernames = Object.keys(ownerMap);
+    if (!ownerUsernames.length) return;
 
-    // role=owner also gets badge if they have any approved submission
-    const roleOwners = await sbGet('users', 'select=username,yt_channel&role=eq.owner');
-    roleOwners.forEach(u => {
-      if (_verifiedUsers.has(u.username.toLowerCase())) return;
-      if (!u.yt_channel) return;
-      const channel = u.yt_channel.toLowerCase().replace('https://youtube.com/@','').replace('https://www.youtube.com/@','').replace('@','').trim();
-      const hasProof = subs.some(s => {
-        if ((s.submitted_by || '').toLowerCase() !== u.username.toLowerCase()) return false;
-        const url = (s.url || '').toLowerCase();
-        return url.includes(channel);
-      });
-      if (hasProof) _verifiedUsers.add(u.username.toLowerCase());
-    });
+    // For each owner, count real (non-ghost) approved roster members
+    await Promise.all(ownerUsernames.map(async uLower => {
+      const u = ownerMap[uLower];
+      if (!u.promo_name) return;
+      try {
+        const rosterRows = await sbGet('roster', `efed=ilike.${encodeURIComponent(u.promo_name)}&status=eq.approved&select=username`);
+        const realCount = rosterRows.filter(r => !r.username.startsWith('__ghost__')).length;
+        if (realCount >= 10) _verifiedOwners.add(uLower);
+      } catch(e) {}
+    }));
   } catch(e) {}
 }
 
@@ -14309,7 +14319,7 @@ async function createEfedSubmit() {
   try {
     // ── BANNED YOUTUBE CHANNEL CHECK ──
     if (ytVal) {
-      const bannedLinks = await sbGet('banned_links', 'select=url').catch(() => []);
+      const bannedLinks = _bannedLinks.length ? _bannedLinks : await sbGet('banned_links', 'select=url').catch(() => []);
       const yt = ytVal.trim().toLowerCase();
       const isBanned = bannedLinks.some(r => {
         const banned = (r.url || '').trim().toLowerCase();
