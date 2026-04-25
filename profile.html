@@ -5549,8 +5549,10 @@ const _tc = (() => {
   function handleImgPick(ev) {
     const file = ev.target.files && ev.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = (e) => {
-      _imgData = e.target.result;
+    reader.onload = async e => {
+      const result = await _imgCrop.open(e.target.result);
+      if (!result) return;
+      _imgData = result;
       const preview = document.getElementById('tc-img-preview');
       const hint    = document.getElementById('tc-img-hint');
       if (preview) { preview.src = _imgData; preview.style.display = 'block'; }
@@ -13240,6 +13242,160 @@ function _copySpotifySQL(el) { _copyMigrationSQL(el); }
     }
   }, { passive: true });
 })();
+</script>
+
+<!-- ── IMAGE CROP / POSITION MODAL ── -->
+<div id="ic-modal-bg" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.93);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);align-items:center;justify-content:center;padding:16px;">
+  <div style="background:#111118;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:20px;width:100%;max-width:340px;box-shadow:0 32px 80px rgba(0,0,0,.9);">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#c8a84b;margin-bottom:14px;">Position Image</div>
+    <div style="border-radius:14px;overflow:hidden;margin-bottom:12px;background:#08080d;">
+      <canvas id="ic-canvas" width="280" height="280" style="display:block;width:100%;aspect-ratio:1/1;touch-action:none;cursor:grab;"></canvas>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+      <button onclick="_imgCrop.zoomBy(-0.12)" style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.65);font-size:1.1rem;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;padding:0;font-family:monospace;" onmouseover="this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.background='transparent'">−</button>
+      <div style="flex:1;height:4px;background:rgba(255,255,255,.1);border-radius:2px;cursor:pointer;position:relative;" onclick="_imgCrop.zoomFromBar(event)">
+        <div id="ic-zoom-bar" style="height:100%;background:#c8a84b;border-radius:2px;width:40%;transition:width .1s;pointer-events:none;"></div>
+      </div>
+      <button onclick="_imgCrop.zoomBy(0.12)" style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.65);font-size:1.1rem;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;padding:0;font-family:monospace;" onmouseover="this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.background='transparent'">+</button>
+    </div>
+    <div style="font-size:.56rem;color:rgba(255,255,255,.22);text-align:center;margin-bottom:14px;letter-spacing:.5px;">Drag to reposition · Scroll or pinch to zoom</div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="_imgCrop.cancel()" style="flex:1;padding:9px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:transparent;color:rgba(255,255,255,.5);font-size:.78rem;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .15s;" onmouseover="this.style.background='rgba(255,255,255,.06)'" onmouseout="this.style.background='transparent'">Cancel</button>
+      <button onclick="_imgCrop.confirm()" style="flex:2;padding:9px;border-radius:8px;border:none;background:#c8a84b;color:#000;font-size:.78rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;" onmouseover="this.style.background='#e0c060'" onmouseout="this.style.background='#c8a84b'">Use This Image</button>
+    </div>
+  </div>
+</div>
+<script>
+// ── IMAGE CROP / POSITION TOOL ────────────────────────────────────────────
+const _imgCrop = (() => {
+  let _resolve = null;
+  let _img = null;
+  let _x = 0, _y = 0, _zoom = 1;
+  let _minZoom = 0.2, _maxZoom = 5;
+  let _dragging = false;
+  let _lastX = 0, _lastY = 0, _lastDist = 0;
+  const CS = 280, OS = 480; // canvas size, output size
+
+  function open(src) {
+    return new Promise(resolve => {
+      _resolve = resolve;
+      _img = new Image();
+      _img.onload = () => {
+        _zoom = Math.max(CS / _img.naturalWidth, CS / _img.naturalHeight);
+        _minZoom = Math.min(CS / _img.naturalWidth, CS / _img.naturalHeight) * 0.4;
+        _maxZoom = _zoom * 6;
+        _x = (CS - _img.naturalWidth * _zoom) / 2;
+        _y = (CS - _img.naturalHeight * _zoom) / 2;
+        _initCanvas();
+        _render(); _updateBar();
+        document.getElementById('ic-modal-bg').style.display = 'flex';
+      };
+      _img.onerror = () => { if (_resolve) { _resolve(null); _resolve = null; } };
+      _img.src = src;
+    });
+  }
+
+  function _initCanvas() {
+    const canvas = document.getElementById('ic-canvas');
+    if (!canvas || canvas._icInited) return;
+    canvas._icInited = true;
+    canvas.addEventListener('mousedown', e => {
+      _dragging = true; _lastX = e.clientX; _lastY = e.clientY;
+      canvas.style.cursor = 'grabbing'; e.preventDefault();
+    });
+    window.addEventListener('mousemove', e => {
+      if (!_dragging) return;
+      _x += e.clientX - _lastX; _y += e.clientY - _lastY;
+      _lastX = e.clientX; _lastY = e.clientY; _render();
+    });
+    window.addEventListener('mouseup', () => {
+      _dragging = false;
+      const c = document.getElementById('ic-canvas'); if (c) c.style.cursor = 'grab';
+    });
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      const r = canvas.getBoundingClientRect(), s = CS / r.width;
+      _applyZoom(e.deltaY > 0 ? -0.08 : 0.08, (e.clientX - r.left) * s, (e.clientY - r.top) * s);
+    }, { passive: false });
+    canvas.addEventListener('touchstart', e => {
+      if (e.touches.length === 1) { _dragging = true; _lastX = e.touches[0].clientX; _lastY = e.touches[0].clientY; }
+      else if (e.touches.length === 2) { _dragging = false; _lastDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); }
+    }, { passive: true });
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      if (e.touches.length === 1 && _dragging) {
+        _x += e.touches[0].clientX - _lastX; _y += e.touches[0].clientY - _lastY;
+        _lastX = e.touches[0].clientX; _lastY = e.touches[0].clientY; _render();
+      } else if (e.touches.length === 2) {
+        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        const r = canvas.getBoundingClientRect(), s = CS / r.width;
+        const cx = ((e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left) * s;
+        const cy = ((e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top) * s;
+        if (_lastDist) _applyZoom((dist - _lastDist) / 100, cx, cy);
+        _lastDist = dist;
+      }
+    }, { passive: false });
+    canvas.addEventListener('touchend', e => { if (e.touches.length < 2) _lastDist = 0; if (!e.touches.length) _dragging = false; }, { passive: true });
+  }
+
+  function _applyZoom(delta, cx, cy) {
+    const nz = Math.max(_minZoom, Math.min(_maxZoom, _zoom * (1 + delta)));
+    _x = cx - (cx - _x) * (nz / _zoom);
+    _y = cy - (cy - _y) * (nz / _zoom);
+    _zoom = nz; _render(); _updateBar();
+  }
+
+  function _render() {
+    const c = document.getElementById('ic-canvas'); if (!c || !_img) return;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, CS, CS);
+    ctx.fillStyle = '#08080d'; ctx.fillRect(0, 0, CS, CS);
+    ctx.drawImage(_img, _x, _y, _img.naturalWidth * _zoom, _img.naturalHeight * _zoom);
+    // corner brackets
+    const L = 20, W = 2.5;
+    ctx.strokeStyle = 'rgba(200,168,75,.8)'; ctx.lineWidth = W; ctx.lineCap = 'round';
+    [[0,0,1,1],[CS,0,-1,1],[0,CS,1,-1],[CS,CS,-1,-1]].forEach(([ox,oy,dx,dy]) => {
+      ctx.beginPath(); ctx.moveTo(ox+dx*L,oy); ctx.lineTo(ox,oy); ctx.lineTo(ox,oy+dy*L); ctx.stroke();
+    });
+  }
+
+  function _updateBar() {
+    const bar = document.getElementById('ic-zoom-bar'); if (!bar) return;
+    const pct = (_zoom - _minZoom) / (_maxZoom - _minZoom) * 100;
+    bar.style.width = Math.max(2, Math.min(100, pct)) + '%';
+  }
+
+  function zoomBy(delta) { _applyZoom(delta, CS / 2, CS / 2); }
+
+  function zoomFromBar(e) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const nz = _minZoom + (_maxZoom - _minZoom) * pct;
+    _x = CS/2 - (CS/2 - _x) * (nz / _zoom);
+    _y = CS/2 - (CS/2 - _y) * (nz / _zoom);
+    _zoom = nz; _render(); _updateBar();
+  }
+
+  function confirm() {
+    const s = OS / CS;
+    const out = document.createElement('canvas'); out.width = OS; out.height = OS;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = '#08080d'; ctx.fillRect(0, 0, OS, OS);
+    if (_img) ctx.drawImage(_img, _x*s, _y*s, _img.naturalWidth*_zoom*s, _img.naturalHeight*_zoom*s);
+    _close(out.toDataURL('image/jpeg', 0.88));
+  }
+
+  function cancel() { _close(null); }
+
+  function _close(result) {
+    const bg = document.getElementById('ic-modal-bg'); if (bg) bg.style.display = 'none';
+    if (_resolve) { _resolve(result); _resolve = null; }
+    _img = null; _dragging = false;
+  }
+
+  return { open, zoomBy, zoomFromBar, confirm, cancel };
+})();
+
 </script>
 
 </body>
