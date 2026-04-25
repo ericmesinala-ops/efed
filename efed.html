@@ -10402,7 +10402,7 @@ const _vault = (() => {
     if (sel) sel.style.display = 'none';
     if (dd)  dd.style.display  = 'none';
     if (err) { err.style.display='none'; err.textContent=''; }
-    if (btn) { btn.disabled=false; btn.textContent='Send'; }
+    if (btn) { btn.disabled=false; btn.textContent='Award'; }
     _renderAwardPicker();
     document.getElementById('cv-award-bg').style.display = 'flex';
   }
@@ -10476,35 +10476,50 @@ const _vault = (() => {
     const year = (document.getElementById('cv-award-year')?.value||'').trim();
     if (!_awardUser)  { if(err){err.textContent='Select a wrestler.';err.style.display='block';} return; }
     if (!_awardTitle) { if(err){err.textContent='Select a championship.';err.style.display='block';} return; }
-    if (btn) { btn.disabled=true; btn.textContent='Sending…'; }
+    if (btn) { btn.disabled=true; btn.textContent='Awarding…'; }
     if (err) err.style.display = 'none';
     try {
-      await sbInsert('trophies', {
-        username:    _awardUser.username,
-        name:        _awardTitle.name,
-        year:        year || null,
-        image_url:   _awardTitle.image_url || null,
-        sort_order:  0,
-        source:      'owner',
-        awarded_by:  getSession()?.username || '',
-        efed_name:   EFED_NAME
-      });
-      await sbInsert('notifications', {
+      // ── insert trophy (fallback if new columns not yet migrated) ──
+      const trophyBase = {
         username:   _awardUser.username,
-        type:       'award',
-        message:    `🏆 <strong>${_esc(EFED_NAME)}</strong> has awarded you the <strong>${_esc(_awardTitle.name)}</strong>${year?' ('+year+')':''}.`,
-        video_url:  null,
-        read:       false,
-        created_at: new Date().toISOString()
-      });
+        name:       _awardTitle.name,
+        year:       year || null,
+        image_url:  _awardTitle.image_url || null,
+        sort_order: 0
+      };
+      let trophyErr = null;
+      try {
+        await sbInsert('trophies', { ...trophyBase, source: 'owner', awarded_by: getSession()?.username || '', efed_name: EFED_NAME });
+      } catch(colErr) {
+        try {
+          await sbInsert('trophies', trophyBase);
+        } catch(baseErr) {
+          trophyErr = baseErr;
+        }
+      }
+      if (trophyErr) throw trophyErr;
+
+      // ── notification (non-blocking — don't fail the award if this errors) ──
+      try {
+        await sbInsert('notifications', {
+          username:   _awardUser.username,
+          type:       'award',
+          message:    `🏆 <strong>${_esc(EFED_NAME)}</strong> has awarded you the <strong>${_esc(_awardTitle.name)}</strong>${year?' ('+year+')':''}.`,
+          video_url:  null,
+          read:       false,
+          created_at: new Date().toISOString()
+        });
+      } catch(notifErr) { console.warn('Award notif failed (non-fatal):', notifErr); }
+
       closeAwardModal();
       showToast('🏆 Awarded to @'+_awardUser.username+'!');
     } catch(e) {
-      if(err){err.textContent='Could not send. Try again.';err.style.display='block';}
-      if(btn){btn.disabled=false;btn.textContent='Send';}
+      const detail = e?.message || String(e);
+      if(err){err.textContent='Could not award: ' + detail;err.style.display='block';}
+      if(btn){btn.disabled=false;btn.textContent='Award';}
+      console.error('sendAward failed:', detail);
     }
   }
-
   return { load, scroll, openAdd, closeModal, save, handleImgPick, setStatus, openAward, closeAwardModal, sendAward, searchUser };
 })();
 
@@ -14674,7 +14689,7 @@ function _processCawDragFile(file, slot) {
     <div class="cv-modal-err" id="cv-award-err"></div>
     <div class="cv-modal-actions">
       <button class="cv-btn-cancel" onclick="_vault.closeAwardModal()">Cancel</button>
-      <button class="cv-btn-save" id="cv-award-send-btn" onclick="_vault.sendAward()">Send</button>
+      <button class="cv-btn-save" id="cv-award-send-btn" onclick="_vault.sendAward()">Award</button>
     </div>
   </div>
 </div>
