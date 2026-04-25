@@ -25,23 +25,30 @@
     html.day-mode .hub-link { color: #1a6fd4; text-decoration-color: rgba(26,111,212,.3); }
     html.day-mode .hub-link:hover { color: #1558aa; }
     .x-embed-wrap {
-      margin-top: 8px; max-width: 480px; width: 100%;
-      border-radius: 14px;
+      margin-top: 10px; max-width: 460px;
     }
-    /* Force the Twitter iframe to fit cleanly */
-    .x-embed-wrap iframe.twitter-tweet-rendered {
-      border-radius: 12px !important;
-      max-width: 100% !important;
-      width: 100% !important;
+    .x-preview-card {
+      display: block; text-decoration: none;
+      background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1);
+      border-radius: 14px; padding: 14px 16px;
+      transition: background .15s, border-color .15s; cursor: pointer;
     }
-    .x-embed-wrap .twitter-tweet {
-      margin: 0 !important;
-      max-width: 100% !important;
-    }
+    .x-preview-card:hover { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.2); }
+    .x-preview-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:9px; gap:10px; }
+    .x-preview-author-info { display:flex; flex-direction:column; gap:1px; min-width:0; }
+    .x-preview-name { font-size:.82rem; font-weight:700; color:#e8e8e8; font-family:'DM Sans',sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .x-preview-handle { font-size:.7rem; color:rgba(255,255,255,.38); font-family:'DM Sans',sans-serif; }
+    .x-preview-logo { color:rgba(255,255,255,.45); flex-shrink:0; }
+    .x-preview-text { font-size:.84rem; color:rgba(255,255,255,.85); line-height:1.55; font-family:'DM Sans',sans-serif; margin-bottom:10px; white-space:pre-wrap; word-break:break-word; }
+    .x-preview-footer { font-size:.65rem; color:rgba(255,255,255,.25); font-family:'DM Sans',sans-serif; letter-spacing:.5px; }
+    html.day-mode .x-preview-card { background:rgba(0,0,0,.04); border-color:rgba(0,0,0,.1); }
+    html.day-mode .x-preview-card:hover { background:rgba(0,0,0,.08); border-color:rgba(0,0,0,.18); }
+    html.day-mode .x-preview-name { color:#111118; }
+    html.day-mode .x-preview-handle { color:rgba(0,0,0,.4); }
+    html.day-mode .x-preview-text { color:rgba(0,0,0,.8); }
     .x-embed-skeleton {
       padding: 14px 16px; background: rgba(255,255,255,.04);
-      border: 1px solid rgba(255,255,255,.08); border-radius: 14px;
-      max-width: 480px;
+      border: 1px solid rgba(255,255,255,.08); border-radius: 14px; max-width: 460px;
     }
     .x-embed-sk-line {
       height: 10px; background: rgba(255,255,255,.08); border-radius: 6px;
@@ -468,46 +475,60 @@ function _autoLink(rawText) {
 
 // ── X / TWITTER POST EMBED ENGINE ────────────────────────────
 // Watches the DOM for hub-link[data-x-embed] anchors (set by _autoLink),
-// fetches Twitter oEmbed, and renders an inline tweet card beneath the post text.
+// fetches Twitter oEmbed, and renders a clean custom preview card beneath the post text.
 (function _initXEmbeds() {
-  function _loadTwttr() {
-    if (window._twttrScriptLoading) return;
-    if (document.querySelector('script[src*="platform.twitter.com/widgets"]')) return;
-    window._twttrScriptLoading = true;
-    const s = document.createElement('script');
-    s.src = 'https://platform.twitter.com/widgets.js';
-    s.async = true; s.charset = 'utf-8';
-    document.head.appendChild(s);
+  function _escX(s) {
+    return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
+
+  const X_LOGO = `<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" class="x-preview-logo"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>`;
 
   async function _doEmbed(link) {
     const url = link.getAttribute('href');
     if (!url) return;
 
-    // Find insertion point — right after the text block that contains this link
     const textBlock = link.closest('.post-card-text, .efed-post-card-text') || link.parentElement;
     const parent = textBlock.parentElement;
     if (!parent) return;
 
     const wrap = document.createElement('div');
     wrap.className = 'x-embed-wrap';
-    // Insert after the text block
     textBlock.after ? textBlock.after(wrap) : parent.insertBefore(wrap, textBlock.nextSibling);
 
-    // Skeleton while loading
-    wrap.innerHTML = `<div class="x-embed-skeleton"><div class="x-embed-sk-line" style="width:60%"></div><div class="x-embed-sk-line" style="width:80%;margin-top:6px"></div><div class="x-embed-sk-line" style="width:45%;margin-top:6px"></div></div>`;
+    wrap.innerHTML = `<div class="x-embed-skeleton"><div class="x-embed-sk-line" style="width:55%"></div><div class="x-embed-sk-line" style="width:82%;margin-top:6px"></div><div class="x-embed-sk-line" style="width:40%;margin-top:6px"></div></div>`;
 
     try {
-      const r = await fetch(`https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&theme=dark&dnt=true&omit_script=true`);
+      const r = await fetch(`https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&dnt=true&omit_script=true`);
       if (!r.ok) { wrap.remove(); return; }
       const d = await r.json();
       if (!d.html) { wrap.remove(); return; }
-      wrap.innerHTML = d.html;
-      _loadTwttr();
-      // Hide the raw hub-link text above — the embed card replaces it visually
-      link.style.cssText = 'display:none;';
-      // If widgets.js already ready, render immediately
-      if (window.twttr?.widgets?.load) window.twttr.widgets.load(wrap);
+
+      // Parse oEmbed HTML — extract tweet text and handle
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(d.html, 'text/html');
+      const bq = doc.querySelector('blockquote');
+      const p = bq?.querySelector('p');
+      if (p) p.querySelectorAll('a').forEach(a => { if (/pic\.twitter|t\.co/i.test(a.href||'')) a.remove(); });
+      const tweetText = p?.textContent?.trim() || '';
+      const authorName = d.author_name || '';
+      const tweetLinkEl = bq?.querySelector('a[href*="/status/"]');
+      const handleMatch = (tweetLinkEl?.href||'').match(/(?:twitter|x)\.com\/@?(\w+)\//i);
+      const handle = handleMatch ? '@' + handleMatch[1] : '';
+
+      wrap.innerHTML = `
+        <a href="${_escX(url)}" target="_blank" rel="noopener noreferrer" class="x-preview-card">
+          <div class="x-preview-header">
+            <div class="x-preview-author-info">
+              <span class="x-preview-name">${_escX(authorName)}</span>
+              ${handle ? `<span class="x-preview-handle">${_escX(handle)}</span>` : ''}
+            </div>
+            ${X_LOGO}
+          </div>
+          ${tweetText ? `<div class="x-preview-text">${_escX(tweetText)}</div>` : ''}
+          <div class="x-preview-footer">View on X ↗</div>
+        </a>`;
+
+      link.style.display = 'none';
     } catch(e) { wrap.remove(); }
   }
 
