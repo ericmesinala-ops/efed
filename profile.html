@@ -1782,6 +1782,8 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     viewport.addEventListener('touchstart', function(e) {
       /* Don't hijack touches that start inside a horizontally-scrollable thumbnail row */
       if (e.target.closest('.vid-row')) return;
+      /* Don't begin a drag while the user has a field focused */
+      if (window._inputEditFocused) return;
       const t = e.touches[0];
       _startX = t.clientX; _startY = t.clientY;
       _tx = 0; _ty = 0;
@@ -1791,6 +1793,8 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 
     viewport.addEventListener('touchmove', function(e) {
       if (!_dragging) return;
+      /* Bail if the user is editing a field — no accidental swipes */
+      if (window._inputEditFocused) return;
       const t = e.touches[0];
       _tx = t.clientX - _startX;
       _ty = t.clientY - _startY;
@@ -3011,11 +3015,11 @@ html.day-mode .rr-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 
 /* Rivalry control buttons */
 .rv-ctrl-btn {
-  background: none; border: none; cursor: pointer; padding: 2px 4px;
-  font-size: .7rem; color: rgba(255,255,255,.2); border-radius: 4px;
-  transition: color .15s, background .15s; line-height: 1;
+  background: none; border: none; cursor: pointer; padding: 2px 3px;
+  font-size: .7rem; color: rgba(255,255,255,.18); border-radius: 3px;
+  transition: color .15s; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
 }
-.rv-ctrl-btn:hover { color: rgba(255,255,255,.7); background: rgba(255,255,255,.07); }
+.rv-ctrl-btn:hover { color: rgba(255,255,255,.6); background: none; }
 .rv-ctrl-btn:disabled { opacity: .2; cursor: default; }
 .rv-ctrl-btn.del { color: rgba(192,0,14,.4); }
 .rv-ctrl-btn.del:hover { color: #ff6b6b; background: rgba(192,0,14,.08); }
@@ -3123,14 +3127,14 @@ html.day-mode .rv-name-input::placeholder { color: rgba(0,0,0,.2); }
 }
 @media (hover: none) { .rec-arr-col { display: none; } }
 .rec-arr-btn {
-  width: 18px; height: 18px; border-radius: 4px;
-  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
-  color: rgba(255,255,255,.25); font-size: .55rem;
+  width: 18px; height: 18px; border-radius: 3px;
+  background: none; border: none;
+  color: rgba(255,255,255,.2); font-size: .55rem;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all .12s; line-height: 1;
+  cursor: pointer; transition: color .12s; line-height: 1; padding: 0;
 }
-.rec-arr-btn:hover { background: rgba(255,255,255,.12); color: rgba(255,255,255,.8); border-color: rgba(255,255,255,.2); }
-.rec-arr-btn:disabled { opacity: .15; cursor: default; pointer-events: none; }
+.rec-arr-btn:hover { color: rgba(255,255,255,.6); background: none; }
+.rec-arr-btn:disabled { opacity: .12; cursor: default; pointer-events: none; }
 /* Mobile drag indicator */
 .rec-banner.rr-dragging { opacity: .4; }
 .rec-banner.rr-drag-over { outline: 1px dashed rgba(200,168,75,.4); border-radius: 8px; }
@@ -3343,7 +3347,13 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
       <div id="rm2-step-2" class="rm2-step">
         <!-- Live match banner preview -->
         <div style="padding:11px 13px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);margin-bottom:4px;">
-          <div style="font-size:.42rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.5);font-weight:700;margin-bottom:8px;font-family:'DM Sans',sans-serif;">Match Preview</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div style="font-size:.42rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.5);font-weight:700;font-family:'DM Sans',sans-serif;">Match Preview</div>
+            <button id="rm2-undo-btn" onclick="_rm2Undo()" disabled style="opacity:.3;background:none;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:4px;font-size:.6rem;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-weight:600;padding:3px 7px;border-radius:6px;transition:all .15s;" onmouseover="if(!this.disabled)this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.background='none'">
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5A3.5 3.5 0 1 0 3 2.2L1.5 1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><polyline points="1.5,1 1.5,3.2 3.5,3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Undo
+            </button>
+          </div>
           <!-- Slot chips row (same as step 1 preview, read-only recap here) -->
           <div id="rm2-detail-preview" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:38px;margin-bottom:8px;"></div>
           <!-- Meta line -->
@@ -3456,6 +3466,39 @@ let _rm2RosterCache = {};  // efed → [{username,display_name,avatar_url}]
 // Each slot: {type:'wrestler', username, name, avatar} | {type:'vs'}
 window._rm2Slots = [];
 let _rm2DragSrc = null;
+let _rm2DetailDragSrc = null;          // drag source for step-2 detail preview
+let _rm2UndoStack = [];                // undo history of slot arrays
+
+// ── SLOT MUTATION HELPERS ────────────────────────────────────────────────────
+function _rm2SnapshotUndo() {
+  // Push a deep copy before any mutation
+  _rm2UndoStack.push(JSON.parse(JSON.stringify(window._rm2Slots)));
+  if (_rm2UndoStack.length > 20) _rm2UndoStack.shift();
+  _rm2RefreshUndoBtn();
+}
+function _rm2SlotDelete(idx) {
+  _rm2SnapshotUndo();
+  window._rm2Slots.splice(idx, 1);
+  rm2RenderSlotPreview();
+}
+function _rm2SlotSwap(srcIdx, destIdx) {
+  if (srcIdx === null || srcIdx === destIdx) return;
+  _rm2SnapshotUndo();
+  const moved = window._rm2Slots.splice(srcIdx, 1)[0];
+  const newDest = srcIdx < destIdx ? destIdx - 1 : destIdx;
+  window._rm2Slots.splice(newDest, 0, moved);
+  rm2RenderSlotPreview();
+}
+function _rm2Undo() {
+  if (!_rm2UndoStack.length) return;
+  window._rm2Slots = _rm2UndoStack.pop();
+  rm2RenderSlotPreview();
+  _rm2RefreshUndoBtn();
+}
+function _rm2RefreshUndoBtn() {
+  const btn = document.getElementById('rm2-undo-btn');
+  if (btn) { btn.disabled = !_rm2UndoStack.length; btn.style.opacity = _rm2UndoStack.length ? '1' : '.3'; }
+}
 
 // ── ADD NEW: opens the multi-step modal ──
 async function recAddNew() {
@@ -3472,6 +3515,7 @@ async function recAddNew() {
   _rm2Result = 'win';
   _rm2ChampOn = false;
   _rm2Role = 'contender';
+  _rm2UndoStack = [];
 
   // Pre-fill the user (self) as first participant in preview
   const selfAvImg = document.getElementById('profile-av-img');
@@ -3520,6 +3564,7 @@ async function recEdit(idx) {
   _rm2Result = r.result || 'win';
   _rm2ChampOn = !!r.champ_name;
   _rm2Role = r.role || 'contender';
+  _rm2UndoStack = [];
 
   // Rehydrate slot system — prefer saved slots array, fall back to parsing opponents string
   window._rm2Slots = [];
@@ -3714,6 +3759,7 @@ function rm2SlotAddVs() {
   if (!window._rm2Slots.length) return; // nothing to VS yet
   const last = window._rm2Slots[window._rm2Slots.length - 1];
   if (last && last.type === 'vs') return; // no double VS
+  _rm2SnapshotUndo();
   window._rm2Slots.push({ type: 'vs' });
   rm2RenderSlotPreview();
 }
@@ -3721,6 +3767,7 @@ function rm2SlotAddVs() {
 function rm2SlotAddQuestion() {
   // ??? = unknown opponent
   const last = window._rm2Slots.length ? window._rm2Slots[window._rm2Slots.length - 1] : null;
+  _rm2SnapshotUndo();
   // Auto-insert VS if last slot was a wrestler
   if (last && last.type === 'wrestler') {
     window._rm2Slots.push({ type: 'vs' });
@@ -3735,6 +3782,7 @@ function rm2SlotAddManual() {
   const v = inp.value.trim();
   if (!v) return;
   const last = window._rm2Slots.length ? window._rm2Slots[window._rm2Slots.length - 1] : null;
+  _rm2SnapshotUndo();
   if (last && last.type === 'wrestler') {
     window._rm2Slots.push({ type: 'vs' });
   }
@@ -3744,6 +3792,7 @@ function rm2SlotAddManual() {
 }
 
 function rm2SlotRemove(idx) {
+  _rm2SnapshotUndo();
   window._rm2Slots.splice(idx, 1);
   // Clean orphan VS at start/end or double VS
   if (window._rm2Slots.length && window._rm2Slots[0].type === 'vs') window._rm2Slots.shift();
@@ -3802,6 +3851,7 @@ function rm2RenderSlotPreview() {
         e.preventDefault(); chip.style.background = 'rgba(255,255,255,.05)'; chip.style.borderColor = 'rgba(255,255,255,.1)';
         const src = _rm2DragSrc;
         if (src === null || src === i) return;
+        _rm2SnapshotUndo();
         const moved = window._rm2Slots.splice(src, 1)[0];
         const vsNewIdx = src < i ? i - 1 : i;
         window._rm2Slots.splice(vsNewIdx + 1, 0, moved);
@@ -3844,6 +3894,7 @@ function rm2RenderSlotPreview() {
         e.preventDefault(); el.style.outline = '';
         const src = _rm2DragSrc;
         if (src === null || src === i) return;
+        _rm2SnapshotUndo();
         const moved = window._rm2Slots.splice(src, 1)[0];
         const newIdx = src < i ? i - 1 : i;
         window._rm2Slots.splice(newIdx, 0, moved);
@@ -3894,18 +3945,36 @@ function rm2SyncDetailPreview() {
   selfChip.appendChild(Object.assign(document.createElement('span'), { textContent: selfName.length > 13 ? selfName.slice(0, 12) + '…' : selfName }));
   cont.appendChild(selfChip);
 
-  // Slots
-  slots.forEach(s => {
+  // Slots — skip isSelf wrestler since the self chip is already prepended above
+  slots.forEach((s, si) => {
+    if (s.isSelf) return; // already rendered as selfChip
     if (s.type === 'vs') {
       const vs = document.createElement('span');
-      vs.style.cssText = 'font-size:.5rem;font-weight:800;color:rgba(255,255,255,.2);letter-spacing:2px;font-family:"DM Sans",sans-serif;';
+      vs.dataset.slotIdx = si;
+      vs.style.cssText = 'position:relative;display:inline-flex;align-items:center;justify-content:center;padding:3px 9px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:20px;font-size:.5rem;font-weight:800;color:rgba(255,255,255,.2);letter-spacing:2px;font-family:"DM Sans",sans-serif;cursor:default;';
       vs.textContent = 'VS';
+      // Delete button on VS chip
+      const vsDel = document.createElement('span');
+      vsDel.style.cssText = 'display:none;position:absolute;top:-5px;right:-5px;width:13px;height:13px;background:#c0000e;border-radius:50%;font-size:.45rem;color:#fff;align-items:center;justify-content:center;cursor:pointer;line-height:1;z-index:2;';
+      vsDel.textContent = '✕';
+      vsDel.onclick = (e) => { e.stopPropagation(); _rm2SlotDelete(si); };
+      vs.appendChild(vsDel);
+      vs.onmouseenter = () => { vsDel.style.display = 'flex'; };
+      vs.onmouseleave = () => { vsDel.style.display = 'none'; };
+      // Drag
+      vs.draggable = true;
+      vs.addEventListener('dragstart', e => { _rm2DetailDragSrc = si; vs.style.opacity = '.4'; e.dataTransfer.effectAllowed = 'move'; });
+      vs.addEventListener('dragend', () => { vs.style.opacity = '1'; _rm2DetailDragSrc = null; });
+      vs.addEventListener('dragover', e => { e.preventDefault(); if (_rm2DetailDragSrc !== null) vs.style.outline = '1px dashed rgba(200,168,75,.5)'; });
+      vs.addEventListener('dragleave', () => { vs.style.outline = ''; });
+      vs.addEventListener('drop', e => { e.preventDefault(); vs.style.outline = ''; _rm2SlotSwap(_rm2DetailDragSrc, si); });
       cont.appendChild(vs);
     } else {
       const isMystery = s.username === '__mystery__';
       const initials = (s.name || '?').split(/\s+/).map(w => w[0]?.toUpperCase() || '').slice(0, 2).join('');
       const chip = document.createElement('span');
-      chip.style.cssText = `display:inline-flex;align-items:center;gap:4px;padding:3px 8px 3px 4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:20px;font-size:.65rem;color:#e0e0e0;font-family:"DM Sans",sans-serif;font-weight:600;`;
+      chip.dataset.slotIdx = si;
+      chip.style.cssText = 'position:relative;display:inline-flex;align-items:center;gap:4px;padding:3px 8px 3px 4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:20px;font-size:.65rem;color:#e0e0e0;font-family:"DM Sans",sans-serif;font-weight:600;cursor:grab;user-select:none;';
       const avEl = document.createElement('div');
       avEl.style.cssText = `width:19px;height:19px;border-radius:50%;${isMystery ? 'background:rgba(80,60,120,.25);border:1.5px dashed rgba(180,140,255,.4);' : 'background:rgba(192,0,14,.12);border:1.5px solid rgba(192,0,14,.25);'}display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:.6rem;${isMystery ? 'color:rgba(180,140,255,.7);' : 'color:#c0000e;'}flex-shrink:0;overflow:hidden;`;
       if (isMystery) avEl.textContent = '?';
@@ -3915,6 +3984,21 @@ function rm2SyncDetailPreview() {
       const lbl = document.createElement('span');
       lbl.textContent = (s.name || '???').length > 13 ? (s.name || '???').slice(0, 12) + '…' : (s.name || '???');
       chip.appendChild(lbl);
+      // Delete X button
+      const del = document.createElement('span');
+      del.style.cssText = 'display:none;position:absolute;top:-5px;right:-5px;width:14px;height:14px;background:#c0000e;border-radius:50%;font-size:.5rem;color:#fff;align-items:center;justify-content:center;cursor:pointer;line-height:1;z-index:2;';
+      del.textContent = '✕';
+      del.onclick = (e) => { e.stopPropagation(); _rm2SlotDelete(si); };
+      chip.appendChild(del);
+      chip.onmouseenter = () => { del.style.display = 'flex'; };
+      chip.onmouseleave = () => { del.style.display = 'none'; };
+      // Drag and drop
+      chip.draggable = true;
+      chip.addEventListener('dragstart', e => { _rm2DetailDragSrc = si; chip.style.opacity = '.4'; e.dataTransfer.effectAllowed = 'move'; });
+      chip.addEventListener('dragend', () => { chip.style.opacity = '1'; _rm2DetailDragSrc = null; });
+      chip.addEventListener('dragover', e => { e.preventDefault(); if (_rm2DetailDragSrc !== null && _rm2DetailDragSrc !== si) chip.style.outline = '1px dashed rgba(200,168,75,.5)'; });
+      chip.addEventListener('dragleave', () => { chip.style.outline = ''; });
+      chip.addEventListener('drop', e => { e.preventDefault(); chip.style.outline = ''; _rm2SlotSwap(_rm2DetailDragSrc, si); });
       cont.appendChild(chip);
     }
   });
@@ -4261,9 +4345,9 @@ function renderRecords() {
     const bodyEl = document.createElement('div');
     bodyEl.className = 'rec-banner-body';
     const champLabelHtml = champLabel ? `
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:3px;">
+      <div style="display:flex;align-items:center;gap:5px;margin-top:3px;min-width:0;">
         <span class="rr-champ-badge" style="flex-shrink:0;">${champLabel}</span>
-        ${r.champ_name ? `<span style="font-size:.6rem;color:rgba(200,168,75,.6);font-family:'DM Sans',sans-serif;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${r.champ_name.replace(/</g,'&lt;')}</span>` : ''}
+        ${r.champ_name ? `<span style="font-size:.58rem;color:rgba(200,168,75,.55);font-family:'DM Sans',sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${r.champ_name.replace(/</g,'&lt;')}</span>` : ''}
       </div>` : '';
     bodyEl.innerHTML = `
       <div class="rec-banner-name">${matchDisplayName.replace(/</g,'&lt;')}</div>
@@ -4287,8 +4371,8 @@ function renderRecords() {
       const arrCol = document.createElement('div');
       arrCol.className = 'rec-arr-col';
       arrCol.innerHTML = `
-        <button class="rec-arr-btn" ${origIdx === 0 ? 'disabled' : ''} onclick="event.stopPropagation();recMove(${origIdx},-1)" title="Move up">▲</button>
-        <button class="rec-arr-btn" ${origIdx === _records.length - 1 ? 'disabled' : ''} onclick="event.stopPropagation();recMove(${origIdx},1)" title="Move down">▼</button>`;
+        <button class="rec-arr-btn" ${origIdx === 0 ? 'disabled' : ''} onclick="event.stopPropagation();recMove(${origIdx},-1)" title="Move up"><svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 4L4 1L7 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="rec-arr-btn" ${origIdx === _records.length - 1 ? 'disabled' : ''} onclick="event.stopPropagation();recMove(${origIdx},1)" title="Move down"><svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 1L4 4L7 1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
       ctrlEl.appendChild(arrCol);
       // Edit + Delete buttons
       const editBtn = document.createElement('button');
@@ -4583,8 +4667,8 @@ function renderRivalries() {
       const resolvedName = r.display_name || '';
       // Move buttons: hide on mobile (drag-and-drop is enough)
       const moveBtns = isMobile ? '' : `
-        <button class="rv-ctrl-btn" onclick="rvMove(${i},-1)" ${i===0?'disabled':''} title="Move up">▲</button>
-        <button class="rv-ctrl-btn" onclick="rvMove(${i},1)" ${i===_rivalries.length-1?'disabled':''} title="Move down">▼</button>`;
+        <button class="rv-ctrl-btn" onclick="rvMove(${i},-1)" ${i===0?'disabled':''} title="Move up"><svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 4L4 1L7 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="rv-ctrl-btn" onclick="rvMove(${i},1)" ${i===_rivalries.length-1?'disabled':''} title="Move down"><svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 1L4 4L7 1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
       return `<div class="rr-row rv-row" data-idx="${i}" style="align-items:flex-start;padding:12px 0;gap:10px;">
         <div style="width:44px;height:44px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);margin-top:2px;">${avatarHtml}</div>
         <div class="rr-text-col" style="flex:1;min-width:0;gap:6px;">
@@ -12608,6 +12692,54 @@ function _copyMigrationSQL(el) {
   });
 }
 function _copySpotifySQL(el) { _copyMigrationSQL(el); }
+</script>
+
+<script>
+// ── INPUT FOCUS SCROLL LOCK ──────────────────────────────────────────────────
+// Disables page swipe/scroll while the user is actively editing an input,
+// textarea, or select. Re-enables the moment they blur out.
+(function() {
+  // Selectors that should trigger a lock when focused
+  const FIELD_SELECTOR = 'input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]), textarea, select';
+
+  // Locked touchmove handler — prevents accidental swipe while editing
+  function _lockTouchMove(e) {
+    // Allow vertical scroll inside the element itself (e.g. a textarea)
+    if (e.target.closest('textarea')) return;
+    e.stopPropagation();
+  }
+
+  let _scrollLocked = false;
+  let _blurTimer = null;
+
+  function lockScroll() {
+    if (_scrollLocked) return;
+    _scrollLocked = true;
+    window._inputEditFocused = true;
+    document.addEventListener('touchmove', _lockTouchMove, { capture: true, passive: true });
+  }
+
+  function unlockScroll() {
+    if (!_scrollLocked) return;
+    _scrollLocked = false;
+    window._inputEditFocused = false;
+    document.removeEventListener('touchmove', _lockTouchMove, { capture: true });
+  }
+
+  document.addEventListener('focusin', (e) => {
+    if (!e.target.matches(FIELD_SELECTOR)) return;
+    // Skip inputs that live inside a modal overlay (those handle their own scroll)
+    if (e.target.closest('#rm2-modal-bg, #rivalry-modal-bg, #champ-edit-modal-bg, .modal-bg, [id$="-modal-bg"]')) return;
+    clearTimeout(_blurTimer);
+    lockScroll();
+  });
+
+  document.addEventListener('focusout', (e) => {
+    if (!e.target.matches(FIELD_SELECTOR)) return;
+    // Small delay in case focus is moving to another editable field immediately
+    _blurTimer = setTimeout(unlockScroll, 150);
+  });
+})();
 </script>
 
 </body>
