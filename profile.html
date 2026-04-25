@@ -5217,10 +5217,12 @@ html.day-mode .tc-btn-cancel:hover { background: rgba(0,0,0,.06); }
 const _tc = (() => {
   let _targetUser = null;
   let _isOwn = false;
-  let _items = [];   // [{id, image_url, name, year, sort_order}]
+  let _items = [];   // [{id, image_url, name, year, sort_order, source, efed_name}]
   let _dragSrc = null;
-  let _editing = null; // null = adding new, else row id
-  let _imgData = null; // base64 for new upload
+  let _editing = null;
+  let _imgData = null;
+  let _activeEfed = null; // {promo_name, owner_username, vault_json} when step 1a
+  let _selfEfedName = ''; // eFed typed in step 0
 
   const _grid  = () => document.getElementById('trophy-case-grid');
   const _scroll = () => document.getElementById('trophy-case-scroll');
@@ -5228,12 +5230,13 @@ const _tc = (() => {
   // ── RENDER ──────────────────────────────────────────────────────────────
   function _render() {
     const grid = _grid(); if (!grid) return;
-    const empty = document.getElementById('trophy-case-empty');
-    const badge = document.getElementById('trophy-count-badge');
+    const empty  = document.getElementById('trophy-case-empty');
+    const badge  = document.getElementById('trophy-count-badge');
     const addBtn = document.getElementById('tc-add-btn');
     grid.innerHTML = '';
 
     const count = _items.length;
+    const hasSelfReported = _items.some(i => i.source !== 'owner');
     if (badge) {
       if (count) { badge.textContent = count + ' ' + (count === 1 ? 'trophy' : 'trophies'); badge.style.display = 'block'; }
       else { badge.style.display = 'none'; }
@@ -5247,90 +5250,75 @@ const _tc = (() => {
       tile.dataset.id = item.id;
       tile.dataset.idx = idx;
 
-      // image wrap
       const imgWrap = document.createElement('div');
       imgWrap.className = 'tc-tile-img-wrap';
-
       if (item.image_url) {
         const img = document.createElement('img');
-        img.src = item.image_url;
-        img.alt = item.name || '';
-        img.loading = 'lazy';
+        img.src = item.image_url; img.alt = item.name || ''; img.loading = 'lazy';
         imgWrap.appendChild(img);
       } else {
         imgWrap.innerHTML = `<div class="tc-tile-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`;
       }
 
-      // owner controls
       if (_isOwn) {
-        const acts = document.createElement('div');
-        acts.className = 'tc-tile-actions';
-
+        const acts = document.createElement('div'); acts.className = 'tc-tile-actions';
         const dragBtn = document.createElement('button');
-        dragBtn.className = 'tc-act-btn tc-drag-handle';
-        dragBtn.title = 'Drag to reorder';
+        dragBtn.className = 'tc-act-btn tc-drag-handle'; dragBtn.title = 'Drag to reorder';
         dragBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>`;
-
         const editBtn = document.createElement('button');
-        editBtn.className = 'tc-act-btn tc-drag-handle';
-        editBtn.title = 'Edit';
-        editBtn.style.background = 'rgba(200,168,75,.88)';
-        editBtn.style.color = '#000';
+        editBtn.className = 'tc-act-btn tc-drag-handle'; editBtn.title = 'Edit';
+        editBtn.style.background = 'rgba(200,168,75,.88)'; editBtn.style.color = '#000';
         editBtn.innerHTML = '✎';
         editBtn.onclick = (ev) => { ev.stopPropagation(); openEdit(item); };
-
         const delBtn = document.createElement('button');
-        delBtn.className = 'tc-act-btn tc-del-btn';
-        delBtn.title = 'Delete';
-        delBtn.innerHTML = '✕';
+        delBtn.className = 'tc-act-btn tc-del-btn'; delBtn.title = 'Delete'; delBtn.innerHTML = '✕';
         delBtn.onclick = (ev) => { ev.stopPropagation(); _del(item.id); };
-
-        acts.appendChild(dragBtn);
-        acts.appendChild(editBtn);
-        acts.appendChild(delBtn);
+        acts.appendChild(dragBtn); acts.appendChild(editBtn); acts.appendChild(delBtn);
         tile.appendChild(acts);
-
-        // drag & drop
         tile.draggable = true;
-        tile.addEventListener('dragstart', (e) => {
-          _dragSrc = idx;
-          tile.classList.add('tc-dragging');
-          e.dataTransfer.effectAllowed = 'move';
-        });
+        tile.addEventListener('dragstart', (e) => { _dragSrc = idx; tile.classList.add('tc-dragging'); e.dataTransfer.effectAllowed = 'move'; });
         tile.addEventListener('dragend', () => tile.classList.remove('tc-dragging'));
         tile.addEventListener('dragover', (e) => { e.preventDefault(); tile.classList.add('tc-drag-over'); });
         tile.addEventListener('dragleave', () => tile.classList.remove('tc-drag-over'));
         tile.addEventListener('drop', (e) => {
-          e.preventDefault();
-          tile.classList.remove('tc-drag-over');
+          e.preventDefault(); tile.classList.remove('tc-drag-over');
           if (_dragSrc === null || _dragSrc === idx) return;
-          const moved = _items.splice(_dragSrc, 1)[0];
-          _items.splice(idx, 0, moved);
-          _dragSrc = null;
-          _render();
-          _saveOrder();
+          const moved = _items.splice(_dragSrc, 1)[0]; _items.splice(idx, 0, moved);
+          _dragSrc = null; _render(); _saveOrder();
         });
-
-        // touch drag
         _attachTouchDrag(tile, idx);
       }
 
       tile.appendChild(imgWrap);
 
-      const nameEl = document.createElement('div');
-      nameEl.className = 'tc-tile-name';
-      nameEl.textContent = item.name || '';
-      tile.appendChild(nameEl);
+      const nameEl = document.createElement('div'); nameEl.className = 'tc-tile-name';
+      nameEl.textContent = item.name || ''; tile.appendChild(nameEl);
 
       if (item.year) {
-        const yearEl = document.createElement('div');
-        yearEl.className = 'tc-tile-year';
-        yearEl.textContent = item.year;
-        tile.appendChild(yearEl);
+        const yearEl = document.createElement('div'); yearEl.className = 'tc-tile-year';
+        yearEl.textContent = item.year; tile.appendChild(yearEl);
+      }
+
+      // ── asterisk for self-reported ──
+      if (item.source !== 'owner') {
+        const star = document.createElement('div');
+        star.style.cssText = 'position:absolute;bottom:2px;right:6px;font-size:.48rem;color:rgba(200,168,75,.35);font-weight:700;line-height:1;pointer-events:none;z-index:5;';
+        star.textContent = '*';
+        tile.appendChild(star);
       }
 
       grid.appendChild(tile);
     });
+
+    // self-reported note
+    let noteEl = document.getElementById('tc-self-note');
+    if (!noteEl) {
+      noteEl = document.createElement('div'); noteEl.id = 'tc-self-note';
+      noteEl.style.cssText = 'font-size:.48rem;color:#3a3a4a;letter-spacing:.5px;margin-top:6px;font-style:italic;';
+      const sec = document.getElementById('trophy-case-section'); if (sec) sec.appendChild(noteEl);
+    }
+    noteEl.style.display = hasSelfReported ? 'block' : 'none';
+    noteEl.textContent = '* self-reported';
 
     _updateChevrons();
   }
@@ -5338,12 +5326,7 @@ const _tc = (() => {
   // ── TOUCH DRAG ──────────────────────────────────────────────────────────
   function _attachTouchDrag(tile, idx) {
     let _th = null;
-    tile.addEventListener('touchstart', (e) => {
-      _th = setTimeout(() => {
-        _dragSrc = idx;
-        tile.classList.add('tc-dragging');
-      }, 400);
-    }, { passive: true });
+    tile.addEventListener('touchstart', (e) => { _th = setTimeout(() => { _dragSrc = idx; tile.classList.add('tc-dragging'); }, 400); }, { passive: true });
     tile.addEventListener('touchmove', (e) => {
       if (_dragSrc === null) { clearTimeout(_th); return; }
       const touch = e.touches[0];
@@ -5362,18 +5345,13 @@ const _tc = (() => {
       _grid().querySelectorAll('.tc-tile').forEach(t => t.classList.remove('tc-drag-over'));
       if (target && target !== tile) {
         const toIdx = parseInt(target.dataset.idx);
-        if (!isNaN(toIdx) && toIdx !== _dragSrc) {
-          const moved = _items.splice(_dragSrc, 1)[0];
-          _items.splice(toIdx, 0, moved);
-          _saveOrder();
-        }
+        if (!isNaN(toIdx) && toIdx !== _dragSrc) { const moved = _items.splice(_dragSrc, 1)[0]; _items.splice(toIdx, 0, moved); _saveOrder(); }
       }
-      _dragSrc = null;
-      _render();
+      _dragSrc = null; _render();
     }, { passive: true });
   }
 
-  // ── CHEVRONS + SCROLL ────────────────────────────────────────────────────
+  // ── CHEVRONS ─────────────────────────────────────────────────────────────
   function _updateChevrons() {
     const scr = _scroll(); if (!scr) return;
     const lBtn = document.getElementById('tc-arr-left');
@@ -5394,44 +5372,178 @@ const _tc = (() => {
     _targetUser = username;
     const session = typeof getSession === 'function' ? getSession() : null;
     _isOwn = !!(session && (session.username.toLowerCase() === username.toLowerCase() || (typeof ADMIN_USERNAME !== 'undefined' && session.username.toLowerCase() === ADMIN_USERNAME)));
-
     try {
       const rows = await sbGet('trophies', `username=eq.${encodeURIComponent(username)}&order=sort_order.asc,created_at.desc`);
-      _items = rows.map(r => ({ id: r.id, image_url: r.image_url, name: r.name || '', year: r.year || '', sort_order: r.sort_order || 0 }));
+      _items = rows.map(r => ({ id: r.id, image_url: r.image_url, name: r.name||'', year: r.year||'', sort_order: r.sort_order||0, source: r.source||'self', efed_name: r.efed_name||'' }));
     } catch(e) { _items = []; }
     _render();
     const scr = _scroll();
     if (scr) scr.addEventListener('scroll', _updateChevrons, { passive: true });
   }
 
-  // ── ADD / EDIT MODAL ─────────────────────────────────────────────────────
+  // ── ADD FLOW: STEP NAVIGATION ────────────────────────────────────────────
   function openAdd() {
-    _editing = null; _imgData = null;
-    _setModalState({ name: '', year: '' });
+    _editing = null; _imgData = null; _activeEfed = null; _selfEfedName = '';
+    document.getElementById('tc-modal-title-el').textContent = 'Add Trophy';
+    goStep(0);
     document.getElementById('tc-modal-bg').style.display = 'flex';
+    setTimeout(() => { const inp = document.getElementById('tc-s0-input'); if(inp){inp.value='';inp.focus();} }, 80);
   }
 
   function openEdit(item) {
     _editing = item.id; _imgData = null;
-    _setModalState({ name: item.name, year: item.year, existingImg: item.image_url });
+    document.getElementById('tc-modal-title-el').textContent = 'Edit Trophy';
+    _setS1bState({ name: item.name, year: item.year, existingImg: item.image_url, isEdit: true });
+    goStep('1b');
     document.getElementById('tc-modal-bg').style.display = 'flex';
   }
 
-  function _setModalState({ name, year, existingImg }) {
-    document.getElementById('tc-modal-title-el').textContent = _editing ? 'Edit Trophy' : 'Add Trophy';
-    document.getElementById('tc-name-input').value = name || '';
-    document.getElementById('tc-year-input').value = year || '';
+  function goStep(step) {
+    ['tc-s0','tc-s1a','tc-s1b'].forEach(id => {
+      const el = document.getElementById(id); if(el) el.style.display = 'none';
+    });
+    const target = document.getElementById('tc-s'+step);
+    if (target) target.style.display = 'block';
+  }
+
+  async function checkEfed() {
+    const input  = document.getElementById('tc-s0-input');
+    const msg    = document.getElementById('tc-s0-msg');
+    const btn    = document.getElementById('tc-s0-next');
+    const query  = (input?.value || '').trim();
+    if (!query) { if(msg){msg.textContent='Enter an eFed name or acronym.';msg.style.color='#ff6b6b';} return; }
+    if (btn) { btn.disabled=true; btn.textContent='Checking…'; }
+    if (msg) { msg.textContent=''; }
+    try {
+      // Search by promo_name or acronym
+      const rows = await sbGet('users', `or=(promo_name.ilike.*${encodeURIComponent(query)}*,acronym.ilike.${encodeURIComponent(query)})&is_efed_owner=eq.true&select=username,promo_name,efed_vault_json&limit=5`);
+      // Pick best match
+      const q = query.toLowerCase();
+      const match = rows.find(r =>
+        (r.acronym||'').toLowerCase() === q ||
+        (r.promo_name||'').toLowerCase() === q
+      ) || rows[0];
+
+      if (match) {
+        _selfEfedName  = match.promo_name;
+        _activeEfed    = { promo_name: match.promo_name, owner_username: match.username, vault_json: Array.isArray(match.efed_vault_json) ? match.efed_vault_json : [] };
+        _buildVaultPicker(_activeEfed.vault_json);
+        const lbl = document.getElementById('tc-s1a-label');
+        if(lbl) lbl.textContent = match.promo_name;
+        document.getElementById('tc-s1a-name').value = '';
+        document.getElementById('tc-s1a-year').value = '';
+        const smsg = document.getElementById('tc-s1a-msg'); if(smsg) smsg.textContent='';
+        goStep('1a');
+      } else {
+        // Not found — inactive/defunct, allow self-add
+        _selfEfedName = query;
+        _activeEfed   = null;
+        _setS1bState({ name: '', year: '', existingImg: null, isEdit: false });
+        goStep('1b');
+      }
+    } catch(e) {
+      if(msg){msg.textContent='Could not check eFed. Try again.';msg.style.color='#ff6b6b';}
+    } finally {
+      if(btn){btn.disabled=false;btn.textContent='Next →';}
+    }
+  }
+
+  function _buildVaultPicker(vaultItems) {
+    const grid = document.getElementById('tc-vault-picker'); if (!grid) return;
+    grid.innerHTML = '';
+    if (!vaultItems.length) {
+      grid.innerHTML = '<div style="font-size:.72rem;color:#5a5a6a;">No titles listed in this eFed\'s vault.</div>';
+      return;
+    }
+    vaultItems.forEach(item => {
+      const card = document.createElement('div');
+      card.style.cssText = 'flex-shrink:0;width:64px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;';
+      card.dataset.id = item.id;
+      const imgWrap = document.createElement('div');
+      imgWrap.style.cssText = 'width:64px;height:64px;border-radius:12px;overflow:hidden;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.1);transition:border-color .15s,background .15s;display:flex;align-items:center;justify-content:center;';
+      imgWrap.innerHTML = item.image_url
+        ? `<img src="${item.image_url}" style="width:100%;height:100%;object-fit:cover;display:block;">`
+        : '<span style="font-size:1.4rem;">🏆</span>';
+      const nameEl = document.createElement('div');
+      nameEl.style.cssText = 'font-size:.44rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:rgba(200,168,75,.6);text-align:center;line-height:1.3;width:64px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;';
+      nameEl.textContent = item.name;
+      card.appendChild(imgWrap); card.appendChild(nameEl);
+      card.onclick = () => {
+        grid.querySelectorAll('[data-id]').forEach(c => {
+          c.querySelector('div').style.borderColor = 'rgba(255,255,255,.1)';
+          c.querySelector('div').style.background  = 'rgba(255,255,255,.06)';
+        });
+        imgWrap.style.borderColor = 'rgba(200,168,75,.7)';
+        imgWrap.style.background  = 'rgba(200,168,75,.08)';
+        document.getElementById('tc-s1a-name').value = item.name;
+      };
+      grid.appendChild(card);
+    });
+  }
+
+  function _setS1bState({ name, year, existingImg, isEdit }) {
+    const nameIn  = document.getElementById('tc-name-input');
+    const yearIn  = document.getElementById('tc-year-input');
     const preview = document.getElementById('tc-img-preview');
-    const hint = document.getElementById('tc-img-hint');
-    if (existingImg) { preview.src = existingImg; preview.style.display = 'block'; hint.style.display = 'none'; }
-    else { preview.style.display = 'none'; hint.style.display = 'flex'; }
-    const err = document.getElementById('tc-modal-err'); if (err) { err.style.display = 'none'; err.textContent = ''; }
-    const saveBtn = document.getElementById('tc-save-btn'); if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+    const hint    = document.getElementById('tc-img-hint');
+    const err     = document.getElementById('tc-modal-err');
+    const btn     = document.getElementById('tc-save-btn');
+    const cancel  = document.getElementById('tc-s1b-cancel');
+    if (nameIn) nameIn.value = name||'';
+    if (yearIn) yearIn.value = year||'';
+    if (existingImg) { if(preview){preview.src=existingImg;preview.style.display='block';} if(hint)hint.style.display='none'; }
+    else { if(preview)preview.style.display='none'; if(hint)hint.style.display='flex'; }
+    if (err) { err.style.display='none'; err.textContent=''; }
+    if (btn) { btn.disabled=false; btn.textContent='Save'; }
+    if (cancel) cancel.onclick = isEdit ? closeModal : () => goStep(0);
+    if (cancel) cancel.textContent = isEdit ? 'Cancel' : '← Back';
+  }
+
+  async function notifyOwner() {
+    const nameVal = (document.getElementById('tc-s1a-name')?.value||'').trim();
+    const yearVal = (document.getElementById('tc-s1a-year')?.value||'').trim();
+    const msg     = document.getElementById('tc-s1a-msg');
+    const btn     = document.getElementById('tc-s1a-notify');
+    if (!nameVal) { if(msg){msg.textContent='Enter or select a title name.';msg.style.color='#ff6b6b';} return; }
+    if (btn) { btn.disabled=true; btn.textContent='Sending…'; }
+    if (msg) msg.textContent='';
+    const session = typeof getSession==='function' ? getSession() : null;
+    try {
+      // Find vault image for the picked title
+      const vaultItem = (_activeEfed?.vault_json||[]).find(v => v.name === nameVal);
+      await sbInsert('trophies', {
+        username:   _targetUser,
+        name:       nameVal,
+        year:       yearVal||null,
+        image_url:  vaultItem?.image_url||null,
+        sort_order: _items.length,
+        source:     'self',
+        awarded_by: null,
+        efed_name:  _selfEfedName||''
+      });
+      // Notify owner
+      if (_activeEfed?.owner_username) {
+        await sbInsert('notifications', {
+          username:   _activeEfed.owner_username,
+          type:       'trophy_claim',
+          message:    `🏆 <strong>@${_esc(session?.username||_targetUser)}</strong> added <strong>${_esc(nameVal)}</strong> from <strong>${_esc(_selfEfedName)}</strong> to their Trophy Case.`,
+          video_url:  null,
+          read:       false,
+          created_at: new Date().toISOString()
+        });
+      }
+      closeModal();
+      await load(_targetUser);
+    } catch(e) {
+      if(msg){msg.textContent='Could not save. Try again.';msg.style.color='#ff6b6b';}
+      if(btn){btn.disabled=false;btn.textContent='Notify Owner';}
+    }
   }
 
   function closeModal() {
     document.getElementById('tc-modal-bg').style.display = 'none';
-    _imgData = null; _editing = null;
+    _imgData = null; _editing = null; _activeEfed = null; _selfEfedName = '';
+    const fi = document.getElementById('tc-img-file'); if(fi) fi.value='';
   }
 
   function handleImgPick(ev) {
@@ -5440,7 +5552,7 @@ const _tc = (() => {
     reader.onload = (e) => {
       _imgData = e.target.result;
       const preview = document.getElementById('tc-img-preview');
-      const hint = document.getElementById('tc-img-hint');
+      const hint    = document.getElementById('tc-img-hint');
       if (preview) { preview.src = _imgData; preview.style.display = 'block'; }
       if (hint) hint.style.display = 'none';
     };
@@ -5452,28 +5564,28 @@ const _tc = (() => {
     const year = document.getElementById('tc-year-input').value.trim();
     const err  = document.getElementById('tc-modal-err');
     const btn  = document.getElementById('tc-save-btn');
-    if (!name) { if (err) { err.textContent = 'Enter the title name.'; err.style.display = 'block'; } return; }
-
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-    if (err) err.style.display = 'none';
-
+    if (!name) { if(err){err.textContent='Enter the title name.';err.style.display='block';} return; }
+    if (btn) { btn.disabled=true; btn.textContent='Saving…'; }
+    if (err) err.style.display='none';
     try {
       if (_editing) {
-        const patch = { name, year: year || null };
+        const patch = { name, year: year||null };
         if (_imgData) patch.image_url = _imgData;
         await sbPatch('trophies', `id=eq.${_editing}`, patch);
       } else {
         await sbInsert('trophies', {
-          username: _targetUser, name, year: year || null,
-          image_url: _imgData || null,
-          sort_order: _items.length
+          username:  _targetUser, name, year: year||null,
+          image_url: _imgData||null,
+          sort_order: _items.length,
+          source:    'self',
+          efed_name: _selfEfedName||null
         });
       }
       closeModal();
       await load(_targetUser);
     } catch(e) {
-      if (err) { err.textContent = 'Could not save: ' + (e.message || 'error'); err.style.display = 'block'; }
-      if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+      if(err){err.textContent='Could not save: '+(e.message||'error');err.style.display='block';}
+      if(btn){btn.disabled=false;btn.textContent='Save';}
     }
   }
 
@@ -5490,7 +5602,7 @@ const _tc = (() => {
     });
   }
 
-  return { load, scroll, openAdd, closeModal, save, handleImgPick };
+  return { load, scroll, openAdd, closeModal, save, handleImgPick, goStep, checkEfed, notifyOwner };
 })();
 
 async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
@@ -5583,28 +5695,56 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
   <div id="tc-modal" style="background:#14141c;border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:22px 20px 18px;width:100%;max-width:320px;box-shadow:0 24px 80px rgba(0,0,0,.7);">
     <div class="tc-modal-title" id="tc-modal-title-el">Add Trophy</div>
 
-    <label class="tc-modal-label">Photo</label>
-    <div class="tc-img-upload-area" onclick="document.getElementById('tc-img-file').click()">
-      <img id="tc-img-preview" src="" alt="" style="display:none;">
-      <div id="tc-img-hint" class="tc-img-upload-hint">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        <span>Tap to upload</span>
+    <!-- Step 0: eFed lookup (new adds only) -->
+    <div id="tc-s0" style="display:none;">
+      <label class="tc-modal-label" for="tc-s0-input">eFed Name or Acronym</label>
+      <input class="tc-modal-input" id="tc-s0-input" type="text" placeholder="e.g. FSW or First Strike Wrestling" maxlength="60"
+        onkeydown="if(event.key==='Enter')_tc.checkEfed()">
+      <div id="tc-s0-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
+      <div class="tc-modal-actions">
+        <button class="tc-btn-cancel" onclick="_tc.closeModal()">Cancel</button>
+        <button class="tc-btn-save" id="tc-s0-next" onclick="_tc.checkEfed()">Next →</button>
       </div>
     </div>
-    <input type="file" id="tc-img-file" accept="image/*" style="display:none;" onchange="_tc.handleImgPick(event)">
 
-    <label class="tc-modal-label" for="tc-name-input">Title / Championship Name</label>
-    <input class="tc-modal-input" id="tc-name-input" type="text" placeholder="e.g. World Heavyweight Championship" maxlength="60">
-
-    <label class="tc-modal-label" for="tc-year-input">Year</label>
-    <input class="tc-modal-input" id="tc-year-input" type="text" placeholder="e.g. 2024" maxlength="9" style="width:100px;">
-
-    <div class="tc-modal-err" id="tc-modal-err"></div>
-
-    <div class="tc-modal-actions">
-      <button class="tc-btn-cancel" onclick="_tc.closeModal()">Cancel</button>
-      <button class="tc-btn-save" id="tc-save-btn" onclick="_tc.save()">Save</button>
+    <!-- Step 1A: Active eFed — pick from vault -->
+    <div id="tc-s1a" style="display:none;">
+      <div id="tc-s1a-label" style="font-size:.62rem;font-weight:700;letter-spacing:1px;color:rgba(200,168,75,.65);margin-bottom:12px;text-transform:uppercase;"></div>
+      <label class="tc-modal-label">Championship</label>
+      <div id="tc-vault-picker" style="display:flex;gap:10px;overflow-x:auto;padding:4px 2px 8px;scrollbar-width:none;-webkit-overflow-scrolling:touch;"></div>
+      <label class="tc-modal-label" for="tc-s1a-name" style="margin-top:2px;">Or type title name</label>
+      <input class="tc-modal-input" id="tc-s1a-name" type="text" placeholder="Title name" maxlength="60">
+      <label class="tc-modal-label" for="tc-s1a-year">Year</label>
+      <input class="tc-modal-input" id="tc-s1a-year" type="text" placeholder="e.g. 2024" maxlength="4" style="width:100px;">
+      <div id="tc-s1a-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;color:#ff6b6b;"></div>
+      <div class="tc-modal-actions">
+        <button class="tc-btn-cancel" onclick="_tc.goStep(0)">← Back</button>
+        <button class="tc-btn-save" id="tc-s1a-notify" onclick="_tc.notifyOwner()">Notify Owner</button>
+      </div>
     </div>
+
+    <!-- Step 1B: Self-add (inactive/not found) or Edit existing -->
+    <div id="tc-s1b" style="display:none;">
+      <label class="tc-modal-label">Photo</label>
+      <div class="tc-img-upload-area" onclick="document.getElementById('tc-img-file').click()">
+        <img id="tc-img-preview" src="" alt="" style="display:none;">
+        <div id="tc-img-hint" class="tc-img-upload-hint">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <span>Tap to upload</span>
+        </div>
+      </div>
+      <input type="file" id="tc-img-file" accept="image/*" style="display:none;" onchange="_tc.handleImgPick(event)">
+      <label class="tc-modal-label" for="tc-name-input">Title / Championship Name</label>
+      <input class="tc-modal-input" id="tc-name-input" type="text" placeholder="e.g. World Heavyweight Championship" maxlength="60">
+      <label class="tc-modal-label" for="tc-year-input">Year</label>
+      <input class="tc-modal-input" id="tc-year-input" type="text" placeholder="e.g. 2024" maxlength="9" style="width:100px;">
+      <div class="tc-modal-err" id="tc-modal-err"></div>
+      <div class="tc-modal-actions">
+        <button class="tc-btn-cancel" id="tc-s1b-cancel">Cancel</button>
+        <button class="tc-btn-save" id="tc-save-btn" onclick="_tc.save()">Save</button>
+      </div>
+    </div>
+
   </div>
 </div>
 
