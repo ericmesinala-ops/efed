@@ -3215,6 +3215,41 @@ html.day-mode .rv-name-input::placeholder { color: rgba(0,0,0,.2); }
   overflow-y: auto;
   padding-right: 3px;
 }
+/* ── USER SEARCH DROPDOWN ── */
+.user-search-wrap { position: relative; }
+.user-search-dropdown {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px);
+  background: #1a1a24; border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px; z-index: 9999; overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  max-height: 280px; overflow-y: auto;
+}
+.user-search-dropdown:empty { display: none; }
+.usd-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; cursor: pointer;
+  transition: background .12s;
+  font-family: 'DM Sans', sans-serif;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.usd-item:last-child { border-bottom: none; }
+.usd-item:hover { background: rgba(255,255,255,.06); }
+.usd-avatar {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(255,255,255,.08); overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .75rem; font-weight: 700; color: rgba(255,255,255,.5);
+}
+.usd-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.usd-name { font-size: .82rem; font-weight: 600; color: #e8e8e8; }
+.usd-username { font-size: .7rem; color: rgba(255,255,255,.35); }
+html.day-mode .user-search-dropdown { background: #fff; border-color: rgba(0,0,0,.1); box-shadow: 0 8px 24px rgba(0,0,0,.15); }
+html.day-mode .usd-item:hover { background: rgba(0,0,0,.04); }
+html.day-mode .usd-item { border-bottom-color: rgba(0,0,0,.06); }
+html.day-mode .usd-name { color: #111; }
+html.day-mode .usd-username { color: rgba(0,0,0,.4); }
+html.day-mode .usd-avatar { background: rgba(0,0,0,.07); color: rgba(0,0,0,.4); }
+
 .rm2-opp-card {
   display: flex; flex-direction: column; align-items: center; gap: 5px;
   padding: 9px 5px; border-radius: 10px;
@@ -3342,9 +3377,12 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
 
         <!-- Manual name text box -->
         <div style="display:flex;gap:7px;margin-bottom:10px;">
-          <input id="rm2-opp-manual" type="text" maxlength="60" placeholder="Type opponent name…" autocomplete="off"
-            style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:8px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;"
-            oninput="rm2ManualTyping(this)" onkeydown="if(event.key==='Enter'){rm2SlotAddManual();event.preventDefault();}">
+          <div class="user-search-wrap" style="flex:1;position:relative;">
+            <input id="rm2-opp-manual" type="text" maxlength="60" placeholder="Type opponent name…" autocomplete="off"
+              style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:8px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;"
+              oninput="rm2ManualTyping(this)" onkeydown="if(event.key==='Enter'){rm2SlotAddManual();event.preventDefault();}">
+            <div id="rm2-opp-dropdown" class="user-search-dropdown"></div>
+          </div>
           <button onclick="rm2SlotAddManual()" style="padding:8px 14px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap;" onmouseover="this.style.color='#fff';this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.color='rgba(255,255,255,.55)';this.style.background='rgba(255,255,255,.06)'">Add</button>
         </div>
 
@@ -3763,16 +3801,94 @@ function rm2RenderOppGrid(members) {
   });
 }
 
+// ── SHARED USER SEARCH DROPDOWN ──
+let _usdDebounce = null;
+
+function usdBuildItem(u, onSelect) {
+  const div = document.createElement('div');
+  div.className = 'usd-item';
+  const avDiv = document.createElement('div');
+  avDiv.className = 'usd-avatar';
+  if (u.avatar_url) {
+    const img = document.createElement('img');
+    img.src = u.avatar_url;
+    img.onerror = () => { avDiv.textContent = (u.display_name || u.username || '?')[0].toUpperCase(); };
+    avDiv.appendChild(img);
+  } else {
+    avDiv.textContent = (u.display_name || u.username || '?')[0].toUpperCase();
+  }
+  const info = document.createElement('div');
+  info.innerHTML = `<div class="usd-name">${_esc(u.display_name || u.username)}</div><div class="usd-username">@${_esc(u.username)}</div>`;
+  div.appendChild(avDiv);
+  div.appendChild(info);
+  div.addEventListener('mousedown', e => { e.preventDefault(); onSelect(u); });
+  return div;
+}
+
+async function usdSearch(query, dropdownEl, onSelect) {
+  if (!query || query.length < 2) { dropdownEl.innerHTML = ''; return; }
+  try {
+    const q = encodeURIComponent(query);
+    const [byUsername, byDisplay] = await Promise.all([
+      sbGet('users', `username=ilike.*${q}*&select=username,display_name,avatar_url&limit=10`),
+      sbGet('users', `display_name=ilike.*${q}*&select=username,display_name,avatar_url&limit=10`)
+    ]);
+    // Merge + deduplicate
+    const seen = new Set();
+    const results = [];
+    [...byUsername, ...byDisplay].forEach(u => {
+      if (!seen.has(u.username)) { seen.add(u.username); results.push(u); }
+    });
+    const top = results.slice(0, 10);
+    dropdownEl.innerHTML = '';
+    if (!top.length) { dropdownEl.innerHTML = ''; return; }
+    top.forEach(u => dropdownEl.appendChild(usdBuildItem(u, onSelect)));
+  } catch(e) { dropdownEl.innerHTML = ''; }
+}
+
+// ── RIVALRY: live typing search ──
+function rvNameTyping(idx, inp) {
+  const dd = document.getElementById(`rv-dropdown-${idx}`);
+  if (!dd) return;
+  clearTimeout(_usdDebounce);
+  const q = inp.value.trim();
+  if (!q) { dd.innerHTML = ''; return; }
+  _usdDebounce = setTimeout(() => {
+    usdSearch(q, dd, u => {
+      // User selected from dropdown — fill in and save
+      inp.value = u.username;
+      dd.innerHTML = '';
+      _rivalries[idx].name = u.username;
+      _rivalries[idx].display_name = u.display_name || u.username;
+      _rivalries[idx].avatar_url = u.avatar_url || '';
+      renderRivalries();
+      const session = getSession(); if (session) saveRivalries(session);
+    });
+  }, 300);
+}
+
 function rm2OppManualInput(inp) {
   // legacy — kept for compat; actual input handled by rm2ManualTyping
 }
 
-// ── NEW SLOT SYSTEM ──
-
 function rm2ManualTyping(inp) {
-  // Just update UI hint — actual add happens on button click or Enter
+  const dd = document.getElementById('rm2-opp-dropdown');
   const msg = document.getElementById('rm2-msg-1');
   if (msg) msg.textContent = '';
+  if (!dd) return;
+  clearTimeout(_usdDebounce);
+  const q = inp.value.trim();
+  if (!q) { dd.innerHTML = ''; return; }
+  _usdDebounce = setTimeout(() => {
+    usdSearch(q, dd, u => {
+      // User selected — add as a real linked wrestler slot
+      inp.value = '';
+      dd.innerHTML = '';
+      _rm2SnapshotUndo();
+      window._rm2Slots.push({ type: 'wrestler', username: u.username, name: u.display_name || u.username, avatar: u.avatar_url || '' });
+      rm2RenderSlotPreview();
+    });
+  }, 300);
 }
 
 function rm2SlotAddVs() {
@@ -3796,6 +3912,8 @@ function rm2SlotAddManual() {
   if (!inp) return;
   const v = inp.value.trim();
   if (!v) return;
+  const dd = document.getElementById('rm2-opp-dropdown');
+  if (dd) dd.innerHTML = '';
   _rm2SnapshotUndo();
   window._rm2Slots.push({ type: 'wrestler', username: '', name: v, avatar: '' });
   inp.value = '';
@@ -4589,12 +4707,15 @@ function rvAddNew() {
 // ── RIVALRY: click bold name to re-edit ──
 function rvEditName(idx, el) {
   const r = _rivalries[idx];
-  // Swap the bold div for an input pre-filled with the raw username
-  el.outerHTML = `<input class="rv-name-input" value="${_esc(r.name||'')}" placeholder="Enter @username" maxlength="60"
-    style="font-weight:400;"
-    onblur="rvNameBlur(${idx},this)"
-    onkeydown="if(event.key==='Enter')this.blur();">`;
-  // Focus it
+  // Swap the bold div for an input with dropdown
+  el.outerHTML = `<div class="user-search-wrap" style="flex:1;min-width:0;">
+    <input class="rv-name-input" value="${_esc(r.name||'')}" placeholder="Enter @username or name" maxlength="60"
+      style="font-weight:400;width:100%;"
+      oninput="rvNameTyping(${idx},this)"
+      onblur="rvNameBlur(${idx},this)"
+      onkeydown="if(event.key==='Enter')this.blur();">
+    <div class="user-search-dropdown" id="rv-dropdown-${idx}"></div>
+  </div>`;
   const inp = document.querySelector(`#rivalries-list .rr-row[data-idx="${idx}"] .rv-name-input`);
   if (inp) { inp.focus(); inp.select(); }
 }
@@ -4747,11 +4868,15 @@ function renderRivalries() {
         <div class="rr-text-col" style="flex:1;min-width:0;gap:6px;">
           ${resolvedName
             ? `<div style="font-size:.88rem;font-weight:700;color:#e8e8e8;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-                onclick="rvEditName(${i},this)">${_esc(resolvedName)}</div>`
-            : `<input class="rv-name-input" value="${_esc(r.name||'')}" placeholder="Enter @username" maxlength="60"
-                onblur="rvNameBlur(${i},this)"
-                onkeydown="if(event.key==='Enter')this.blur();"
-                style="font-weight:400;">`
+                onclick="rvEditName(${i},this)">${withProfileVerified(resolvedName, r.name)}</div>`
+            : `<div class="user-search-wrap" style="flex:1;min-width:0;">
+                <input class="rv-name-input" value="${_esc(r.name||'')}" placeholder="Enter @username or name" maxlength="60"
+                  oninput="rvNameTyping(${i},this)"
+                  onblur="rvNameBlur(${i},this)"
+                  onkeydown="if(event.key==='Enter')this.blur();"
+                  style="font-weight:400;width:100%;">
+                <div class="user-search-dropdown" id="rv-dropdown-${i}"></div>
+              </div>`
           }
           <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
             <input class="rv-field-input" value="${_esc(r.efed||'')}" placeholder="eFed" maxlength="10" style="width:52px;flex-shrink:0;font-size:.65rem;text-transform:uppercase;"
@@ -4772,7 +4897,7 @@ function renderRivalries() {
       return `<div class="rr-row rv-row" data-idx="${i}" style="align-items:center;padding:12px 0;gap:12px;">
         <div style="width:44px;height:44px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);">${avatarHtml}</div>
         <div class="rr-text-col" style="flex:1;min-width:0;">
-          <div style="font-size:.88rem;font-weight:700;color:#e8e8e8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(displayName)}</div>
+          <div style="font-size:.88rem;font-weight:700;color:#e8e8e8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${withProfileVerified(displayName, r.name)}</div>
           ${metaParts.length ? `<div style="font-size:.65rem;color:rgba(255,255,255,.3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(metaParts.join(' · '))}</div>` : ''}
         </div>
         <span class="rv-status ${status}">${statusLabel}</span>
