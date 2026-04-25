@@ -24,41 +24,40 @@
     .hub-link:hover { color: #90c8ff; text-decoration-color: rgba(144,200,255,.6); }
     html.day-mode .hub-link { color: #1a6fd4; text-decoration-color: rgba(26,111,212,.3); }
     html.day-mode .hub-link:hover { color: #1558aa; }
-    .x-embed-wrap {
-      margin-top: 10px; max-width: 460px;
+    .hub-embed-wrap { margin: 10px 0 4px; width: 100%; }
+    @keyframes _hub_in { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+    .hub-preview-card {
+      display:flex; align-items:center; gap:16px; text-decoration:none;
+      width:100%; box-sizing:border-box;
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
+      border-radius:14px; padding:14px 18px;
+      transition:background .15s, border-color .15s; cursor:pointer;
+      animation:_hub_in .22s ease both;
     }
-    .x-preview-card {
-      display: block; text-decoration: none;
-      background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1);
-      border-radius: 14px; padding: 14px 16px;
-      transition: background .15s, border-color .15s; cursor: pointer;
+    .hub-preview-card:hover { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.2); }
+    .hub-preview-icon { flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+    .hub-preview-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+    .hub-preview-name  { font-size:.84rem; font-weight:700; color:#e8e8e8; font-family:'DM Sans',sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .hub-preview-handle{ font-size:.7rem;  color:rgba(255,255,255,.35); font-family:'DM Sans',sans-serif; }
+    .hub-preview-text  { font-size:.81rem; color:rgba(255,255,255,.78); line-height:1.5; font-family:'DM Sans',sans-serif; margin-top:5px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .hub-preview-cta   { font-size:.65rem; color:rgba(255,255,255,.22); font-family:'DM Sans',sans-serif; letter-spacing:.5px; margin-top:5px; }
+    html.day-mode .hub-preview-card  { background:rgba(0,0,0,.04); border-color:rgba(0,0,0,.1); }
+    html.day-mode .hub-preview-card:hover { background:rgba(0,0,0,.08); border-color:rgba(0,0,0,.18); }
+    html.day-mode .hub-preview-name  { color:#111118; }
+    html.day-mode .hub-preview-handle{ color:rgba(0,0,0,.38); }
+    html.day-mode .hub-preview-text  { color:rgba(0,0,0,.75); }
+    .hub-embed-skeleton {
+      display:flex; align-items:center; gap:16px; padding:14px 18px;
+      background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);
+      border-radius:14px; width:100%; box-sizing:border-box;
     }
-    .x-preview-card:hover { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.2); }
-    .x-preview-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:9px; gap:10px; }
-    .x-preview-author-info { display:flex; flex-direction:column; gap:1px; min-width:0; }
-    .x-preview-name { font-size:.82rem; font-weight:700; color:#e8e8e8; font-family:'DM Sans',sans-serif; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .x-preview-handle { font-size:.7rem; color:rgba(255,255,255,.38); font-family:'DM Sans',sans-serif; }
-    .x-preview-logo { color:rgba(255,255,255,.45); flex-shrink:0; }
-    .x-preview-text { font-size:.84rem; color:rgba(255,255,255,.85); line-height:1.55; font-family:'DM Sans',sans-serif; margin-bottom:10px; white-space:pre-wrap; word-break:break-word; }
-    .x-preview-footer { font-size:.65rem; color:rgba(255,255,255,.25); font-family:'DM Sans',sans-serif; letter-spacing:.5px; }
-    html.day-mode .x-preview-card { background:rgba(0,0,0,.04); border-color:rgba(0,0,0,.1); }
-    html.day-mode .x-preview-card:hover { background:rgba(0,0,0,.08); border-color:rgba(0,0,0,.18); }
-    html.day-mode .x-preview-name { color:#111118; }
-    html.day-mode .x-preview-handle { color:rgba(0,0,0,.4); }
-    html.day-mode .x-preview-text { color:rgba(0,0,0,.8); }
-    .x-embed-skeleton {
-      padding: 14px 16px; background: rgba(255,255,255,.04);
-      border: 1px solid rgba(255,255,255,.08); border-radius: 14px; max-width: 460px;
-    }
-    .x-embed-sk-line {
-      height: 10px; background: rgba(255,255,255,.08); border-radius: 6px;
-      animation: x-embed-pulse 1.4s ease-in-out infinite;
-    }
-    @keyframes x-embed-pulse {
-      0%,100% { opacity: .5; } 50% { opacity: 1; }
-    }
+    .hub-sk-icon { width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,.09); flex-shrink:0; animation:_hub_pulse 1.4s ease-in-out infinite; }
+    .hub-sk-line { height:9px; border-radius:6px; background:rgba(255,255,255,.08); animation:_hub_pulse 1.4s ease-in-out infinite; }
+    @keyframes _hub_pulse { 0%,100%{opacity:.45} 50%{opacity:.9} }
   `;
   document.head.appendChild(s);
+})();
+
 })();
 
 // ── WRESTLING EMOJI FALLBACK SET ─────────────────────────────
@@ -449,23 +448,25 @@ function getGeneralStamps() {
   return GENERAL_STAMP_CODES.map(code => getStamp(code)).filter(Boolean);
 }
 
-// ── AUTO-LINK — converts raw text to HTML with clickable URLs ─
-// X/Twitter status URLs get data-x-embed so the embed engine picks them up.
+
+// ── SOCIAL URL DETECTION + AUTO-LINK ─────────────────────────
 const _X_STATUS_RE = /^https?:\/\/(www\.)?(twitter\.com|x\.com)\/\w+\/status\/\d+/i;
+const _IG_POST_RE  = /^https?:\/\/(www\.)?instagram\.com\/(p|reel|tv)\/[\w-]+/i;
 
 function _autoLink(rawText) {
   if (!rawText) return '';
   const URL_RE = /https?:\/\/[^\s\])"'<>\u200B]+/g;
-  const out = [];
+  const out = [], esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   let last = 0, m;
-  const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   while ((m = URL_RE.exec(rawText)) !== null) {
     if (m.index > last) out.push(esc(rawText.slice(last, m.index)));
     let url = m[0].replace(/[.,;:!?)]+$/, '');
     const trailing = esc(m[0].slice(url.length));
-    const isXPost = _X_STATUS_RE.test(url);
-    const display = url.length > 42 ? url.slice(0, 39) + '…' : url;
-    out.push(`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="hub-link"${isXPost ? ' data-x-embed="1"' : ''}>${esc(display)}</a>`);
+    const isX  = _X_STATUS_RE.test(url);
+    const isIG = _IG_POST_RE.test(url);
+    const display = url.length > 42 ? url.slice(0, 39) + '\u2026' : url;
+    const embed = isX ? ' data-hub-embed="x"' : isIG ? ' data-hub-embed="ig"' : '';
+    out.push(`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="hub-link"${embed}>${esc(display)}</a>`);
     if (trailing) out.push(trailing);
     last = m.index + m[0].length;
   }
@@ -473,98 +474,108 @@ function _autoLink(rawText) {
   return out.join('');
 }
 
-// ── X / TWITTER POST EMBED ENGINE ────────────────────────────
-// Watches the DOM for hub-link[data-x-embed] anchors (set by _autoLink),
-// fetches Twitter oEmbed, and renders a clean custom preview card beneath the post text.
-(function _initXEmbeds() {
-  function _escX(s) {
-    return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// ── SOCIAL EMBED ENGINE ────────────────────────────────────────
+(function _initSocialEmbeds() {
+  const _e = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  const X_ICON  = '<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24" style="color:rgba(255,255,255,.7)"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
+  const IG_ICON = '<svg viewBox="0 0 24 24" width="28" height="28" fill="none"><defs><linearGradient id="ig_g" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#f09433"/><stop offset="25%" stop-color="#e6683c"/><stop offset="50%" stop-color="#dc2743"/><stop offset="75%" stop-color="#cc2366"/><stop offset="100%" stop-color="#bc1888"/></linearGradient></defs><rect x="2" y="2" width="20" height="20" rx="6" fill="url(#ig_g)"/><rect x="6.5" y="6.5" width="11" height="11" rx="3" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="12" cy="12" r="3" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="16.5" cy="7.5" r=".9" fill="#fff"/></svg>';
+
+  function _skeleton(wrap) {
+    wrap.innerHTML = '<div class="hub-embed-skeleton"><div class="hub-sk-icon"></div><div style="flex:1;display:flex;flex-direction:column;gap:7px"><div class="hub-sk-line" style="width:48%"></div><div class="hub-sk-line" style="width:76%"></div></div></div>';
   }
 
-  const X_LOGO = `<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" class="x-preview-logo"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>`;
-
-  async function _doEmbed(link) {
-    const url = link.getAttribute('href');
-    if (!url) return;
-
-    // Find the post card and insert the embed RIGHT BEFORE the footer —
-    // this guarantees the footer always renders below the embed regardless
-    // of async timing or the text block's wrapper nesting.
-    const postCard = link.closest('.post-card, .efed-post-card, [class^="post-card"]');
-    const footer = postCard?.querySelector('.post-card-footer, .efed-post-card-footer');
-    if (!postCard && !footer) return;
-
+  function _insertWrap(link) {
+    const postCard = link.closest('.post-card') || link.closest('.efed-post-card') || link.closest('[data-id]');
+    const footer   = postCard ? postCard.querySelector('.post-card-footer, .efed-post-card-footer') : null;
     const wrap = document.createElement('div');
-    wrap.className = 'x-embed-wrap';
+    wrap.className = 'hub-embed-wrap';
     if (footer) {
       footer.before(wrap);
     } else {
-      // Fallback: after the text block
-      const textBlock = link.closest('.post-card-text, .efed-post-card-text') || link.parentElement;
-      textBlock.after ? textBlock.after(wrap) : textBlock.parentElement.insertBefore(wrap, textBlock.nextSibling);
+      const tb = link.closest('.post-card-text, .efed-post-card-text') || link.parentElement;
+      if (tb.after) tb.after(wrap); else tb.parentElement.insertBefore(wrap, tb.nextSibling);
     }
+    return { wrap, postCard };
+  }
 
-    wrap.innerHTML = `<div class="x-embed-skeleton"><div class="x-embed-sk-line" style="width:55%"></div><div class="x-embed-sk-line" style="width:82%;margin-top:6px"></div><div class="x-embed-sk-line" style="width:40%;margin-top:6px"></div></div>`;
+  function _repaint(postCard) {
+    requestAnimationFrame(() => { if (postCard) void postCard.offsetHeight; });
+  }
 
+  async function _embedX(link) {
+    const url = link.getAttribute('href');
+    const { wrap, postCard } = _insertWrap(link);
+    _skeleton(wrap);
     try {
-      const r = await fetch(`https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&dnt=true&omit_script=true`);
+      const r = await fetch('https://publish.twitter.com/oembed?url=' + encodeURIComponent(url) + '&dnt=true&omit_script=true');
       if (!r.ok) { wrap.remove(); return; }
       const d = await r.json();
-      if (!d.html) { wrap.remove(); return; }
-
-      // Parse oEmbed HTML — extract tweet text and handle
       const parser = new DOMParser();
-      const doc = parser.parseFromString(d.html, 'text/html');
-      const bq = doc.querySelector('blockquote');
-      const p = bq?.querySelector('p');
-      if (p) p.querySelectorAll('a').forEach(a => { if (/pic\.twitter|t\.co/i.test(a.href||'')) a.remove(); });
-      const tweetText = p?.textContent?.trim() || '';
-      const authorName = d.author_name || '';
-      const tweetLinkEl = bq?.querySelector('a[href*="/status/"]');
-      const handleMatch = (tweetLinkEl?.href||'').match(/(?:twitter|x)\.com\/@?(\w+)\//i);
-      const handle = handleMatch ? '@' + handleMatch[1] : '';
-
-      wrap.innerHTML = `
-        <a href="${_escX(url)}" target="_blank" rel="noopener noreferrer" class="x-preview-card">
-          <div class="x-preview-header">
-            <div class="x-preview-author-info">
-              <span class="x-preview-name">${_escX(authorName)}</span>
-              ${handle ? `<span class="x-preview-handle">${_escX(handle)}</span>` : ''}
-            </div>
-            ${X_LOGO}
-          </div>
-          ${tweetText ? `<div class="x-preview-text">${_escX(tweetText)}</div>` : ''}
-          <div class="x-preview-footer">View on X ↗</div>
-        </a>`;
-
+      const doc = parser.parseFromString(d.html || '', 'text/html');
+      const bq  = doc.querySelector('blockquote');
+      const p   = bq && bq.querySelector('p');
+      if (p) p.querySelectorAll('a').forEach(a => { if (/pic\.twitter|t\.co/i.test(a.href || '')) a.remove(); });
+      const text   = (p && p.textContent.trim()) || '';
+      const name   = d.author_name || '';
+      const hm     = ((bq && bq.querySelector('a[href*=\'/status/\']') || {}).href || '').match(/(?:twitter|x)\.com\/@?(\w+)\//i);
+      const handle = hm ? '@' + hm[1] : '';
+      wrap.innerHTML = '<a href="' + _e(url) + '" target="_blank" rel="noopener noreferrer" class="hub-preview-card">' +
+        '<div class="hub-preview-icon">' + X_ICON + '</div>' +
+        '<div class="hub-preview-body">' +
+          '<span class="hub-preview-name">' + _e(name) + '</span>' +
+          (handle ? '<span class="hub-preview-handle">' + _e(handle) + '</span>' : '') +
+          (text   ? '<div  class="hub-preview-text">'   + _e(text)   + '</div>'  : '') +
+          '<span class="hub-preview-cta">View on X \u2197</span>' +
+        '</div></a>';
       link.style.display = 'none';
-
-      // Force layout recalculation so the post card expands and footer stays below
-      if (postCard) void postCard.offsetHeight;
+      _repaint(postCard);
     } catch(e) { wrap.remove(); }
   }
 
+  async function _embedIG(link) {
+    const url = link.getAttribute('href');
+    const { wrap, postCard } = _insertWrap(link);
+    _skeleton(wrap);
+    let name = '', text = '';
+    try {
+      const r = await fetch('https://www.instagram.com/oembed/?url=' + encodeURIComponent(url) + '&format=json');
+      if (r.ok) { const d = await r.json(); name = d.author_name || ''; text = d.title || ''; }
+    } catch(_) {}
+    wrap.innerHTML = '<a href="' + _e(url) + '" target="_blank" rel="noopener noreferrer" class="hub-preview-card">' +
+      '<div class="hub-preview-icon">' + IG_ICON + '</div>' +
+      '<div class="hub-preview-body">' +
+        '<span class="hub-preview-name">' + _e(name || 'Instagram') + '</span>' +
+        (text ? '<div class="hub-preview-text">' + _e(text) + '</div>' : '') +
+        '<span class="hub-preview-cta">View on Instagram \u2197</span>' +
+      '</div></a>';
+    link.style.display = 'none';
+    _repaint(postCard);
+  }
+
+  function _process(link) {
+    const type = link.getAttribute('data-hub-embed');
+    link.removeAttribute('data-hub-embed');
+    if (type === 'x')  _embedX(link);
+    if (type === 'ig') _embedIG(link);
+  }
+
   function _scan(root) {
-    (root.querySelectorAll ? root.querySelectorAll('a.hub-link[data-x-embed]') : [])
-      .forEach(link => { link.removeAttribute('data-x-embed'); _doEmbed(link); });
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('a.hub-link[data-hub-embed]').forEach(_process);
   }
 
-  const obs = new MutationObserver(muts => {
-    muts.forEach(({ addedNodes }) => addedNodes.forEach(n => {
+  const obs = new MutationObserver(muts => muts.forEach(({ addedNodes }) =>
+    addedNodes.forEach(n => {
       if (n.nodeType !== 1) return;
-      if (n.matches?.('a.hub-link[data-x-embed]')) { n.removeAttribute('data-x-embed'); _doEmbed(n); }
-      else _scan(n);
-    }));
-  });
+      if (n.matches && n.matches('a.hub-link[data-hub-embed]')) _process(n); else _scan(n);
+    })
+  ));
 
-  function _start() {
-    obs.observe(document.body, { childList: true, subtree: true });
-    _scan(document.body);
-  }
-
-  if (document.body) _start();
-  else document.addEventListener('DOMContentLoaded', _start);
+  function _start() { obs.observe(document.body, { childList: true, subtree: true }); _scan(document.body); }
+  if (document.body) _start(); else document.addEventListener('DOMContentLoaded', _start);
 })();
+
 function _getMoodletForEfed(name) {
   // legacy: returns single stamp for the eFed (cat 1 only, seeded)
   const pool = getStampsByCategory(1);
