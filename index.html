@@ -11419,16 +11419,8 @@ async function checkLockerRoomAccess() {
   if (!tab) return;
   const session = typeof getSession === "function" ? getSession() : null;
   if (!session) return;
-  if (session.username.toLowerCase() === "derrick_maximus") {
-    tab.classList.add("roster-visible"); return;
-  }
-  try {
-    const r = await fetch("https://osbarvhklizidsffytye.supabase.co/rest/v1/roster?username=eq." + encodeURIComponent(session.username) + "&status=eq.approved&select=efed&limit=1", {
-      headers: { "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM", "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM" }
-    });
-    const rows = r.ok ? await r.json() : [];
-    if (rows.length) tab.classList.add("roster-visible");
-  } catch(e) {}
+  // Any logged-in user gets the General room — always show the chat tab
+  tab.classList.add("roster-visible");
 }
 
 // Set home as default active on load
@@ -12590,7 +12582,7 @@ function initChat() {
     // Default to first efed room, otherwise updates
     const efedRooms = window._efedRooms || [];
     if (!_chatRoom) {
-      _chatRoom = efedRooms.length ? efedRooms[0].id : 'updates';
+      _chatRoom = 'general'; // General room is the default for everyone
     }
     // Re-render pills with correct active state
     buildChatRooms();
@@ -12606,7 +12598,10 @@ function initChat() {
       window._chatCurrentEfedName = '';
     }
     if (pinned) {
-      if (activeEfed) {
+      if (_chatRoom === 'general') {
+        pinned.style.display = 'block';
+        pinned.innerHTML = '🌐 <strong style="color:rgba(255,255,255,.75);">General</strong> — open to everyone on the Hub. Keep it fun and respectful.';
+      } else if (activeEfed) {
         pinned.style.display = 'block';
         pinned.innerHTML = '<span style="opacity:.5;">🔒</span> Only the <strong style="color:rgba(255,255,255,.75);">' + activeEfed.name + '</strong> roster can use this chatroom.';
       } else {
@@ -12706,12 +12701,13 @@ async function buildChatRooms() {
 
   window._efedRooms = efedRooms;
 
-  // Build flat list for dropdown
+  // Build flat list for dropdown — General room first, then eFed rooms, then Updates
   const list = [];
+  list.push({ id: 'general', name: 'General', group: 'Rooms' });
   if (efedRooms.length) {
-    efedRooms.forEach((r, i) => list.push({ id: r.id, name: r.name, efedName: r.name, group: i === 0 ? 'eFed Rooms' : null }));
+    efedRooms.forEach((r, i) => list.push({ id: r.id, name: r.name, efedName: r.name, group: i === 0 ? 'Locker Rooms' : null }));
   }
-  list.push({ id: 'updates', name: 'Updates', group: efedRooms.length ? 'General' : null });
+  list.push({ id: 'updates', name: 'Updates', group: efedRooms.length ? 'Announcements' : 'Announcements' });
   window._chatRoomList = list;
 
   // Update trigger label
@@ -12739,7 +12735,10 @@ function switchChatRoom(roomId, efedName) {
   const pinned = document.getElementById('chat-pinned');
   const note = document.getElementById('chat-say-hi');
   if (pinned) {
-    if (efedName) {
+    if (roomId === 'general') {
+      pinned.style.display = 'block';
+      pinned.innerHTML = '🌐 <strong style="color:rgba(255,255,255,.75);">General</strong> — open to everyone on the Hub. Keep it fun and respectful.';
+    } else if (efedName) {
       pinned.style.display = 'block';
       pinned.innerHTML = '<span style="opacity:.5;">🔒</span> Only the <strong style="color:rgba(255,255,255,.75);">' + _esc(efedName) + '</strong> roster can use this chatroom.';
     } else {
@@ -12747,6 +12746,13 @@ function switchChatRoom(roomId, efedName) {
     }
   }
   if (note) note.style.display = roomId === 'updates' ? 'flex' : 'none';
+  // Update panel header title
+  const headerTitle = document.getElementById('chat-header-title');
+  if (headerTitle) {
+    if (roomId === 'general') headerTitle.textContent = 'GENERAL';
+    else if (roomId === 'updates') headerTitle.textContent = 'UPDATES';
+    else headerTitle.textContent = efedName ? efedName.toUpperCase() + ' ROOM' : 'LOCKER ROOM';
+  }
   _updateChatInputForRoom(roomId);
 }
 
@@ -12754,6 +12760,7 @@ function _updateChatInputForRoom(roomId) {
   const session = getSession();
   const isAdmin = session && session.username.toLowerCase() === ADMIN_USERNAME;
   const isUpdatesRoom = roomId === 'updates';
+  const isGeneralRoom = roomId === 'general';
   const inputRow = document.getElementById('chat-input-row');
   const readonlyNotice = document.getElementById('chat-readonly-notice');
   const loggedOut = document.getElementById('chat-logged-out-msg');
@@ -12763,6 +12770,7 @@ function _updateChatInputForRoom(roomId) {
     if (readonlyNotice) readonlyNotice.style.display = 'block';
     if (loggedOut) loggedOut.style.display = 'none';
   } else {
+    // General room and eFed rooms: all logged-in users can post
     if (inputRow) inputRow.style.display = 'flex';
     if (readonlyNotice) readonlyNotice.style.display = 'none';
     if (loggedOut) loggedOut.style.display = 'none';
@@ -12909,8 +12917,9 @@ function renderChatMessage(text) {
     const url = text.slice(5, -6);
     return `<img src="${escapeHtml(url)}" alt="GIF" style="max-width:55%;border-radius:8px;margin-top:4px;display:block;" loading="eager" onload="scrollChatToBottom()">`;
   }
-  // Render moodlet/stamp tokens — wrap stamp imgs with subtle glow
-  const rendered = _renderWithMoodlets(escapeHtml(text))
+  // Auto-link URLs, then render stamp tokens and special emoji
+  const linked = typeof _autoLink === 'function' ? _autoLink(text) : escapeHtml(text);
+  const rendered = _renderWithMoodlets(linked)
     .replace(/🎲/g, '<span style="filter:drop-shadow(0 0 2px rgba(200,168,75,.95)) drop-shadow(0 0 5px rgba(200,168,75,.6));display:inline-block;">🎲</span>');
   if (text.includes('[m:')) {
     return rendered.replace(/<img([^>]*class="[^"]*moodlet[^"]*"[^>]*)>/gi,
@@ -13377,11 +13386,13 @@ function _buildStampPickerContent(pickerEl, efedName, inputEl) {
   const session = typeof getSession === 'function' ? getSession() : null;
   const username = session?.username || '';
   const labelEl = pickerEl.querySelector('.stamp-picker-efed-label');
-  if (labelEl) labelEl.textContent = (efedName || 'eFed') + ' Official Stamps';
+  if (labelEl) labelEl.textContent = (window._chatRoom === 'general') ? 'General Stamps' : (efedName || 'eFed') + ' Official Stamps';
   const grid = pickerEl.querySelector('.stamp-picker-grid');
   if (grid) {
     grid.innerHTML = '';
-    const stamps = getEfedStamps(efedName || '');
+    const stamps = (window._chatRoom === 'general')
+      ? (typeof getGeneralStamps === 'function' ? getGeneralStamps() : getEfedStamps(''))
+      : getEfedStamps(efedName || '');
     stamps.forEach(s => {
       const btn = document.createElement('button');
       btn.className = 'stamp-picker-btn';

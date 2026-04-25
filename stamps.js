@@ -17,6 +17,13 @@
       display: inline-flex; align-items: center; justify-content: center;
     }
     .moodlet-picker-btn:hover { background: rgba(255,255,255,.1); transform: scale(1.12); }
+    .hub-link {
+      color: #6ab0ff; text-decoration: underline; text-decoration-color: rgba(106,176,255,.35);
+      text-underline-offset: 2px; word-break: break-all; transition: color .15s;
+    }
+    .hub-link:hover { color: #90c8ff; text-decoration-color: rgba(144,200,255,.6); }
+    html.day-mode .hub-link { color: #1a6fd4; text-decoration-color: rgba(26,111,212,.3); }
+    html.day-mode .hub-link:hover { color: #1558aa; }
   `;
   document.head.appendChild(s);
 })();
@@ -398,6 +405,38 @@ const _moodletImg = stampImg;
 const _renderWithMoodlets = renderStampTokens;
 const _insertMoodletAtCursor = insertStampAtCursor;
 const MOODLET_DEFS = STAMP_DEFS;
+
+// ── GENERAL ROOM — curated universal stamp set ────────────────
+// These 16 stamps are shown in the General chat room for all users.
+const GENERAL_STAMP_CODES = [
+  'fire','love','yessir','goat','bigups','respect','salute','awesome',
+  'epic','crylaugh','grin','smile','laughing','dead','wesolid','alrighty'
+];
+function getGeneralStamps() {
+  return GENERAL_STAMP_CODES.map(code => getStamp(code)).filter(Boolean);
+}
+
+// ── AUTO-LINK — converts raw text to HTML with clickable URLs ─
+// Processes raw (unescaped) text; returns HTML string.
+// Non-URL portions are HTML-escaped; URLs become <a> tags.
+function _autoLink(rawText) {
+  if (!rawText) return '';
+  const URL_RE = /https?:\/\/[^\s\])"'<>\u200B]+/g;
+  const out = [];
+  let last = 0, m;
+  const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  while ((m = URL_RE.exec(rawText)) !== null) {
+    if (m.index > last) out.push(esc(rawText.slice(last, m.index)));
+    let url = m[0].replace(/[.,;:!?)]+$/, ''); // strip trailing punctuation
+    const trailing = esc(m[0].slice(url.length));
+    const display = url.length > 42 ? url.slice(0, 39) + '…' : url;
+    out.push(`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="hub-link">${esc(display)}</a>`);
+    if (trailing) out.push(trailing);
+    last = m.index + m[0].length;
+  }
+  if (last < rawText.length) out.push(esc(rawText.slice(last)));
+  return out.join('');
+}
 function _getMoodletForEfed(name) {
   // legacy: returns single stamp for the eFed (cat 1 only, seeded)
   const pool = getStampsByCategory(1);
