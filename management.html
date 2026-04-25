@@ -2173,25 +2173,42 @@ async function mgmtHandleAvatarFile(event) {
   const session = getSession();
   if (!session) return;
   const msgEl = document.getElementById('mgmt-av-msg');
-  if (msgEl) { msgEl.textContent = 'Processing…'; msgEl.style.color = '#8a8a9a'; }
+  if (msgEl) { msgEl.textContent = 'Uploading…'; msgEl.style.color = '#8a8a9a'; }
   const reader = new FileReader();
   reader.onload = async e => {
     const img = new Image();
     img.onload = async () => {
-      // Square crop from center, resize to 200×200
+      // Square crop from center, resize to 256×256
       const size = Math.min(img.width, img.height);
       const canvas = document.createElement('canvas');
-      canvas.width = 200; canvas.height = 200;
-      canvas.getContext('2d').drawImage(img, (img.width - size) / 2, (img.height - size) / 2, size, size, 0, 0, 200, 200);
+      canvas.width = 256; canvas.height = 256;
+      canvas.getContext('2d').drawImage(img, (img.width - size) / 2, (img.height - size) / 2, size, size, 0, 0, 256, 256);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       mgmtSetAvatarPreview(dataUrl);
-      // Save to avatar_url field
       try {
+        // Upload to Cloudinary CDN instead of storing base64 in DB
+        const CLOUD_NAME = 'dfjope4m';
+        const UPLOAD_PRESET = 'efed_avatars';
+        const publicId = 'avatars_' + session.username + '_avatar';
+        const blob = await fetch(dataUrl).then(r => r.blob());
+        const formData = new FormData();
+        formData.append('file', blob);
+        formData.append('upload_preset', UPLOAD_PRESET);
+        formData.append('public_id', publicId);
+        formData.append('overwrite', 'true');
+        const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+          method: 'POST', body: formData
+        });
+        if (!uploadRes.ok) throw new Error('Cloudinary upload failed');
+        const uploadData = await uploadRes.json();
+        const cdnUrl = `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/w_256,h_256,c_fill,f_auto,q_auto/${uploadData.public_id}`;
+        // Save CDN URL (not base64) to DB
         await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
-          method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ avatar_url: dataUrl })
+          method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ avatar_url: cdnUrl })
         });
         const s2 = getSession();
-        if (s2) { s2.avatarUrl = dataUrl; localStorage.setItem('efed_session', JSON.stringify(s2)); }
+        if (s2) { s2.avatarUrl = cdnUrl; localStorage.setItem('efed_session', JSON.stringify(s2)); }
+        mgmtSetAvatarPreview(cdnUrl);
         if (msgEl) { msgEl.textContent = '✓ Photo saved!'; msgEl.style.color = '#4caf64'; }
         setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 3000);
       } catch(err) {
