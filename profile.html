@@ -3311,7 +3311,7 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
       <!-- ── STEP 1: Choose opponents (eFed booking style) ── -->
       <div id="rm2-step-1" class="rm2-step">
         <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:6px;">Build Your Match</div>
-        <div style="font-size:.62rem;color:rgba(255,255,255,.25);margin-bottom:10px;line-height:1.5;font-family:'DM Sans',sans-serif;">You're already in. Use VS or ??? to add opponents. Drag to reorder.</div>
+        <div style="font-size:.62rem;color:rgba(255,255,255,.25);margin-bottom:10px;line-height:1.5;font-family:'DM Sans',sans-serif;">You're already in. Add teammates first, then tap <strong style="color:rgba(200,168,75,.5);">+ VS</strong> to separate sides, then add opponents. Drag to reorder.</div>
 
         <!-- Live match banner preview (slot-based, drag & drop) -->
         <div id="rm2-slot-preview-wrap" style="display:none;padding:10px 12px;border-radius:11px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);margin-bottom:10px;">
@@ -3571,26 +3571,31 @@ async function recEdit(idx) {
   if (Array.isArray(r.slots) && r.slots.length) {
     window._rm2Slots = r.slots.map(s => ({ ...s }));
   } else if (r.opponents) {
-    const parts = r.opponents.split(/\s+vs\.?\s+/i);
-    parts.forEach((name, pi) => {
-      if (pi > 0) window._rm2Slots.push({ type: 'vs' });
-      const nm = name.trim();
-      if (nm === '???') {
-        window._rm2Slots.push({ type: 'wrestler', username: '__mystery__', name: '???', avatar: '' });
-      } else {
-        // Try to match against cached roster
-        let matched = null;
-        for (const efed in _rm2RosterCache) {
-          matched = _rm2RosterCache[efed].find(m => (m.display_name || m.username) === nm);
-          if (matched) break;
+    // Legacy format: "PartnerA & PartnerB vs Opp1 & Opp2 vs Opp3"
+    // Each VS-separated segment is a team; within each team "&" separates members
+    const teamParts = r.opponents.split(/\s+vs\.?\s+/i);
+    teamParts.forEach((teamStr, ti) => {
+      if (ti > 0) window._rm2Slots.push({ type: 'vs' });
+      const members = teamStr.split(/\s*&\s*/);
+      members.forEach(nm => {
+        nm = nm.trim();
+        if (!nm) return;
+        if (nm === '???') {
+          window._rm2Slots.push({ type: 'wrestler', username: '__mystery__', name: '???', avatar: '' });
+        } else {
+          let matched = null;
+          for (const efed in _rm2RosterCache) {
+            matched = _rm2RosterCache[efed].find(m => (m.display_name || m.username) === nm);
+            if (matched) break;
+          }
+          window._rm2Slots.push({
+            type: 'wrestler',
+            username: matched ? matched.username : (r.opponent_username && !window._rm2Slots.some(s => s.type === 'wrestler') ? r.opponent_username : ''),
+            name: nm,
+            avatar: matched ? (matched.avatar_url || '') : (!window._rm2Slots.some(s => s.type === 'wrestler') ? (r.opponent_avatar || '') : '')
+          });
         }
-        window._rm2Slots.push({
-          type: 'wrestler',
-          username: matched ? matched.username : (r.opponent_username && pi === 0 ? r.opponent_username : ''),
-          name: nm,
-          avatar: matched ? (matched.avatar_url || '') : (pi === 0 ? (r.opponent_avatar || '') : '')
-        });
-      }
+      });
     });
   }
 
@@ -3765,13 +3770,8 @@ function rm2SlotAddVs() {
 }
 
 function rm2SlotAddQuestion() {
-  // ??? = unknown opponent
-  const last = window._rm2Slots.length ? window._rm2Slots[window._rm2Slots.length - 1] : null;
+  // ??? = unknown wrestler — joins the current team (no auto-VS)
   _rm2SnapshotUndo();
-  // Auto-insert VS if last slot was a wrestler
-  if (last && last.type === 'wrestler') {
-    window._rm2Slots.push({ type: 'vs' });
-  }
   window._rm2Slots.push({ type: 'wrestler', username: '__mystery__', name: '???', avatar: '' });
   rm2RenderSlotPreview();
 }
@@ -3781,11 +3781,7 @@ function rm2SlotAddManual() {
   if (!inp) return;
   const v = inp.value.trim();
   if (!v) return;
-  const last = window._rm2Slots.length ? window._rm2Slots[window._rm2Slots.length - 1] : null;
   _rm2SnapshotUndo();
-  if (last && last.type === 'wrestler') {
-    window._rm2Slots.push({ type: 'vs' });
-  }
   window._rm2Slots.push({ type: 'wrestler', username: '', name: v, avatar: '' });
   inp.value = '';
   rm2RenderSlotPreview();
@@ -3815,10 +3811,9 @@ function rm2SlotAddFromRoster(m) {
     rm2SlotRemove(existing);
     return;
   }
-  const last = window._rm2Slots.length ? window._rm2Slots[window._rm2Slots.length - 1] : null;
-  if (last && last.type === 'wrestler') {
-    window._rm2Slots.push({ type: 'vs' });
-  }
+  _rm2SnapshotUndo();
+  // No auto-VS — wrestlers added consecutively are on the same team.
+  // User taps + VS to separate teams.
   window._rm2Slots.push({ type: 'wrestler', username: m.username, name: m.display_name || m.username, avatar: m.avatar_url || '' });
   rm2RenderSlotPreview();
 }
@@ -3837,6 +3832,14 @@ function rm2RenderSlotPreview() {
   container.innerHTML = '';
 
   slots.forEach((slot, i) => {
+    // Show "&" between two consecutive wrestler slots (same team)
+    if (i > 0 && slot.type === 'wrestler' && slots[i - 1].type === 'wrestler') {
+      const amp = document.createElement('span');
+      amp.style.cssText = 'font-size:.52rem;font-weight:800;color:rgba(200,168,75,.5);letter-spacing:.5px;flex-shrink:0;align-self:flex-end;padding-bottom:14px;';
+      amp.textContent = '&';
+      container.appendChild(amp);
+    }
+
     if (slot.type === 'vs') {
       const chip = document.createElement('div');
       chip.style.cssText = 'position:relative;display:inline-flex;align-items:center;justify-content:center;padding:3px 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:20px;cursor:default;transition:all .1s;';
@@ -3946,8 +3949,18 @@ function rm2SyncDetailPreview() {
   cont.appendChild(selfChip);
 
   // Slots — skip isSelf wrestler since the self chip is already prepended above
+  // Track the previous visible slot type to know when to insert "&"
+  let _prevDetailType = 'wrestler'; // self chip was just rendered
   slots.forEach((s, si) => {
     if (s.isSelf) return; // already rendered as selfChip
+    // Insert "&" between two consecutive wrestlers (same team, no VS between them)
+    if (s.type === 'wrestler' && _prevDetailType === 'wrestler') {
+      const amp = document.createElement('span');
+      amp.style.cssText = 'font-size:.5rem;font-weight:800;color:rgba(200,168,75,.45);letter-spacing:.5px;flex-shrink:0;';
+      amp.textContent = '&';
+      cont.appendChild(amp);
+    }
+    _prevDetailType = s.type;
     if (s.type === 'vs') {
       const vs = document.createElement('span');
       vs.dataset.slotIdx = si;
@@ -4100,6 +4113,39 @@ function _recFmtDate(d) {
   } catch(e) { return d; }
 }
 
+// ── TEAM STRUCTURE HELPERS ─────────────────────────────────────────────────
+// Parse _rm2Slots into an array of teams (each team = array of wrestler slots).
+// VS slots act as dividers between teams.
+function _rm2BuildTeams(slots) {
+  const teams = [[]];
+  for (const s of slots) {
+    if (s.type === 'vs') teams.push([]);
+    else teams[teams.length - 1].push(s);
+  }
+  return teams; // may contain empty arrays if VS is at start/end
+}
+
+// Build a team-aware match display name from stored r.slots + selfName.
+// r.slots does NOT include the self slot (filtered on save).
+// Convention: the first segment (before the first VS) = self's partners.
+function _rm2MatchDisplayFromSlots(selfName, r) {
+  if (!Array.isArray(r.slots) || !r.slots.length) {
+    // Legacy fallback — plain "Self vs opponents"
+    return selfName ? `${selfName} vs ${r.opponents || '???'}` : (r.opponents || '???');
+  }
+  const teams = [[]];
+  for (const s of r.slots) {
+    if (s.type === 'vs') teams.push([]);
+    else teams[teams.length - 1].push(s.name || '???');
+  }
+  // teams[0] = self's partners; teams[1+] = opposing teams
+  const myTeam = [selfName, ...(teams[0] || [])].filter(Boolean);
+  const oppTeams = teams.slice(1);
+  const myStr = myTeam.join(' & ');
+  const oppStr = oppTeams.map(t => t.join(' & ')).join(' vs ');
+  return oppStr ? `${myStr} vs ${oppStr}` : myStr;
+}
+
 // ── SAVE record from modal ──
 async function rm2SaveRecord() {
   const session = getSession(); if (!session) return;
@@ -4121,10 +4167,22 @@ async function rm2SaveRecord() {
   const selfNameEl = document.getElementById('identity-row-name');
   const selfName = selfNameEl ? (selfNameEl.textContent || '').replace(/On Roster.*$/, '').trim() : '';
 
-  // Build full "Opp1 vs Opp2" opponents string (excluding self)
-  const opponentStr = opponentWrestlers.map(w => w.name).join(' vs ');
-  // For single opponent backwards compat, also store first opponent's username/avatar
-  const firstReal = opponentWrestlers.find(w => w.username && w.username !== '__mystery__');
+  // Build team-aware opponent string from slot structure
+  // teams[0] = self's team (partners); teams[1+] = opposing sides
+  const allTeams = _rm2BuildTeams(window._rm2Slots);
+  const selfTeamIdx = allTeams.findIndex(t => t.some(w => w.isSelf));
+  const selfTeamPartners = (allTeams[selfTeamIdx] || []).filter(w => !w.isSelf);
+  const oppTeams = allTeams.filter((_, i) => i !== (selfTeamIdx === -1 ? -99 : selfTeamIdx));
+  // opponentStr encodes: [partners segment] vs [opp team 1] vs [opp team 2]
+  // partners segment (if any) uses "&" within, then "vs" separates from opp teams
+  const partnerStr = selfTeamPartners.map(w => w.name).join(' & ');
+  const oppStr = oppTeams.map(t => t.filter(w => !w.isSelf).map(w => w.name).join(' & ')).filter(Boolean).join(' vs ');
+  const opponentStr = [partnerStr, oppStr].filter(Boolean).join(' vs ');
+
+  // For single opponent backwards compat, also store first real opponent's username/avatar
+  const firstOppTeam = oppTeams[0] || [];
+  const firstReal = firstOppTeam.find(w => w.username && w.username !== '__mystery__')
+    || opponentWrestlers.find(w => w.username && w.username !== '__mystery__');
 
   const rec = {
     result: _rm2Result,
@@ -4299,8 +4357,8 @@ function renderRecords() {
     const champLabel = _recordChampLabel(r);
     const oppName = r.opponents || '???';
     const oppAvatar = r.opponent_avatar || '';
-    // Build display: "Self vs Opp1 vs Opp2"
-    const matchDisplayName = selfNameRaw ? `${selfNameRaw} vs ${oppName}` : oppName;
+    // Build team-aware display name using saved slots when available
+    const matchDisplayName = _rm2MatchDisplayFromSlots(selfNameRaw, r);
     // If oppName contains "vs", use the last person's initials (e.g. "Shibata Reyes vs Zachary Chen" → ZC)
     const oppParts = oppName.split(/\s+vs\.?\s+/i);
     const lastOpp = oppParts[oppParts.length - 1].trim();
