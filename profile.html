@@ -2927,7 +2927,7 @@ html.day-mode .rr-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 .rr-result.win  { background: rgba(76,175,100,.14); color: #4caf64; border: 1px solid rgba(76,175,100,.3); }
 .rr-result.loss { background: rgba(192,0,14,.12);   color: #ff6b6b; border: 1px solid rgba(192,0,14,.3); }
 
-/* Outcome badge (Rivalries) — Won/Lost/Even pill */
+/* Outcome badge (Rivalries) — Won/Lost/Even pill — kept for record compat */
 .rr-outcome {
   flex-shrink: 0;
   font-size: .48rem; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
@@ -2936,6 +2936,62 @@ html.day-mode .rr-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 .rr-outcome.won  { background: rgba(76,175,100,.1);  color: #4caf64; border: 1px solid rgba(76,175,100,.22); }
 .rr-outcome.lost { background: rgba(192,0,14,.09);   color: #ff6b6b; border: 1px solid rgba(192,0,14,.22); }
 .rr-outcome.even { background: rgba(200,168,75,.08); color: #c8a84b; border: 1px solid rgba(200,168,75,.2); }
+
+/* Rivalry status badge — Ongoing / Ended */
+.rv-status {
+  flex-shrink: 0;
+  font-size: .46rem; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 20px; cursor: default;
+}
+.rv-status.ongoing { background: rgba(76,175,100,.1);  color: #4caf64; border: 1px solid rgba(76,175,100,.22); }
+.rv-status.ended   { background: rgba(255,255,255,.05); color: rgba(255,255,255,.3); border: 1px solid rgba(255,255,255,.1); }
+
+/* Rivalry status toggle button (edit mode) */
+.rv-status-btn {
+  flex-shrink: 0; cursor: pointer; border: none;
+  font-family: 'DM Sans', sans-serif;
+  font-size: .46rem; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 20px;
+  transition: background .15s, color .15s;
+}
+.rv-status-btn.ongoing { background: rgba(76,175,100,.1);  color: #4caf64; border: 1px solid rgba(76,175,100,.22); }
+.rv-status-btn.ended   { background: rgba(255,255,255,.05); color: rgba(255,255,255,.3); border: 1px solid rgba(255,255,255,.1); }
+
+/* Rivalry field inputs (efed, match type, show, year) */
+.rv-field-input {
+  background: none; border: none; outline: none;
+  font-family: 'DM Sans', sans-serif;
+  color: rgba(255,255,255,.38); font-weight: 500;
+  padding: 0; min-width: 0;
+}
+.rv-field-input::placeholder { color: rgba(255,255,255,.14); }
+.rv-field-input:focus { color: rgba(255,255,255,.7); }
+
+/* Rivalry name input (top line, edit mode) */
+.rv-name-input {
+  background: none; border: none; outline: none; width: 100%;
+  font-family: 'DM Sans', sans-serif;
+  font-size: .88rem; font-weight: 700; color: #e8e8e8;
+  padding: 0;
+}
+.rv-name-input::placeholder { color: rgba(255,255,255,.18); font-weight: 400; }
+
+/* Rivalry control buttons */
+.rv-ctrl-btn {
+  background: none; border: none; cursor: pointer; padding: 2px 4px;
+  font-size: .7rem; color: rgba(255,255,255,.2); border-radius: 4px;
+  transition: color .15s, background .15s; line-height: 1;
+}
+.rv-ctrl-btn:hover { color: rgba(255,255,255,.7); background: rgba(255,255,255,.07); }
+.rv-ctrl-btn:disabled { opacity: .2; cursor: default; }
+.rv-ctrl-btn.del { color: rgba(192,0,14,.4); }
+.rv-ctrl-btn.del:hover { color: #ff6b6b; background: rgba(192,0,14,.08); }
+html.day-mode .rv-status.ongoing { background: rgba(76,175,100,.1); color: #2a8a42; border-color: rgba(76,175,100,.3); }
+html.day-mode .rv-status.ended   { background: rgba(0,0,0,.05); color: rgba(0,0,0,.3); border-color: rgba(0,0,0,.1); }
+html.day-mode .rv-field-input { color: rgba(0,0,0,.35); }
+html.day-mode .rv-field-input:focus { color: rgba(0,0,0,.7); }
+html.day-mode .rv-name-input { color: #111; }
+html.day-mode .rv-name-input::placeholder { color: rgba(0,0,0,.2); }
 
 /* vs prefix */
 .rv-vs {
@@ -3906,35 +3962,47 @@ async function loadCareerRecords(username, isOwn) {
 // ── RIVALRY: add new entry ──
 function rvAddNew() {
   const session = getSession(); if (!session) return;
-  _rivalries.unshift({ name:'', outcome:'even', match:'', efed:'', year:'', notes:'' });
-  _fetchRivalryAvatars().then(() => {
-    renderRivalries();
-    saveRivalries(session);
-    setTimeout(() => {
-      const first = document.querySelector('#rivalries-list .rr-main');
-      if (first) { first.focus(); first.select(); }
-    }, 50);
-  });
+  _rivalries.unshift({ name:'', display_name:'', avatar_url:'', efed:'', match_type:'', show:'', year:'', status:'ongoing' });
+  renderRivalries();
+  saveRivalries(session);
+  setTimeout(() => {
+    const first = document.querySelector('#rivalries-list .rv-name-input');
+    if (first) { first.focus(); }
+  }, 50);
 }
 
 // ── RIVALRY: cycle outcome badge (even → won → lost → even) ──
-function rvCycleOutcome(idx, e) {
-  e.stopPropagation();
+// ── RIVALRY: toggle ongoing/ended ──
+function rvToggleStatus(idx) {
   const session = getSession(); if (!session) return;
-  const cycle = { even:'won', won:'lost', lost:'even' };
-  _rivalries[idx].outcome = cycle[_rivalries[idx].outcome] || 'even';
+  _rivalries[idx].status = (_rivalries[idx].status === 'ended') ? 'ongoing' : 'ended';
   renderRivalries();
   saveRivalries(session);
 }
 
-// ── RIVALRY: inline field save on blur ──
-function rvFieldBlur(idx, field, el) {
+// ── RIVALRY: name field blur — look up by username, freeze avatar ──
+async function rvNameBlur(idx, el) {
   const session = getSession(); if (!session) return;
   const val = el.value.trim();
-  _rivalries[idx][field] = field === 'efed' ? val.toUpperCase() : val;
-  if (field === 'name') {
-    _fetchRivalryAvatars().then(() => renderRivalries());
-  }
+  if (!val || val === _rivalries[idx].name) return;
+  _rivalries[idx].name = val;
+  _rivalries[idx].display_name = '';
+  _rivalries[idx].avatar_url = '';
+  try {
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(val)}&select=username,display_name,avatar_url`);
+    if (rows.length) {
+      _rivalries[idx].display_name = rows[0].display_name || rows[0].username;
+      _rivalries[idx].avatar_url   = rows[0].avatar_url || '';
+    }
+  } catch(e) {}
+  renderRivalries();
+  saveRivalries(session);
+}
+
+// ── RIVALRY: individual field save ──
+function rvSaveField(idx, field, el) {
+  const session = getSession(); if (!session) return;
+  _rivalries[idx][field] = el.value.trim();
   saveRivalries(session);
 }
 
@@ -3965,7 +4033,6 @@ async function saveRivalries(session) {
     if (!r.ok) {
       const errText = await r.text();
       if (errText.includes('rivalries')) {
-        // Column not yet created — silent no-op, show hint
         console.warn('rivalries column missing — run SQL migration');
       } else { showToast('Save failed'); }
     }
@@ -3985,99 +4052,82 @@ function renderRivalries() {
   const editable = _rrIsOwn;
 
   list.innerHTML = _rivalries.map((r, i) => {
-    const cached = _rivalryAvatarCache[(r.name||'').toLowerCase().trim()];
-    const displayName = cached?.display_name || r.name || '';
-    const avatarUrl   = cached?.avatar_url   || '';
-    const outcome = r.outcome || 'even';
-    const metaParts = [r.match, r.notes, [r.efed, r.year].filter(Boolean).join(' · ')].filter(Boolean);
-    const initials = displayName.split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('') || '?';
-    const outcomeColor = outcome === 'won' ? '#4caf64' : outcome === 'lost' ? '#ff6b6b' : '#c8a84b';
+    // Avatar: use stored (frozen) avatar first, fall back to live cache
+    const cached    = _rivalryAvatarCache[(r.name||'').toLowerCase().trim()];
+    const avatarUrl = r.avatar_url || cached?.avatar_url || '';
+    const displayName = r.display_name || cached?.display_name || r.name || '';
 
-    // Rival avatar
+    // Initials: split by whitespace only (underscore names = one word = one initial)
+    const initials = (displayName || r.name || '?').trim()
+      .split(/\s+/).slice(0, 2).map(w => (w[0]||'').toUpperCase()).join('') || '?';
+
+    const status = r.status || 'ongoing';
+    const statusLabel = status === 'ended' ? 'Ended' : 'Ongoing';
+
+    // Meta parts for display
+    const metaParts = [r.efed, r.match_type, r.show, r.year].filter(Boolean);
+
+    // Avatar HTML
     const avatarHtml = avatarUrl
-      ? `<img src="${_esc(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.outerHTML='<span style=\'font-family:Bebas Neue,sans-serif;font-size:.85rem;color:${outcomeColor};\'>${initials}</span>'">`
-      : `<span style="font-family:'Bebas Neue',sans-serif;font-size:.85rem;color:${outcomeColor};">${initials}</span>`;
+      ? `<img src="${_esc(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
+           onerror="this.style.display='none';this.parentNode.querySelector('.rv-init').style.display='flex';">
+         <span class="rv-init" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.95rem;color:rgba(255,255,255,.55);">${initials}</span>`
+      : `<span class="rv-init" style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.95rem;color:rgba(255,255,255,.55);">${initials}</span>`;
 
-    // Owner avatar (left side)
-    const ownerInitials = (_rrOwnerName||'?').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('') || '?';
-    const ownerAvatarHtml = _rrOwnerAvatarUrl
-      ? `<img src="${_esc(_rrOwnerAvatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.outerHTML='<span style=\'font-family:Bebas Neue,sans-serif;font-size:.75rem;color:rgba(255,255,255,.5);\'>${ownerInitials}</span>'">`
-      : `<span style="font-family:'Bebas Neue',sans-serif;font-size:.75rem;color:rgba(255,255,255,.5);">${ownerInitials}</span>`;
-
-    return `<div class="rr-row rv-row" data-idx="${i}">
-      <!-- Owner side -->
-      <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;max-width:90px;min-width:0;">
-        <div style="width:32px;height:32px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);">${ownerAvatarHtml}</div>
-        <span style="font-size:.68rem;font-weight:700;color:rgba(255,255,255,.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'DM Sans',sans-serif;">${_esc(_rrOwnerName)}</span>
-      </div>
-      <!-- VS -->
-      <span class="rv-vs" style="flex-shrink:0;padding:0 4px;font-size:.52rem;font-weight:900;letter-spacing:1.5px;">VS</span>
-      <!-- Rival side -->
-      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
-        <div class="rv-avatar" style="width:38px;height:38px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09);">${avatarHtml}</div>
-        <div class="rr-text-col" style="flex:1;min-width:0;">
-          <input class="rr-main" value="${_esc(displayName)}" placeholder="Rival name" maxlength="60"
-            ${editable ? '' : 'readonly'}
-            onblur="${editable?`rvFieldBlur(${i},'name',this)`:''}"
-            style="font-size:.88rem;font-weight:600;color:#e8e8e8;">
-          ${(editable || metaParts.length) ? `<input class="rr-main rr-meta" value="${_esc(metaParts.join(' · '))}" placeholder="Notable match · eFed · Notes" maxlength="160"
-            ${editable ? '' : 'readonly'}
-            onblur="${editable?`rvMetaBlur(${i},this)`:''}"
-            style="font-size:.65rem;color:rgba(255,255,255,.28);font-weight:400;">` : ''}
+    if (editable) {
+      return `<div class="rr-row rv-row" data-idx="${i}" style="align-items:flex-start;padding:12px 0;gap:10px;">
+        <div style="width:44px;height:44px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);margin-top:2px;">${avatarHtml}</div>
+        <div class="rr-text-col" style="flex:1;min-width:0;gap:6px;">
+          <input class="rv-name-input" value="${_esc(r.name||'')}" placeholder="Enter @username" maxlength="60"
+            onblur="rvNameBlur(${i},this)"
+            onkeydown="if(event.key==='Enter')this.blur();">
+          <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
+            <input class="rv-field-input" value="${_esc(r.efed||'')}" placeholder="eFed" maxlength="40" style="flex:1;min-width:55px;font-size:.65rem;"
+              onblur="rvSaveField(${i},'efed',this)" onkeydown="if(event.key==='Enter')this.blur();">
+            <input class="rv-field-input" value="${_esc(r.match_type||'')}" placeholder="Match type" maxlength="40" style="flex:1.5;min-width:75px;font-size:.65rem;"
+              onblur="rvSaveField(${i},'match_type',this)" onkeydown="if(event.key==='Enter')this.blur();">
+            <input class="rv-field-input" value="${_esc(r.show||'')}" placeholder="Show" maxlength="60" style="flex:1.5;min-width:65px;font-size:.65rem;"
+              onblur="rvSaveField(${i},'show',this)" onkeydown="if(event.key==='Enter')this.blur();">
+            <input class="rv-field-input" value="${_esc(r.year||'')}" placeholder="Year" maxlength="4" style="width:40px;flex-shrink:0;font-size:.65rem;"
+              onblur="rvSaveField(${i},'year',this)" onkeydown="if(event.key==='Enter')this.blur();">
+          </div>
         </div>
-      </div>
-      ${editable
-        ? `<button class="rv-outcome-cycle rr-outcome ${outcome}" onclick="rvCycleOutcome(${i},event)" title="Click to cycle outcome" style="cursor:pointer;">${{won:'Won',lost:'Lost',even:'Even'}[outcome]||'Even'}</button>`
-        : `<span class="rr-outcome ${outcome}">${{won:'Won',lost:'Lost',even:'Even'}[outcome]||'Even'}</span>`}
-      ${editable ? `
-      <div class="rr-controls">
-        <button class="rr-arrow" onclick="rvMove(${i},-1)" ${i===0?'disabled':''} title="Move up">▲</button>
-        <button class="rr-arrow" onclick="rvMove(${i},1)" ${i===_rivalries.length-1?'disabled':''} title="Move down">▼</button>
-      </div>
-      <button class="rr-del" onclick="event.stopPropagation();deleteRivalry(${i})" title="Delete">✕</button>` : ''}
-    </div>`;
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
+          <button class="rv-status-btn ${status}" onclick="rvToggleStatus(${i})">${statusLabel}</button>
+          <div style="display:flex;align-items:center;gap:2px;">
+            <button class="rv-ctrl-btn" onclick="rvMove(${i},-1)" ${i===0?'disabled':''} title="Move up">▲</button>
+            <button class="rv-ctrl-btn" onclick="rvMove(${i},1)" ${i===_rivalries.length-1?'disabled':''} title="Move down">▼</button>
+            <button class="rv-ctrl-btn del" onclick="event.stopPropagation();deleteRivalry(${i})" title="Delete">✕</button>
+          </div>
+        </div>
+      </div>`;
+    } else {
+      return `<div class="rr-row rv-row" data-idx="${i}" style="align-items:center;padding:12px 0;gap:12px;">
+        <div style="width:44px;height:44px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);">${avatarHtml}</div>
+        <div class="rr-text-col" style="flex:1;min-width:0;">
+          <div style="font-size:.88rem;font-weight:700;color:#e8e8e8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(displayName)}</div>
+          ${metaParts.length ? `<div style="font-size:.65rem;color:rgba(255,255,255,.3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(metaParts.join(' · '))}</div>` : ''}
+        </div>
+        <span class="rv-status ${status}">${statusLabel}</span>
+      </div>`;
+    }
   }).join('');
 
   if (editable) _rrMobileDrag(list, _rivalries, () => { renderRivalries(); saveRivalries(getSession()); });
 }
 
-function rvMetaBlur(idx, el) {
-  // Store full combined meta in 'match' field for display
-  const session = getSession(); if (!session) return;
-  _rivalries[idx].match = el.value.trim();
-  _rivalries[idx].notes = '';
-  _rivalries[idx].efed = '';
-  _rivalries[idx].year = '';
-  saveRivalries(session);
-}
-
 async function _fetchRivalryAvatars() {
-  if (!_rivalries.length) return;
-  const names = [...new Set(_rivalries.map(r => (r.name||'').trim()).filter(Boolean))];
+  // For backward compat: fetch avatars for old-schema rivalries that have no stored avatar_url
+  const names = [...new Set(
+    _rivalries.filter(r => !r.avatar_url && r.name).map(r => (r.name||'').trim()).filter(Boolean)
+  )];
   if (!names.length) return;
   try {
     const encoded = names.map(n => encodeURIComponent(n)).join(',');
-    const [byUsername, byDisplay] = await Promise.all([
-      sbGet('users', `username=in.(${encoded})&select=username,display_name,avatar_url`).catch(()=>[]),
-      sbGet('users', `display_name=in.(${encoded})&select=username,display_name,avatar_url`).catch(()=>[])
-    ]);
-    const all = [...byUsername, ...byDisplay];
-    const seen = new Set();
-    all.forEach(u => {
-      const uKey = (u.username||'').toLowerCase();
-      if (!seen.has(uKey)) {
-        seen.add(uKey);
-        _rivalryAvatarCache[uKey] = { found: true, avatar_url: u.avatar_url||null, display_name: u.display_name || u.username };
-      }
-      const dKey = (u.display_name||'').toLowerCase();
-      if (dKey && !seen.has(dKey)) {
-        seen.add(dKey);
-        _rivalryAvatarCache[dKey] = { found: true, avatar_url: u.avatar_url||null, display_name: u.display_name || u.username };
-      }
-    });
-    names.forEach(n => {
-      const k = n.toLowerCase();
-      if (!_rivalryAvatarCache[k]) _rivalryAvatarCache[k] = { found: false, avatar_url: null, display_name: n };
+    const rows = await sbGet('users', `username=in.(${encoded})&select=username,display_name,avatar_url`).catch(()=>[]);
+    rows.forEach(u => {
+      const k = (u.username||'').toLowerCase();
+      _rivalryAvatarCache[k] = { avatar_url: u.avatar_url||null, display_name: u.display_name || u.username };
     });
   } catch(e) {}
 }
@@ -4092,7 +4142,6 @@ async function loadRivalries(username, isOwn) {
     _rrOwnerName = rows[0]?.display_name || username;
     _rrOwnerAvatarUrl = rows[0]?.avatar_url || '';
   } catch(e) {
-    // rivalries column may not exist yet — fail silently
     _rivalries = [];
     _rrOwnerName = username;
     _rrOwnerAvatarUrl = '';
