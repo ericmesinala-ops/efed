@@ -40,93 +40,6 @@
     return _verifiedUsers.has(username.toLowerCase());
   }
 
-  // ── SPECIAL EMOJI SYSTEM ──
-  // Admin (derrick_maximus) is ALWAYS 🎲. No one else can ever have 🎲.
-  // All other users get a unique emoji assigned once and stored in Supabase users.special_emoji.
-  // Pool: gender-neutral, no skin tones, universally safe.
-  const ADMIN_SPECIAL_EMOJI = '🎲';
-  const _EMOJI_POOL = [
-    '⚡','🔥','🌊','❄️','🌀','☄️','🌙','⭐','🌟','💫','✨','🎯','🏆','👑',
-    '💎','🔮','🎪','🎭','🎨','🎸','🎺','🎻','🥁','🎮','🕹️','🃏','🀄','🎰',
-    '🚀','🛸','🌈','⚗️','🔬','🔭','💡','⚙️','🔩','🧲','💣','🧨','🎆','🎇',
-    '🌋','🗻','🏔️','🌊','🦋','🦅','🦁','🐉','🦊','🐺','🦝','🦎','🦈','🦂',
-    '🐙','🦑','🦠','🍄','🌵','🌴','🎋','🍀','🌺','🌸','🍁','🍂','🍃','🌾',
-    '💀','☠️','👻','👾','🤖','👽','🎃','🧿','🔱','⚜️','🏴‍☠️','🎖️','🎗️',
-    '🧬','🦠','🧪','🧫','🧲','💾','📡','🛡️','⚔️','🗡️','🏹','🪃','🔑','🗝️',
-    '🌑','🌒','🌓','🌔','🌕','🌖','🌗','🌘','🪐','🌠','🌌','🌫️','🌪️','🌩️',
-    '🎵','🎶','🎼','🎤','🎧','📻','🥊','⛸️','🏋️','🤺','🏇','🧗','🪂','🤿',
-    '🧩','🪆','🎱','🎳','🎯','🎻','🪕','🪗','🪘','🪙','🪬','🧧','🎀'
-  ].filter(e => e !== ADMIN_SPECIAL_EMOJI);
-
-  // In-memory cache: username → emoji
-  const _emojiCache = {};
-  // Queue to avoid race conditions on assign
-  const _emojiAssigning = new Set();
-
-  function _glowEmoji(emoji) {
-    return `<span class="special-emoji-glow">${emoji}</span>`;
-  }
-
-  function getUserEmoji(username) {
-    if (!username) return null;
-    const u = username.toLowerCase();
-    if (u === ADMIN_USERNAME) return ADMIN_SPECIAL_EMOJI;
-    return _emojiCache[u] || null;
-  }
-
-  async function ensureUserEmoji(username) {
-    if (!username) return;
-    const u = username.toLowerCase();
-    if (u === ADMIN_USERNAME) {
-      _emojiCache[u] = ADMIN_SPECIAL_EMOJI;
-      // Make sure admin row in DB also has it
-      try {
-        const rows = await sbGet('users', `username=eq.${encodeURIComponent(u)}&select=special_emoji`);
-        if (rows.length && rows[0].special_emoji !== ADMIN_SPECIAL_EMOJI) {
-          await sbUpdate('users', { special_emoji: ADMIN_SPECIAL_EMOJI }, `username=eq.${encodeURIComponent(u)}`);
-        }
-      } catch(e) {}
-      return;
-    }
-    if (_emojiCache[u] || _emojiAssigning.has(u)) return;
-    _emojiAssigning.add(u);
-    try {
-      const rows = await sbGet('users', `username=eq.${encodeURIComponent(u)}&select=special_emoji`);
-      if (rows.length && rows[0].special_emoji && rows[0].special_emoji !== ADMIN_SPECIAL_EMOJI) {
-        _emojiCache[u] = rows[0].special_emoji;
-        return;
-      }
-      // Need to assign one — pick randomly from pool, avoid already-taken ones
-      const takenRows = await sbGet('users', `special_emoji=not.is.null&select=special_emoji`);
-      const taken = new Set(takenRows.map(r => r.special_emoji));
-      taken.add(ADMIN_SPECIAL_EMOJI); // admin's is always off limits
-      const available = _EMOJI_POOL.filter(e => !taken.has(e));
-      const pick = available.length > 0
-        ? available[Math.floor(Math.random() * available.length)]
-        : _EMOJI_POOL[Math.floor(Math.random() * _EMOJI_POOL.length)]; // fallback if pool exhausted
-      await sbUpdate('users', { special_emoji: pick }, `username=eq.${encodeURIComponent(u)}`);
-      _emojiCache[u] = pick;
-    } catch(e) { console.error('[emoji] ensureUserEmoji failed for', u, e); }
-    finally { _emojiAssigning.delete(u); }
-  }
-
-  async function preloadEmojis(usernames) {
-    if (!usernames || !usernames.length) return;
-    const toFetch = [...new Set(usernames.map(u => u.toLowerCase()))].filter(u => !_emojiCache[u]);
-    if (!toFetch.length) return;
-    try {
-      const rows = await sbGet('users', `username=in.(${toFetch.map(u => encodeURIComponent(u)).join(',')})&select=username,special_emoji`);
-      rows.forEach(r => {
-        const u = r.username.toLowerCase();
-        if (u === ADMIN_USERNAME) { _emojiCache[u] = ADMIN_SPECIAL_EMOJI; return; }
-        if (r.special_emoji && r.special_emoji !== ADMIN_SPECIAL_EMOJI) _emojiCache[u] = r.special_emoji;
-      });
-      // Assign emojis for anyone who doesn't have one yet
-      for (const u of toFetch) {
-        if (!_emojiCache[u]) await ensureUserEmoji(u);
-      }
-    } catch(e) {}
-  }
 
   function withVerified(displayName, username, useAdminLabel = true) {
     if (!isVerifiedUser(username)) {
@@ -196,10 +109,28 @@
 
   async function getPageViewCount(pageType, pageKey) {
     try {
-      const rows = await sbGet('page_views', `page_type=eq.${encodeURIComponent(pageType)}&page_key=eq.${encodeURIComponent(pageKey)}&select=id`);
-      return rows.length;
+      const r = await fetch(
+        SUPABASE_URL + '/rest/v1/page_views?page_type=eq.' + encodeURIComponent(pageType) + '&page_key=eq.' + encodeURIComponent(pageKey),
+        { headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range-Unit': 'items', 'Range': '0-0' } }
+      );
+      const count = parseInt(r.headers.get('content-range')?.split('/')[1] || '0', 10);
+      return isNaN(count) ? 0 : count;
     } catch(e) { return 0; }
   }
+
+  // ── PASSIVE CLEANUP — runs silently ~10% of page loads, no pg_cron needed ──
+  (function passiveCleanup() {
+    if (Math.random() > 0.1) return;
+    const now = Date.now();
+    const cutoff90 = now - (90 * 24 * 60 * 60 * 1000); // 90 days for page_views
+    const cutoff60 = now - (60 * 24 * 60 * 60 * 1000); // 60 days for notifications
+    const cutoff30 = now - (30 * 24 * 60 * 60 * 1000); // 30 days for chat_messages (ms)
+    // Convert to ISO for created_at fields (text/timestamptz columns)
+    // All three tables store timestamps as bigint milliseconds
+    fetch(SUPABASE_URL + '/rest/v1/page_views?viewed_at=lt.' + cutoff90, { method: 'DELETE', headers: SB_HEADERS }).catch(() => {});
+    fetch(SUPABASE_URL + '/rest/v1/notifications?created_at=lt.' + cutoff60 + '&read=eq.true', { method: 'DELETE', headers: SB_HEADERS }).catch(() => {});
+    fetch(SUPABASE_URL + '/rest/v1/chat_messages?created_at=lt.' + cutoff30, { method: 'DELETE', headers: SB_HEADERS }).catch(() => {});
+  })();
 
   function formatViewCount(n) {
     if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -248,7 +179,6 @@
       if (userBtn) { userBtn.style.visibility = "visible"; userBtn.style.display = "flex"; }
       if (initialsEl) { var n = session.displayName || session.username || "?"; initialsEl.textContent = n[0].toUpperCase(); }
       // Ensure current user has their special emoji assigned in Supabase
-      ensureUserEmoji(session.username).catch(()=>{});
     } else {
       if (userBtn) userBtn.style.visibility = "hidden";
     }
@@ -264,15 +194,6 @@ function safeParseTagsJson(raw) { if (!raw) return []; if (Array.isArray(raw)) r
   }
 
   /* ── SPECIAL EMOJI GLOW ── */
-  .special-emoji-glow {
-    display: inline-block;
-    font-size: 1em;
-    line-height: 1;
-    filter: drop-shadow(0 0 4px rgba(255,255,180,0.85)) drop-shadow(0 0 8px rgba(255,220,80,0.6));
-    animation: emoji-pulse 2.4s ease-in-out infinite;
-    vertical-align: middle;
-    flex-shrink: 0;
-  }
   @keyframes emoji-pulse {
     0%,100% { filter: drop-shadow(0 0 3px rgba(255,255,180,0.8)) drop-shadow(0 0 7px rgba(255,200,50,0.55)); }
     50%      { filter: drop-shadow(0 0 7px rgba(255,255,200,1))   drop-shadow(0 0 14px rgba(255,220,80,0.85)); }
@@ -6706,17 +6627,11 @@ window.addEventListener('popstate', function(e) {
 // ── HUB VIEW TIMER — per-video hub watch time + live viewers
 // ═══════════════════════════════════════════════════════════════════
 (function() {
-  const HUB_TICK_SECS  = 15;    // push +15s to server every 15s while watching
-  const HUB_WATCH_TTL  = 90000; // 90s — watcher row expires if no heartbeat
-  const HUB_WATCH_HB   = 30000; // watcher heartbeat interval
-  const HUB_REFRESH    = 30000; // re-read DB every 30s
+  const HUB_TICK_SECS  = 60;    // push +60s to server every 60s while watching
 
   let _hubWatching    = false;
   let _hubCurrentUrl  = null;  // URL of video being watched
   let _hubTickTimer   = null;
-  let _hubWatchHbT    = null;
-  let _hubRefreshT    = null;
-  let _hubLiveCount   = 0;
   let _hubTotalSecs   = 0;
   let _hubDbLoaded    = false;
 
@@ -6735,8 +6650,6 @@ window.addEventListener('popstate', function(e) {
   function _render() {
     const wrap     = document.getElementById('hub-video-stats');
     const lbl      = document.getElementById('hub-video-time-label');
-    const liveWrap = document.getElementById('hub-video-live-wrap');
-    const liveLbl  = document.getElementById('hub-video-live-label');
     if (!lbl || !wrap) return;
 
     // Show only when there's data or actively watching
@@ -6745,15 +6658,7 @@ window.addEventListener('popstate', function(e) {
       lbl.textContent = _fmtTime(_hubTotalSecs);
     }
 
-    // Live badge — only when > 1 person watching this video
-    if (liveWrap && liveLbl) {
-      if (_hubLiveCount > 1) {
-        liveLbl.textContent = _hubLiveCount + ' watching now';
-        liveWrap.style.display = 'flex';
-      } else {
-        liveWrap.style.display = 'none';
-      }
-    }
+    // Live watcher badge removed
   }
 
   // ── Load per-video total from hub_video_stats ──
@@ -6770,19 +6675,6 @@ window.addEventListener('popstate', function(e) {
     _render();
   }
 
-  // ── Count live viewers for this video ──
-  async function _countLive(url) {
-    if (!url) return;
-    try {
-      const cutoff = Date.now() - HUB_WATCH_TTL;
-      const r = await fetch(SUPABASE_URL + '/rest/v1/hub_watchers?video_url=eq.' + encodeURIComponent(url) + '&last_seen=gt.' + cutoff + '&select=session_id', {
-        headers: { ...SB_HEADERS, 'Prefer': 'count=exact', 'Range': '0-0' }
-      });
-      _hubLiveCount = parseInt(r.headers.get('Content-Range')?.split('/')[1] || '0', 10);
-    } catch(e) {}
-    _render();
-  }
-
   // ── Tick: push +15s to this video's total ──
   async function _tick() {
     if (!_hubWatching || !_hubCurrentUrl || document.visibilityState === 'hidden') return;
@@ -6794,28 +6686,6 @@ window.addEventListener('popstate', function(e) {
       }).catch(() => null);
       _hubTotalSecs += HUB_TICK_SECS;
       _render();
-    } catch(e) {}
-  }
-
-  // ── Heartbeat: upsert watcher row for this video ──
-  async function _heartbeat() {
-    if (!_hubWatching || !_hubCurrentUrl) return;
-    try {
-      await fetch(SUPABASE_URL + '/rest/v1/hub_watchers', {
-        method: 'POST',
-        headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates' },
-        body: JSON.stringify({ session_id: _hubSessId, video_url: _hubCurrentUrl, last_seen: Date.now() })
-      });
-      await _countLive(_hubCurrentUrl);
-    } catch(e) {}
-  }
-
-  // ── Remove own watcher row ──
-  async function _removeWatcher() {
-    try {
-      await fetch(SUPABASE_URL + '/rest/v1/hub_watchers?session_id=eq.' + encodeURIComponent(_hubSessId), {
-        method: 'DELETE', headers: SB_HEADERS
-      });
     } catch(e) {}
   }
 
@@ -6835,11 +6705,8 @@ window.addEventListener('popstate', function(e) {
 
     // Load stats + start timers
     _loadStats(url);
-    _heartbeat();
     _tick();
     _hubTickTimer = setInterval(_tick, HUB_TICK_SECS * 1000);
-    _hubWatchHbT  = setInterval(_heartbeat, HUB_WATCH_HB);
-    _hubRefreshT  = setInterval(() => { _loadStats(url); _countLive(url); }, HUB_REFRESH);
   };
 
   // ── Public: called by closeExpand ──
@@ -6848,9 +6715,6 @@ window.addEventListener('popstate', function(e) {
     if (!_hubWatching) return;
     _hubWatching = false;
     clearInterval(_hubTickTimer); _hubTickTimer = null;
-    clearInterval(_hubWatchHbT);  _hubWatchHbT  = null;
-    clearInterval(_hubRefreshT);  _hubRefreshT  = null;
-    _removeWatcher();
     _hubCurrentUrl = null;
   }
 
@@ -6859,7 +6723,6 @@ window.addEventListener('popstate', function(e) {
       clearInterval(_hubTickTimer);
     } else if (_hubWatching) {
       _hubTickTimer = setInterval(_tick, HUB_TICK_SECS * 1000);
-      _heartbeat();
     }
   });
   window.addEventListener('beforeunload', _hubStopWatching);
@@ -10458,12 +10321,7 @@ async function loadExpandComments(url) {
       const users = await sbGet('users', `username=in.(${usernames.map(u => encodeURIComponent(u)).join(',')})`);
       users.forEach(u => {
         avatarMap[u.username] = u.avatar_url || null;
-        const ulow = u.username.toLowerCase();
-        if (ulow === ADMIN_USERNAME) { _emojiCache[ulow] = ADMIN_SPECIAL_EMOJI; }
-        else if (u.special_emoji && u.special_emoji !== ADMIN_SPECIAL_EMOJI) { _emojiCache[ulow] = u.special_emoji; }
       });
-      // Assign emojis to any user who doesn't have one yet
-      for (const u of usernames) { if (!_emojiCache[u.toLowerCase()]) await ensureUserEmoji(u); }
     } catch(e) {}
 
     list.innerHTML = '';
@@ -12790,14 +12648,10 @@ async function loadChatMessages(roomId) {
     // Pre-fetch avatars + special emojis for all unique users
     const unames = [...new Set(rows.map(r => r.username))];
     try {
-      const uRows = await sbGet('users', `username=in.(${unames.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,special_emoji`);
+      const uRows = await sbGet('users', `username=in.(${unames.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url`);
       uRows.forEach(u => {
         if (u.avatar_url) _chatAvatarCache[u.username] = u.avatar_url;
-        const ulow = u.username.toLowerCase();
-        if (ulow === ADMIN_USERNAME) { _emojiCache[ulow] = ADMIN_SPECIAL_EMOJI; }
-        else if (u.special_emoji && u.special_emoji !== ADMIN_SPECIAL_EMOJI) { _emojiCache[ulow] = u.special_emoji; }
       });
-      for (const u of unames) { if (!_emojiCache[u.toLowerCase()]) await ensureUserEmoji(u); }
     } catch(e) {}
     rows.forEach(m => appendChatMessage(m, false));
     // Track highest id so polling only fetches newer messages
@@ -13352,12 +13206,6 @@ var CHAT_WRESTLING_EMOJIS = [
 
 // _emojiPickerOpen retired — see _stampPickerOpen
 
-// ── Special emojis per user (earned/granted) ──
-function getSpecialEmojis(username) {
-  if (!username) return [];
-  const emoji = getUserEmoji(username.toLowerCase());
-  return emoji ? [emoji] : [];
-}
 
 function _makeEmojiBtn(icon, fontSize) {
   const btn = document.createElement('button');
