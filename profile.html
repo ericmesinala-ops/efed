@@ -8415,17 +8415,47 @@ async function loadFeaturedVideos(targetUser) {
       row.innerHTML = emptyMsg;
       return;
     }
-    const ids = appearances.map(a => a.video_id).filter(id => id && /^\d+$/.test(String(id)));
+
+    // Build a ytId → appearance map for all entries
+    const ytIdMap = {};
+    appearances.forEach(a => {
+      const ytId = extractId(a.video_url || '');
+      if (ytId) ytIdMap[ytId] = a;
+    });
+
+    // Try numeric IDs first (legacy entries)
+    const numericIds = appearances.map(a => a.video_id).filter(id => id && /^\d+$/.test(String(id)));
     let subs = [];
-    if (ids.length) {
-      subs = await sbGet('submissions', `id=in.(${ids.join(',')})&select=id,url,show_name,date,thumb_url`).catch(() => []);
+    if (numericIds.length) {
+      subs = await sbGet('submissions', `id=in.(${numericIds.join(',')})&select=id,url,show_name,date,thumb_url`).catch(() => []);
     }
-    if (countEl) countEl.textContent = subs.length || appearances.length;
-    if (subs.length) {
-      row.innerHTML = subs.map(s => makeVidCard(s.url, s.show_name, s.date, s.thumb_url)).join('');
-    } else {
-      row.innerHTML = appearances.map(a => makeVidCard(a.video_url || '', '', '', '')).join('');
+
+    // For any not found by numeric ID, look up by YouTube ID embedded in url
+    const foundUrls = new Set(subs.map(s => extractId(s.url)));
+    const missingYtIds = Object.keys(ytIdMap).filter(id => !foundUrls.has(id));
+    if (missingYtIds.length) {
+      // PostgREST ilike: %25 in the filter string decodes to % on the server
+      const orCond = missingYtIds.map(id => `url.ilike.%25${id}%25`).join(',');
+      const extra = await sbGet('submissions', `or=(${orCond})&select=id,url,show_name,date,thumb_url`).catch(() => []);
+      subs = [...subs, ...extra];
     }
+
+    // Build url→sub and ytId→sub lookup maps
+    const subByUrl = {};
+    const subByYtId = {};
+    subs.forEach(s => {
+      if (s.url) subByUrl[s.url] = s;
+      const ytId = extractId(s.url);
+      if (ytId) subByYtId[ytId] = s;
+    });
+
+    if (countEl) countEl.textContent = appearances.length;
+    row.innerHTML = appearances.map(a => {
+      const ytId = extractId(a.video_url || '');
+      const sub = subByUrl[a.video_url] || (ytId ? subByYtId[ytId] : null);
+      return makeVidCard(a.video_url || '', sub?.show_name || '', sub?.date || '', sub?.thumb_url || '');
+    }).join('');
+
     setTimeout(updateFeatInArrows, 100);
   } catch(e) {
     console.error('loadFeaturedVideos error:', e);
