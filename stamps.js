@@ -487,17 +487,22 @@ function _autoLink(rawText) {
     const url = link.getAttribute('href');
     if (!url) return;
 
-    const textBlock = link.closest('.post-card-text, .efed-post-card-text') || link.parentElement;
-    const parent = textBlock.parentElement;
-    if (!parent) return;
+    // Find the post card and insert the embed RIGHT BEFORE the footer —
+    // this guarantees the footer always renders below the embed regardless
+    // of async timing or the text block's wrapper nesting.
+    const postCard = link.closest('.post-card, .efed-post-card, [class^="post-card"]');
+    const footer = postCard?.querySelector('.post-card-footer, .efed-post-card-footer');
+    if (!postCard && !footer) return;
 
     const wrap = document.createElement('div');
     wrap.className = 'x-embed-wrap';
-    textBlock.after ? textBlock.after(wrap) : parent.insertBefore(wrap, textBlock.nextSibling);
-
-    // The post card has overflow:hidden — lift it so the footer stays visible after embed
-    const postCard = link.closest('.post-card, .efed-post-card, .post-card-ooc, .post-card-ic');
-    if (postCard) postCard.style.overflow = 'visible';
+    if (footer) {
+      footer.before(wrap);
+    } else {
+      // Fallback: after the text block
+      const textBlock = link.closest('.post-card-text, .efed-post-card-text') || link.parentElement;
+      textBlock.after ? textBlock.after(wrap) : textBlock.parentElement.insertBefore(wrap, textBlock.nextSibling);
+    }
 
     wrap.innerHTML = `<div class="x-embed-skeleton"><div class="x-embed-sk-line" style="width:55%"></div><div class="x-embed-sk-line" style="width:82%;margin-top:6px"></div><div class="x-embed-sk-line" style="width:40%;margin-top:6px"></div></div>`;
 
@@ -533,6 +538,9 @@ function _autoLink(rawText) {
         </a>`;
 
       link.style.display = 'none';
+
+      // Force layout recalculation so the post card expands and footer stays below
+      if (postCard) void postCard.offsetHeight;
     } catch(e) { wrap.remove(); }
   }
 
