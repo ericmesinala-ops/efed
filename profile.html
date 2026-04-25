@@ -2736,7 +2736,7 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 </div>
 
 <!-- ── TROPHY CASE ── -->
-<div class="section" id="trophy-case-section" style="padding-bottom:100px;">
+<div class="section" id="trophy-case-section" style="padding-bottom:16px;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
     <div class="sec-title" style="margin-bottom:0;">Trophy Case</div>
     <div id="trophy-count-badge" style="display:none;font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(200,168,75,.5);font-weight:700;"></div>
@@ -2751,7 +2751,7 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 </div>
 
 <!-- ── RIVALRIES SECTION ── -->
-<div class="section" id="rivalries-section" style="padding-bottom:100px;">
+<div class="section" id="rivalries-section" style="padding-bottom:16px;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
     <div class="sec-title" style="margin-bottom:0;">Rivalries</div>
     <button id="rivalry-add-btn" onclick="rvAddNew()" title="Add rivalry" style="display:none;" class="rr-add-btn">+</button>
@@ -2761,7 +2761,7 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 </div>
 
 <!-- ── RECORDS SECTION ── -->
-<div class="section" id="records-section" style="padding-bottom:100px;">
+<div class="section" id="records-section" style="padding-bottom:16px;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;position:relative;">
     <div class="sec-title" style="margin-bottom:0;">Recent Match</div>
     <div style="display:flex;align-items:center;gap:8px;">
@@ -2945,6 +2945,42 @@ html.day-mode .rr-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 }
 .rv-status.ongoing { background: rgba(76,175,100,.1);  color: #4caf64; border: 1px solid rgba(76,175,100,.22); }
 .rv-status.ended   { background: rgba(255,255,255,.05); color: rgba(255,255,255,.3); border: 1px solid rgba(255,255,255,.1); }
+
+/* Rivalry expand/collapse chevron button */
+.rv-chevron-btn {
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  margin: 4px auto 0;
+  background: transparent; border: none; cursor: pointer;
+  color: rgba(255,255,255,.25); font-family: 'DM Sans', sans-serif;
+  font-size: .7rem; letter-spacing: .5px;
+  padding: 6px 14px; border-radius: 20px;
+  transition: color .18s, background .18s;
+  backdrop-filter: blur(6px);
+}
+.rv-chevron-btn:hover { color: rgba(255,255,255,.6); background: rgba(255,255,255,.05); }
+.rv-chevron-btn svg { flex-shrink: 0; transition: transform .2s; }
+.rv-chevron-up { margin-top: 2px; }
+
+/* Rivalry pagination row */
+.rv-pagination-row {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 6px 0 2px; flex-wrap: wrap;
+}
+.rv-page-tab {
+  min-width: 28px; height: 28px; padding: 0 7px;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+  border-radius: 7px; color: rgba(255,255,255,.3);
+  font-family: 'DM Sans', sans-serif; font-size: .72rem; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+}
+.rv-page-tab:hover { background: rgba(255,255,255,.08); color: rgba(255,255,255,.65); }
+.rv-page-tab.rv-page-active {
+  background: rgba(200,168,75,.12); border-color: rgba(200,168,75,.3);
+  color: #c8a84b;
+}
+.rv-chevron-inline {
+  margin: 0; padding: 4px 8px; min-width: 28px; height: 28px;
+}
 
 /* Rivalry status toggle button (edit mode) */
 .rv-status-btn {
@@ -4052,6 +4088,12 @@ async function saveRivalries(session) {
   } catch(e) { showToast('Save failed'); }
 }
 
+// ── RIVALRY EXPAND/COLLAPSE/PAGINATION STATE ──
+let _rvExpanded = false;
+let _rvPage = 0;
+const RV_DEFAULT_SHOW = 3;
+const RV_PAGE_SIZE = 10;
+
 function renderRivalries() {
   const list  = document.getElementById('rivalries-list');
   const empty = document.getElementById('rivalries-empty');
@@ -4059,28 +4101,57 @@ function renderRivalries() {
   if (!_rivalries.length) {
     list.innerHTML = '';
     if (empty) empty.style.display = 'block';
+    // clear chevron/pagination
+    let ctrl = document.getElementById('rv-expand-ctrl');
+    if (ctrl) ctrl.remove();
     return;
   }
   if (empty) empty.style.display = 'none';
   const editable = _rrIsOwn;
+  const total = _rivalries.length;
+  const isMobile = window.innerWidth <= 600;
 
-  list.innerHTML = _rivalries.map((r, i) => {
-    // Avatar: use stored (frozen) avatar first, fall back to live cache
+  // Determine which items to show
+  let showItems, showExpand, showCollapse, showPagination;
+  if (total <= RV_DEFAULT_SHOW) {
+    // Always show all, no controls
+    showItems = _rivalries.map((_,i)=>i);
+    showExpand = false; showCollapse = false; showPagination = false;
+  } else if (total <= RV_PAGE_SIZE) {
+    // Show 3 or all, simple chevron toggle
+    if (_rvExpanded) {
+      showItems = _rivalries.map((_,i)=>i);
+      showExpand = false; showCollapse = true; showPagination = false;
+    } else {
+      showItems = [0,1,2];
+      showExpand = true; showCollapse = false; showPagination = false;
+    }
+  } else {
+    // Over 10: paginated mode
+    const pageCount = Math.ceil(total / RV_PAGE_SIZE);
+    if (_rvPage < 0) _rvPage = 0;
+    if (_rvPage >= pageCount) _rvPage = pageCount - 1;
+    if (!_rvExpanded && _rvPage === 0) {
+      // default: show only 3, with expand chevron
+      showItems = [0,1,2];
+      showExpand = true; showCollapse = false; showPagination = false;
+    } else {
+      const start = _rvPage * RV_PAGE_SIZE;
+      showItems = [];
+      for (let ii = start; ii < Math.min(start + RV_PAGE_SIZE, total); ii++) showItems.push(ii);
+      showExpand = false; showCollapse = true; showPagination = true;
+    }
+  }
+
+  function buildRow(r, i) {
     const cached    = _rivalryAvatarCache[(r.name||'').toLowerCase().trim()];
     const avatarUrl = r.avatar_url || cached?.avatar_url || '';
     const displayName = r.display_name || cached?.display_name || r.name || '';
-
-    // Initials: split by whitespace only (underscore names = one word = one initial)
     const initials = (displayName || r.name || '?').trim()
       .split(/\s+/).slice(0, 2).map(w => (w[0]||'').toUpperCase()).join('') || '?';
-
     const status = r.status || 'ongoing';
     const statusLabel = status === 'ended' ? 'Ended' : 'Ongoing';
-
-    // Meta parts for display
     const metaParts = [r.efed, r.year].filter(Boolean);
-
-    // Avatar HTML
     const avatarHtml = avatarUrl
       ? `<img src="${_esc(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
            onerror="this.style.display='none';this.parentNode.querySelector('.rv-init').style.display='flex';">
@@ -4088,8 +4159,11 @@ function renderRivalries() {
       : `<span class="rv-init" style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.95rem;color:rgba(255,255,255,.55);">${initials}</span>`;
 
     if (editable) {
-      // Show display_name (bold) if resolved, otherwise show raw name input (normal weight)
       const resolvedName = r.display_name || '';
+      // Move buttons: hide on mobile (drag-and-drop is enough)
+      const moveBtns = isMobile ? '' : `
+        <button class="rv-ctrl-btn" onclick="rvMove(${i},-1)" ${i===0?'disabled':''} title="Move up">▲</button>
+        <button class="rv-ctrl-btn" onclick="rvMove(${i},1)" ${i===_rivalries.length-1?'disabled':''} title="Move down">▼</button>`;
       return `<div class="rr-row rv-row" data-idx="${i}" style="align-items:flex-start;padding:12px 0;gap:10px;">
         <div style="width:44px;height:44px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);margin-top:2px;">${avatarHtml}</div>
         <div class="rr-text-col" style="flex:1;min-width:0;gap:6px;">
@@ -4111,8 +4185,7 @@ function renderRivalries() {
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
           <button class="rv-status-btn ${status}" onclick="rvToggleStatus(${i})">${statusLabel}</button>
           <div style="display:flex;align-items:center;gap:2px;">
-            <button class="rv-ctrl-btn" onclick="rvMove(${i},-1)" ${i===0?'disabled':''} title="Move up">▲</button>
-            <button class="rv-ctrl-btn" onclick="rvMove(${i},1)" ${i===_rivalries.length-1?'disabled':''} title="Move down">▼</button>
+            ${moveBtns}
             <button class="rv-ctrl-btn del" onclick="event.stopPropagation();deleteRivalry(${i})" title="Delete">✕</button>
           </div>
         </div>
@@ -4127,9 +4200,70 @@ function renderRivalries() {
         <span class="rv-status ${status}">${statusLabel}</span>
       </div>`;
     }
-  }).join('');
+  }
+
+  list.innerHTML = showItems.map(i => buildRow(_rivalries[i], i)).join('');
+
+  // Build expand/collapse/pagination control
+  let ctrl = document.getElementById('rv-expand-ctrl');
+  if (!ctrl) {
+    ctrl = document.createElement('div');
+    ctrl.id = 'rv-expand-ctrl';
+    list.parentNode.insertBefore(ctrl, list.nextSibling);
+  }
+
+  if (!showExpand && !showCollapse) {
+    ctrl.innerHTML = '';
+  } else if (showExpand) {
+    const remaining = total - RV_DEFAULT_SHOW;
+    ctrl.innerHTML = `<button class="rv-chevron-btn" onclick="_rvShowMore()" title="Show more rivalries">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 6.5L9 11.5L14 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>${remaining} more</span>
+    </button>`;
+  } else if (showCollapse && !showPagination) {
+    ctrl.innerHTML = `<button class="rv-chevron-btn rv-chevron-up" onclick="_rvCollapse()" title="Show fewer">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 11.5L9 6.5L14 11.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>`;
+  } else if (showPagination) {
+    // Numbered tabs + collapse
+    const pageCount = Math.ceil(total / RV_PAGE_SIZE);
+    const tabs = Array.from({length: pageCount}, (_,pi) =>
+      `<button class="rv-page-tab${pi===_rvPage?' rv-page-active':''}" onclick="_rvGoPage(${pi})">${pi+1}</button>`
+    ).join('');
+    ctrl.innerHTML = `<div class="rv-pagination-row">
+      ${tabs}
+      <button class="rv-chevron-btn rv-chevron-up rv-chevron-inline" onclick="_rvCollapse()" title="Collapse">
+        <svg width="16" height="16" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 11.5L9 6.5L14 11.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>`;
+  }
 
   if (editable) _rrMobileDrag(list, _rivalries, () => { renderRivalries(); saveRivalries(getSession()); });
+}
+
+function _rvShowMore() {
+  _rvExpanded = true;
+  _rvPage = 0;
+  renderRivalries();
+}
+function _rvCollapse() {
+  _rvExpanded = false;
+  _rvPage = 0;
+  renderRivalries();
+  // scroll back up to the section
+  const sec = document.getElementById('rivalries-section');
+  if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function _rvGoPage(p) {
+  _rvPage = p;
+  _rvExpanded = true;
+  renderRivalries();
 }
 
 async function _fetchRivalryAvatars() {
