@@ -495,6 +495,10 @@ function _autoLink(rawText) {
     wrap.className = 'x-embed-wrap';
     textBlock.after ? textBlock.after(wrap) : parent.insertBefore(wrap, textBlock.nextSibling);
 
+    // The post card has overflow:hidden — lift it so the footer stays visible after embed
+    const postCard = link.closest('.post-card, .efed-post-card, .post-card-ooc, .post-card-ic');
+    if (postCard) postCard.style.overflow = 'visible';
+
     wrap.innerHTML = `<div class="x-embed-skeleton"><div class="x-embed-sk-line" style="width:55%"></div><div class="x-embed-sk-line" style="width:82%;margin-top:6px"></div><div class="x-embed-sk-line" style="width:40%;margin-top:6px"></div></div>`;
 
     try {
