@@ -473,101 +473,80 @@ function _autoLink(rawText) {
   return out.join('');
 }
 
-// ── SOCIAL EMBED ENGINE ────────────────────────────────────────
+// ── SOCIAL EMBED ENGINE (slot-based — slots baked into post template) ─────
 (function _initSocialEmbeds() {
   const _e = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
   const X_ICON  = '<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24" style="color:rgba(255,255,255,.7)"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
   const IG_ICON = '<svg viewBox="0 0 24 24" width="28" height="28" fill="none"><defs><linearGradient id="ig_g" x1="0" y1="1" x2="1" y2="0"><stop offset="0%" stop-color="#f09433"/><stop offset="25%" stop-color="#e6683c"/><stop offset="50%" stop-color="#dc2743"/><stop offset="75%" stop-color="#cc2366"/><stop offset="100%" stop-color="#bc1888"/></linearGradient></defs><rect x="2" y="2" width="20" height="20" rx="6" fill="url(#ig_g)"/><rect x="6.5" y="6.5" width="11" height="11" rx="3" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="12" cy="12" r="3" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="16.5" cy="7.5" r=".9" fill="#fff"/></svg>';
 
-  function _skeleton(wrap) {
-    wrap.innerHTML = '<div class="hub-embed-skeleton"><div class="hub-sk-icon"></div><div style="flex:1;display:flex;flex-direction:column;gap:7px"><div class="hub-sk-line" style="width:48%"></div><div class="hub-sk-line" style="width:76%"></div></div></div>';
+  function _skeleton(slot) {
+    slot.className = 'hub-embed-wrap';
+    slot.innerHTML = '<div class="hub-embed-skeleton"><div class="hub-sk-icon"></div><div style="flex:1;display:flex;flex-direction:column;gap:7px"><div class="hub-sk-line" style="width:48%"></div><div class="hub-sk-line" style="width:76%"></div></div></div>';
   }
 
-  function _insertWrap(link) {
-    const postCard = link.closest('.post-card') || link.closest('.efed-post-card') || link.closest('[data-id]');
-    const footer   = postCard ? postCard.querySelector('.post-card-footer, .efed-post-card-footer') : null;
-    const wrap = document.createElement('div');
-    wrap.className = 'hub-embed-wrap';
-    if (footer) {
-      footer.before(wrap);
-    } else {
-      const tb = link.closest('.post-card-text, .efed-post-card-text') || link.parentElement;
-      if (tb.after) tb.after(wrap); else tb.parentElement.insertBefore(wrap, tb.nextSibling);
-    }
-    return { wrap, postCard };
+  function _card(slot, url, icon, name, handle, text, cta) {
+    slot.className = 'hub-embed-wrap';
+    slot.innerHTML =
+      '<a href="' + _e(url) + '" target="_blank" rel="noopener noreferrer" class="hub-preview-card">' +
+        '<div class="hub-preview-icon">' + icon + '</div>' +
+        '<div class="hub-preview-body">' +
+          '<span class="hub-preview-name">'  + _e(name || 'Post') + '</span>' +
+          (handle ? '<span class="hub-preview-handle">' + _e(handle) + '</span>' : '') +
+          (text   ? '<div class="hub-preview-text">'    + _e(text)   + '</div>'  : '') +
+          '<span class="hub-preview-cta">' + cta + '</span>' +
+        '</div>' +
+      '</a>';
   }
 
-  function _repaint(postCard) {
-    requestAnimationFrame(() => { if (postCard) void postCard.offsetHeight; });
-  }
-
-  async function _embedX(link) {
-    const url = link.getAttribute('href');
-    const { wrap, postCard } = _insertWrap(link);
-    _skeleton(wrap);
+  async function _fillX(slot, url) {
     try {
       const r = await fetch('https://publish.twitter.com/oembed?url=' + encodeURIComponent(url) + '&dnt=true&omit_script=true');
-      if (!r.ok) { wrap.remove(); return; }
+      if (!r.ok) { slot.remove(); return; }
       const d = await r.json();
       const parser = new DOMParser();
-      const doc = parser.parseFromString(d.html || '', 'text/html');
-      const bq  = doc.querySelector('blockquote');
-      const p   = bq && bq.querySelector('p');
+      const doc  = parser.parseFromString(d.html || '', 'text/html');
+      const bq   = doc.querySelector('blockquote');
+      const p    = bq && bq.querySelector('p');
       if (p) p.querySelectorAll('a').forEach(a => { if (/pic\.twitter|t\.co/i.test(a.href || '')) a.remove(); });
       const text   = (p && p.textContent.trim()) || '';
       const name   = d.author_name || '';
-      const hm     = ((bq && bq.querySelector('a[href*=\'/status/\']') || {}).href || '').match(/(?:twitter|x)\.com\/@?(\w+)\//i);
+      const hm     = ((bq && bq.querySelector('a[href*="/status/"]') || {}).href || '').match(/(?:twitter|x)\.com\/@?(\w+)\//i);
       const handle = hm ? '@' + hm[1] : '';
-      wrap.innerHTML = '<a href="' + _e(url) + '" target="_blank" rel="noopener noreferrer" class="hub-preview-card">' +
-        '<div class="hub-preview-icon">' + X_ICON + '</div>' +
-        '<div class="hub-preview-body">' +
-          '<span class="hub-preview-name">' + _e(name) + '</span>' +
-          (handle ? '<span class="hub-preview-handle">' + _e(handle) + '</span>' : '') +
-          (text   ? '<div  class="hub-preview-text">'   + _e(text)   + '</div>'  : '') +
-          '<span class="hub-preview-cta">View on X \u2197</span>' +
-        '</div></a>';
-      link.style.display = 'none';
-      _repaint(postCard);
-    } catch(e) { wrap.remove(); }
+      _card(slot, url, X_ICON, name, handle, text, 'View on X \u2197');
+    } catch(e) { slot.remove(); }
   }
 
-  async function _embedIG(link) {
-    const url = link.getAttribute('href');
-    const { wrap, postCard } = _insertWrap(link);
-    _skeleton(wrap);
+  async function _fillIG(slot, url) {
     let name = '', text = '';
     try {
       const r = await fetch('https://www.instagram.com/oembed/?url=' + encodeURIComponent(url) + '&format=json');
       if (r.ok) { const d = await r.json(); name = d.author_name || ''; text = d.title || ''; }
     } catch(_) {}
-    wrap.innerHTML = '<a href="' + _e(url) + '" target="_blank" rel="noopener noreferrer" class="hub-preview-card">' +
-      '<div class="hub-preview-icon">' + IG_ICON + '</div>' +
-      '<div class="hub-preview-body">' +
-        '<span class="hub-preview-name">' + _e(name || 'Instagram') + '</span>' +
-        (text ? '<div class="hub-preview-text">' + _e(text) + '</div>' : '') +
-        '<span class="hub-preview-cta">View on Instagram \u2197</span>' +
-      '</div></a>';
-    link.style.display = 'none';
-    _repaint(postCard);
+    _card(slot, url, IG_ICON, name || 'Instagram', '', text, 'View on Instagram \u2197');
   }
 
-  function _process(link) {
-    const type = link.getAttribute('data-hub-embed');
-    link.removeAttribute('data-hub-embed');
-    if (type === 'x')  _embedX(link);
-    if (type === 'ig') _embedIG(link);
+  function _processSlot(slot) {
+    const url  = slot.getAttribute('data-embed-url');
+    const type = slot.getAttribute('data-embed-type');
+    if (!url || !type) return;
+    slot.removeAttribute('data-embed-url');
+    slot.removeAttribute('data-embed-type');
+    _skeleton(slot);
+    if (type === 'x')  _fillX(slot, url);
+    if (type === 'ig') _fillIG(slot, url);
   }
 
   function _scan(root) {
     if (!root || !root.querySelectorAll) return;
-    root.querySelectorAll('a.hub-link[data-hub-embed]').forEach(_process);
+    root.querySelectorAll('.hub-embed-slot[data-embed-url]').forEach(_processSlot);
   }
 
   const obs = new MutationObserver(muts => muts.forEach(({ addedNodes }) =>
     addedNodes.forEach(n => {
       if (n.nodeType !== 1) return;
-      if (n.matches && n.matches('a.hub-link[data-hub-embed]')) _process(n); else _scan(n);
+      if (n.matches && n.matches('.hub-embed-slot[data-embed-url]')) _processSlot(n);
+      else _scan(n);
     })
   ));
 
