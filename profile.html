@@ -7080,15 +7080,16 @@ function _htRenderSlots(rawTags) {
     html += `<div style="display:flex;align-items:center;gap:6px;">
       <div class="ht-slot owner" id="ht-slot-${slotNum}">
         <div class="ht-slot-lbl">CC Hashtag</div>
-        <div class="ht-slot-val" id="ht-val-${slotNum}"
-          contenteditable="true"
+        <input type="text" class="ht-slot-val ht-slot-input" id="ht-val-${slotNum}"
           spellcheck="false"
           data-slot="${slotNum}"
-          style="outline:none;cursor:text;"
+          value="${tag ? '#'+_esc(tag) : ''}"
+          placeholder="#hashtag"
+          maxlength="21"
           onblur="htSlotSave(this)"
           onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
-          oninput="this.textContent=this.textContent.replace(/[^a-zA-Z0-9_#]/g,'').replace(/^#+/,'');"
-        >${tag ? '#'+_esc(tag) : ''}</div>
+          style="outline:none;cursor:text;display:block;"
+        >
       </div>
       <button class="ht-add-btn${showPlus ? ' ht-add-btn--mobile' : ' ht-add-btn--hidden'}" id="ht-add-${slotNum}" onclick="htShowNext()" title="Add hashtag">+</button>
     </div>`;
@@ -7102,7 +7103,7 @@ function htShowNext() {
   const tags = [1,2,3].map(n => {
     const el = document.getElementById('ht-val-' + n);
     if (!el) return '';
-    const raw = (el.textContent||'').replace(/^#+/,'').trim();
+    const raw = (el.value||'').replace(/^#+/,'').trim();
     return raw;
   });
   _htRenderSlots(tags);
@@ -7114,9 +7115,8 @@ function htShowNext() {
 async function htSlotSave(el) {
   if (!_isOwnProfile) return;
   const slotNum = el.dataset.slot;
-  const raw = (el.textContent || '').replace(/^#+/, '').trim().replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20);
-  // Re-render cleanly
-  el.textContent = raw ? '#' + raw : '';
+  const raw = (el.value || '').replace(/^#+/, '').trim().replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20);
+  el.value = raw ? '#' + raw : '';
   const session = getSession(); if (!session) return;
   try {
     await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),
@@ -8409,18 +8409,23 @@ async function loadFeaturedVideos(targetUser) {
   if (section) section.style.display = '';
   row.innerHTML = '<div class="featured-empty-state"><span class="featured-empty-text" style="color:rgba(255,255,255,.2)">Loading…</span></div>';
   try {
-    const appearances = await sbGet('video_appearances',
-      `username=eq.${encodeURIComponent(featUser)}&select=video_url,show_name,date,thumb_url&order=appeared_at.desc`
-    );
+    const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(featUser)}&select=video_id,video_url,appeared_at&order=appeared_at.desc`);
     if (!appearances.length) {
       if (countEl) countEl.textContent = '0';
       row.innerHTML = emptyMsg;
       return;
     }
-    if (countEl) countEl.textContent = appearances.length;
-    row.innerHTML = appearances.map(a =>
-      makeVidCard(a.video_url || '', a.show_name || '', a.date || '', a.thumb_url || '')
-    ).join('');
+    const ids = appearances.map(a => a.video_id).filter(id => id && /^\d+$/.test(String(id)));
+    let subs = [];
+    if (ids.length) {
+      subs = await sbGet('submissions', `id=in.(${ids.join(',')})&select=id,url,show_name,date,thumb_url`).catch(() => []);
+    }
+    if (countEl) countEl.textContent = subs.length || appearances.length;
+    if (subs.length) {
+      row.innerHTML = subs.map(s => makeVidCard(s.url, s.show_name, s.date, s.thumb_url)).join('');
+    } else {
+      row.innerHTML = appearances.map(a => makeVidCard(a.video_url || '', '', '', '')).join('');
+    }
     setTimeout(updateFeatInArrows, 100);
   } catch(e) {
     console.error('loadFeaturedVideos error:', e);
