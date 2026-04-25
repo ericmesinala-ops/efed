@@ -12184,6 +12184,10 @@ const _efedFeed = (() => {
         </div>
       </div>` : '';
       const commentHtml = p.text ? `<div style="margin-top:8px;font-size:.85rem;color:rgba(255,255,255,.85);line-height:1.55;white-space:pre-wrap;word-break:break-word;">${typeof _autoLink==='function'?_autoLink(p.text):_e(p.text)}</div>` : '';
+      const _rxRe = /https?:\/\/(www\.)?(twitter\.com|x\.com)\/\w+\/status\/\d+/i;
+      const _rigRe = /https?:\/\/(www\.)?instagram\.com\/(p|reel|tv)\/[\w-]+/i;
+      const _rxU = p.text && p.text.match(_rxRe), _rigU = p.text && p.text.match(_rigRe);
+      const repostEmbedSlot = (_rxU||_rigU) ? `<div class="hub-embed-slot" data-embed-url="${_e((_rxU||_rigU)[0].replace(/[.,;:!?)]+$/,''))}" data-embed-type="${_rxU?'x':'ig'}"></div>` : '';
       const repostShareBtn = (() => {
         const tweetText = vm ? `📺 Check this out!\n\n${vm.url||''}` : `📺 ${(p.text||'').slice(0,270)}`;
         const url = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(tweetText);
@@ -12200,7 +12204,7 @@ const _efedFeed = (() => {
             </div>
           </div>
         </div>
-        ${commentHtml}${videoCard}
+        ${commentHtml}${repostEmbedSlot}${videoCard}
         <div class="efed-post-card-footer">
           <div style="display:flex;align-items:center;gap:12px;">${likeBtn}${replyBtn}${repostShareBtn}${deleteBtn}</div>
         </div>
@@ -12225,8 +12229,12 @@ const _efedFeed = (() => {
     const textHtml = p.text
       ? `<div class="efed-post-card-text">${modeIconSvg}${_wrapEfedEmojis(typeof _autoLink==='function'?_autoLink(p.text):_e(p.text))}</div>`
       : '';
+    const _xRe = /https?:\/\/(www\.)?(twitter\.com|x\.com)\/\w+\/status\/\d+/i;
+    const _igRe = /https?:\/\/(www\.)?instagram\.com\/(p|reel|tv)\/[\w-]+/i;
+    const _xU = p.text && p.text.match(_xRe), _igU = p.text && p.text.match(_igRe);
+    const embedSlot = (_xU||_igU) ? `<div class="hub-embed-slot" data-embed-url="${_e((_xU||_igU)[0].replace(/[.,;:!?)]+$/,''))}" data-embed-type="${_xU?'x':'ig'}"></div>` : '';
     const bodyHtml = p.text
-      ? `<div style="margin-top:10px;">${textHtml}</div>${imgHtml}`
+      ? `<div style="margin-top:10px;">${textHtml}${embedSlot}</div>${imgHtml}`
       : imgHtml;
     const likeBtn = `<button class="efed-post-action-btn${p._liked?' liked':''}" onclick="_efedFeed.like('${p.id}',this)" data-liked="${p._liked?'1':'0'}">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="${p._liked?'#c0000e':'none'}" stroke="${p._liked?'#c0000e':'currentColor'}" stroke-width="2" stroke-linecap="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
@@ -12348,6 +12356,48 @@ const _efedFeed = (() => {
     if (jb) jb.classList.toggle('visible', idx > 0);
   }
   function _setDots(idx, total) { /* dots removed — floating chevrons used instead */ }
+  // ── SOCIAL EMBED BANNERS (Twitter/X and Instagram) ──────────────────────
+  function _activateEmbedSlots(container) {
+    const slots = (container || document).querySelectorAll('.hub-embed-slot:not([data-embed-activated])');
+    if (!slots.length) return;
+    slots.forEach(slot => {
+      slot.dataset.embedActivated = '1';
+      const url  = slot.dataset.embedUrl;
+      const type = slot.dataset.embedType; // 'x' or 'ig'
+      if (!url) return;
+      if (type === 'x') {
+        // Twitter/X: inject blockquote + load widgets.js once
+        const tweetId = (url.match(/\/status\/(\d+)/)||[])[1];
+        if (!tweetId) return;
+        slot.innerHTML = `<blockquote class="twitter-tweet" data-theme="dark" data-dnt="true"><a href="${url.replace('x.com','twitter.com')}"></a></blockquote>`;
+        if (!window._hubXWidgetLoaded) {
+          window._hubXWidgetLoaded = true;
+          const s = document.createElement('script');
+          s.src = 'https://platform.twitter.com/widgets.js';
+          s.async = true;
+          s.charset = 'utf-8';
+          s.onload = () => { if (window.twttr && twttr.widgets) twttr.widgets.load(); };
+          document.head.appendChild(s);
+        } else if (window.twttr && twttr.widgets) {
+          twttr.widgets.load(slot);
+        }
+      } else if (type === 'ig') {
+        // Instagram: inject blockquote + load embeds.js once
+        slot.innerHTML = `<blockquote class="instagram-media" data-instgrm-captioned data-instgrm-permalink="${url}" data-instgrm-version="14" style="background:#fff;border:0;border-radius:3px;box-shadow:0 0 1px 0 rgba(0,0,0,.5),0 1px 10px 0 rgba(0,0,0,.15);margin:1px;max-width:540px;min-width:326px;padding:0;width:calc(100% - 2px);"></blockquote>`;
+        if (!window._hubIgEmbedLoaded) {
+          window._hubIgEmbedLoaded = true;
+          const s = document.createElement('script');
+          s.src = 'https://www.instagram.com/embed.js';
+          s.async = true;
+          s.onload = () => { if (window.instgrm && instgrm.Embeds) instgrm.Embeds.process(); };
+          document.head.appendChild(s);
+        } else if (window.instgrm && instgrm.Embeds) {
+          instgrm.Embeds.process();
+        }
+      }
+    });
+  }
+
   function _fullRender() {
     const t = _track(); const w = _wrap(); if (!t) return;
     if (!_items.length) {
@@ -12360,6 +12410,8 @@ const _efedFeed = (() => {
     _slide(_idx, false); _setNav(_idx, _items.length); _setDots(_idx, _items.length);
     _replyCache = {};
     setTimeout(() => { _initReplyTogglesBatch(_items.map(p => p.id)); }, 200);
+    // Activate Twitter/Instagram embed banners
+    requestAnimationFrame(() => _activateEmbedSlots(t));
     // Double-RAF: wait for browser layout before measuring card height
     requestAnimationFrame(() => requestAnimationFrame(() => _syncWrapHeight(_idx, false)));
   }
