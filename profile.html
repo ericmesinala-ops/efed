@@ -4327,7 +4327,6 @@ function _rm2MatchDisplayFromSlots(selfName, r) {
 function _rm2ExtractYtId(url) {
   if (!url) return '';
   try {
-    // Handles youtu.be/ID, youtube.com/watch?v=ID, youtube.com/embed/ID, youtube.com/shorts/ID
     const u = new URL(url.trim());
     if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('?')[0];
     if (u.hostname.includes('youtube.com')) {
@@ -4336,9 +4335,32 @@ function _rm2ExtractYtId(url) {
       if (pathMatch) return pathMatch[2];
     }
   } catch(e) {}
-  // Fallback: raw ID (11 chars)
   const m = url.match(/[?&]v=([^&]+)/);
   return m ? m[1] : '';
+}
+
+// Extract timestamp (t= or start=) — handles "120", "2m3s", "1h30m" etc.
+function _rm2ExtractYtStart(url) {
+  if (!url) return 0;
+  try {
+    const u = new URL(url.trim());
+    const raw = u.searchParams.get('t') || u.searchParams.get('start') || '';
+    if (!raw) return 0;
+    if (/^\d+$/.test(raw)) return parseInt(raw, 10);
+    let secs = 0;
+    const h = raw.match(/(\d+)h/); if (h) secs += parseInt(h[1]) * 3600;
+    const mn = raw.match(/(\d+)m/); if (mn) secs += parseInt(mn[1]) * 60;
+    const s = raw.match(/(\d+)s/); if (s) secs += parseInt(s[1]);
+    return secs;
+  } catch(e) { return 0; }
+}
+
+// Build embed src preserving start time
+function _rm2YtEmbedSrc(url) {
+  const vid = _rm2ExtractYtId(url);
+  if (!vid) return '';
+  const start = _rm2ExtractYtStart(url);
+  return 'https://www.youtube.com/embed/' + vid + '?autoplay=1' + (start ? '&start=' + start : '');
 }
 
 async function rm2SaveRecord() {
@@ -4694,8 +4716,8 @@ function renderRecords() {
           embedDiv.innerHTML = '';
           ytBtn.querySelector('span').textContent = 'Watch match';
         } else {
-          const vid = _rm2ExtractYtId(r.youtube_url);
-          embedDiv.innerHTML = `<iframe src="https://www.youtube.com/embed/${vid}?autoplay=1" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+          const src = _rm2YtEmbedSrc(r.youtube_url);
+          embedDiv.innerHTML = `<iframe src="${src}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
           embedDiv.classList.add('open');
           ytBtn.querySelector('span').textContent = 'Hide video';
         }
