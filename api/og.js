@@ -1,17 +1,16 @@
 // api/og.js — Dynamic Open Graph card for EFED Streaming Hub
-// No external fetch calls — generates card purely from URL params
-// to avoid Vercel Hobby plan outbound request restrictions.
+// No external fetch — reads display name from ?n= param passed by the share button
 
 const SITE_URL  = 'https://efed-stream.vercel.app';
 const SITE_NAME = 'EFED Streaming Hub';
 
 const CRAWLER_RE = /twitterbot|facebookexternalhit|discordbot|linkedinbot|slackbot|whatsapp|telegrambot|applebot|googlebot|bingbot|embedly|outbrain|quora/i;
 
-function buildCardSvg(username) {
-  const name    = (username || 'Wrestler').toUpperCase();
-  const handle  = '@' + (username || '');
-  const initial = (username || '?')[0].toUpperCase();
-  const fontSize = name.length > 18 ? 62 : name.length > 12 ? 80 : 96;
+function buildCardSvg(displayName, username) {
+  const name    = (displayName || username || 'Wrestler').toUpperCase();
+  const handle  = username ? '@' + username : '';
+  const initial = (displayName || username || '?')[0].toUpperCase();
+  const fontSize = name.length > 18 ? 60 : name.length > 12 ? 78 : 94;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
   <defs>
@@ -26,10 +25,10 @@ function buildCardSvg(username) {
   <circle cx="960" cy="315" r="185" fill="rgba(255,255,255,0.04)" stroke="#c8a84b" stroke-width="2" stroke-opacity="0.35"/>
   <text x="960" y="375" font-family="Arial Black,Arial" font-size="160" fill="rgba(255,255,255,0.55)" text-anchor="middle">${initial}</text>
   <text x="80" y="270" font-family="Arial Black,Arial" font-weight="900" font-size="${fontSize}" fill="#ffffff" letter-spacing="4">${name}</text>
-  <text x="80" y="330" font-family="Arial,sans-serif" font-size="27" fill="rgba(255,255,255,0.3)">${handle}</text>
-  <rect x="80" y="360" width="72" height="3" fill="#c0000e"/>
-  <text x="80" y="412" font-family="Arial,sans-serif" font-size="22" fill="rgba(255,255,255,0.18)" letter-spacing="4">EFED STREAMING HUB</text>
-  <text x="80" y="450" font-family="Arial,sans-serif" font-size="20" fill="rgba(255,255,255,0.12)" letter-spacing="2">efed-stream.vercel.app</text>
+  <text x="80" y="328" font-family="Arial,sans-serif" font-size="26" fill="rgba(255,255,255,0.28)">${handle}</text>
+  <rect x="80" y="358" width="72" height="3" fill="#c0000e"/>
+  <text x="80" y="410" font-family="Arial,sans-serif" font-size="22" fill="rgba(255,255,255,0.18)" letter-spacing="4">EFED STREAMING HUB</text>
+  <text x="80" y="446" font-family="Arial,sans-serif" font-size="19" fill="rgba(255,255,255,0.10)" letter-spacing="2">efed-stream.vercel.app</text>
 </svg>`;
 }
 
@@ -77,20 +76,21 @@ function buildHtml({ title, description, imageUrl, pageUrl }) {
 
 export default async function handler(req, res) {
   try {
-    const fullUrl  = new URL(req.url, SITE_URL);
-    const username = (fullUrl.searchParams.get('u') || '').trim().toLowerCase();
-    const isImg    = fullUrl.searchParams.get('_img') === '1';
-    const ua       = req.headers['user-agent'] || '';
+    const fullUrl     = new URL(req.url, SITE_URL);
+    const username    = (fullUrl.searchParams.get('u') || '').trim().toLowerCase();
+    const displayName = (fullUrl.searchParams.get('n') || '').trim();
+    const isImg       = fullUrl.searchParams.get('_img') === '1';
+    const ua          = req.headers['user-agent'] || '';
 
     // Image endpoint — serves SVG card directly
     if (isImg) {
-      const svg = username ? buildCardSvg(username) : buildFallbackSvg();
+      const svg = username ? buildCardSvg(displayName || username, username) : buildFallbackSvg();
       res.setHeader('Content-Type', 'image/svg+xml');
       res.setHeader('Cache-Control', 'public, max-age=300');
       return res.status(200).send(svg);
     }
 
-    // Real browsers — redirect straight to profile
+    // Real browsers — redirect straight to profile (strip ?n= so URL stays clean)
     if (!CRAWLER_RE.test(ua)) {
       const dest = username
         ? `${SITE_URL}/profile.html?u=${encodeURIComponent(username)}`
@@ -100,12 +100,10 @@ export default async function handler(req, res) {
     }
 
     // Crawlers — return OG meta HTML
-    const title = username
-      ? `@${username} — ${SITE_NAME}`
-      : SITE_NAME;
-
-    const description = username
-      ? `View ${username}'s wrestling profile on ${SITE_NAME}.`
+    const name  = displayName || username;
+    const title = name ? `${name} — ${SITE_NAME}` : SITE_NAME;
+    const description = name
+      ? `View ${name}'s wrestling profile on ${SITE_NAME}.`
       : 'The home of eFed wrestling. Watch matches, track careers, and connect with the community.';
 
     const pageUrl  = username
@@ -113,7 +111,7 @@ export default async function handler(req, res) {
       : SITE_URL;
 
     const imageUrl = username
-      ? `${SITE_URL}/api/og?_img=1&u=${encodeURIComponent(username)}`
+      ? `${SITE_URL}/api/og?_img=1&u=${encodeURIComponent(username)}&n=${encodeURIComponent(displayName || username)}`
       : `${SITE_URL}/api/og?_img=1`;
 
     const html = buildHtml({ title, description, imageUrl, pageUrl });
