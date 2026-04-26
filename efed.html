@@ -2255,7 +2255,10 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 <!-- ── ROSTER ── -->
 <!-- ── CHAMPIONS SECTION ── -->
 <div id="champions-section" style="display:none;" class="section">
-  <div class="sec-title">Champions</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <div class="sec-title" style="margin-bottom:0;">Champions</div>
+    <button id="champ-add-btn" onclick="toggleChampForm()" style="display:none;width:28px;height:28px;border-radius:50%;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);color:#c8a84b;font-size:1.1rem;line-height:1;cursor:pointer;display:none;align-items:center;justify-content:center;transition:background .15s;" title="Add Champion">+</button>
+  </div>
 
   <div style="display:flex;align-items:center;gap:4px;">
     <div class="prof-arr-col">
@@ -2264,6 +2267,40 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     <div id="champions-grid" style="flex:1;display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none;-webkit-overflow-scrolling:touch;" onscroll="updateChampArrows()"></div>
     <div class="prof-arr-col">
       <button class="prof-pill-arr hidden" id="champ-arr-right" onclick="scrollChampRow(1)">&#8250;</button>
+    </div>
+  </div>
+
+  <!-- ── INLINE ADD CHAMPION FORM ── -->
+  <div id="champ-inline-form" style="display:none;margin-top:16px;background:rgba(255,255,255,.02);border:1px solid rgba(200,168,75,.15);border-radius:14px;padding:18px;animation:fadeInUp .2s ease;">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:.85rem;letter-spacing:3px;color:#c8a84b;margin-bottom:14px;">ADD CHAMPION</div>
+
+    <!-- Step 1: Pick wrestler -->
+    <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.4);font-weight:700;margin-bottom:8px;">Select Wrestler</div>
+    <div id="champ-form-roster" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none;margin-bottom:6px;"></div>
+
+    <!-- Ghost text input -->
+    <div style="display:flex;gap:6px;margin-bottom:16px;">
+      <input id="champ-ghost-input" type="text" maxlength="40" placeholder="Not on site? Type name here…"
+        style="flex:1;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:7px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;outline:none;"
+        onkeydown="if(event.key==='Enter'){addChampGhost();event.preventDefault();}">
+      <button onclick="addChampGhost()" style="padding:7px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s;" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">Add Ghost</button>
+    </div>
+
+    <!-- Step 2: Pick belt -->
+    <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.4);font-weight:700;margin-bottom:4px;">Select Championship</div>
+    <div style="font-size:.6rem;color:rgba(255,255,255,.2);margin-bottom:8px;">Only active championships shown. To change status, go to the Championship section.</div>
+    <div id="champ-form-belts" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;"></div>
+
+    <!-- Step 3: Date of win -->
+    <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.4);font-weight:700;margin-bottom:4px;">Date of Win</div>
+    <div style="font-size:.6rem;color:rgba(255,255,255,.2);margin-bottom:6px;">Optional — but important for tracking reign length.</div>
+    <input id="champ-form-date" type="date"
+      style="width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;outline:none;box-sizing:border-box;margin-bottom:16px;">
+
+    <div id="champ-form-msg" style="font-size:.68rem;color:#ff6b6b;min-height:14px;margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="toggleChampForm()" style="flex:1;padding:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;">Cancel</button>
+      <button onclick="submitAddChampion()" style="flex:2;padding:10px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'Bebas Neue',sans-serif;font-size:.9rem;letter-spacing:2px;cursor:pointer;">Add Champion</button>
     </div>
   </div>
 </div>
@@ -7694,10 +7731,23 @@ async function loadRoster() {
       } else if (isPending && _isOwnProfile) {
         card.onclick = () => openRosterModerateModal(u.username, u.display_name||u.username, rosterRowId);
       } else if (!isPending) {
+        // Both owner and non-owner: click card goes to profile
+        card.onclick = () => window.location.href = 'profile.html?u=' + encodeURIComponent(u.username);
+        // Owner: long-press for action menu (book, remove)
         if (_isOwnProfile) {
-          card.onclick = () => openRosterActionMenu(u.username, u.display_name||u.username, u.avatar_url||null, rosterRowId, planNote);
-        } else {
-          card.onclick = () => window.location.href = 'profile.html?u=' + encodeURIComponent(u.username);
+          let _lpTimer = null;
+          card.addEventListener('touchstart', () => {
+            _lpTimer = setTimeout(() => {
+              openRosterActionMenu(u.username, u.display_name||u.username, u.avatar_url||null, rosterRowId, planNote);
+            }, 550);
+          }, { passive: true });
+          card.addEventListener('touchend', () => clearTimeout(_lpTimer));
+          card.addEventListener('touchmove', () => clearTimeout(_lpTimer));
+          // Desktop: right-click for action menu
+          card.addEventListener('contextmenu', e => {
+            e.preventDefault();
+            openRosterActionMenu(u.username, u.display_name||u.username, u.avatar_url||null, rosterRowId, planNote);
+          });
         }
       }
       if (isPending && !_isOwnProfile) card.style.cursor = 'default';
@@ -8848,18 +8898,6 @@ html.day-mode .bk-step-dot { background: rgba(0,0,0,.04); border-color: rgba(0,0
 
     <!-- Action buttons -->
     <div style="padding:20px 22px;display:flex;flex-direction:column;gap:8px;">
-
-      <button class="ram-btn" onclick="closeRosterActionMenu();setTimeout(()=>_ram_openChamp(),80)">
-        <span class="ram-btn-icon">🏆</span>
-        Assign Championship
-      </button>
-
-      <!-- Create Emblem — hidden for now. Trophy Case is managed by the user, not the eFed owner. Code preserved for future reuse.
-      <button class="ram-btn" onclick="closeRosterActionMenu();setTimeout(()=>_ram_openEmblem(),80)">
-        <span class="ram-btn-icon">🎖️</span>
-        Create Emblem
-      </button>
-      -->
 
       <button class="ram-btn" onclick="closeRosterActionMenu();setTimeout(()=>_ram_viewProfile(),80)">
         <span class="ram-btn-icon">👤</span>
@@ -10110,7 +10148,153 @@ async function doLeaveRoster(username, rosterRowId) {
 }
 
 // ── CHAMPIONS ──
-let _champData = []; // [{username, displayName, avatarUrl, title}]
+// ── INLINE CHAMPION FORM ───────────────────────────────────────────────────
+let _champFormWrestler = null; // { username, displayName, avatarUrl, isGhost }
+let _champFormBelt = null;     // { id, name, image_url }
+
+function toggleChampForm() {
+  const form = document.getElementById('champ-inline-form');
+  if (!form) return;
+  const open = form.style.display !== 'none';
+  if (open) {
+    form.style.display = 'none';
+    _champFormWrestler = null; _champFormBelt = null;
+  } else {
+    form.style.display = 'block';
+    _populateChampForm();
+    document.getElementById('champ-form-msg').textContent = '';
+  }
+}
+
+function _populateChampForm() {
+  _champFormWrestler = null; _champFormBelt = null;
+  // Roster chips
+  const rosterEl = document.getElementById('champ-form-roster');
+  if (rosterEl) {
+    rosterEl.innerHTML = '';
+    const members = window._efedRosterMembers || [];
+    members.forEach(m => {
+      const chip = document.createElement('div');
+      chip.style.cssText = 'flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;padding:6px;border-radius:10px;border:2px solid transparent;transition:border-color .15s;min-width:64px;';
+      const av = m.avatar_url
+        ? `<div style="width:44px;height:44px;border-radius:50%;overflow:hidden;border:2px solid rgba(255,255,255,.1);"><img src="${m.avatar_url}" style="width:100%;height:100%;object-fit:cover;"></div>`
+        : `<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:rgba(255,255,255,.5);">${(m.display_name||'?')[0].toUpperCase()}</div>`;
+      const name = `<div style="font-size:.58rem;color:rgba(255,255,255,.5);text-align:center;max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(m.display_name||m.username).replace(/</g,'&lt;')}</div>`;
+      chip.innerHTML = av + name;
+      chip.onclick = () => {
+        rosterEl.querySelectorAll('div[style*="flex-direction:column"]').forEach(c => c.style.borderColor='transparent');
+        chip.style.borderColor = 'rgba(200,168,75,.7)';
+        _champFormWrestler = { username: m.username, displayName: m.display_name || m.username, avatarUrl: m.avatar_url || null, isGhost: !!(m.username||'').startsWith('__ghost__') };
+      };
+      rosterEl.appendChild(chip);
+    });
+  }
+
+  // Belt chips
+  const beltsEl = document.getElementById('champ-form-belts');
+  if (beltsEl) {
+    beltsEl.innerHTML = '';
+    const active = _vault.getActiveItems();
+    if (!active.length) {
+      beltsEl.innerHTML = '<div style="font-size:.68rem;color:#5a5a6a;">No active championships in vault yet.</div>';
+    } else {
+      active.forEach(item => {
+        const chip = document.createElement('div');
+        chip.style.cssText = 'flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;padding:6px 8px;border-radius:10px;border:2px solid transparent;transition:border-color .15s;min-width:70px;max-width:80px;';
+        const img = item.image_url
+          ? `<div style="width:52px;height:36px;display:flex;align-items:center;justify-content:center;"><img src="${item.image_url}" style="max-width:52px;max-height:36px;object-fit:contain;"></div>`
+          : `<div style="width:52px;height:36px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;">🏆</div>`;
+        const name = `<div style="font-size:.58rem;color:rgba(255,255,255,.5);text-align:center;line-height:1.3;word-break:break-word;">${item.name.replace(/</g,'&lt;')}</div>`;
+        chip.innerHTML = img + name;
+        chip.onclick = () => {
+          beltsEl.querySelectorAll('div[style*="flex-direction:column"]').forEach(c => c.style.borderColor='transparent');
+          chip.style.borderColor = 'rgba(200,168,75,.7)';
+          _champFormBelt = item;
+        };
+        beltsEl.appendChild(chip);
+      });
+    }
+  }
+  // Clear ghost input and date
+  const gi = document.getElementById('champ-ghost-input'); if(gi) gi.value = '';
+  const di = document.getElementById('champ-form-date'); if(di) di.value = '';
+}
+
+function addChampGhost() {
+  const input = document.getElementById('champ-ghost-input');
+  const name = (input?.value || '').trim();
+  if (!name) return;
+  const rosterEl = document.getElementById('champ-form-roster');
+  if (!rosterEl) return;
+  // Create ghost chip
+  const ghostUsername = '__ghost__champ_' + Date.now();
+  const chip = document.createElement('div');
+  chip.style.cssText = 'flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;padding:6px;border-radius:10px;border:2px solid rgba(200,168,75,.7);transition:border-color .15s;min-width:64px;';
+  chip.innerHTML = `<div style="width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.06);border:2px dashed rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:rgba(255,255,255,.4);">${name[0].toUpperCase()}</div>
+    <div style="font-size:.58rem;color:rgba(255,255,255,.5);text-align:center;max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name.replace(/</g,'&lt;')}</div>`;
+  // Deselect all other chips first
+  rosterEl.querySelectorAll('div[style*="flex-direction:column"]').forEach(c => c.style.borderColor='transparent');
+  chip.onclick = () => {
+    rosterEl.querySelectorAll('div[style*="flex-direction:column"]').forEach(c => c.style.borderColor='transparent');
+    chip.style.borderColor = 'rgba(200,168,75,.7)';
+    _champFormWrestler = { username: ghostUsername, displayName: name, avatarUrl: null, isGhost: true };
+  };
+  rosterEl.appendChild(chip);
+  // Auto-select the ghost we just added
+  _champFormWrestler = { username: ghostUsername, displayName: name, avatarUrl: null, isGhost: true };
+  input.value = '';
+  input.focus();
+}
+
+async function submitAddChampion() {
+  const msg = document.getElementById('champ-form-msg');
+  if (!_champFormWrestler) { msg.textContent = 'Please select a wrestler.'; return; }
+  if (!_champFormBelt) { msg.textContent = 'Please select a championship.'; return; }
+  msg.textContent = '';
+
+  const dateVal = (document.getElementById('champ-form-date')?.value || '').trim();
+  const entry = {
+    username:     _champFormWrestler.username,
+    displayName:  _champFormWrestler.displayName,
+    avatarUrl:    _champFormWrestler.avatarUrl || null,
+    title:        _champFormBelt.name,
+    beltName:     _champFormBelt.name,
+    beltId:       _champFormBelt.id,
+    beltImageUrl: _champFormBelt.image_url || null,
+    dateWon:      dateVal || null,
+  };
+
+  // Remove any existing entry for this user+belt combo, then add
+  _champData = _champData.filter(c => !(c.username === entry.username && c.beltId === entry.beltId));
+  _champData.push(entry);
+  await _saveChampions();
+
+  // Also update the user's own championships column (skip for pure ghost wrestlers)
+  if (!_champFormWrestler.isGhost || !_champFormWrestler.username.startsWith('__ghost__')) {
+    try {
+      const userRows = await sbGet('users', `username=eq.${encodeURIComponent(entry.username)}&select=championships`);
+      const existing = Array.isArray(userRows[0]?.championships) ? userRows[0].championships : [];
+      const updated = existing.filter(c => c.beltId !== entry.beltId);
+      updated.push({ name: entry.beltName, efed: EFED_NAME, date: entry.dateWon || null, belt_img: entry.beltImageUrl || null, beltId: entry.beltId });
+      await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(entry.username), {
+        method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ championships: updated })
+      });
+    } catch(e) { console.warn('Could not update user championships:', e); }
+  }
+
+  renderChampions();
+  toggleChampForm();
+  showToast(entry.displayName + ' crowned champion!');
+}
+
+// Edit existing champion (owner clicks card)
+function openEditChampModal(idx) {
+  const champ = _champData[idx];
+  if (!champ) return;
+  openSetChampModal(champ.username, champ.displayName, champ.avatarUrl || null);
+}
+
+let _champData = []; // [{username, displayName, avatarUrl, title, beltName, beltId, beltImageUrl, dateWon}]
 let _setChampUsername = null, _setChampName = null, _setChampAvatar = null;
 
 function openSetChampModal(username, displayName, avatarUrl) {
@@ -10162,8 +10346,20 @@ async function applyChampion() {
 
 async function removeChampion() {
   if (!_setChampUsername) return;
+  const removed = _champData.find(c => c.username === _setChampUsername);
   _champData = _champData.filter(c => c.username !== _setChampUsername);
   await _saveChampions();
+  // Remove from user's championships column too
+  if (removed && !_setChampUsername.startsWith('__ghost__')) {
+    try {
+      const userRows = await sbGet('users', `username=eq.${encodeURIComponent(_setChampUsername)}&select=championships`);
+      const existing = Array.isArray(userRows[0]?.championships) ? userRows[0].championships : [];
+      const updated = existing.filter(c => c.beltId !== removed.beltId);
+      await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(_setChampUsername), {
+        method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ championships: updated })
+      });
+    } catch(e) {}
+  }
   renderChampions();
   closeSetChampModal();
   showToast('Champion removed.');
@@ -10573,156 +10769,121 @@ const _vault = (() => {
       console.error('sendAward failed:', detail);
     }
   }
-  return { load, scroll, jumpStart, openAdd, closeModal, save, handleImgPick, setStatus, openAward, closeAwardModal, sendAward, searchUser };
+  return { load, scroll, jumpStart, openAdd, closeModal, save, handleImgPick, setStatus, openAward, closeAwardModal, sendAward, searchUser, getActiveItems: () => _items.filter(it => it.active !== false) };
 })();
 
 function renderChampions() {
   const sec = document.getElementById('champions-section');
   const grid = document.getElementById('champions-grid');
   const hint = document.getElementById('champions-owner-hint');
+  const addBtn = document.getElementById('champ-add-btn');
   if (!sec || !grid) return;
 
-  if (!_champData.length) { sec.style.display = 'none'; return; }
+  if (addBtn) addBtn.style.display = _isOwnProfile ? 'flex' : 'none';
+  if (!_champData.length) { sec.style.display = _isOwnProfile ? 'block' : 'none'; return; }
   sec.style.display = 'block';
   if (hint) hint.style.display = _isOwnProfile ? '' : 'none';
 
   grid.innerHTML = '';
   _champData.forEach((champ, idx) => {
     const card = document.createElement('div');
-    card.style.cssText = 'flex-shrink:0;width:130px;border:1px solid rgba(200,168,75,.2);border-radius:10px;padding:14px 10px;text-align:center;position:relative;user-select:none;cursor:pointer;transition:border-color .2s;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--surface);';
+    card.style.cssText = 'flex-shrink:0;width:148px;border:1px solid rgba(200,168,75,.22);border-radius:12px;padding:0;text-align:center;position:relative;user-select:none;cursor:pointer;transition:border-color .2s,box-shadow .2s;display:flex;flex-direction:column;align-items:center;overflow:hidden;background:var(--surface);';
     card.dataset.idx = idx;
 
     // Gold glow top bar
     const topBar = document.createElement('div');
-    topBar.style.cssText = 'position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,rgba(200,168,75,.0),rgba(200,168,75,.6),rgba(200,168,75,.0));border-radius:10px 10px 0 0;';
+    topBar.style.cssText = 'position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,rgba(200,168,75,.0),rgba(200,168,75,.7),rgba(200,168,75,.0));border-radius:12px 12px 0 0;z-index:2;';
     card.appendChild(topBar);
 
+    // Belt image strip (top of card)
+    const beltStrip = document.createElement('div');
+    beltStrip.style.cssText = 'width:100%;height:72px;background:rgba(200,168,75,.04);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;';
+    if (champ.beltImageUrl) {
+      beltStrip.innerHTML = `<img loading="lazy" src="${champ.beltImageUrl}" style="width:100%;height:100%;object-fit:contain;padding:6px;">`;
+    } else {
+      beltStrip.innerHTML = `<span style="font-size:2rem;opacity:.5;">🏆</span>`;
+    }
+    card.appendChild(beltStrip);
+
+    // Body
     const avInner = champ.avatarUrl
       ? `<img loading="lazy" src="${champ.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
-      : `<span style="font-family:"Bebas Neue",sans-serif;font-size:1.1rem;color:#c8a84b;">${(champ.displayName||'?')[0].toUpperCase()}</span>`;
+      : `<span style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#c8a84b;">${(champ.displayName||'?')[0].toUpperCase()}</span>`;
 
     const content = document.createElement('div');
-    content.style.cssText = 'position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;width:100%;';
+    content.style.cssText = 'position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;width:100%;padding:10px 10px 12px;';
     content.innerHTML = `
-      <div style="width:44px;height:44px;border-radius:50%;background:rgba(200,168,75,.08);border:2px solid rgba(200,168,75,.35);display:flex;align-items:center;justify-content:center;margin:0 auto 8px;overflow:hidden;">${avInner}</div>
-      <div style="font-size:.78rem;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px;">${withVerified(champ.displayName||'', champ.username, false)}</div>
-      <div style="font-size:.58rem;color:rgba(200,168,75,.8);margin-top:4px;line-height:1.35;text-align:center;word-break:break-word;max-width:110px;">${(champ.title||'').replace(/</g,'&lt;')}</div>`;
+      <div style="width:38px;height:38px;border-radius:50%;background:rgba(200,168,75,.08);border:2px solid rgba(200,168,75,.4);display:flex;align-items:center;justify-content:center;margin:0 auto 6px;overflow:hidden;">${avInner}</div>
+      <div style="font-size:.75rem;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:128px;">${withVerified(champ.displayName||'', champ.username, false)}</div>
+      <div style="font-size:.57rem;color:rgba(200,168,75,.85);margin-top:3px;line-height:1.35;text-align:center;word-break:break-word;max-width:128px;">${(champ.beltName||champ.title||'').replace(/</g,'&lt;')}</div>`;
     card.appendChild(content);
 
     card.onclick = () => window.location.href = 'profile.html?u=' + encodeURIComponent(champ.username);
-    card.onmouseenter = () => card.style.borderColor = 'rgba(200,168,75,.5)';
-    card.onmouseleave = () => card.style.borderColor = 'rgba(200,168,75,.2)';
+    card.onmouseenter = () => { card.style.borderColor='rgba(200,168,75,.55)'; card.style.boxShadow='0 4px 20px rgba(200,168,75,.12)'; };
+    card.onmouseleave = () => { card.style.borderColor='rgba(200,168,75,.22)'; card.style.boxShadow=''; };
 
-    // Owner: click card to edit/remove championship; drag to reorder
     if (_isOwnProfile) {
       card.style.userSelect = 'none';
-
-      // Click = open edit modal (change title or remove when they lose the belt)
       card.onclick = e => {
         if (card._wasDragged) { card._wasDragged = false; return; }
-        openSetChampModal(champ.username, champ.displayName, champ.avatarUrl || null);
+        openEditChampModal(idx);
       };
 
-      // ── MOUSE drag — reorder on mouseup, NOT on mousemove ──
+      // ── MOUSE drag ──
       card.addEventListener('mousedown', e => {
         if (e.button !== 0) return;
-        // Let buttons/links handle their own clicks
         if (e.target.closest('button,a')) return;
         const srcIdx = parseInt(card.dataset.idx);
         const rect = card.getBoundingClientRect();
         const offX = e.clientX - rect.left;
         let clone = null, dragStarted = false, lastToIdx = srcIdx;
-
         function onMove(ev) {
-          // Only start visual drag after moving a few pixels
           if (!dragStarted) {
             if (Math.abs(ev.clientX - e.clientX) < 4) return;
-            dragStarted = true;
-            card._wasDragged = true;
+            dragStarted = true; card._wasDragged = true;
             clone = card.cloneNode(true);
-            clone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;opacity:.88;pointer-events:none;z-index:99999;border-radius:10px;border:1px solid rgba(200,168,75,.6);box-shadow:0 10px 30px rgba(0,0,0,.7);cursor:grabbing;`;
-            document.body.appendChild(clone);
-            card.style.opacity = '.25';
+            clone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;opacity:.88;pointer-events:none;z-index:99999;border-radius:12px;border:1px solid rgba(200,168,75,.6);box-shadow:0 10px 30px rgba(0,0,0,.7);`;
+            document.body.appendChild(clone); card.style.opacity = '.25';
           }
           if (!clone) return;
-          clone.style.left = (ev.clientX - offX) + 'px';
-          clone.style.top = rect.top + 'px';
-          // Find target under cursor
-          clone.style.visibility = 'hidden';
-          const el = document.elementFromPoint(ev.clientX, ev.clientY);
-          clone.style.visibility = 'visible';
-          grid.querySelectorAll('[data-idx]').forEach(c2 => c2.style.outline = '');
-          const tgt = el ? el.closest('[data-idx]') : null;
-          if (tgt && tgt !== card && tgt.parentNode === grid) {
-            tgt.style.outline = '2px solid rgba(200,168,75,.55)';
-            lastToIdx = parseInt(tgt.dataset.idx);
-          } else {
-            lastToIdx = srcIdx;
-          }
+          clone.style.left = (ev.clientX - offX) + 'px'; clone.style.top = rect.top + 'px';
+          clone.style.visibility='hidden'; const el=document.elementFromPoint(ev.clientX,ev.clientY); clone.style.visibility='visible';
+          grid.querySelectorAll('[data-idx]').forEach(c2=>c2.style.outline='');
+          const tgt = el?el.closest('[data-idx]'):null;
+          if (tgt&&tgt!==card&&tgt.parentNode===grid) { tgt.style.outline='2px solid rgba(200,168,75,.55)'; lastToIdx=parseInt(tgt.dataset.idx); } else lastToIdx=srcIdx;
         }
-
-        function onUp(ev) {
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
-          if (clone) { clone.remove(); clone = null; }
-          grid.querySelectorAll('[data-idx]').forEach(c2 => { c2.style.outline = ''; c2.style.opacity = ''; });
-          card.style.opacity = '';
-          // Do the reorder on drop
-          if (dragStarted && !isNaN(lastToIdx) && lastToIdx !== srcIdx) {
-            const [m] = _champData.splice(srcIdx, 1);
-            _champData.splice(lastToIdx, 0, m);
-            _saveChampions();
-            renderChampions();
-          }
+        function onUp() {
+          document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp);
+          if(clone){clone.remove();clone=null;}
+          grid.querySelectorAll('[data-idx]').forEach(c2=>{c2.style.outline='';c2.style.opacity='';});
+          card.style.opacity='';
+          if(dragStarted&&!isNaN(lastToIdx)&&lastToIdx!==srcIdx){const[m]=_champData.splice(srcIdx,1);_champData.splice(lastToIdx,0,m);_saveChampions();renderChampions();}
         }
-
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
+        document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
       });
 
       // ── TOUCH drag ──
-      let tActive = false, tClone = null, tSrcIdx = null, tLastToIdx = null;
-      card.addEventListener('touchstart', e => {
-        tSrcIdx = parseInt(card.dataset.idx);
-        tLastToIdx = tSrcIdx;
-        const t = e.touches[0];
-        const rect2 = card.getBoundingClientRect();
-        tActive = true;
-        tClone = card.cloneNode(true);
-        tClone.style.cssText = `position:fixed;width:${rect2.width}px;height:${rect2.height}px;left:${rect2.left}px;top:${rect2.top}px;opacity:.85;pointer-events:none;z-index:9999;border-radius:10px;border:1px solid rgba(200,168,75,.5);`;
-        document.body.appendChild(tClone);
-        card.style.opacity = '.3';
-      }, { passive: true });
-      card.addEventListener('touchmove', e => {
-        if (!tActive || !tClone) return;
-        const t = e.touches[0];
-        tClone.style.left = (t.clientX - tClone.offsetWidth / 2) + 'px';
-        tClone.style.top  = (t.clientY - tClone.offsetHeight / 2) + 'px';
-        tClone.style.visibility = 'hidden';
-        const el = document.elementFromPoint(t.clientX, t.clientY);
-        tClone.style.visibility = 'visible';
-        grid.querySelectorAll('[data-idx]').forEach(c2 => c2.style.outline = '');
-        const tgt = el?.closest('[data-idx]');
-        if (tgt && tgt !== card) {
-          tgt.style.outline = '2px solid rgba(200,168,75,.5)';
-          tLastToIdx = parseInt(tgt.dataset.idx);
-        } else {
-          tLastToIdx = tSrcIdx;
-        }
-      }, { passive: true });
-      card.addEventListener('touchend', () => {
-        if (!tActive) return;
-        tActive = false;
-        if (tClone) { tClone.remove(); tClone = null; }
-        card.style.opacity = '1';
-        grid.querySelectorAll('[data-idx]').forEach(c2 => c2.style.outline = '');
-        if (!isNaN(tLastToIdx) && tSrcIdx !== null && tLastToIdx !== tSrcIdx) {
-          card._wasDragged = true;
-          const [m] = _champData.splice(tSrcIdx, 1);
-          _champData.splice(tLastToIdx, 0, m);
-          _saveChampions();
-          renderChampions();
-        }
+      let tActive=false,tClone=null,tSrcIdx=null,tLastToIdx=null;
+      card.addEventListener('touchstart',e=>{
+        tSrcIdx=parseInt(card.dataset.idx);tLastToIdx=tSrcIdx;
+        const t=e.touches[0];const rect2=card.getBoundingClientRect();tActive=true;
+        tClone=card.cloneNode(true);
+        tClone.style.cssText=`position:fixed;width:${rect2.width}px;height:${rect2.height}px;left:${rect2.left}px;top:${rect2.top}px;opacity:.85;pointer-events:none;z-index:9999;border-radius:12px;border:1px solid rgba(200,168,75,.5);`;
+        document.body.appendChild(tClone);card.style.opacity='.3';
+      },{passive:true});
+      card.addEventListener('touchmove',e=>{
+        if(!tActive||!tClone)return;const t=e.touches[0];
+        tClone.style.left=(t.clientX-tClone.offsetWidth/2)+'px';tClone.style.top=(t.clientY-tClone.offsetHeight/2)+'px';
+        tClone.style.visibility='hidden';const el=document.elementFromPoint(t.clientX,t.clientY);tClone.style.visibility='visible';
+        grid.querySelectorAll('[data-idx]').forEach(c2=>c2.style.outline='');
+        const tgt=el?.closest('[data-idx]');
+        if(tgt&&tgt!==card){tgt.style.outline='2px solid rgba(200,168,75,.5)';tLastToIdx=parseInt(tgt.dataset.idx);}else tLastToIdx=tSrcIdx;
+      },{passive:true});
+      card.addEventListener('touchend',()=>{
+        if(!tActive)return;tActive=false;
+        if(tClone){tClone.remove();tClone=null;}card.style.opacity='1';
+        grid.querySelectorAll('[data-idx]').forEach(c2=>c2.style.outline='');
+        if(!isNaN(tLastToIdx)&&tSrcIdx!==null&&tLastToIdx!==tSrcIdx){card._wasDragged=true;const[m]=_champData.splice(tSrcIdx,1);_champData.splice(tLastToIdx,0,m);_saveChampions();renderChampions();}
       });
     }
 

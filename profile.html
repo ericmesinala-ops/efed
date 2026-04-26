@@ -9069,37 +9069,47 @@ function renderChampionships(championships) {
 
   const list = Array.isArray(championships) ? championships.filter(c => c.name) : [];
 
-  // Store for modal pre-fill
+  // Store for save-back
   if (sec) sec.dataset.championships = JSON.stringify(list);
 
-  if (!list.length) {
-    sec.style.display = 'none';
-    return;
-  }
-
+  if (!list.length) { sec.style.display = 'none'; return; }
   sec.style.display = 'block';
-  display.innerHTML = list.map((c, i) => {
+  display.innerHTML = '';
+
+  list.forEach((c, i) => {
     const timerId = 'reign-timer-' + i;
-    const beltIcon = c.belt_img
-      ? `<img loading="lazy" src="${c.belt_img}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid rgba(200,168,75,.2);flex-shrink:0;">`
-      : `<div style="font-size:1.3rem;flex-shrink:0;">🥇</div>`;
-    return `
-      <div style="background:rgba(200,168,75,.04);border:1px solid rgba(200,168,75,.15);border-radius:12px;padding:14px 16px;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-          ${beltIcon}
+    const card = document.createElement('div');
+    card.draggable = _isOwnProfile;
+    card.dataset.idx = i;
+    card.style.cssText = 'background:rgba(200,168,75,.04);border:1px solid rgba(200,168,75,.15);border-radius:12px;overflow:hidden;position:relative;cursor:' + (_isOwnProfile ? 'grab' : 'default') + ';user-select:none;';
+
+    // Belt image — tall banner strip if image exists
+    const beltHtml = c.belt_img
+      ? `<div style="width:100%;height:90px;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;border-bottom:1px solid rgba(200,168,75,.1);">
+           <img loading="lazy" src="${_esc(c.belt_img)}" style="max-height:80px;max-width:100%;object-fit:contain;padding:0 12px;">
+         </div>`
+      : '';
+
+    card.innerHTML = `${beltHtml}
+      <div style="padding:14px 16px;">
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          ${!c.belt_img ? '<div style="font-size:1.8rem;flex-shrink:0;line-height:1;">🥇</div>' : ''}
           <div style="flex:1;min-width:0;">
-            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.05rem;letter-spacing:2px;color:#c8a84b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(c.name)}</div>
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.08rem;letter-spacing:2px;color:#c8a84b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(c.name)}</div>
             <div style="font-size:.68rem;color:rgba(255,255,255,.4);margin-top:1px;">${_esc(c.efed || '')}</div>
           </div>
+          ${_isOwnProfile ? `<button onclick="deleteUserChampionship(${i})" style="flex-shrink:0;background:none;border:none;cursor:pointer;color:rgba(255,255,255,.2);padding:2px 4px;font-size:.8rem;transition:color .15s;line-height:1;" onmouseover="this.style.color='#ff6b6b'" onmouseout="this.style.color='rgba(255,255,255,.2)'" title="Remove championship">✕</button>` : ''}
         </div>
-        ${c.date ? `<div style="display:flex;align-items:center;gap:5px;font-size:.62rem;color:rgba(255,255,255,.3);">
+        ${c.date ? `<div style="display:flex;align-items:center;gap:5px;font-size:.62rem;color:rgba(255,255,255,.3);margin-top:8px;">
           <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           Reign: <span id="${timerId}" style="font-family:'DM Sans',sans-serif;font-weight:700;color:rgba(255,255,255,.65);letter-spacing:.5px;"></span>
         </div>` : ''}
       </div>`;
-  }).join('');
 
-  // Start timers
+    display.appendChild(card);
+  });
+
+  // Start reign timers
   list.forEach((c, i) => {
     if (!c.date) return;
     const el = document.getElementById('reign-timer-' + i);
@@ -9114,6 +9124,48 @@ function renderChampionships(championships) {
     tick();
     _champTimers.push(setInterval(tick, 1000));
   });
+
+  // Drag-and-drop reorder (owner only)
+  if (_isOwnProfile) {
+    let _dragSrcIdx = null;
+    display.querySelectorAll('[data-idx]').forEach(card => {
+      card.addEventListener('dragstart', e => { _dragSrcIdx = parseInt(card.dataset.idx); card.style.opacity='.4'; e.dataTransfer.effectAllowed='move'; });
+      card.addEventListener('dragend', () => { card.style.opacity='1'; display.querySelectorAll('[data-idx]').forEach(c=>c.style.outline=''); });
+      card.addEventListener('dragover', e => { e.preventDefault(); card.style.outline='1px solid rgba(200,168,75,.5)'; });
+      card.addEventListener('dragleave', () => card.style.outline='');
+      card.addEventListener('drop', e => {
+        e.preventDefault(); card.style.outline='';
+        const toIdx = parseInt(card.dataset.idx);
+        if (_dragSrcIdx === null || _dragSrcIdx === toIdx) return;
+        const stored = JSON.parse(sec.dataset.championships || '[]');
+        const [moved] = stored.splice(_dragSrcIdx, 1);
+        stored.splice(toIdx, 0, moved);
+        sec.dataset.championships = JSON.stringify(stored);
+        _saveUserChampionships(stored);
+        renderChampionships(stored);
+      });
+    });
+  }
+}
+
+async function deleteUserChampionship(idx) {
+  const ok = await showConfirm('Remove Championship', 'Remove this title from your profile?', 'Remove');
+  if (!ok) return;
+  const session = getSession(); if (!session) return;
+  const sec = document.getElementById('title-section');
+  const stored = JSON.parse(sec?.dataset.championships || '[]');
+  stored.splice(idx, 1);
+  await _saveUserChampionships(stored);
+  renderChampionships(stored);
+}
+
+async function _saveUserChampionships(list) {
+  const session = getSession(); if (!session) return;
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ championships: list })
+    });
+  } catch(e) { console.warn('Could not save championships:', e); }
 }
 
 // Legacy shim — in case any old code calls renderTitle
