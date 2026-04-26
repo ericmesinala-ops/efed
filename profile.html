@@ -3451,7 +3451,15 @@ html.day-mode .rv-edit-btn:hover { color: #a07830; background: rgba(160,120,48,.
     </div>
   </div>
 
-  <!-- YouTube URL -->
+  <!-- Notable Promo URL -->
+  <div style="margin-bottom:14px;">
+    <div class="rv-modal-label">Notable Promo <span style="color:rgba(255,255,255,.2);font-size:.42rem;text-transform:none;letter-spacing:0;">optional</span></div>
+    <input id="rv-modal-promo" class="rv-modal-input" type="url" maxlength="200"
+      placeholder="YouTube link" autocomplete="off"
+      oninput="this.style.borderColor=this.value&&!_rm2ExtractYtId(this.value)?'rgba(255,80,80,.5)':'rgba(255,255,255,.1)'">
+  </div>
+
+  <!-- Notable Match Video -->
   <div style="margin-bottom:14px;">
     <div class="rv-modal-label">Notable Match Video <span style="color:rgba(255,255,255,.2);font-size:.42rem;text-transform:none;letter-spacing:0;">optional</span></div>
     <input id="rv-modal-youtube" class="rv-modal-input" type="url" maxlength="200"
@@ -5201,7 +5209,7 @@ function _rvHideInline() {
 function openRivalryModal(idx) {
   _rvModalIdx = (idx === undefined || idx === null) ? null : idx;
   const isNew = _rvModalIdx === null;
-  const r = isNew ? { name:'', display_name:'', avatar_url:'', efed:'', year:'', youtube_url:'', status:'ongoing' } : _rivalries[_rvModalIdx];
+  const r = isNew ? { name:'', display_name:'', avatar_url:'', efed:'', year:'', promo_url:'', youtube_url:'', status:'ongoing' } : _rivalries[_rvModalIdx];
 
   _rvModalResolvedName    = r.name || '';
   _rvModalResolvedDisplay = r.display_name || '';
@@ -5212,6 +5220,8 @@ function openRivalryModal(idx) {
   document.getElementById('rv-modal-name').value    = r.display_name || r.name || '';
   document.getElementById('rv-modal-efed').value    = r.efed || '';
   document.getElementById('rv-modal-year').value    = r.year || '';
+  document.getElementById('rv-modal-promo').value   = r.promo_url   || '';
+  document.getElementById('rv-modal-promo').style.borderColor = '';
   document.getElementById('rv-modal-youtube').value = r.youtube_url || '';
   document.getElementById('rv-modal-youtube').style.borderColor = '';
   document.getElementById('rv-modal-resolved').style.display = _rvModalResolvedName ? 'block' : 'none';
@@ -5284,8 +5294,10 @@ async function saveRivalryFromModal() {
   const session = getSession(); if (!session) return;
   const rawName = document.getElementById('rv-modal-name').value.trim();
   if (!rawName) { document.getElementById('rv-modal-err').textContent = 'Please enter an opponent name.'; return; }
+  const promo = document.getElementById('rv-modal-promo').value.trim();
   const yt = document.getElementById('rv-modal-youtube').value.trim();
-  if (yt && !_rm2ExtractYtId(yt)) { document.getElementById('rv-modal-err').textContent = 'Invalid YouTube link — check the URL.'; return; }
+  if (promo && !_rm2ExtractYtId(promo)) { document.getElementById('rv-modal-err').textContent = 'Invalid Promo link — check the URL.'; return; }
+  if (yt && !_rm2ExtractYtId(yt)) { document.getElementById('rv-modal-err').textContent = 'Invalid Match link — check the URL.'; return; }
   document.getElementById('rv-modal-err').textContent = '';
   const entry = {
     name:         _rvModalResolvedName    || rawName,
@@ -5293,6 +5305,7 @@ async function saveRivalryFromModal() {
     avatar_url:   _rvModalResolvedAvatar  || '',
     efed:         document.getElementById('rv-modal-efed').value.trim().toUpperCase(),
     year:         document.getElementById('rv-modal-year').value.trim(),
+    promo_url:    promo,
     youtube_url:  yt,
     status:       _rvModalStatus
   };
@@ -5430,39 +5443,82 @@ const RV_PAGE_SIZE = 10;
 // ── RIVALRY: attach YouTube embed listeners after innerHTML render ──
 // Embed divs are inserted as SIBLINGS after each row (edge-to-edge, like match history)
 function _rvAttachYtListeners(list) {
-  list.querySelectorAll('.rv-yt-watch-btn').forEach(btn => {
-    const idx = parseInt(btn.dataset.rvyt, 10);
-    const row = btn.closest('.rv-row');
+  // Group buttons by row index so we can cross-close promo↔match
+  const byIdx = {};
+  list.querySelectorAll('.rv-yt-promo-btn, .rv-yt-watch-btn').forEach(btn => {
+    const isPromo = btn.classList.contains('rv-yt-promo-btn');
+    const idx = parseInt(isPromo ? btn.dataset.rvpromo : btn.dataset.rvyt, 10);
+    if (!byIdx[idx]) byIdx[idx] = { row: btn.closest('.rv-row'), promoBtn: null, matchBtn: null, promoEmbed: null, matchEmbed: null };
+    if (isPromo) byIdx[idx].promoBtn = btn;
+    else         byIdx[idx].matchBtn = btn;
+  });
+
+  Object.values(byIdx).forEach(({ row, promoBtn, matchBtn }) => {
     if (!row) return;
+    const idx = parseInt((promoBtn || matchBtn).dataset.rvpromo || (promoBtn || matchBtn).dataset.rvyt, 10);
 
-    // Create embed div and inject it after the row in the list
-    const embedDiv = document.createElement('div');
-    embedDiv.id = 'rv-yt-embed-' + idx;
-    embedDiv.className = 'rec-yt-embed';
-    row.after(embedDiv);
+    // Create embed divs — promo first, then match — inserted as siblings after the row
+    let insertAfter = row;
+    let promoEmbed = null, matchEmbed = null;
 
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const isOpen = embedDiv.classList.contains('open');
-      if (isOpen) {
-        embedDiv.classList.remove('open');
-        embedDiv.innerHTML = '';
-        btn.querySelector('span').textContent = 'Notable Match';
-      } else {
-        const r = _rivalries[idx];
-        if (!r || !r.youtube_url) return;
-        const src = _rm2YtEmbedSrc(r.youtube_url);
-        const iframe = document.createElement('iframe');
-        iframe.src = src;
-        iframe.allow = 'autoplay; encrypted-media';
-        iframe.allowFullscreen = true;
-        iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
-        embedDiv.innerHTML = '';
-        embedDiv.appendChild(iframe);
-        embedDiv.classList.add('open');
-        btn.querySelector('span').textContent = 'Hide video';
-      }
-    });
+    if (promoBtn) {
+      promoEmbed = document.createElement('div');
+      promoEmbed.id = 'rv-promo-embed-' + idx;
+      promoEmbed.className = 'rec-yt-embed';
+      insertAfter.after(promoEmbed);
+      insertAfter = promoEmbed;
+    }
+    if (matchBtn) {
+      matchEmbed = document.createElement('div');
+      matchEmbed.id = 'rv-yt-embed-' + idx;
+      matchEmbed.className = 'rec-yt-embed';
+      insertAfter.after(matchEmbed);
+    }
+
+    function closeEmbed(embed, btn, defaultLabel) {
+      if (!embed) return;
+      embed.classList.remove('open');
+      embed.innerHTML = '';
+      if (btn) btn.querySelector('span').textContent = defaultLabel;
+    }
+
+    function openEmbed(embed, btn, urlKey, openLabel, closeLabel) {
+      const r = _rivalries[idx];
+      if (!r || !r[urlKey]) return;
+      const src = _rm2YtEmbedSrc(r[urlKey]);
+      const iframe = document.createElement('iframe');
+      iframe.src = src;
+      iframe.allow = 'autoplay; encrypted-media';
+      iframe.allowFullscreen = true;
+      iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
+      embed.innerHTML = '';
+      embed.appendChild(iframe);
+      embed.classList.add('open');
+      btn.querySelector('span').textContent = closeLabel;
+    }
+
+    if (promoBtn && promoEmbed) {
+      promoBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (promoEmbed.classList.contains('open')) {
+          closeEmbed(promoEmbed, promoBtn, 'Notable Promo');
+        } else {
+          closeEmbed(matchEmbed, matchBtn, 'Notable Match'); // close match if open
+          openEmbed(promoEmbed, promoBtn, 'promo_url', 'Notable Promo', 'Hide video');
+        }
+      });
+    }
+    if (matchBtn && matchEmbed) {
+      matchBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (matchEmbed.classList.contains('open')) {
+          closeEmbed(matchEmbed, matchBtn, 'Notable Match');
+        } else {
+          closeEmbed(promoEmbed, promoBtn, 'Notable Promo'); // close promo if open
+          openEmbed(matchEmbed, matchBtn, 'youtube_url', 'Notable Match', 'Hide video');
+        }
+      });
+    }
   });
 }
 
@@ -5524,6 +5580,7 @@ function renderRivalries() {
     const status      = r.status || 'ongoing';
     const statusLabel = status === 'ended' ? 'Ended' : 'Ongoing';
     const metaParts   = [r.efed, r.year].filter(Boolean);
+    const hasPromo    = !!(r.promo_url   && _rm2ExtractYtId(r.promo_url));
     const hasYt       = !!(r.youtube_url && _rm2ExtractYtId(r.youtube_url));
     const avatarHtml  = avatarUrl
       ? `<img loading="lazy" src="${_esc(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
@@ -5531,12 +5588,11 @@ function renderRivalries() {
          <span class="rv-init" style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.95rem;color:rgba(255,255,255,.55);">${initials}</span>`
       : `<span class="rv-init" style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.95rem;color:rgba(255,255,255,.55);">${initials}</span>`;
 
-    // Shared YT button HTML — embed div is inserted as a sibling of the row (edge-to-edge), not inside it
-    const ytRowHtml = hasYt
-      ? `<button class="rec-yt-btn rv-yt-watch-btn" data-rvyt="${i}" style="margin-top:5px;cursor:pointer;">
-           <svg width="13" height="13" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-           <span>Notable Match</span>
-         </button>`
+    const _ytIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`;
+    const _promoBtn = hasPromo ? `<button class="rec-yt-btn rv-yt-promo-btn" data-rvpromo="${i}" style="cursor:pointer;">${_ytIcon}<span>Notable Promo</span></button>` : '';
+    const _matchBtn = hasYt    ? `<button class="rec-yt-btn rv-yt-watch-btn" data-rvyt="${i}"    style="cursor:pointer;">${_ytIcon}<span>Notable Match</span></button>` : '';
+    const ytRowHtml = (hasPromo || hasYt)
+      ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:5px;">${_promoBtn}${_matchBtn}</div>`
       : '';
 
     if (editable) {
