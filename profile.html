@@ -187,7 +187,7 @@ function getEmblemSVG(designId) {
   }
 
   // ── STORAGE UPLOAD HELPER ──
-  // Converts a dataUrl to a Blob and uploads to Supabase Storage.
+  // Converts a dataUrl to a Blob and uploads to Cloudinary.
   // Returns the public URL string.
   async function uploadToStorage(dataUrl, bucket, path, transform = 'w_256,h_256,c_fill,f_auto,q_auto') {
     const CLOUD_NAME = 'dfjope4m';
@@ -196,23 +196,24 @@ function getEmblemSVG(designId) {
     const res = await fetch(dataUrl);
     const blob = await res.blob();
 
-    // Build a deterministic folder/filename tag using the path so re-uploads
-    // land in the same logical slot. We use a `folder` + `context` instead of
-    // `public_id` + `overwrite` because those two params require a signed request
-    // on unsigned presets and cause the "Unknown API key" error.
-    const tag = path.replace(/\.[^.]+$/, '').replace(/\//g, '_');
+    // Use folder to organise assets — this IS allowed on unsigned presets.
+    // Do NOT send `public_id`, `overwrite`, or `context` — those require signed requests.
+    const folder = bucket; // e.g. "trophies", "avatars", "belts"
 
     const formData = new FormData();
     formData.append('file', blob);
     formData.append('upload_preset', UPLOAD_PRESET);
-    formData.append('tags', tag);           // keeps assets findable/replaceable
-    formData.append('context', 'alt=' + tag); // lightweight metadata
+    formData.append('folder', folder);
 
     const r = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
       method: 'POST',
       body: formData
     });
-    if (!r.ok) throw new Error('Cloudinary upload failed: ' + await r.text());
+    if (!r.ok) {
+      const errText = await r.text();
+      console.error('Cloudinary upload failed:', errText);
+      throw new Error('Image upload failed: ' + errText);
+    }
     const data = await r.json();
 
     const publicIdFinal = data.public_id;
@@ -2012,20 +2013,18 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
   <div class="sec-title">Moveset</div>
   <div class="moveset-grid">
     <div class="moveset-col">
-      <div class="moveset-col-header sig-header">Signatures</div>
-      <div id="ms-sig-slots"></div>
-      <div id="ms-sig-add" class="ms-add-btn" style="display:none;" onclick="addMoveSlot('sig')">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Add Signature
+      <div class="moveset-col-header sig-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Signatures</span>
+        <div id="ms-sig-add" class="ms-add-btn" style="display:none;" onclick="addMoveSlot('sig')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
       </div>
+      <div id="ms-sig-slots"></div>
     </div>
     <div class="moveset-col">
-      <div class="moveset-col-header fin-header">Finishers</div>
-      <div id="ms-fin-slots"></div>
-      <div id="ms-fin-add" class="ms-add-btn ms-add-fin" style="display:none;" onclick="addMoveSlot('fin')">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Add Finisher
+      <div class="moveset-col-header fin-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Finishers</span>
+        <div id="ms-fin-add" class="ms-add-btn ms-add-fin" style="display:none;" onclick="addMoveSlot('fin')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
       </div>
+      <div id="ms-fin-slots"></div>
     </div>
   </div>
 </div>
@@ -2080,17 +2079,20 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 .move-original:empty:not(:focus)::before { content: 'original name'; color: rgba(255,255,255,.08); font-style: italic; }
 /* Add button — hidden until column hovered */
 .ms-add-btn {
-  display: none; align-items: center; gap: 5px;
-  padding: 6px 10px; border-radius: 7px; cursor: pointer; margin-top: 2px;
-  font-size: .58rem; font-weight: 600; letter-spacing: .5px;
-  font-family: 'DM Sans',sans-serif; color: rgba(255,255,255,.25);
-  border: 1px dashed rgba(255,255,255,.1); background: none;
-  transition: color .15s, border-color .15s, background .15s;
-  user-select: none;
+  flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
+  border: 1.5px dashed rgba(200,168,75,.35); background: transparent;
+  color: rgba(200,168,75,.55); display: flex; align-items: center;
+  justify-content: center; cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
 }
-.ms-add-btn:hover { color: rgba(255,255,255,.6); border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.04); }
-.ms-add-fin { color: rgba(200,168,75,.3); border-color: rgba(200,168,75,.15); }
-.ms-add-fin:hover { color: rgba(200,168,75,.8); border-color: rgba(200,168,75,.35); background: rgba(200,168,75,.06); }
+.ms-add-btn:hover { border-color: rgba(200,168,75,.8); color: rgba(200,168,75,1); background: rgba(200,168,75,.06); }
+.ms-add-fin { border-color: rgba(200,168,75,.35); color: rgba(200,168,75,.55); }
+.ms-add-fin:hover { border-color: rgba(200,168,75,.8); color: rgba(200,168,75,1); background: rgba(200,168,75,.06); }
+@media (hover: none) {
+  .ms-add-btn:active { background: rgba(200,168,75,.15); color: #c8a84b; }
+}
+html.day-mode .ms-add-btn { border-color: rgba(168,130,10,.3); color: rgba(168,130,10,.6); }
+html.day-mode .ms-add-btn:hover { border-color: rgba(168,130,10,.8); color: rgba(168,130,10,1); }
 /* day mode */
 html.day-mode .moveset-col-header.sig-header { color: rgba(0,0,0,.3); }
 html.day-mode .move-slot { background: rgba(0,0,0,.03); border-color: rgba(0,0,0,.07); }
@@ -2101,8 +2103,6 @@ html.day-mode .move-new { color: rgba(0,0,0,.8); }
 html.day-mode .move-new:empty:not(:focus)::before { color: rgba(0,0,0,.1); }
 html.day-mode .move-original { color: rgba(0,0,0,.25); }
 html.day-mode .move-original:empty:not(:focus)::before { color: rgba(0,0,0,.08); }
-html.day-mode .ms-add-btn { color: rgba(0,0,0,.2); border-color: rgba(0,0,0,.1); }
-html.day-mode .ms-add-btn:hover { color: rgba(0,0,0,.55); border-color: rgba(0,0,0,.2); background: rgba(0,0,0,.03); }
 </style>
 
 <div class="section" id="caw-images-section">
@@ -2756,32 +2756,35 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 
 <!-- ── TROPHY CASE ── -->
 <div class="section" id="trophy-case-section" style="padding-bottom:16px;">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-    <div class="sec-title" style="margin-bottom:0;flex:1;">Trophy Case</div>
-    <div id="trophy-count-badge" style="display:none;font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(200,168,75,.5);font-weight:700;"></div>
-  </div>
-
-  <!-- Netflix-style scroll row -->
-  <div style="display:flex;align-items:center;gap:0;">
-    <div class="nf-scroll-wrap" id="tc-scroll-wrap">
-      <div id="trophy-case-scroll" style="overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch;scrollbar-width:none;">
-        <div id="trophy-case-grid" style="display:flex;gap:14px;flex-wrap:nowrap;padding:6px 4px 10px;align-items:flex-start;"></div>
-      </div>
-      <button class="nf-chevron nf-left nf-hidden" id="tc-arr-left" onclick="_tc.scroll(-1)" title="Back"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
-      <button class="nf-chevron nf-right nf-hidden" id="tc-arr-right" onclick="_tc.scroll(1)" title="More"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
-      <button class="nf-chevron nf-jump nf-hidden" id="tc-arr-start" onclick="_tc.jumpStart()" title="Back to start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button>
+  <!-- Grid view (default) -->
+  <div id="tc-grid-view">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div class="sec-title" style="margin-bottom:0;flex:1;">Trophy Case</div>
+      <div id="trophy-count-badge" style="display:none;font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(200,168,75,.5);font-weight:700;"></div>
     </div>
-    <button class="tc-add-btn" id="tc-add-btn" onclick="_tc.openAdd()" style="display:none;" title="Add / Request Title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    <!-- Netflix-style scroll row -->
+    <div style="display:flex;align-items:center;gap:0;">
+      <div class="nf-scroll-wrap" id="tc-scroll-wrap">
+        <div id="trophy-case-scroll" style="overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch;scrollbar-width:none;">
+          <div id="trophy-case-grid" style="display:flex;gap:14px;flex-wrap:nowrap;padding:6px 4px 10px;align-items:flex-start;"></div>
+        </div>
+        <button class="nf-chevron nf-left nf-hidden" id="tc-arr-left" onclick="_tc.scroll(-1)" title="Back"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+        <button class="nf-chevron nf-right nf-hidden" id="tc-arr-right" onclick="_tc.scroll(1)" title="More"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+        <button class="nf-chevron nf-jump nf-hidden" id="tc-arr-start" onclick="_tc.jumpStart()" title="Back to start"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button>
+      </div>
+      <button class="tc-add-btn" id="tc-add-btn" onclick="_tc.openAdd()" style="display:none;" title="Add / Request Title"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    </div>
+    <div id="trophy-case-empty" style="font-size:.78rem;color:#5a5a6a;padding:8px 0 4px;display:none;">No trophies yet.</div>
   </div>
-
-  <div id="trophy-case-empty" style="font-size:.78rem;color:#5a5a6a;padding:8px 0 4px;display:none;">No trophies yet.</div>
+  <!-- Inline builder (shown when adding/editing) -->
+  <div id="tc-builder-view" style="display:none;"></div>
 </div>
 
 <!-- ── RIVALRIES SECTION ── -->
 <div class="section" id="rivalries-section" style="padding-bottom:16px;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
     <div class="sec-title" style="margin-bottom:0;flex:1;">Rivalries</div>
-    <button id="rivalry-add-btn" onclick="rvAddNew()" title="Add rivalry" style="display:none;" class="rr-add-btn">+</button>
+    <button id="rivalry-add-btn" onclick="rvAddNew()" title="Add rivalry" style="display:none;" class="rr-add-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
   </div>
   <div id="rivalries-list"></div>
   <div id="rivalries-empty" style="font-size:.78rem;color:#5a5a6a;padding:8px 0 4px;">No rivalries logged yet.</div>
@@ -2906,26 +2909,19 @@ html.day-mode .irf-chip.active { background: rgba(168,130,10,.08); border-color:
 <style>
 /* ── RR SHARED: add button (matches hashtag style) ── */
 .rr-add-btn {
-  flex-shrink: 0;
-  width: 22px; height: 22px; border-radius: 50%;
-  background: rgba(255,255,255,.07);
-  border: 1px solid rgba(255,255,255,.12);
-  color: rgba(255,255,255,.35);
-  font-size: .9rem; line-height: 1;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  opacity: 0;
-  transition: opacity .2s, background .15s, color .15s;
+  flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
+  border: 1.5px dashed rgba(200,168,75,.35); background: transparent;
+  color: rgba(200,168,75,.55); display: flex; align-items: center;
+  justify-content: center; cursor: pointer; margin-left: 6px;
+  transition: border-color .15s, color .15s, background .15s;
 }
-.rr-add-btn:hover { opacity: 1; background: rgba(200,168,75,.15); border-color: rgba(200,168,75,.35); color: #c8a84b; }
-#rivalries-section:hover .rr-add-btn,
-#records-section:hover .rr-add-btn { opacity: 1; }
+.rr-add-btn:hover { border-color: rgba(200,168,75,.8); color: rgba(200,168,75,1); background: rgba(200,168,75,.06); }
 @media (hover: none) {
-  .rr-add-btn { opacity: .35 !important; }
-  .rr-add-btn:active { opacity: 1 !important; background: rgba(200,168,75,.15); color: #c8a84b; }
+  .rr-add-btn { opacity: 1 !important; }
+  .rr-add-btn:active { background: rgba(200,168,75,.15); color: #c8a84b; }
 }
-html.day-mode .rr-add-btn { background: rgba(0,0,0,.06); border-color: rgba(0,0,0,.12); color: rgba(0,0,0,.3); }
-html.day-mode .rr-add-btn:hover { background: rgba(168,130,10,.1); border-color: rgba(168,130,10,.3); color: var(--gold); }
+html.day-mode .rr-add-btn { border-color: rgba(168,130,10,.3); color: rgba(168,130,10,.6); }
+html.day-mode .rr-add-btn:hover { border-color: rgba(168,130,10,.8); color: rgba(168,130,10,1); }
 
 /* ── RR INLINE ROW (shared base) ── */
 /* ── RECORDS & RIVALRIES — search-style flat list ── */
@@ -3520,22 +3516,11 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
           </div>
         </div>
 
-        <!-- End of Match Win Method -->
+        <!-- Win Result cycling pill -->
         <div>
-          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:7px;">End of Match Win Method <span style="opacity:.4;font-size:.45rem;letter-spacing:1px;">(optional)</span></div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;" id="rm2-method-btns">
-            <button onclick="rm2SetMethod('pinfall')"   id="rm2-method-pinfall"   class="rm2-meth-btn" style="padding:7px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;transition:all .15s;">📌 Pinfall</button>
-            <button onclick="rm2SetMethod('submission')" id="rm2-method-submission" class="rm2-meth-btn" style="padding:7px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;transition:all .15s;">🔒 Submission</button>
-            <button onclick="rm2SetMethod('dq')"        id="rm2-method-dq"        class="rm2-meth-btn" style="padding:7px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;transition:all .15s;">🚫 DQ</button>
-            <button onclick="rm2SetMethod('countout')"  id="rm2-method-countout"  class="rm2-meth-btn" style="padding:7px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;transition:all .15s;">⏱ Count-Out</button>
-            <button onclick="rm2SetMethod('ko')"        id="rm2-method-ko"        class="rm2-meth-btn" style="padding:7px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;transition:all .15s;">💥 KO</button>
-            <button onclick="rm2SetMethod('')"          id="rm2-method-none"      class="rm2-meth-btn" style="padding:7px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.07);background:transparent;color:rgba(255,255,255,.22);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:600;cursor:pointer;transition:all .15s;">✕ None</button>
-          </div>
-          <!-- Special Rules -->
-          <input id="rm2-special" type="text" placeholder="e.g. Ladder Match, Last Man Standing, Iron Man…"
-            style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;outline:none;box-sizing:border-box;" maxlength="60">
-          <style>#rm2-special::placeholder{color:rgba(255,255,255,.22);}</style>
-          <div style="font-size:.57rem;color:rgba(255,255,255,.2);margin-top:4px;">Optional: add special stipulation or match rules above.</div>
+          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:7px;">Win Result <span style="opacity:.4;font-size:.45rem;letter-spacing:1px;">(optional)</span></div>
+          <button id="rm2-method-pill" onclick="rm2CycleMethod()" style="padding:7px 18px;border-radius:20px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;transition:all .2s;letter-spacing:.3px;">— None</button>
+          <input id="rm2-special" type="hidden" value="">
         </div>
 
 
@@ -4316,23 +4301,34 @@ function rm2SetRole(v) {
   if (chb) { chb.style.borderColor=v==='champion'?'rgba(200,168,75,.4)':'rgba(255,255,255,.1)'; chb.style.background=v==='champion'?'rgba(200,168,75,.1)':'rgba(255,255,255,.04)'; chb.style.color=v==='champion'?'#c8a84b':'rgba(255,255,255,.4)'; }
 }
 
+const _rm2MethodCycle = ['', 'pinfall', 'submission', 'dq', 'countout', 'ko'];
+const _rm2MethodLabels = { '': '— None', pinfall: 'Pinfall', submission: 'Submission', dq: 'DQ', countout: 'Count-Out', ko: 'KO' };
+const _rm2MethodColors = { '': null, pinfall: '#4caf64', submission: '#38bdf8', dq: '#ff6b6b', countout: '#e8a020', ko: '#c084fc' };
+
+function rm2CycleMethod() {
+  const cur = _rm2MethodCycle.indexOf(_rm2WinMethod);
+  const next = _rm2MethodCycle[(cur + 1) % _rm2MethodCycle.length];
+  rm2SetMethod(next);
+}
+
 function rm2SetMethod(v) {
   _rm2WinMethod = v;
-  // Active = red tint, inactive = ghost
-  document.querySelectorAll('.rm2-meth-btn').forEach(btn => {
-    const isNone = btn.id === 'rm2-method-none';
-    const active = !isNone && btn.id === 'rm2-method-' + v;
-    const noneActive = isNone && v === '';
-    if (active || noneActive) {
-      btn.style.borderColor = active ? 'rgba(192,0,14,.5)' : 'rgba(255,255,255,.18)';
-      btn.style.background  = active ? 'rgba(192,0,14,.14)' : 'rgba(255,255,255,.07)';
-      btn.style.color       = active ? '#ff6b6b' : 'rgba(255,255,255,.55)';
-    } else {
-      btn.style.borderColor = isNone ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.1)';
-      btn.style.background  = isNone ? 'transparent' : 'rgba(255,255,255,.04)';
-      btn.style.color       = isNone ? 'rgba(255,255,255,.22)' : 'rgba(255,255,255,.45)';
-    }
-  });
+  const pill = document.getElementById('rm2-method-pill');
+  if (!pill) return;
+  const label = _rm2MethodLabels[v] || '— None';
+  const color = _rm2MethodColors[v];
+  pill.textContent = label;
+  if (color) {
+    pill.style.borderColor = color.replace(')', ',.4)').replace('rgb', 'rgba').replace('#', 'rgba(').replace(/rgba\(([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2}),\.4\)/, (_,r,g,b) => `rgba(${parseInt(r,16)},${parseInt(g,16)},${parseInt(b,16)},.4)`);
+    // simpler: just use direct color vars
+    pill.style.borderColor = color + '66';
+    pill.style.background  = color + '18';
+    pill.style.color       = color;
+  } else {
+    pill.style.borderColor = 'rgba(255,255,255,.14)';
+    pill.style.background  = 'rgba(255,255,255,.05)';
+    pill.style.color       = 'rgba(255,255,255,.5)';
+  }
 }
 
 // ── LIVE PREVIEW (step 2) ──
@@ -4547,6 +4543,14 @@ function _rm2HideInline() {
   if (panel) panel.style.display = 'none';
   if (builder) builder.style.display = 'none';
   if (listView) listView.style.display = 'block';
+  // Scroll back so match history is in view
+  const sec = document.getElementById('records-section');
+  const stickyEl = document.getElementById('profile-nav-name-sticky');
+  if (sec) {
+    const stickyH = stickyEl ? stickyEl.getBoundingClientRect().height : 0;
+    const secTop = sec.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: secTop - stickyH - 57, behavior: 'smooth' });
+  }
 }
 
 function closeRecordModal() {
@@ -4765,8 +4769,8 @@ function renderRecords() {
     vsWrap.appendChild(oppAv);
 
     // Body
-    const methodLabel = { pinfall: '📌 Pinfall', submission: '🔒 Submission', dq: '🚫 DQ', countout: '⏱ Count-Out', ko: '💥 KO' }[r.win_method] || '';
-    const metaParts = [r.type, r.efed, r.efed_show, r.date ? _recFmtDate(r.date) : '', methodLabel, r.special_rules || ''].filter(Boolean);
+    const methodLabel = { pinfall: 'Pinfall', submission: 'Submission', dq: 'DQ', countout: 'Count-Out', ko: 'KO' }[r.win_method] || '';
+    const metaParts = [r.type, r.efed, r.efed_show, r.date ? _recFmtDate(r.date) : '', methodLabel].filter(Boolean);
     const bodyEl = document.createElement('div');
     bodyEl.className = 'rec-banner-body';
     const champLabelHtml = champLabel ? `
@@ -4774,8 +4778,12 @@ function renderRecords() {
         <span class="rr-champ-badge" style="flex-shrink:0;">${champLabel}</span>
         ${r.champ_name ? `<span style="font-size:.58rem;color:rgba(200,168,75,.55);font-family:'DM Sans',sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${r.champ_name.replace(/</g,'&lt;')}</span>` : ''}
       </div>` : '';
+    // W/L result pill
+    const resultColor = isWin ? '#4caf64' : '#ff6b6b';
+    const resultLabel = isWin ? 'W' : 'L';
+    const resultPill = `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${resultColor}22;border:1px solid ${resultColor}55;color:${resultColor};font-family:'Bebas Neue',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;flex-shrink:0;vertical-align:middle;margin-right:5px;">${resultLabel}</span>`;
     bodyEl.innerHTML = `
-      <div class="rec-banner-name">${matchDisplayName}</div>
+      <div class="rec-banner-name" style="display:flex;align-items:center;gap:0;">${resultPill}${matchDisplayName}</div>
       ${metaParts.length ? `<div class="rec-banner-meta">${metaParts.join(' · ')}</div>` : ''}
       ${champLabelHtml}`;
 
@@ -5792,10 +5800,34 @@ const _tc = (() => {
     if (scr) scr.addEventListener('scroll', _updateChevrons, { passive: true });
   }
 
+  // ── INLINE PANEL HELPERS ────────────────────────────────────────────────
+  function _showInline() {
+    const modal   = document.getElementById('tc-modal');
+    const builder = document.getElementById('tc-builder-view');
+    const gridView = document.getElementById('tc-grid-view');
+    const bg      = document.getElementById('tc-modal-bg');
+    if (!modal || !builder || !gridView) return;
+    builder.innerHTML = '';
+    builder.appendChild(modal);
+    // Strip the floating-modal chrome — render bare inside the section
+    modal.style.cssText = 'display:block;background:transparent;border:none;border-radius:0;padding:0;width:100%;max-width:none;max-height:none;overflow-y:visible;box-shadow:none;';
+    if (bg) bg.style.display = 'none';
+    gridView.style.display = 'none';
+    builder.style.display  = 'block';
+    // Scroll neatly below sticky nav (same logic as match history)
+    const sec      = document.getElementById('trophy-case-section');
+    const stickyEl = document.getElementById('profile-nav-name-sticky');
+    if (sec) {
+      const stickyH = stickyEl ? stickyEl.getBoundingClientRect().height : 0;
+      const secTop  = sec.getBoundingClientRect().top + window.scrollY;
+      window.scrollTo({ top: secTop - stickyH - 57, behavior: 'smooth' });
+    }
+  }
+
   // ── ADD FLOW: STEP NAVIGATION ────────────────────────────────────────────
   function openAdd() {
     _editing = null; _imgData = null; _activeEfed = null; _selfEfedName = '';
-    document.getElementById('tc-modal-title-el').textContent = 'Request Title';
+    document.getElementById('tc-modal-title-el').textContent = 'Add / Request Title';
     const successEl = document.getElementById('tc-s1a-success');
     if (successEl) { successEl.style.display = 'none'; successEl.textContent = ''; }
     const backBtn = document.getElementById('tc-s1a-back');
@@ -5803,7 +5835,7 @@ const _tc = (() => {
     const notifyBtn = document.getElementById('tc-s1a-notify');
     if (notifyBtn) { notifyBtn.disabled = false; notifyBtn.textContent = 'Request'; }
     goStep(0);
-    document.getElementById('tc-modal-bg').style.display = 'flex';
+    _showInline();
     setTimeout(() => { const inp = document.getElementById('tc-s0-input'); if(inp){inp.value='';inp.focus();} }, 80);
   }
 
@@ -5812,7 +5844,7 @@ const _tc = (() => {
     document.getElementById('tc-modal-title-el').textContent = 'Edit Trophy';
     _setS1bState({ name: item.name, year: item.year, existingImg: item.image_url, isEdit: true });
     goStep('1b');
-    document.getElementById('tc-modal-bg').style.display = 'flex';
+    _showInline();
   }
 
   function goStep(step) {
@@ -6010,7 +6042,18 @@ const _tc = (() => {
   }
 
   function closeModal() {
-    document.getElementById('tc-modal-bg').style.display = 'none';
+    // Move modal back into its background container and restore grid
+    const modal    = document.getElementById('tc-modal');
+    const builder  = document.getElementById('tc-builder-view');
+    const gridView = document.getElementById('tc-grid-view');
+    const bg       = document.getElementById('tc-modal-bg');
+    if (modal && bg && modal.parentElement !== bg) {
+      bg.appendChild(modal);
+      modal.style.cssText = ''; // restore original CSS class styling
+    }
+    if (bg) bg.style.display = 'none';
+    if (builder)  { builder.innerHTML = ''; builder.style.display = 'none'; }
+    if (gridView) gridView.style.display = '';
     _imgData = null; _editing = null; _activeEfed = null; _selfEfedName = '';
     _cvReset();
     const fi = document.getElementById('tc-img-file'); if(fi) fi.value='';
@@ -6224,8 +6267,8 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
 <div id="tc-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.88);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);align-items:center;justify-content:center;padding:20px;">
   <div id="tc-modal" style="background:#111118;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px 18px 16px;width:100%;max-width:380px;max-height:88vh;overflow-y:auto;box-shadow:0 32px 80px rgba(0,0,0,.9);scrollbar-width:thin;scrollbar-color:rgba(200,168,75,.25) transparent;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <div class="tc-modal-title" id="tc-modal-title-el" style="margin-bottom:0;">Add / Request Title</div>
-      <button onclick="_tc.closeModal()" style="background:transparent;border:none;color:rgba(255,255,255,.35);font-size:1.2rem;cursor:pointer;line-height:1;padding:4px 6px;border-radius:6px;transition:color .15s,background .15s;" onmouseover="this.style.color='rgba(255,255,255,.8)';this.style.background='rgba(255,255,255,.07)'" onmouseout="this.style.color='rgba(255,255,255,.35)';this.style.background='transparent'">✕</button>
+      <div id="tc-modal-title-el" style="margin-bottom:0;font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Add / Request Title</div>
+      <button onclick="_tc.closeModal()" title="Close" style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);color:rgba(255,255,255,.5);font-size:.8rem;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;" onmouseover="this.style.background='rgba(255,255,255,.13)';this.style.color='#fff'" onmouseout="this.style.background='rgba(255,255,255,.07)';this.style.color='rgba(255,255,255,.5)'">✕</button>
     </div>
 
     <!-- Step 0: eFed lookup (new adds only) -->
