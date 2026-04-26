@@ -3026,6 +3026,16 @@ html.day-mode .rr-add-btn:hover { border-color: rgba(168,130,10,.8); color: rgba
 }
 .rv-field-input::placeholder { color: rgba(255,255,255,.14); }
 .rv-field-input:focus { color: rgba(255,255,255,.7); }
+/* Compact YouTube edit button inline with eFed/Year */
+.rv-yt-edit-btn {
+  display:inline-flex;align-items:center;justify-content:center;gap:2px;
+  padding:3px 7px;border-radius:20px;
+  border:1px solid rgba(255,255,255,.1);background:transparent;
+  cursor:pointer;opacity:.35;transition:opacity .15s,border-color .15s,background .15s;flex-shrink:0;
+}
+.rv-yt-edit-btn:hover, .rv-yt-edit-btn.rv-yt-edit-open { opacity:1; border-color:rgba(255,0,0,.35); background:rgba(255,0,0,.07); }
+.rv-yt-edit-btn.rv-yt-edit-has { opacity:.75; border-color:rgba(255,0,0,.3); background:rgba(255,0,0,.06); }
+.rv-yt-edit-btn.rv-yt-edit-has:hover, .rv-yt-edit-btn.rv-yt-edit-has.rv-yt-edit-open { opacity:1; border-color:rgba(255,0,0,.55); background:rgba(255,0,0,.12); }
 
 /* Rivalry name input (top line, edit mode) */
 .rv-name-input {
@@ -5134,7 +5144,11 @@ function renderRivalries() {
 
     if (editable) {
       const resolvedName = r.display_name || '';
+      const hasYt = !!(r.youtube_url && _rm2ExtractYtId(r.youtube_url));
+      const ytIcon = `<svg width="11" height="11" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`;
       const rvYtTipId = `rv-yt-tip-body-${i}`;
+      const rvYtInputId = `rv-yt-input-${i}`;
+      const rvYtPanelId = `rv-yt-panel-${i}`;
       // Move buttons: hide on mobile (drag-and-drop is enough)
       const moveBtns = isMobile ? '' : `
         <button class="rv-ctrl-btn" onclick="rvMove(${i},-1)" ${i===0?'disabled':''} title="Move up"><svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 4L4 1L7 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -5154,27 +5168,28 @@ function renderRivalries() {
                 <div class="user-search-dropdown" id="rv-dropdown-${i}"></div>
               </div>`
           }
-          <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
+          <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;" class="rv-meta-row">
             <input class="rv-field-input" value="${_esc(r.efed||'')}" placeholder="eFed" maxlength="10" style="width:52px;flex-shrink:0;font-size:.65rem;text-transform:uppercase;"
               onblur="rvSaveField(${i},'efed',this)" onkeydown="if(event.key==='Enter')this.blur();">
             <input class="rv-field-input" value="${_esc(r.year||'')}" placeholder="Year" maxlength="4" style="width:40px;flex-shrink:0;font-size:.65rem;"
               onblur="rvSaveField(${i},'year',this)" onkeydown="if(event.key==='Enter')this.blur();">
+            <!-- Video button: shows filled red if URL saved, ghost "+" if not -->
+            <button class="rv-yt-edit-btn${hasYt?' rv-yt-edit-has':''}" title="${hasYt?'Edit notable match video':'Add notable match video'}"
+              onclick="(function(btn,panelId){var panel=document.getElementById(panelId);var open=panel.style.display!=='none';panel.style.display=open?'none':'block';btn.classList.toggle('rv-yt-edit-open',!open);})(this,'${rvYtPanelId}')">
+              ${ytIcon}${hasYt?'':'<span style="font-size:.55rem;font-weight:700;color:rgba(255,255,255,.35);margin-left:2px;">+</span>'}
+            </button>
           </div>
-          <!-- Notable Match YouTube -->
-          <div style="margin-top:4px;">
-            <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:5px;display:flex;align-items:center;gap:5px;">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="#ff0000" style="flex-shrink:0;"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-              Notable Match <span style="opacity:.4;font-size:.45rem;letter-spacing:1px;">(optional)</span>
-            </div>
-            <input class="rv-field-input" value="${_esc(r.youtube_url||'')}" placeholder="YouTube link (optional)" maxlength="200" type="url"
+          <!-- Expandable YouTube panel (hidden by default) -->
+          <div id="${rvYtPanelId}" style="display:none;margin-top:4px;">
+            <input id="${rvYtInputId}" class="rv-field-input" value="${_esc(r.youtube_url||'')}" placeholder="YouTube link (optional)" maxlength="200" type="url"
               style="width:100%;font-size:.65rem;box-sizing:border-box;"
               oninput="this.style.borderColor=this.value&&!_rm2ExtractYtId(this.value)?'rgba(255,80,80,.5)':'rgba(255,255,255,.1)'"
-              onblur="rvSaveField(${i},'youtube_url',this)" onkeydown="if(event.key==='Enter')this.blur();">
-            <div style="margin-top:5px;">
+              onblur="rvSaveField(${i},'youtube_url',this);renderRivalries();" onkeydown="if(event.key==='Enter')this.blur();">
+            <div style="margin-top:4px;">
               <button onclick="(function(btn){var body=document.getElementById('${rvYtTipId}');var open=body.style.display!=='none';body.style.display=open?'none':'block';btn.querySelector('svg').style.transform=open?'':'rotate(180deg)';})(this)"
-                style="width:100%;display:flex;align-items:center;justify-content:space-between;background:rgba(200,168,75,.07);border:1px solid rgba(200,168,75,.15);border-radius:8px;padding:7px 10px;cursor:pointer;text-align:left;">
-                <span style="font-size:.62rem;color:#c8a84b;font-weight:700;letter-spacing:.3px;">⭐ Tip — skip straight to your match</span>
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
+                style="width:100%;display:flex;align-items:center;justify-content:space-between;background:rgba(200,168,75,.07);border:1px solid rgba(200,168,75,.15);border-radius:8px;padding:6px 10px;cursor:pointer;text-align:left;">
+                <span style="font-size:.6rem;color:#c8a84b;font-weight:700;letter-spacing:.3px;">⭐ Tip — skip straight to your match</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
               <div id="${rvYtTipId}" style="display:none;background:rgba(200,168,75,.04);border:1px solid rgba(200,168,75,.1);border-top:none;border-radius:0 0 8px 8px;padding:8px 10px;">
                 <div style="font-size:.62rem;color:rgba(255,255,255,.55);line-height:1.6;">
@@ -5572,6 +5587,7 @@ const _tc = (() => {
   let _dragSrc = null;
   let _editing = null;
   let _imgData = null;
+  let _cvUserUploaded = false; // true only when user picks a NEW file
   let _activeEfed = null; // {promo_name, owner_username, vault_json} when step 1a
   let _efedMatches = []; // multiple results when acronym is ambiguous
   let _selfEfedName = ''; // eFed typed in step 0
@@ -5650,7 +5666,7 @@ const _tc = (() => {
   }
 
   function _cvReset() {
-    _cvImg=null; _cvX=0; _cvY=0; _cvZoom=1; _cvDrag=false;
+    _cvImg=null; _cvX=0; _cvY=0; _cvZoom=1; _cvDrag=false; _cvUserUploaded=false;
     const c=_cvCanvas(); if(c){const ctx=c.getContext('2d');ctx.clearRect(0,0,CW,CH);} _cvGuide(_cvCanvas()&&_cvCanvas().getContext('2d')||{save:()=>{},restore:()=>{}});
     const hint=document.getElementById('tc-img-hint'); if(hint)hint.style.display='flex';
     const strip=document.getElementById('tc-zoom-strip'); if(strip)strip.style.display='none';
@@ -6022,22 +6038,45 @@ const _tc = (() => {
   function _setS1bState({ name, year, existingImg, isEdit }) {
     const nameIn  = document.getElementById('tc-name-input');
     const yearIn  = document.getElementById('tc-year-input');
-    const preview = document.getElementById('tc-img-preview');
     const hint    = document.getElementById('tc-img-hint');
     const err     = document.getElementById('tc-modal-err');
     const btn     = document.getElementById('tc-save-btn');
     const cancel  = document.getElementById('tc-s1b-cancel');
     if (nameIn) nameIn.value = name||'';
     if (yearIn) { yearIn.value = year||''; yearIn.disabled = false; yearIn.style.opacity = '1'; }
-    _presentActive = false;
+    _presentActive = (year||'').toLowerCase() === 'present';
     const presBtn = document.getElementById('tc-present-btn');
-    if (presBtn) { presBtn.style.background = 'transparent'; presBtn.style.color = 'rgba(255,255,255,.4)'; presBtn.style.borderColor = 'rgba(255,255,255,.15)'; }
-    if (existingImg) { if(preview){preview.src=existingImg;preview.style.display='block';} if(hint)hint.style.display='none'; }
-    else { if(preview)preview.style.display='none'; if(hint)hint.style.display='flex'; }
+    if (_presentActive) {
+      if (yearIn) { yearIn.disabled = true; yearIn.style.opacity = '.45'; }
+      if (presBtn) { presBtn.style.background = '#c0000e'; presBtn.style.color = '#fff'; presBtn.style.borderColor = '#c0000e'; }
+    } else {
+      if (presBtn) { presBtn.style.background = 'transparent'; presBtn.style.color = 'rgba(255,255,255,.4)'; presBtn.style.borderColor = 'rgba(255,255,255,.15)'; }
+    }
     if (err) { err.style.display='none'; err.textContent=''; }
-    if (btn) { btn.disabled=false; btn.textContent='Save'; }
+    if (btn) { btn.disabled=false; btn.textContent= isEdit ? 'Save' : 'Add'; }
     if (cancel) cancel.onclick = isEdit ? closeModal : () => goStep(0);
     if (cancel) cancel.textContent = isEdit ? 'Cancel' : '← Back';
+    // Load existing image into canvas when editing
+    _cvReset();
+    if (existingImg) {
+      _cvInitEvents();
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        _cvImg = img;
+        _cvZoom = Math.max(CW / img.naturalWidth, CH / img.naturalHeight);
+        _cvZoomMin = Math.min(CW / img.naturalWidth, CH / img.naturalHeight) * 0.3;
+        _cvZoomMax = _cvZoom * 6;
+        _cvX = (CW - img.naturalWidth * _cvZoom) / 2;
+        _cvY = (CH - img.naturalHeight * _cvZoom) / 2;
+        _cvRender(); _cvUpdateBar();
+        if (hint) hint.style.display = 'none';
+        const strip = document.getElementById('tc-zoom-strip'); if (strip) strip.style.display = 'flex';
+        const wrap  = document.getElementById('tc-canvas-wrap'); if (wrap)  wrap.style.cursor  = 'grab';
+      };
+      img.onerror = () => { /* can't load cross-origin — leave canvas empty so user can re-upload */ };
+      img.src = existingImg;
+    }
   }
 
   async function notifyOwner() {
@@ -6107,6 +6146,7 @@ const _tc = (() => {
 
   function handleImgPick(ev) {
     const file = ev.target.files && ev.target.files[0]; if (!file) return;
+    _cvUserUploaded = true;
     _cvInitEvents();
     const reader = new FileReader();
     reader.onload = e => {
@@ -6135,7 +6175,7 @@ const _tc = (() => {
     const err  = document.getElementById('tc-modal-err');
     const btn  = document.getElementById('tc-save-btn');
     if (!name) { if(err){err.textContent='Enter the title name.';err.style.display='block';} return; }
-    if (_cvImg) _imgData = _cvExport(); // bake canvas to jpeg
+    if (_cvImg && _cvUserUploaded) _imgData = _cvExport(); // only bake if user uploaded a NEW image
     if (btn) { btn.disabled=true; btn.textContent='Saving…'; }
     if (err) err.style.display='none';
     try {
@@ -6151,8 +6191,11 @@ const _tc = (() => {
         }
       }
       if (_editing) {
+        // Bake canvas only if the user moved/uploaded an image (i.e. _cvImg is set)
+        if (_cvImg) _imgData = _cvExport();
         const patch = { name, year: year||null };
-        if (imageUrl) patch.image_url = imageUrl;
+        if (_imgData) patch.image_url = imageUrl; // new image uploaded
+        // If no new image, don't touch image_url — keep whatever's in the DB
         await sbPatch('trophies', `id=eq.${_editing}`, patch);
       } else {
         await sbInsert('trophies', {
@@ -6321,13 +6364,14 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
     <div id="tc-s0" style="display:none;">
       <div style="font-size:.7rem;color:rgba(255,255,255,.45);margin-bottom:12px;line-height:1.5;">Select which title you won in the past, or write the name if it's not in the list.</div>
       <label class="tc-modal-label" for="tc-s0-input">eFed Name or Acronym</label>
-      <input class="tc-modal-input" id="tc-s0-input" type="text" placeholder="e.g. EOW or Empire Origin Wrestling" maxlength="60"
-        onkeydown="if(event.key==='Enter')_tc.checkEfed()">
-      <div id="tc-s0-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
-      <div class="tc-modal-actions">
-        <button class="tc-btn-cancel" onclick="_tc.closeModal()">Cancel</button>
-        <button class="tc-btn-save" id="tc-s0-next" onclick="_tc.checkEfed()">Next →</button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input class="tc-modal-input" id="tc-s0-input" type="text" placeholder="e.g. EOW or Empire Origin Wrestling" maxlength="60"
+          style="flex:1;min-width:0;margin-bottom:0;"
+          onkeydown="if(event.key==='Enter')_tc.checkEfed()">
+        <button class="tc-btn-cancel" onclick="_tc.closeModal()" style="flex-shrink:0;white-space:nowrap;margin-bottom:0;">Cancel</button>
+        <button class="tc-btn-save" id="tc-s0-next" onclick="_tc.checkEfed()" style="flex-shrink:0;white-space:nowrap;margin-bottom:0;">Next →</button>
       </div>
+      <div id="tc-s0-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
     </div>
 
     <!-- Step PICK: Multiple eFeds share this acronym -->
