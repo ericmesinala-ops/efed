@@ -193,15 +193,29 @@ function getEmblemSVG(designId) {
     const CLOUD_NAME = 'dfjope4m';
     const UPLOAD_PRESET = 'efed_avatars';
 
-    const res = await fetch(dataUrl);
-    const blob = await res.blob();
+    // Convert data URL → Blob manually so MIME type is always correct.
+    // fetch(dataUrl) can return type:"" on some browsers, causing Cloudinary to reject the request.
+    let blob;
+    if (dataUrl.startsWith('data:')) {
+      const [header, b64] = dataUrl.split(',');
+      const mime = (header.match(/:(.*?);/) || [])[1] || 'image/jpeg';
+      const binary = atob(b64);
+      const arr = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+      blob = new Blob([arr], { type: mime });
+    } else {
+      // Remote URL (e.g. existing Cloudinary link) — fetch normally
+      const res = await fetch(dataUrl);
+      blob = await res.blob();
+    }
 
-    // Use folder to organise assets — this IS allowed on unsigned presets.
+    // Use folder to organise assets — allowed on unsigned presets.
     // Do NOT send `public_id`, `overwrite`, or `context` — those require signed requests.
     const folder = bucket; // e.g. "trophies", "avatars", "belts"
+    const ext = blob.type.includes('png') ? 'png' : 'jpg';
 
     const formData = new FormData();
-    formData.append('file', blob);
+    formData.append('file', blob, 'upload.' + ext); // filename helps Cloudinary detect format
     formData.append('upload_preset', UPLOAD_PRESET);
     formData.append('folder', folder);
 
