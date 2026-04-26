@@ -3373,7 +3373,7 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
         <div style="display:flex;gap:8px;margin-bottom:10px;">
           <button onclick="rm2SlotAddVs()" id="rm2-vs-btn" style="flex:1;padding:9px;border-radius:9px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.05);color:rgba(255,255,255,.55);font-family:'Bebas Neue',sans-serif;font-size:.9rem;letter-spacing:2px;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='rgba(200,168,75,.5)';this.style.background='rgba(200,168,75,.08)';this.style.color='#c8a84b'" onmouseout="this.style.borderColor='rgba(255,255,255,.18)';this.style.background='rgba(255,255,255,.05)';this.style.color='rgba(255,255,255,.55)'">+ VS</button>
           <button onclick="rm2SlotAddQuestion()" style="flex:1;padding:9px;border-radius:9px;border:1px dashed rgba(255,255,255,.18);background:rgba(255,255,255,.04);color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='rgba(180,140,255,.4)';this.style.background='rgba(180,140,255,.07)';this.style.color='rgba(200,170,255,.8)'" onmouseout="this.style.borderColor='rgba(255,255,255,.18)';this.style.background='rgba(255,255,255,.04)';this.style.color='rgba(255,255,255,.4)'">+ ???</button>
-          <button onclick="rm2SlotAddMultiple()" style="flex:1;padding:9px;border-radius:9px;border:1px solid rgba(56,189,248,.35);background:rgba(26,111,168,.18);color:rgba(56,189,248,.9);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:4px;" onmouseover="this.style.borderColor='rgba(56,189,248,.65)';this.style.background='rgba(26,111,168,.32)';this.style.color='#38bdf8'" onmouseout="this.style.borderColor='rgba(56,189,248,.35)';this.style.background='rgba(26,111,168,.18)';this.style.color='rgba(56,189,248,.9)'">👥 Multiple</button>
+          <button onclick="rm2SlotAddMultiple()" style="flex:1;padding:9px;border-radius:9px;border:1px solid rgba(56,189,248,.25);background:rgba(56,189,248,.06);color:rgba(56,189,248,.65);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;transition:all .15s;" onmouseover="this.style.borderColor='rgba(56,189,248,.55)';this.style.background='rgba(56,189,248,.12)';this.style.color='rgba(56,189,248,.95)'" onmouseout="this.style.borderColor='rgba(56,189,248,.25)';this.style.background='rgba(56,189,248,.06)';this.style.color='rgba(56,189,248,.65)'">+ Multiple</button>
         </div>
 
         <!-- Manual name text box -->
@@ -3886,6 +3886,11 @@ function rm2ManualTyping(inp) {
       // User selected — add as a real linked wrestler slot
       inp.value = '';
       dd.innerHTML = '';
+      // Prevent adding self as an opponent (self slot already exists with isSelf:true)
+      const selfSlot = window._rm2Slots.find(s => s.isSelf);
+      if (selfSlot && selfSlot.username && selfSlot.username === u.username) return;
+      // Also prevent duplicate usernames already in slots
+      if (u.username && window._rm2Slots.some(s => s.type === 'wrestler' && !s.isSelf && s.username === u.username)) return;
       _rm2SnapshotUndo();
       window._rm2Slots.push({ type: 'wrestler', username: u.username, name: u.display_name || u.username, avatar: u.avatar_url || '' });
       rm2RenderSlotPreview();
@@ -4014,7 +4019,7 @@ function rm2RenderSlotPreview() {
       const isMultiple = m.username === '__multiple__';
       const isSelf = !!m.isSelf;
       const avHtml = isMultiple
-        ? `<div style="width:34px;height:34px;border-radius:50%;background:#1a6fa8;border:2px solid #38bdf8;display:flex;align-items:center;justify-content:center;font-size:1.1rem;box-shadow:0 0 8px rgba(56,189,248,.35);">👥</div>`
+        ? `<div style="width:34px;height:34px;border-radius:50%;background:rgba(56,189,248,.15);border:2px solid rgba(56,189,248,.55);display:flex;align-items:center;justify-content:center;font-size:1.1rem;">👥</div>`
         : isMystery
         ? `<div style="width:34px;height:34px;border-radius:50%;background:rgba(80,60,120,.25);border:2px dashed rgba(180,140,255,.3);display:flex;align-items:center;justify-content:center;font-size:1rem;">❓</div>`
         : (m.avatar
@@ -4282,7 +4287,9 @@ function _rm2MatchDisplayFromSlots(selfName, r) {
     else teams[teams.length - 1].push(s.name || '???');
   }
   // teams[0] = self's partners; teams[1+] = opposing teams
-  const myTeam = [selfName, ...(teams[0] || [])].filter(Boolean);
+  // Guard: if self's name appears in teams[0], skip it (was accidentally saved)
+  const partners = (teams[0] || []).filter(n => n !== selfName);
+  const myTeam = [selfName, ...partners].filter(Boolean);
   const oppTeams = teams.slice(1);
   const myStr = myTeam.join(' & ');
   const oppStr = oppTeams.map(t => t.join(' & ')).join(' vs ');
@@ -4338,7 +4345,7 @@ async function rm2SaveRecord() {
     date: dateV || '',
     champ_name: champ || '',
     role: _rm2ChampOn ? _rm2Role : '',
-    slots: window._rm2Slots.filter(s => !s.isSelf).map(s => ({ type: s.type, username: s.username || '', name: s.name || '', avatar: s.avatar || '' })),
+    slots: window._rm2Slots.filter(s => !s.isSelf && s.username !== (session.username || '__self_never_match__')).map(s => ({ type: s.type, username: s.username || '', name: s.name || '', avatar: s.avatar || '' })),
   };
 
   const saveBtn = document.getElementById('rm2-save-btn');
