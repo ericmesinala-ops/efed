@@ -3361,7 +3361,7 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
       <!-- ── STEP 1: Choose opponents (eFed booking style) ── -->
       <div id="rm2-step-1" class="rm2-step">
         <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:6px;">Build Your Match</div>
-        <div style="font-size:.62rem;color:rgba(255,255,255,.25);margin-bottom:10px;line-height:1.5;font-family:'DM Sans',sans-serif;">You're already in. Add teammates first, then tap <strong style="color:rgba(200,168,75,.5);">+ VS</strong> to separate sides, then add opponents. Drag to reorder.</div>
+        <div style="font-size:.62rem;color:rgba(255,255,255,.25);margin-bottom:10px;line-height:1.5;font-family:'DM Sans',sans-serif;">How to use in a Tag Match: Enter your ally’s name in the box, select their CAW or click Add, then click <strong style="color:rgba(200,168,75,.5);">VS</strong> to add opponents—entering one name at a time.</div>
 
         <!-- Live match banner preview (slot-based, drag & drop) -->
         <div id="rm2-slot-preview-wrap" style="padding:10px 12px;border-radius:11px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);margin-bottom:10px;">
@@ -3531,6 +3531,7 @@ function _rm2SnapshotUndo() {
   _rm2RefreshUndoBtn();
 }
 function _rm2SlotDelete(idx) {
+  if (window._rm2Slots[idx]?.isSelf) return; // self slot is permanent — cannot be deleted
   _rm2SnapshotUndo();
   window._rm2Slots.splice(idx, 1);
   rm2RenderSlotPreview();
@@ -3781,7 +3782,7 @@ function rm2RenderOppGrid(members) {
   }
   members.forEach(m => {
     const card = document.createElement('div');
-    const isSelected = window._rm2Slots.some(s => s.type === 'wrestler' && s.username === m.username);
+    const isSelected = window._rm2Slots.some(s => s.type === 'wrestler' && !s.isSelf && s.username === m.username);
     card.className = 'rm2-opp-card' + (isSelected ? ' selected' : '');
     card.dataset.username = m.username;
     const initials = (m.display_name||m.username||'?').replace(/ 👻$/,'').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
@@ -3793,7 +3794,7 @@ function rm2RenderOppGrid(members) {
     card.innerHTML = avHtml + `<div class="rm2-opp-card-name">${short}</div>`;
     card.onclick = () => {
       rm2SlotAddFromRoster({ username: m.username, display_name: (m.display_name||m.username||'').replace(/ 👻$/,''), avatar_url: m.avatar_url || '' });
-      const nowSelected = window._rm2Slots.some(s => s.type === 'wrestler' && s.username === m.username);
+      const nowSelected = window._rm2Slots.some(s => s.type === 'wrestler' && !s.isSelf && s.username === m.username);
       card.classList.toggle('selected', nowSelected);
       document.getElementById('rm2-msg-1').textContent = '';
     };
@@ -3921,6 +3922,7 @@ function rm2SlotAddManual() {
 }
 
 function rm2SlotRemove(idx) {
+  if (window._rm2Slots[idx]?.isSelf) return; // self slot is permanent — cannot be deleted
   _rm2SnapshotUndo();
   window._rm2Slots.splice(idx, 1);
   // Clean orphan VS at start/end or double VS
@@ -3940,7 +3942,8 @@ function rm2SlotRemove(idx) {
 function rm2SlotAddFromRoster(m) {
   const existing = window._rm2Slots.findIndex(s => s.type === 'wrestler' && s.username === m.username);
   if (existing !== -1) {
-    // Toggle off — remove from slots
+    // Toggle off — but never remove the self slot
+    if (window._rm2Slots[existing].isSelf) return;
     rm2SlotRemove(existing);
     return;
   }
