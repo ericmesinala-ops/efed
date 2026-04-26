@@ -2782,12 +2782,18 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 
 <!-- ── RIVALRIES SECTION ── -->
 <div class="section" id="rivalries-section" style="padding-bottom:16px;">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-    <div class="sec-title" style="margin-bottom:0;flex:1;">Rivalries</div>
-    <button id="rivalry-add-btn" onclick="rvAddNew()" title="Add rivalry" style="display:none;" class="rr-add-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+  <!-- List view -->
+  <div id="rv-list-view">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div class="sec-title" style="margin-bottom:0;flex:1;">Rivalries</div>
+      <button id="rivalry-add-btn" onclick="rvAddNew()" title="Add rivalry" style="display:none;" class="rr-add-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    </div>
+    <div id="rivalries-list"></div>
+    <div id="rv-expand-ctrl"></div>
+    <div id="rivalries-empty" style="font-size:.78rem;color:#5a5a6a;padding:8px 0 4px;">No rivalries logged yet.</div>
   </div>
-  <div id="rivalries-list"></div>
-  <div id="rivalries-empty" style="font-size:.78rem;color:#5a5a6a;padding:8px 0 4px;">No rivalries logged yet.</div>
+  <!-- Inline builder (replaces list when adding/editing) -->
+  <div id="rv-builder-view" style="display:none;"></div>
 </div>
 
 <!-- ── RECORDS SECTION ── -->
@@ -3383,25 +3389,8 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
 }
 .rv-edit-btn:hover { color: #c8a84b; background: rgba(200,168,75,.1); }
 
-/* ── Rivalry modal ── */
-#rv-modal-bg {
-  display: none; position: fixed; inset: 0; z-index: 9000;
-  background: rgba(0,0,0,.72); backdrop-filter: blur(8px);
-}
-#rv-modal-panel {
-  display: none; position: fixed; bottom: 0; left: 0; right: 0;
-  z-index: 9001; background: #111114;
-  border-top: 1px solid rgba(255,255,255,.08);
-  border-radius: 18px 18px 0 0;
-  padding: 22px 20px 36px; max-width: 520px;
-  margin: 0 auto; box-sizing: border-box;
-  max-height: 90vh; overflow-y: auto;
-  animation: rv-slide-up .22s ease;
-}
-@keyframes rv-slide-up {
-  from { transform: translateY(40px); opacity: 0; }
-  to   { transform: translateY(0);    opacity: 1; }
-}
+/* ── Rivalry inline panel ── */
+#rv-inline-panel { display: none; }
 .rv-modal-label {
   font-size: .5rem; letter-spacing: 2px; text-transform: uppercase;
   color: #c8a84b; font-weight: 700; margin-bottom: 6px;
@@ -3420,7 +3409,6 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
   font-family: 'DM Sans', sans-serif; font-size: .75rem;
   font-weight: 700; cursor: pointer; transition: all .15s;
 }
-html.day-mode #rv-modal-panel { background: #f4f4fa; }
 html.day-mode .rv-modal-label { color: #a07830; }
 html.day-mode .rv-modal-input { background: rgba(0,0,0,.05); border-color: rgba(0,0,0,.12); color: #111; }
 html.day-mode .rv-modal-input::placeholder { color: rgba(0,0,0,.25); }
@@ -3428,10 +3416,9 @@ html.day-mode .rv-edit-btn { color: rgba(0,0,0,.22); }
 html.day-mode .rv-edit-btn:hover { color: #a07830; background: rgba(160,120,48,.1); }
 </style>
 
-<!-- ── RIVALRY ADD/EDIT MODAL ── -->
-<div id="rv-modal-bg" onclick="if(event.target===this)closeRivalryModal()"></div>
-<div id="rv-modal-panel">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+<!-- ── RIVALRY ADD/EDIT INLINE PANEL ── -->
+<div id="rv-inline-panel">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
     <div id="rv-modal-title" style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Add Rivalry</div>
     <button onclick="closeRivalryModal()" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#fff;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:.85rem;display:flex;align-items:center;justify-content:center;">✕</button>
   </div>
@@ -5172,6 +5159,43 @@ let _rvModalResolvedDisplay = '';
 let _rvModalResolvedAvatar = '';
 let _rvModalStatus = 'ongoing';
 
+function _rvShowInline() {
+  const panel    = document.getElementById('rv-inline-panel');
+  const builder  = document.getElementById('rv-builder-view');
+  const listView = document.getElementById('rv-list-view');
+  if (!panel || !builder || !listView) return;
+  builder.innerHTML = '';
+  builder.appendChild(panel);
+  panel.style.display = 'block';
+  listView.style.display = 'none';
+  builder.style.display = 'block';
+  // Scroll so the top of the rivalries section lands just below the sticky header
+  const sec      = document.getElementById('rivalries-section');
+  const stickyEl = document.getElementById('profile-nav-name-sticky');
+  if (sec) {
+    const stickyH = stickyEl ? stickyEl.getBoundingClientRect().height : 0;
+    const secTop  = sec.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: secTop - stickyH - 57, behavior: 'smooth' });
+  }
+}
+
+function _rvHideInline() {
+  const panel    = document.getElementById('rv-inline-panel');
+  const builder  = document.getElementById('rv-builder-view');
+  const listView = document.getElementById('rv-list-view');
+  if (panel)    panel.style.display    = 'none';
+  if (builder)  builder.style.display  = 'none';
+  if (listView) listView.style.display = 'block';
+  // Scroll back so rivalries are in view
+  const sec      = document.getElementById('rivalries-section');
+  const stickyEl = document.getElementById('profile-nav-name-sticky');
+  if (sec) {
+    const stickyH = stickyEl ? stickyEl.getBoundingClientRect().height : 0;
+    const secTop  = sec.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: secTop - stickyH - 57, behavior: 'smooth' });
+  }
+}
+
 function openRivalryModal(idx) {
   _rvModalIdx = (idx === undefined || idx === null) ? null : idx;
   const isNew = _rvModalIdx === null;
@@ -5192,18 +5216,16 @@ function openRivalryModal(idx) {
   document.getElementById('rv-modal-delete-wrap').style.display = isNew ? 'none' : 'block';
   document.getElementById('rv-modal-err').textContent = '';
   document.getElementById('rv-modal-tip-body').style.display = 'none';
-  const tipSvg = document.querySelector('#rv-modal-panel [onclick*="rv-modal-tip-body"] svg');
+  const tipSvg = document.querySelector('#rv-inline-panel [onclick*="rv-modal-tip-body"] svg');
   if (tipSvg) tipSvg.style.transform = '';
   rvModalSetStatus(_rvModalStatus);
 
-  document.getElementById('rv-modal-bg').style.display = 'block';
-  document.getElementById('rv-modal-panel').style.display = 'block';
+  _rvShowInline();
   setTimeout(() => { const n = document.getElementById('rv-modal-name'); if(n) n.focus(); }, 120);
 }
 
 function closeRivalryModal() {
-  document.getElementById('rv-modal-bg').style.display = 'none';
-  document.getElementById('rv-modal-panel').style.display = 'none';
+  _rvHideInline();
   const dd = document.getElementById('rv-modal-dropdown');
   if (dd) { dd.innerHTML = ''; dd.classList.remove('open'); }
 }
@@ -6495,11 +6517,8 @@ const _tc = (() => {
         }
       }
       if (_editing) {
-        // Bake canvas only if the user moved/uploaded an image (i.e. _cvImg is set)
-        if (_cvImg) _imgData = _cvExport();
         const patch = { name, year: year||null };
-        if (_imgData) patch.image_url = imageUrl; // new image uploaded
-        // If no new image, don't touch image_url — keep whatever's in the DB
+        if (_cvUserUploaded && imageUrl) patch.image_url = imageUrl; // only update image if user uploaded a new one
         await sbPatch('trophies', `id=eq.${_editing}`, patch);
       } else {
         await sbInsert('trophies', {
@@ -6672,8 +6691,8 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
         <input class="tc-modal-input" id="tc-s0-input" type="text" placeholder="e.g. EOW or Empire Origin Wrestling" maxlength="60"
           style="flex:1;min-width:0;margin-bottom:0;"
           onkeydown="if(event.key==='Enter')_tc.checkEfed()">
-        <button class="tc-btn-cancel" onclick="_tc.closeModal()" style="flex-shrink:0;white-space:nowrap;margin-bottom:0;">Cancel</button>
-        <button class="tc-btn-save" id="tc-s0-next" onclick="_tc.checkEfed()" style="flex-shrink:0;white-space:nowrap;margin-bottom:0;">Next →</button>
+        <button class="tc-btn-cancel" onclick="_tc.closeModal()" style="flex:none;white-space:nowrap;margin-bottom:0;">Cancel</button>
+        <button class="tc-btn-save" id="tc-s0-next" onclick="_tc.checkEfed()" style="flex:none;white-space:nowrap;margin-bottom:0;">Next →</button>
       </div>
       <div id="tc-s0-msg" style="font-size:.68rem;margin-top:6px;min-height:14px;"></div>
     </div>
