@@ -2753,7 +2753,10 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 <div class="section" id="trophy-case-section" style="padding-bottom:16px;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
     <div class="sec-title" style="margin-bottom:0;flex:1;">Trophy Case</div>
-    <div id="trophy-count-badge" style="display:none;font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(200,168,75,.5);font-weight:700;"></div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div id="trophy-count-badge" style="display:none;font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(200,168,75,.5);font-weight:700;"></div>
+      <button id="tc-viewall-btn" onclick="_tc.openViewAll()" style="display:none;font-size:.52rem;letter-spacing:1.2px;text-transform:uppercase;color:rgba(200,168,75,.6);font-weight:700;background:none;border:1px solid rgba(200,168,75,.25);border-radius:6px;padding:3px 8px;cursor:pointer;transition:all .15s;font-family:'DM Sans',sans-serif;" onmouseover="this.style.color='rgba(200,168,75,1)';this.style.borderColor='rgba(200,168,75,.6)'" onmouseout="this.style.color='rgba(200,168,75,.6)';this.style.borderColor='rgba(200,168,75,.25)'">View All</button>
+    </div>
   </div>
 
   <!-- Netflix-style scroll row -->
@@ -5199,6 +5202,56 @@ html.day-mode .tc-tile-img-wrap {
 .tc-drag-handle { background: rgba(200,168,75,.88); color: #000; cursor: grab; }
 .tc-tile.tc-dragging { opacity: .35; }
 .tc-tile.tc-drag-over .tc-tile-img-wrap { outline: 2px dashed rgba(200,168,75,.6); border-radius: 10px; }
+/* ── TC VIEW-ALL POPUP ── */
+#tc-viewall-bg {
+  display: none; position: fixed; inset: 0; z-index: 9998;
+  background: rgba(0,0,0,.84); backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  align-items: center; justify-content: center; padding: 16px;
+}
+#tc-viewall-modal {
+  background: #14141c; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 20px; width: 100%; max-width: 640px;
+  max-height: 88vh; display: flex; flex-direction: column;
+  box-shadow: 0 30px 90px rgba(0,0,0,.75);
+  overflow: hidden;
+}
+#tc-viewall-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px 14px; border-bottom: 1px solid rgba(255,255,255,.07);
+  flex-shrink: 0;
+}
+#tc-viewall-title {
+  font-family: 'Bebas Neue', sans-serif; font-size: 1.25rem;
+  letter-spacing: 2.5px; color: #c8a84b;
+}
+#tc-viewall-count {
+  font-size: .56rem; letter-spacing: 1.4px; text-transform: uppercase;
+  color: rgba(200,168,75,.45); font-weight: 700; margin-left: 10px; align-self: flex-end; padding-bottom: 2px;
+}
+#tc-viewall-close {
+  background: none; border: none; color: rgba(255,255,255,.35);
+  font-size: 1.2rem; cursor: pointer; line-height: 1; padding: 4px 6px;
+  transition: color .15s; font-family: sans-serif;
+}
+#tc-viewall-close:hover { color: #fff; }
+#tc-viewall-body {
+  overflow-y: auto; flex: 1; padding: 20px 18px 18px;
+  scrollbar-width: thin; scrollbar-color: rgba(200,168,75,.3) transparent;
+}
+#tc-viewall-body::-webkit-scrollbar { width: 5px; }
+#tc-viewall-body::-webkit-scrollbar-track { background: transparent; }
+#tc-viewall-body::-webkit-scrollbar-thumb { background: rgba(200,168,75,.3); border-radius: 4px; }
+#tc-viewall-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 18px 14px;
+  align-items: start;
+}
+html.day-mode #tc-viewall-modal { background: #f4f4fa; border-color: rgba(0,0,0,.1); }
+html.day-mode #tc-viewall-header { border-bottom-color: rgba(0,0,0,.07); }
+html.day-mode #tc-viewall-close { color: rgba(0,0,0,.35); }
+html.day-mode #tc-viewall-close:hover { color: #111; }
 /* ── TC ADD/EDIT MODAL ── */
 #tc-modal-bg {
   display: none; position: fixed; inset: 0; z-index: 9999;
@@ -5275,6 +5328,8 @@ const _tc = (() => {
       if (count) { badge.textContent = count + ' ' + (count === 1 ? 'trophy' : 'trophies'); badge.style.display = 'block'; }
       else { badge.style.display = 'none'; }
     }
+    const viewAllBtn = document.getElementById('tc-viewall-btn');
+    if (viewAllBtn) viewAllBtn.style.display = count > 0 ? 'inline-flex' : 'none';
     if (empty) empty.style.display = (!count && !_isOwn) ? 'block' : 'none';
     if (addBtn) addBtn.style.display = _isOwn ? 'flex' : 'none';
 
@@ -5682,7 +5737,45 @@ const _tc = (() => {
     });
   }
 
-  return { load, scroll, jumpStart, openAdd, closeModal, save, handleImgPick, goStep, checkEfed, notifyOwner };
+  function openViewAll() {
+    const bg = document.getElementById('tc-viewall-bg'); if (!bg) return;
+    const grid = document.getElementById('tc-viewall-grid'); if (!grid) return;
+    const countEl = document.getElementById('tc-viewall-count');
+    grid.innerHTML = '';
+    const count = _items.length;
+    if (countEl) countEl.textContent = count + ' ' + (count === 1 ? 'trophy' : 'trophies');
+    _items.forEach(item => {
+      const tile = document.createElement('div');
+      tile.className = 'tc-tile';
+      tile.style.width = '100%'; tile.style.cursor = 'default';
+      const imgWrap = document.createElement('div');
+      imgWrap.className = 'tc-tile-img-wrap';
+      imgWrap.style.width = '100%'; imgWrap.style.height = '64px';
+      if (item.image_url) {
+        const img = document.createElement('img');
+        img.src = item.image_url; img.alt = item.name || ''; img.loading = 'lazy';
+        imgWrap.appendChild(img);
+      } else {
+        imgWrap.innerHTML = `<div class="tc-tile-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`;
+      }
+      tile.appendChild(imgWrap);
+      const nameEl = document.createElement('div'); nameEl.className = 'tc-tile-name';
+      nameEl.style.width = '100%'; nameEl.textContent = item.name || '';
+      tile.appendChild(nameEl);
+      if (item.year) {
+        const yearEl = document.createElement('div'); yearEl.className = 'tc-tile-year';
+        yearEl.textContent = item.year; tile.appendChild(yearEl);
+      }
+      grid.appendChild(tile);
+    });
+    bg.style.display = 'flex';
+  }
+
+  function closeViewAll() {
+    const bg = document.getElementById('tc-viewall-bg'); if (bg) bg.style.display = 'none';
+  }
+
+  return { load, scroll, jumpStart, openAdd, openViewAll, closeViewAll, closeModal, save, handleImgPick, goStep, checkEfed, notifyOwner };
 })();
 
 async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
@@ -5771,6 +5864,21 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
 
 
 <!-- ── TROPHY CASE ADD/EDIT MODAL ── -->
+<div id="tc-viewall-bg" onclick="if(event.target===this)_tc.closeViewAll()" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.84);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);align-items:center;justify-content:center;padding:16px;">
+  <div id="tc-viewall-modal">
+    <div id="tc-viewall-header">
+      <div style="display:flex;align-items:baseline;gap:8px;">
+        <div id="tc-viewall-title">Trophy Case</div>
+        <div id="tc-viewall-count"></div>
+      </div>
+      <button id="tc-viewall-close" onclick="_tc.closeViewAll()">✕</button>
+    </div>
+    <div id="tc-viewall-body">
+      <div id="tc-viewall-grid"></div>
+    </div>
+  </div>
+</div>
+
 <div id="tc-modal-bg" onclick="if(event.target===this)_tc.closeModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;">
   <div id="tc-modal" style="background:#14141c;border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:22px 20px 18px;width:100%;max-width:320px;box-shadow:0 24px 80px rgba(0,0,0,.7);">
     <div class="tc-modal-title" id="tc-modal-title-el">Add / Request Title</div>
