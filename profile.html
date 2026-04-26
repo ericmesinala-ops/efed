@@ -3470,6 +3470,11 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
           <button onclick="rm2PrevStep()" style="flex:0 0 80px;padding:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">← Back</button>
           <button onclick="rm2SaveRecord()" style="flex:1;padding:11px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'" id="rm2-save-btn">Save Match</button>
         </div>
+        <!-- Edit-only actions: Delete record + Start over -->
+        <div id="rm2-edit-actions" style="display:none;flex-direction:column;gap:6px;border-top:1px solid rgba(255,255,255,.06);padding-top:10px;margin-top:2px;">
+          <button onclick="rm2StartOver()" style="width:100%;padding:9px;background:transparent;border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:600;cursor:pointer;transition:all .15s;letter-spacing:.5px;" onmouseover="this.style.color='rgba(255,255,255,.7)';this.style.borderColor='rgba(255,255,255,.2)'" onmouseout="this.style.color='rgba(255,255,255,.35)';this.style.borderColor='rgba(255,255,255,.1)'">↺ Start Over</button>
+          <button onclick="rm2DeleteFromModal()" style="width:100%;padding:9px;background:transparent;border:1px solid rgba(192,0,14,.25);border-radius:10px;color:rgba(255,100,100,.6);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:600;cursor:pointer;transition:all .15s;letter-spacing:.5px;" onmouseover="this.style.color='#ff6b6b';this.style.borderColor='rgba(192,0,14,.5)';this.style.background='rgba(192,0,14,.06)'" onmouseout="this.style.color='rgba(255,100,100,.6)';this.style.borderColor='rgba(192,0,14,.25)';this.style.background='transparent'">🗑 Delete This Record</button>
+        </div>
         <div id="rm2-msg-2" style="font-size:.7rem;text-align:center;color:#ff6b6b;min-height:14px;margin-top:-8px;"></div>
       </div>
 
@@ -3598,6 +3603,7 @@ async function recAddNew() {
   rm2SetResult('win'); rm2SetChamp(false); rm2SetRole('contender');
   rm2RenderSlotPreview();
   rm2GoStep(0);
+  const _ea = document.getElementById('rm2-edit-actions'); if(_ea) _ea.style.display = 'none';
   document.getElementById('record-modal-bg').style.display = 'flex';
   await rm2LoadEfeds(session.username);
 }
@@ -3674,6 +3680,7 @@ async function recEdit(idx) {
     rm2GoStep(0);
     await rm2LoadEfeds(session.username);
   }
+  const ea = document.getElementById('rm2-edit-actions'); if(ea) ea.style.display = 'flex';
   document.getElementById('record-modal-bg').style.display = 'flex';
 }
 
@@ -4359,6 +4366,34 @@ function closeRecordModal() {
 }
 
 // ── Legacy shim: openRecordModal / saveRecord (kept so nothing breaks) ──
+async function rm2DeleteFromModal() {
+  if (_rm2EditIdx === null) return;
+  const ok = await showConfirm('Delete Record', 'Remove this match record?', 'Delete');
+  if (!ok) return;
+  closeRecordModal();
+  _records.splice(_rm2EditIdx, 1);
+  if (_recPage * REC_PAGE_SIZE >= _records.length) _recPage = Math.max(0, Math.ceil(_records.length / REC_PAGE_SIZE) - 1);
+  renderRecords();
+  const session = getSession();
+  if (session) await saveRecords(session);
+}
+
+async function rm2StartOver() {
+  const session = getSession(); if (!session) return;
+  _rm2SelectedEfed = '';
+  _rm2SelectedOppUsername = '';
+  _rm2SelectedOppName = '';
+  _rm2SelectedOppAvatar = '';
+  // Keep self slot, reset opponents
+  window._rm2Slots = window._rm2Slots.filter(s => s.isSelf);
+  _rm2UndoStack = [];
+  document.getElementById('rm2-efed-manual').value = '';
+  document.getElementById('rm2-msg-0').textContent = '';
+  document.getElementById('rm2-msg-1').textContent = '';
+  rm2GoStep(0);
+  await rm2LoadEfeds(session.username);
+}
+
 function openRecordModal(editIdx) { recEdit(editIdx !== undefined ? editIdx : null); }
 async function saveRecord() { await rm2SaveRecord(); }
 
