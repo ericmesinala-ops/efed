@@ -250,7 +250,7 @@ function showConfirm(title, msg, btnLabel) {
   title = title || 'Confirm'; msg = msg || 'Are you sure?'; btnLabel = btnLabel || 'Delete';
   const bg = document.getElementById('confirm-modal-bg');
   document.getElementById('confirm-title').textContent = title;
-  document.getElementById('confirm-msg').textContent = msg;
+  document.getElementById('confirm-msg').innerHTML = msg;
   document.getElementById('confirm-ok-btn').textContent = btnLabel;
   bg.style.display = 'flex';
   return new Promise(resolve => { _confirmResolve = (val) => { bg.style.display = 'none'; resolve(val); }; });
@@ -6612,7 +6612,8 @@ const _tc = (() => {
   }
 
   async function _del(id) {
-    if (!confirm('Remove this trophy?')) return;
+    const ok = await showConfirm('Remove Trophy', 'Remove this trophy from the case?', 'Remove');
+    if (!ok) return;
     try { await sbDelete('trophies', `id=eq.${id}`); } catch(e) {}
     _items = _items.filter(i => i.id !== id);
     _render();
@@ -12050,11 +12051,13 @@ async function loadNotifications() {
         div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
       } else if (n.type === 'trophy_claim_denied') {
         // Claimant's denial notification — show appeal option
+        const cleanMsg = displayMessage.replace(/\|\|APPEAL_META:[\s\S]*?\|\|/, '').trim();
+        const rawMsgForAppeal = (n.message || '').replace(/<[^>]+>/g, ''); // keep metadata for JS but strip HTML
         const alreadyAppealed = n.video_url === '__appealed__';
         div.innerHTML = `
           <div class="notif-icon">❌</div>
           <div class="notif-body" style="flex:1;">
-            <div class="notif-msg">${displayMessage}</div>
+            <div class="notif-msg">${cleanMsg}</div>
             <div class="notif-time">${timeAgo}</div>
             ${alreadyAppealed
               ? `<div style="margin-top:8px;font-size:.68rem;color:#8a8a9a;font-style:italic;">✓ Proof submitted — awaiting review.</div>`
@@ -12066,7 +12069,7 @@ async function loadNotifications() {
                   <div id="appeal-form-${n.id}" style="display:none;margin-top:8px;">
                     <input id="appeal-url-${n.id}" type="url" placeholder="YouTube link to the match"
                       style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:7px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.72rem;outline:none;box-sizing:border-box;margin-bottom:6px;">
-                    <button onclick="submitTrophyAppeal(${n.id},'${_esc(n.message||'')}')"
+                    <button onclick="submitTrophyAppeal(${n.id}, ${JSON.stringify(n.message||'')})"
                       style="width:100%;padding:7px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);border-radius:8px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">
                       Send Proof
                     </button>
@@ -12355,9 +12358,9 @@ async function submitTrophyAppeal(notifId, rawMessage) {
   const urlInput = document.getElementById('appeal-url-' + notifId);
   const url = (urlInput?.value || '').trim();
   if (!url) { showToast('Please paste a YouTube link.'); return; }
-  // Extract owner username from message metadata
+  // Extract owner username from embedded metadata
   let ownerUsername = '';
-  const appealMeta = rawMessage.match(/\|\|APPEAL_META:([\s\S]*?)\|\|/);
+  const appealMeta = (rawMessage||'').match(/\|\|APPEAL_META:([\s\S]*?)\|\|/);
   if (appealMeta) { try { ownerUsername = JSON.parse(appealMeta[1]).ownerUsername || ''; } catch(e) {} }
   try {
     if (ownerUsername) {
