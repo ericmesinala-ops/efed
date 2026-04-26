@@ -185,7 +185,7 @@ function getEmblemSVG(designId) {
   // ── STORAGE UPLOAD HELPER ──
   // Converts a dataUrl to a Blob and uploads to Supabase Storage.
   // Returns the public URL string.
-  async function uploadToStorage(dataUrl, bucket, path) {
+  async function uploadToStorage(dataUrl, bucket, path, transform = 'w_256,h_256,c_fill,f_auto,q_auto') {
     const CLOUD_NAME = 'dfjope4m';
     const UPLOAD_PRESET = 'efed_avatars';
 
@@ -208,9 +208,9 @@ function getEmblemSVG(designId) {
     if (!r.ok) throw new Error('Cloudinary upload failed: ' + await r.text());
     const data = await r.json();
 
-    // Return optimized CDN URL — WebP/AVIF auto format, auto quality, 256x256 avatar size
+    // Return optimized CDN URL with caller-specified transform
     const publicIdFinal = data.public_id;
-    return `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/w_256,h_256,c_fill,f_auto,q_auto/${publicIdFinal}`;
+    return `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/${transform}/${publicIdFinal}`;
   }
 
   (function() {
@@ -5967,14 +5967,25 @@ const _tc = (() => {
     if (btn) { btn.disabled=true; btn.textContent='Saving…'; }
     if (err) err.style.display='none';
     try {
+      // Upload image to Cloudinary if we have one, store URL not base64
+      let imageUrl = null;
+      if (_imgData) {
+        const session = getSession();
+        if (session) {
+          const storagePath = 'trophies/' + session.username + '_trophy_' + Date.now();
+          imageUrl = await uploadToStorage(_imgData, 'trophies', storagePath, 'w_560,h_320,c_fill,f_auto,q_auto');
+        } else {
+          imageUrl = _imgData; // fallback to base64 if no session
+        }
+      }
       if (_editing) {
         const patch = { name, year: year||null };
-        if (_imgData) patch.image_url = _imgData;
+        if (imageUrl) patch.image_url = imageUrl;
         await sbPatch('trophies', `id=eq.${_editing}`, patch);
       } else {
         await sbInsert('trophies', {
           username:  _targetUser, name, year: year||null,
-          image_url: _imgData||null,
+          image_url: imageUrl||null,
           sort_order: _items.length,
           source:    'self',
           efed_name: _selfEfedName||null
@@ -7218,9 +7229,9 @@ function handleCawFile(event) {
       const img = new Image();
       img.onload = async () => {
         const canvas = document.createElement('canvas');
-        canvas.width = 1200; canvas.height = 1200;
-        canvas.getContext('2d').drawImage(img, 0, 0, 1200, 1200);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        canvas.width = 600; canvas.height = 600;
+        canvas.getContext('2d').drawImage(img, 0, 0, 600, 600);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
         const imgEl = document.getElementById('caw-img-' + _cawSlot);
         const plusEl = document.getElementById('caw-plus-' + _cawSlot);
         if (imgEl) { imgEl.src = dataUrl; imgEl.style.display = 'block'; }
@@ -7229,7 +7240,7 @@ function handleCawFile(event) {
         const field = 'caw_image_' + _cawSlot;
         try {
           const storagePath = 'avatars/' + session.username + '_slot' + _cawSlot;
-          const publicUrl = await uploadToStorage(dataUrl, 'avatars', storagePath);
+          const publicUrl = await uploadToStorage(dataUrl, 'avatars', storagePath, 'w_600,h_600,c_fill,f_auto,q_auto');
           const cacheBustedUrl = publicUrl + '?t=' + Date.now();
           const body = {}; body[field] = cacheBustedUrl;
           const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
@@ -8339,14 +8350,24 @@ function _readChampEntries() {
 
 function _champHandleBeltImg(event, idx) {
   const file = event.target.files[0]; if (!file) return;
+  const session = getSession();
   const reader = new FileReader();
   reader.onload = ev => {
-    openBannerCrop(ev.target.result, 200, 200, (url) => {
+    openBannerCrop(ev.target.result, 200, 200, async (url) => {
       const entry = document.querySelector(`.champ-entry[data-idx="${idx}"]`);
       if (!entry) return;
-      entry.dataset.beltImg = url;
+      // Show local preview immediately
       const preview = entry.querySelector('.champ-belt-preview');
       if (preview) preview.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;">`;
+      // Upload to Cloudinary and store URL (not base64)
+      let finalUrl = url;
+      try {
+        if (session) {
+          const storagePath = 'belts/' + session.username + '_belt_' + idx;
+          finalUrl = await uploadToStorage(url, 'belts', storagePath, 'w_200,h_200,c_fill,f_auto,q_auto');
+        }
+      } catch(e) { console.warn('Belt upload failed, using local preview', e); }
+      entry.dataset.beltImg = finalUrl;
       // Show remove button if not already there
       let removeBtn = entry.querySelector('.champ-belt-remove-btn');
       if (!removeBtn) {
@@ -8357,7 +8378,7 @@ function _champHandleBeltImg(event, idx) {
         removeBtn.onmouseover = () => removeBtn.style.color = '#ff6b6b';
         removeBtn.onmouseout  = () => removeBtn.style.color = 'rgba(255,80,80,.35)';
         removeBtn.onclick = () => _champRemoveBeltImg(idx);
-        preview.parentNode.appendChild(removeBtn);
+        if (preview) preview.parentNode.appendChild(removeBtn);
       }
     });
   };
@@ -8480,11 +8501,11 @@ async function epHandleAvatar(event) {
   reader.onload = async e => {
     const img = new Image();
     img.onload = async () => {
-      const MAX = 1200; const canvas = document.createElement('canvas');
+      const MAX = 600; const canvas = document.createElement('canvas');
       const scale = Math.min(MAX/img.width, MAX/img.height, 1);
       canvas.width = Math.round(img.width*scale); canvas.height = Math.round(img.height*scale);
       canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
       // Update preview
       const avPrev = document.getElementById('ep-av-preview');
       avPrev.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;">`;
@@ -9156,24 +9177,28 @@ function handleBannerUpload(event, type) {
       if (!session) return;
       const img = new Image();
       img.onload = async () => {
-        // Compress to 1600×400 at 0.92 quality
-        const W = 1600, H = 400;
+        // Compress to 1280×320 at 0.88 quality for Cloudinary upload
+        const W = 1280, H = 320;
         const canvas = document.createElement('canvas');
         canvas.width = W; canvas.height = H;
         canvas.getContext('2d').drawImage(img, 0, 0, W, H);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-        // Show immediately
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+        // Show immediately with local preview
         const bannerImg = document.getElementById('profile-banner-img');
         if (bannerImg) { bannerImg.src = dataUrl; bannerImg.style.display = 'block'; }
         const _bn = document.querySelector('.banner-noise'); if (_bn) _bn.style.display = 'none';
         const _bg = document.querySelector('.banner-glow'); if (_bg) _bg.style.display = 'none';
         const bmsg = document.getElementById('ep-banner-msg');
-        // Save base64 directly to DB (same as avatar/gallery pattern)
+        if (bmsg) { bmsg.textContent = 'Uploading…'; bmsg.style.color = '#8a8a9a'; }
         try {
+          const storagePath = 'banners/' + session.username + '_banner';
+          const publicUrl = await uploadToStorage(dataUrl, 'banners', storagePath, 'w_1280,h_320,c_fill,f_auto,q_auto');
+          const cacheBustedUrl = publicUrl + '?t=' + Date.now();
+          if (bannerImg) bannerImg.src = cacheBustedUrl;
           const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
             method: 'PATCH',
             headers: SB_HEADERS,
-            body: JSON.stringify({ avatar_banner: dataUrl })
+            body: JSON.stringify({ avatar_banner: cacheBustedUrl })
           });
           if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + await r.text());
           if (bmsg) { bmsg.textContent = 'Banner saved!'; bmsg.style.color = '#4caf64'; setTimeout(() => bmsg.textContent = '', 2500); }
@@ -9348,8 +9373,14 @@ async function handleAvatarFile(event) {
       session.avatarUrl = croppedDataUrl;
       localStorage.setItem('efed_session', JSON.stringify(session));
       try {
+        const storagePath = 'avatars/' + session.username + '_avatar';
+        const publicUrl = await uploadToStorage(croppedDataUrl, 'avatars', storagePath);
+        const cacheBustedUrl = publicUrl + '?t=' + Date.now();
+        setAvatar(cacheBustedUrl);
+        session.avatarUrl = cacheBustedUrl;
+        localStorage.setItem('efed_session', JSON.stringify(session));
         await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
-          method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ avatar_url: croppedDataUrl })
+          method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ avatar_url: cacheBustedUrl })
         });
       } catch(err) { console.warn('Avatar save failed', err); }
     });
