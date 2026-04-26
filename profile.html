@@ -6504,10 +6504,11 @@ const _tc = (() => {
       });
       // Notify owner — fire-and-forget, don't let failure block the save
       if (_activeEfed?.owner_username) {
+        const _claimMeta = JSON.stringify({ requesterUsername: session?.username||_targetUser, champName: nameVal, efedName: _selfEfedName||'' });
         sbInsert('notifications', {
           username:   _activeEfed.owner_username,
           type:       'trophy_claim',
-          message:    `🏆 <strong>@${_esc(session?.username||_targetUser)}</strong> claimed <strong>${_esc(nameVal)}</strong> from <strong>${_esc(_selfEfedName)}</strong> — pending your approval.`,
+          message:    `🏆 <strong>@${_esc(session?.username||_targetUser)}</strong> claimed <strong>${_esc(nameVal)}</strong> from <strong>${_esc(_selfEfedName)}</strong> — pending your approval.||TROPHY:${_claimMeta}||`,
           video_url:  null,
           read:       false,
           created_at: Date.now()
@@ -11977,6 +11978,7 @@ async function loadNotifications() {
       let rosterRowId = '', requesterUsername = '', requesterName = '', parsedEfedName = '';
       let isRosterJoin = false;
       let displayMessage = n.message || '';
+      displayMessage = displayMessage.replace(/\|\|APPEAL_META:[\s\S]*?\|\|/, '').trim();
 
       // Extract hidden roster metadata from message
       const rosterMarker = n.message && n.message.match(/\|\|ROSTER:([\s\S]*?)\|\|/);
@@ -12004,7 +12006,76 @@ async function loadNotifications() {
           }
         } catch(e) {}
       }
-      if (isRosterJoin) {
+      // ── Parse trophy_claim metadata ──
+      let isTrophyClaim = false;
+      let tcRequesterUsername = '', tcChampName = '', tcEfedName = '';
+      const trophyMarker = n.message && n.message.match(/\|\|TROPHY:([\s\S]*?)\|\|/);
+      if (trophyMarker && n.type === 'trophy_claim') {
+        try {
+          const meta = JSON.parse(trophyMarker[1]);
+          isTrophyClaim = true;
+          tcRequesterUsername = meta.requesterUsername || '';
+          tcChampName         = meta.champName         || '';
+          tcEfedName          = meta.efedName          || '';
+          displayMessage = n.message.replace(/\|\|TROPHY:[\s\S]*?\|\|/, '').trim();
+        } catch(e) {}
+      }
+
+      if (isTrophyClaim) {
+        div.innerHTML = `
+          <div class="notif-icon">🏆</div>
+          <div class="notif-body" style="flex:1;">
+            <div class="notif-msg">${displayMessage}</div>
+            <div class="notif-time">${timeAgo}</div>
+            <div style="display:flex;gap:8px;margin-top:10px;">
+              <button onclick="notifDenyTrophy('${_esc(tcRequesterUsername)}','${_esc(tcChampName)}','${_esc(tcEfedName)}',${n.id},this.closest('.notif-item'))"
+                style="flex:1;padding:7px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">Deny</button>
+              <button onclick="notifAcceptTrophy('${_esc(tcRequesterUsername)}','${_esc(tcChampName)}','${_esc(tcEfedName)}',${n.id},this.closest('.notif-item'))"
+                style="flex:2;padding:7px 0;background:rgba(76,175,100,.12);border:1px solid rgba(76,175,100,.3);border-radius:8px;color:#4caf64;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">✓ Accept</button>
+            </div>
+          </div>`;
+      } else if (n.type === 'trophy_denied_appeal') {
+        // User's appeal notification — has YouTube proof link from owner's denial
+        const proofUrl = n.video_url || '';
+        div.innerHTML = `
+          <div class="notif-icon">❌</div>
+          <div class="notif-body" style="flex:1;">
+            <div class="notif-msg">${displayMessage}</div>
+            <div class="notif-time">${timeAgo}</div>
+            ${proofUrl ? `<a href="${_esc(proofUrl)}" target="_blank" rel="noopener"
+              style="display:inline-flex;align-items:center;gap:5px;margin-top:8px;font-size:.68rem;color:#c8a84b;text-decoration:none;border:1px solid rgba(200,168,75,.25);border-radius:7px;padding:5px 10px;background:rgba(200,168,75,.06);">
+              ▶ View submitted proof
+            </a>` : ''}
+          </div>`;
+        div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
+      } else if (n.type === 'trophy_claim_denied') {
+        // Claimant's denial notification — show appeal option
+        const alreadyAppealed = n.video_url === '__appealed__';
+        div.innerHTML = `
+          <div class="notif-icon">❌</div>
+          <div class="notif-body" style="flex:1;">
+            <div class="notif-msg">${displayMessage}</div>
+            <div class="notif-time">${timeAgo}</div>
+            ${alreadyAppealed
+              ? `<div style="margin-top:8px;font-size:.68rem;color:#8a8a9a;font-style:italic;">✓ Proof submitted — awaiting review.</div>`
+              : `<div id="appeal-wrap-${n.id}" style="margin-top:10px;">
+                  <button onclick="document.getElementById('appeal-form-${n.id}').style.display='block';this.style.display='none';"
+                    style="font-size:.68rem;color:rgba(255,255,255,.4);background:none;border:1px solid rgba(255,255,255,.1);border-radius:7px;padding:5px 10px;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    Think this is a mistake? Submit proof
+                  </button>
+                  <div id="appeal-form-${n.id}" style="display:none;margin-top:8px;">
+                    <input id="appeal-url-${n.id}" type="url" placeholder="YouTube link to the match"
+                      style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:7px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.72rem;outline:none;box-sizing:border-box;margin-bottom:6px;">
+                    <button onclick="submitTrophyAppeal(${n.id},'${_esc(n.message||'')}')"
+                      style="width:100%;padding:7px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);border-radius:8px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;">
+                      Send Proof
+                    </button>
+                  </div>
+                </div>`
+            }
+          </div>`;
+        div.onclick = () => { markNotifRead(n.id); div.classList.remove('unread'); };
+      } else if (isRosterJoin) {
         div.innerHTML = `
           <div class="notif-icon" onclick="event.stopPropagation();deleteNotif(${n.id},this.closest('.notif-item-wrap'))">🤼</div>
           <div class="notif-body" style="flex:1;">
@@ -12038,9 +12109,13 @@ async function loadNotifications() {
       wrap.className = 'notif-item-wrap';
       wrap.appendChild(div);
       list.appendChild(wrap);
-      addSwipeToDelete(div, n.id);
+      // Disable swipe-to-delete for pending trophy_claim and roster join (must be acted on)
+      if (!isTrophyClaim && !isRosterJoin) addSwipeToDelete(div, n.id);
     });
-    const dot = document.getElementById('bnav-notif-dot'); if (dot) dot.classList.remove('visible');
+    // Only hide dot if no unread notifications remain
+    const unreadCount = notifs.filter(n => !n.read).length;
+    const dot = document.getElementById('bnav-notif-dot');
+    if (dot) dot.classList.toggle('visible', unreadCount > 0);
   } catch(e) { list.innerHTML = '<div class="notif-empty">Could not load notifications.</div>'; }
 }
 
@@ -12188,7 +12263,119 @@ function notifDenyRoster(rosterRowId, requesterUsername, requesterName, efedName
   };
 }
 
-async function markNotifRead(id) { try { await fetch(SUPABASE_URL+'/rest/v1/notifications?id=eq.'+id, { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({read:true}) }); } catch(e) {} }
+async function notifAcceptTrophy(requesterUsername, champName, efedName, notifId, notifEl) {
+  const ok = await showConfirm('Accept Championship Claim', `Approve <strong>${champName}</strong> for <strong>@${requesterUsername}</strong>?`, 'Accept');
+  if (!ok) return;
+  try {
+    // Approve the pending trophy record
+    await fetch(SUPABASE_URL + '/rest/v1/trophies?username=eq.' + encodeURIComponent(requesterUsername) +
+      '&name=eq.' + encodeURIComponent(champName) + '&source=eq.pending', {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ source: 'self' })
+    });
+    const acceptMsg = `✅ Your <strong>${_esc(champName)}</strong> claim from <strong>${_esc(efedName)}</strong> was approved!`;
+    // Notify claimant
+    await sbInsert('notifications', {
+      username: requesterUsername, type: 'award',
+      message: acceptMsg, read: false, created_at: Date.now()
+    });
+    // Update owner's notification: replace buttons with accepted state + award CTA
+    await fetch(SUPABASE_URL + '/rest/v1/notifications?id=eq.' + notifId, {
+      method: 'PATCH', headers: SB_HEADERS,
+      body: JSON.stringify({ read: true, message: `✅ You approved <strong>@${_esc(requesterUsername)}</strong>'s claim for <strong>${_esc(champName)}</strong>.` })
+    });
+    if (notifEl) {
+      notifEl.classList.remove('unread');
+      const body = notifEl.querySelector('.notif-body');
+      if (body) {
+        const btnRow = body.querySelector('div[style*="gap:8px"]');
+        if (btnRow) btnRow.remove();
+
+        // Award CTA
+        const awardLink = `profile.html?u=${encodeURIComponent(requesterUsername)}`;
+        const cta = document.createElement('div');
+        cta.style.cssText = 'margin-top:10px;display:flex;flex-direction:column;gap:8px;';
+        cta.innerHTML = `
+          <a href="${awardLink}" style="display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);border-radius:9px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;text-decoration:none;">
+            🏆 Go to their profile to award
+          </a>
+          <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.textContent=this.textContent.includes('▶')?'▲ Hide tutorial':'▶ How to award a championship';"
+            style="background:none;border:none;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.65rem;cursor:pointer;text-align:left;padding:0;">
+            ▶ How to award a championship
+          </button>
+          <div style="display:none;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:9px;padding:12px;font-size:.68rem;color:rgba(255,255,255,.55);line-height:1.7;">
+            <strong style="color:rgba(255,255,255,.75);display:block;margin-bottom:6px;">From an existing title in your vault</strong>
+            1. Go to their profile → Career tab → Trophy Case<br>
+            2. Click the <strong style="color:#c8a84b;">shield ⊕</strong> button<br>
+            3. Select your eFed → pick the championship from the list<br>
+            4. Fill in the year → click <strong style="color:#c8a84b;">Award</strong><br><br>
+            <strong style="color:rgba(255,255,255,.75);display:block;margin-bottom:6px;">Creating a new championship from scratch</strong>
+            1. Same steps above — when you reach the title list, scroll to the bottom<br>
+            2. Click <strong style="color:#c8a84b;">+ Create New Title</strong><br>
+            3. Upload a belt image, enter the name → click <strong style="color:#c8a84b;">Save & Award</strong>
+          </div>`;
+        body.appendChild(cta);
+      }
+    }
+    showToast('Claim approved!');
+  } catch(e) { showToast('Could not approve — try again.'); }
+}
+
+async function notifDenyTrophy(requesterUsername, champName, efedName, notifId, notifEl) {
+  const ok = await showConfirm('Deny Championship Claim', `Deny <strong>${champName}</strong> for <strong>@${requesterUsername}</strong>?`, 'Deny');
+  if (!ok) return;
+  try {
+    // Delete the pending trophy record
+    await fetch(SUPABASE_URL + '/rest/v1/trophies?username=eq.' + encodeURIComponent(requesterUsername) +
+      '&name=eq.' + encodeURIComponent(champName) + '&source=eq.pending', {
+      method: 'DELETE', headers: SB_HEADERS
+    });
+    // Notify claimant with appeal option
+    await sbInsert('notifications', {
+      username: requesterUsername, type: 'trophy_claim_denied',
+      message: `❌ Your claim for <strong>${_esc(champName)}</strong> from <strong>${_esc(efedName)}</strong> was not approved.||APPEAL_META:${JSON.stringify({ champName, efedName, ownerUsername: getSession()?.username||'' })}||`,
+      video_url: null, read: false, created_at: Date.now()
+    });
+    const denyMsg = `❌ You denied <strong>@${_esc(requesterUsername)}</strong>'s claim for <strong>${_esc(champName)}</strong>.`;
+    await fetch(SUPABASE_URL + '/rest/v1/notifications?id=eq.' + notifId, {
+      method: 'PATCH', headers: SB_HEADERS,
+      body: JSON.stringify({ read: true, message: denyMsg })
+    });
+    if (notifEl) {
+      notifEl.classList.remove('unread');
+      const btnRow = notifEl.querySelector('div[style*="gap:8px"]');
+      if (btnRow) btnRow.innerHTML = '<span style="font-size:.68rem;color:#ff6b6b;font-weight:700;">✕ Denied</span>';
+      const msgEl = notifEl.querySelector('.notif-msg');
+      if (msgEl) msgEl.innerHTML = denyMsg;
+    }
+    showToast('Claim denied.');
+  } catch(e) { showToast('Could not deny — try again.'); }
+}
+
+async function submitTrophyAppeal(notifId, rawMessage) {
+  const urlInput = document.getElementById('appeal-url-' + notifId);
+  const url = (urlInput?.value || '').trim();
+  if (!url) { showToast('Please paste a YouTube link.'); return; }
+  // Extract owner username from message metadata
+  let ownerUsername = '';
+  const appealMeta = rawMessage.match(/\|\|APPEAL_META:([\s\S]*?)\|\|/);
+  if (appealMeta) { try { ownerUsername = JSON.parse(appealMeta[1]).ownerUsername || ''; } catch(e) {} }
+  try {
+    if (ownerUsername) {
+      await sbInsert('notifications', {
+        username: ownerUsername, type: 'trophy_denied_appeal',
+        message: `📹 <strong>@${_esc(getSession()?.username||'')}</strong> submitted proof for their championship claim.`,
+        video_url: url, read: false, created_at: Date.now()
+      });
+    }
+    // Mark claimant's denial notif as appealed so button disappears
+    await fetch(SUPABASE_URL + '/rest/v1/notifications?id=eq.' + notifId, {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ video_url: '__appealed__', read: true })
+    });
+    const wrap = document.getElementById('appeal-wrap-' + notifId);
+    if (wrap) wrap.innerHTML = '<div style="font-size:.68rem;color:#8a8a9a;font-style:italic;margin-top:8px;">✓ Proof submitted — awaiting review.</div>';
+    showToast('Proof sent!');
+  } catch(e) { showToast('Could not send proof — try again.'); }
+}
 async function deleteNotif(id, el) {
   try {
     await fetch(SUPABASE_URL+'/rest/v1/notifications?id=eq.'+id, { method:'DELETE', headers:SB_HEADERS });
