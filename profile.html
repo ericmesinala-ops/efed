@@ -3207,11 +3207,14 @@ html.day-mode .rv-name-input::placeholder { color: rgba(0,0,0,.2); }
 
 /* Pagination tabs */
 .rec-page-tabs {
-  display: flex; gap: 5px; flex-wrap: wrap; justify-content: center;
-  margin-top: 10px;
+  display: flex; gap: 5px; flex-wrap: nowrap;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; padding: 2px 4px;
+  justify-content: flex-start;
 }
+.rec-page-tabs::-webkit-scrollbar { display: none; }
 .rec-page-tab {
-  width: 28px; height: 28px; border-radius: 50%;
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
   background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
   color: rgba(255,255,255,.4); font-size: .7rem; font-weight: 700;
   font-family: 'DM Sans', sans-serif;
@@ -3220,6 +3223,19 @@ html.day-mode .rv-name-input::placeholder { color: rgba(0,0,0,.2); }
 }
 .rec-page-tab:hover { border-color: rgba(200,168,75,.4); color: #c8a84b; }
 .rec-page-tab.active { background: rgba(200,168,75,.15); border-color: rgba(200,168,75,.5); color: #c8a84b; }
+/* Prev/Next page arrows flanking the tabs */
+.rec-page-nav {
+  display: flex; align-items: center; gap: 6px; margin-top: 10px; justify-content: center;
+}
+.rec-page-arrow {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.35); font-size: .85rem;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all .14s;
+}
+.rec-page-arrow:disabled { opacity: .2; pointer-events: none; }
+.rec-page-arrow:not(:disabled):hover { border-color: rgba(200,168,75,.4); color: #c8a84b; }
 
 /* ── NEW RECORD MODAL ── */
 .rm2-step { display: none; flex-direction: column; gap: 14px; }
@@ -4510,11 +4526,16 @@ async function rm2SaveRecord() {
   try {
     if (_rm2EditIdx !== null) {
       _records[_rm2EditIdx] = rec;
+      // Stay on current page when editing
+      _recViewAll = true;
+      _recPage = Math.floor(_rm2EditIdx / REC_PAGE_SIZE);
     } else {
       _records.unshift(rec);
+      // New record goes to position 0 — show page 0 in expanded view
+      _recViewAll = true;
+      _recPage = 0;
     }
     closeRecordModal();
-    _recViewAll = false; _recPage = 0;
     renderRecords();
     await saveRecords(session);
   } catch(e) {
@@ -4898,17 +4919,48 @@ function renderRecords() {
   if (_recViewAll && _records.length > REC_PAGE_SIZE && pgWrap) {
     pgWrap.style.display = 'block';
     const totalPages = Math.ceil(_records.length / REC_PAGE_SIZE);
+
+    const nav = document.createElement('div');
+    nav.className = 'rec-page-nav';
+
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'rec-page-arrow';
+    prevBtn.innerHTML = '&#8249;';
+    prevBtn.title = 'Previous page';
+    prevBtn.disabled = _recPage === 0;
+    prevBtn.onclick = () => { if (_recPage > 0) { _recPage--; renderRecords(); } };
+
     const tabs = document.createElement('div');
     tabs.className = 'rec-page-tabs';
+    tabs.id = 'rec-page-tabs-row';
     for (let p = 0; p < totalPages; p++) {
       const tab = document.createElement('button');
       tab.className = 'rec-page-tab' + (p === _recPage ? ' active' : '');
       tab.textContent = p + 1;
+      tab.dataset.page = p;
       tab.onclick = () => { _recPage = p; renderRecords(); };
       tabs.appendChild(tab);
     }
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'rec-page-arrow';
+    nextBtn.innerHTML = '&#8250;';
+    nextBtn.title = 'Next page';
+    nextBtn.disabled = _recPage === totalPages - 1;
+    nextBtn.onclick = () => { if (_recPage < totalPages - 1) { _recPage++; renderRecords(); } };
+
+    nav.appendChild(prevBtn);
+    nav.appendChild(tabs);
+    nav.appendChild(nextBtn);
+
     pgWrap.innerHTML = '';
-    pgWrap.appendChild(tabs);
+    pgWrap.appendChild(nav);
+
+    // Scroll active tab into view on mobile
+    requestAnimationFrame(() => {
+      const activeTab = tabs.querySelector('.rec-page-tab.active');
+      if (activeTab) activeTab.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+    });
   } else if (pgWrap) {
     pgWrap.style.display = 'none';
   }
@@ -5766,7 +5818,7 @@ const _tc = (() => {
         symbol = '⏳ '; symbolStyle = 'color:#e8a020;';
       } else {
         imgWrap.style.opacity = '0.45'; imgWrap.style.filter = 'grayscale(0.7)';
-        symbol = '✗ '; symbolStyle = 'color:rgba(255,255,255,.35);';
+        symbol = ''; symbolStyle = '';
       }
       nameEl.innerHTML = `<span style="${symbolStyle}font-style:normal;">${symbol}</span>${_esc(item.name || '')}`;
       tile.appendChild(nameEl);
@@ -5787,7 +5839,7 @@ const _tc = (() => {
     }
     noteEl.style.cssText = 'font-size:.65rem;color:#6a6a7a;letter-spacing:.3px;margin-top:10px;line-height:1.8;';
     noteEl.style.display = count > 0 ? 'block' : 'none';
-    noteEl.innerHTML = '<span style="color:#c8a84b;">✓</span> Verified by eFed owner &nbsp;·&nbsp; <span style="color:#e8a020;">⏳</span> Pending owner approval &nbsp;·&nbsp; <span style="color:rgba(255,255,255,.35);">✗</span> Unverified (self-added)';
+    noteEl.innerHTML = '<span style="color:#c8a84b;">✓</span> Verified by eFed owner';
 
     _updateChevrons();
   }
