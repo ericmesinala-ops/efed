@@ -2797,14 +2797,19 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
 
 <!-- ── RECORDS SECTION ── -->
 <div class="section" id="records-section" style="padding-bottom:16px;">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;position:relative;">
-    <div class="sec-title" style="margin-bottom:0;flex:1;">Recent Matches</div>
-    <button id="record-add-btn" onclick="recAddNew()" title="Add record" style="display:none;" class="rr-add-btn">+</button>
+  <!-- List view -->
+  <div id="rec-list-view">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;position:relative;">
+      <div class="sec-title" style="margin-bottom:0;flex:1;">Recent Matches</div>
+      <button id="record-add-btn" onclick="recAddNew()" title="Add record" style="display:none;" class="rr-add-btn">+</button>
+    </div>
+    <div id="records-list"></div>
+    <div id="rec-expand-ctrl"></div>
+    <div id="records-pagination" style="display:none;margin-top:10px;"></div>
+    <div id="records-empty" style="font-size:.78rem;color:#5a5a6a;padding:8px 0 4px;">No records yet.</div>
   </div>
-  <div id="records-list"></div>
-  <div id="rec-expand-ctrl"></div>
-  <div id="records-pagination" style="display:none;margin-top:10px;"></div>
-  <div id="records-empty" style="font-size:.78rem;color:#5a5a6a;padding:8px 0 4px;">No records yet.</div>
+  <!-- Inline builder (replaces list when adding/editing) -->
+  <div id="rec-builder-view" style="display:none;"></div>
 </div>
 
 <style>
@@ -3334,25 +3339,22 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
 </style>
 
 <!-- ── ADD/EDIT RECORD MODAL (v2 multi-step) ── -->
-<div id="record-modal-bg" onclick="if(event.target===this)closeRecordModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;">
-  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:18px;width:100%;max-width:440px;max-height:92dvh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.7);">
-
-    <!-- Header -->
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <div id="record-modal-title" style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Add Match</div>
-        <!-- Step dots -->
-        <div id="rm2-dot-wrap" style="display:flex;align-items:center;gap:5px;">
-          <div class="rm2-steps-dot current" id="rm2-dot-1"></div>
-          <div class="rm2-steps-dot" id="rm2-dot-2"></div>
-        </div>
+<div id="record-modal-bg" style="display:none;"></div>
+<div id="rm2-inline-panel" style="display:none;">
+  <!-- Header -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div id="record-modal-title" style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Add Match</div>
+      <div id="rm2-dot-wrap" style="display:flex;align-items:center;gap:5px;">
+        <div class="rm2-steps-dot current" id="rm2-dot-1"></div>
+        <div class="rm2-steps-dot" id="rm2-dot-2"></div>
       </div>
-      <button onclick="closeRecordModal()" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#fff;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:.85rem;display:flex;align-items:center;justify-content:center;">✕</button>
     </div>
+    <button onclick="closeRecordModal()" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#fff;width:26px;height:26px;border-radius:50%;cursor:pointer;font-size:.85rem;display:flex;align-items:center;justify-content:center;">✕</button>
+  </div>
 
-    <!-- Scrollable body -->
-    <div style="padding:18px 20px 20px;display:flex;flex-direction:column;gap:14px;overflow-y:auto;flex:1;">
-
+  <!-- Steps -->
+  <div style="display:flex;flex-direction:column;gap:14px;">
       <!-- ── STEP 0: Choose eFed ── -->
       <div id="rm2-step-0" class="rm2-step" style="display:none;"><input id="rm2-efed-manual" type="hidden"><div id="rm2-efed-list"></div><div id="rm2-msg-0"></div></div>
 
@@ -3471,8 +3473,6 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
         </div>
         <div id="rm2-msg-2" style="font-size:.7rem;text-align:center;color:#ff6b6b;min-height:14px;margin-top:-8px;"></div>
       </div>
-
-    </div>
   </div>
 </div>
 <script>
@@ -3557,8 +3557,6 @@ function _rm2RefreshUndoBtn() {
 // ── ADD NEW: opens the multi-step modal ──
 async function recAddNew() {
   // Move modal to body once so position:fixed isn't trapped by page-card overflow-x:clip
-  const _mbg = document.getElementById('record-modal-bg');
-  if (_mbg && _mbg.parentNode !== document.body) document.body.appendChild(_mbg);
   const session = getSession(); if (!session) return;
   _rm2EditIdx = null;
   _rm2Step = 0;
@@ -3598,14 +3596,12 @@ async function recAddNew() {
   rm2RenderSlotPreview();
   rm2GoStep(1);
   const _ea = document.getElementById('rm2-edit-actions'); if(_ea) _ea.style.display = 'none';
-  document.getElementById('record-modal-bg').style.display = 'flex';
+  _rm2ShowInline();
 }
 
 // ── EDIT EXISTING record ──
 async function recEdit(idx) {
   // Move modal to body once so position:fixed isn't trapped by page-card overflow-x:clip
-  const _mbg = document.getElementById('record-modal-bg');
-  if (_mbg && _mbg.parentNode !== document.body) document.body.appendChild(_mbg);
   const session = getSession(); if (!session) return;
   const r = _records[idx];
   if (!r) return;
@@ -3676,7 +3672,7 @@ async function recEdit(idx) {
   // Jump straight to step 2 if we have efed + opponents already
   rm2GoStep(1);
   const ea = document.getElementById('rm2-edit-actions'); if(ea) ea.style.display = 'flex';
-  document.getElementById('record-modal-bg').style.display = 'flex';
+  _rm2ShowInline();
 }
 
 // ── LOAD EFEDS for step 0 ──
@@ -4350,8 +4346,33 @@ async function rm2SaveRecord() {
 }
 
 // ── MODAL close ──
+function _rm2ShowInline() {
+  // Move the inline panel into rec-builder-view and show it
+  const panel = document.getElementById('rm2-inline-panel');
+  const builder = document.getElementById('rec-builder-view');
+  const listView = document.getElementById('rec-list-view');
+  if (!panel || !builder || !listView) return;
+  builder.innerHTML = '';
+  builder.appendChild(panel);
+  panel.style.display = 'block';
+  listView.style.display = 'none';
+  builder.style.display = 'block';
+  // Scroll section into view
+  const sec = document.getElementById('records-section');
+  if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function _rm2HideInline() {
+  const panel = document.getElementById('rm2-inline-panel');
+  const builder = document.getElementById('rec-builder-view');
+  const listView = document.getElementById('rec-list-view');
+  if (panel) panel.style.display = 'none';
+  if (builder) builder.style.display = 'none';
+  if (listView) listView.style.display = 'block';
+}
+
 function closeRecordModal() {
-  document.getElementById('record-modal-bg').style.display = 'none';
+  _rm2HideInline();
   _rm2EditIdx = null;
 }
 
