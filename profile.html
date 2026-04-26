@@ -5208,7 +5208,7 @@ html.day-mode .tc-tile-img-wrap {
 }
 #tc-modal {
   background: #111118; border: 1px solid rgba(255,255,255,.1);
-  border-radius: 20px; padding: 22px 20px 18px; width: 100%; max-width: 560px;
+  border-radius: 16px; padding: 20px 18px 16px; width: 100%; max-width: 380px;
   box-shadow: 0 32px 80px rgba(0,0,0,.9);
 }
 .tc-modal-title { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; letter-spacing: 2px; color: #c8a84b; margin-bottom: 16px; }
@@ -5220,17 +5220,17 @@ html.day-mode .tc-tile-img-wrap {
 }
 .tc-modal-input:focus { border-color: rgba(200,168,75,.5); }
 /* image upload area */
-.tc-img-upload-area {
-  width: 100%; max-width: 340px; aspect-ratio: 7/4; border-radius: 12px; border: 2px dashed rgba(200,168,75,.28);
-  background: rgba(255,255,255,.03); display: flex; flex-direction: column;
-  align-items: center; justify-content: center; cursor: pointer; position: relative;
-  overflow: hidden; transition: border-color .15s, background .15s; margin-top: 4px;
-}
-.tc-img-upload-area:hover { border-color: rgba(200,168,75,.55); background: rgba(200,168,75,.04); }
-.tc-img-upload-area img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
-.tc-img-upload-hint { display: flex; flex-direction: column; align-items: center; gap: 6px; color: rgba(200,168,75,.45); pointer-events: none; }
-.tc-img-upload-hint svg { width: 28px; height: 28px; }
-.tc-img-upload-hint span { font-size: .6rem; letter-spacing: 1px; text-transform: uppercase; font-weight: 700; }
+/* tc canvas editor */
+#tc-canvas-wrap { position:relative;border-radius:10px;overflow:hidden;background:#08080d;border:1.5px solid rgba(200,168,75,.22);margin-top:4px;user-select:none; }
+#tc-canvas-wrap canvas { display:block;width:100%;aspect-ratio:560/320;touch-action:none; }
+#tc-img-hint { position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:rgba(200,168,75,.45);pointer-events:none; }
+#tc-img-hint svg { width:28px;height:28px; }
+#tc-img-hint span { font-size:.6rem;letter-spacing:1px;text-transform:uppercase;font-weight:700; }
+#tc-zoom-strip { display:none;align-items:center;gap:8px;margin-top:7px; }
+#tc-zoom-strip button { width:26px;height:26px;border-radius:50%;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.6);font-size:1.1rem;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;font-family:monospace;flex-shrink:0;transition:background .15s; }
+#tc-zoom-strip button:hover { background:rgba(255,255,255,.08); }
+#tc-zoom-track { flex:1;height:3px;background:rgba(255,255,255,.1);border-radius:2px;cursor:pointer;position:relative; }
+#tc-zoom-fill { height:100%;background:#c8a84b;border-radius:2px;width:50%;pointer-events:none;transition:width .08s; }
 .tc-modal-actions { display: flex; gap: 8px; margin-top: 16px; }
 .tc-btn-cancel { flex: 1; padding: 9px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: transparent; color: rgba(255,255,255,.5); font-size: .78rem; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: background .15s; }
 .tc-btn-cancel:hover { background: rgba(255,255,255,.06); }
@@ -5256,6 +5256,92 @@ const _tc = (() => {
   let _imgData = null;
   let _activeEfed = null; // {promo_name, owner_username, vault_json} when step 1a
   let _selfEfedName = ''; // eFed typed in step 0
+
+  // ── CANVAS EDITOR STATE ──
+  let _cvImg = null, _cvX = 0, _cvY = 0, _cvZoom = 1;
+  let _cvZoomMin = 0.1, _cvZoomMax = 8;
+  let _cvDrag = false, _cvLX = 0, _cvLY = 0, _cvLDist = 0;
+  const CW = 560, CH = 320; // canvas output resolution
+
+  function _cvCanvas() { return document.getElementById('tc-canvas'); }
+
+  function _cvRender() {
+    const c = _cvCanvas(); if (!c) return;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, CW, CH);
+    ctx.fillStyle = '#08080d'; ctx.fillRect(0, 0, CW, CH);
+    if (_cvImg) ctx.drawImage(_cvImg, _cvX, _cvY, _cvImg.naturalWidth * _cvZoom, _cvImg.naturalHeight * _cvZoom);
+    _cvGuide(ctx);
+  }
+
+  function _cvGuide(ctx) {
+    const cx = CW / 2, cy = CH / 2;
+    ctx.save();
+    // Corner brackets
+    const L = 22; ctx.strokeStyle = 'rgba(200,168,75,.7)'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    [[0,0,1,1],[CW,0,-1,1],[0,CH,1,-1],[CW,CH,-1,-1]].forEach(([ox,oy,dx,dy]) => {
+      ctx.beginPath(); ctx.moveTo(ox+dx*L,oy); ctx.lineTo(ox,oy); ctx.lineTo(ox,oy+dy*L); ctx.stroke();
+    });
+    // Dashed oval guide
+    ctx.strokeStyle = 'rgba(200,168,75,.55)'; ctx.lineWidth = 2;
+    ctx.setLineDash([10, 6]);
+    ctx.beginPath(); ctx.ellipse(cx, cy, CW * 0.36, CH * 0.4, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    // Subtle center crosshair
+    ctx.strokeStyle = 'rgba(200,168,75,.18)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx - 12, cy); ctx.lineTo(cx + 12, cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, cy - 12); ctx.lineTo(cx, cy + 12); ctx.stroke();
+    ctx.restore();
+  }
+
+  function _cvApplyZoom(delta, pivotX, pivotY) {
+    const nz = Math.max(_cvZoomMin, Math.min(_cvZoomMax, _cvZoom * (1 + delta)));
+    _cvX = pivotX - (pivotX - _cvX) * (nz / _cvZoom);
+    _cvY = pivotY - (pivotY - _cvY) * (nz / _cvZoom);
+    _cvZoom = nz; _cvRender(); _cvUpdateBar();
+  }
+
+  function _cvUpdateBar() {
+    const fill = document.getElementById('tc-zoom-fill'); if (!fill) return;
+    const pct = (_cvZoom - _cvZoomMin) / (_cvZoomMax - _cvZoomMin) * 100;
+    fill.style.width = Math.max(2, Math.min(100, pct)) + '%';
+  }
+
+  function cvZoom(delta) { _cvApplyZoom(delta, CW / 2, CH / 2); }
+
+  function cvZoomBar(e) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const nz = _cvZoomMin + (_cvZoomMax - _cvZoomMin) * pct;
+    _cvX = CW/2 - (CW/2 - _cvX) * (nz/_cvZoom);
+    _cvY = CH/2 - (CH/2 - _cvY) * (nz/_cvZoom);
+    _cvZoom = nz; _cvRender(); _cvUpdateBar();
+  }
+
+  function _cvInitEvents() {
+    const wrap = document.getElementById('tc-canvas-wrap');
+    const c = _cvCanvas(); if (!c || c._tcInited) return; c._tcInited = true;
+    c.addEventListener('mousedown', e => { if (!_cvImg) return; _cvDrag=true; _cvLX=e.clientX; _cvLY=e.clientY; wrap.style.cursor='grabbing'; e.preventDefault(); });
+    window.addEventListener('mousemove', e => { if (!_cvDrag) return; _cvX+=e.clientX-_cvLX; _cvY+=e.clientY-_cvLY; _cvLX=e.clientX; _cvLY=e.clientY; _cvRender(); });
+    window.addEventListener('mouseup', () => { _cvDrag=false; if(wrap) wrap.style.cursor=_cvImg?'grab':'default'; });
+    c.addEventListener('wheel', e => { e.preventDefault(); const r=c.getBoundingClientRect(),s=CW/r.width; _cvApplyZoom(e.deltaY>0?-0.08:0.08,(e.clientX-r.left)*s,(e.clientY-r.top)*s); }, {passive:false});
+    c.addEventListener('touchstart', e => { if(e.touches.length===1){_cvDrag=true;_cvLX=e.touches[0].clientX;_cvLY=e.touches[0].clientY;} else if(e.touches.length===2){_cvDrag=false;_cvLDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);} }, {passive:true});
+    c.addEventListener('touchmove', e => { e.preventDefault(); if(e.touches.length===1&&_cvDrag){_cvX+=e.touches[0].clientX-_cvLX;_cvY+=e.touches[0].clientY-_cvLY;_cvLX=e.touches[0].clientX;_cvLY=e.touches[0].clientY;_cvRender();} else if(e.touches.length===2){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY),r=c.getBoundingClientRect(),s=CW/r.width,pcx=((e.touches[0].clientX+e.touches[1].clientX)/2-r.left)*s,pcy=((e.touches[0].clientY+e.touches[1].clientY)/2-r.top)*s;if(_cvLDist)_cvApplyZoom((d-_cvLDist)/150,pcx,pcy);_cvLDist=d;} }, {passive:false});
+    c.addEventListener('touchend', e => { if(e.touches.length<2)_cvLDist=0; if(!e.touches.length)_cvDrag=false; }, {passive:true});
+  }
+
+  function _cvReset() {
+    _cvImg=null; _cvX=0; _cvY=0; _cvZoom=1; _cvDrag=false;
+    const c=_cvCanvas(); if(c){const ctx=c.getContext('2d');ctx.clearRect(0,0,CW,CH);} _cvGuide(_cvCanvas()&&_cvCanvas().getContext('2d')||{save:()=>{},restore:()=>{}});
+    const hint=document.getElementById('tc-img-hint'); if(hint)hint.style.display='flex';
+    const strip=document.getElementById('tc-zoom-strip'); if(strip)strip.style.display='none';
+    const wrap=document.getElementById('tc-canvas-wrap'); if(wrap)wrap.style.cursor='default';
+  }
+
+  function _cvExport() {
+    const c=_cvCanvas(); if(!c||!_cvImg) return null;
+    return c.toDataURL('image/jpeg', 0.88);
+  }
 
   const _grid  = () => document.getElementById('trophy-case-grid');
   const _scroll = () => document.getElementById('trophy-case-scroll');
@@ -5620,18 +5706,30 @@ const _tc = (() => {
   function closeModal() {
     document.getElementById('tc-modal-bg').style.display = 'none';
     _imgData = null; _editing = null; _activeEfed = null; _selfEfedName = '';
+    _cvReset();
     const fi = document.getElementById('tc-img-file'); if(fi) fi.value='';
   }
 
   function handleImgPick(ev) {
     const file = ev.target.files && ev.target.files[0]; if (!file) return;
+    _cvInitEvents();
     const reader = new FileReader();
     reader.onload = e => {
-      _imgData = e.target.result;
-      const preview = document.getElementById('tc-img-preview');
-      const hint    = document.getElementById('tc-img-hint');
-      if (preview) { preview.src = _imgData; preview.style.display = 'block'; }
-      if (hint) hint.style.display = 'none';
+      const img = new Image();
+      img.onload = () => {
+        _cvImg = img;
+        // fit image to canvas initially
+        _cvZoom = Math.max(CW / img.naturalWidth, CH / img.naturalHeight);
+        _cvZoomMin = Math.min(CW / img.naturalWidth, CH / img.naturalHeight) * 0.3;
+        _cvZoomMax = _cvZoom * 6;
+        _cvX = (CW - img.naturalWidth * _cvZoom) / 2;
+        _cvY = (CH - img.naturalHeight * _cvZoom) / 2;
+        _cvRender(); _cvUpdateBar();
+        const hint = document.getElementById('tc-img-hint'); if(hint) hint.style.display='none';
+        const strip = document.getElementById('tc-zoom-strip'); if(strip) strip.style.display='flex';
+        const wrap = document.getElementById('tc-canvas-wrap'); if(wrap) wrap.style.cursor='grab';
+      };
+      img.src = e.target.result;
     };
     reader.readAsDataURL(file);
   }
@@ -5642,6 +5740,7 @@ const _tc = (() => {
     const err  = document.getElementById('tc-modal-err');
     const btn  = document.getElementById('tc-save-btn');
     if (!name) { if(err){err.textContent='Enter the title name.';err.style.display='block';} return; }
+    if (_cvImg) _imgData = _cvExport(); // bake canvas to jpeg
     if (btn) { btn.disabled=true; btn.textContent='Saving…'; }
     if (err) err.style.display='none';
     try {
@@ -5681,12 +5780,8 @@ const _tc = (() => {
 
   function clearImg() {
     _imgData = null;
-    const preview = document.getElementById('tc-img-preview');
-    const hint    = document.getElementById('tc-img-hint');
-    const fi      = document.getElementById('tc-img-file');
-    if (preview) { preview.src = ''; preview.style.display = 'none'; }
-    if (hint)    hint.style.display = 'flex';
-    if (fi)      fi.value = '';
+    _cvReset();
+    const fi = document.getElementById('tc-img-file'); if(fi) fi.value='';
   }
 
   let _presentActive = false;
@@ -5703,10 +5798,27 @@ const _tc = (() => {
     }
   }
 
-  return { load, scroll, jumpStart, openAdd, openEdit, closeModal, save, handleImgPick, goStep, checkEfed, notifyOwner, clearImg, togglePresent };
+  return { load, scroll, jumpStart, openAdd, openEdit, closeModal, save, handleImgPick, goStep, checkEfed, notifyOwner, clearImg, togglePresent, cvZoom, cvZoomBar };
 })();
 
 async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
+// Draw guide on idle canvas at startup
+(function() {
+  function _initGuide() {
+    const c = document.getElementById('tc-canvas'); if (!c) return;
+    const ctx = c.getContext('2d'), CW = c.width, CH = c.height, cx = CW/2, cy = CH/2;
+    ctx.clearRect(0,0,CW,CH);
+    ctx.strokeStyle='rgba(200,168,75,.55)'; ctx.lineWidth=2; ctx.setLineDash([10,6]);
+    ctx.beginPath(); ctx.ellipse(cx,cy,CW*.36,CH*.4,0,0,Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]); ctx.strokeStyle='rgba(200,168,75,.7)'; ctx.lineWidth=2.5; ctx.lineCap='round';
+    const L=22;
+    [[0,0,1,1],[CW,0,-1,1],[0,CH,1,-1],[CW,CH,-1,-1]].forEach(([ox,oy,dx,dy])=>{
+      ctx.beginPath();ctx.moveTo(ox+dx*L,oy);ctx.lineTo(ox,oy);ctx.lineTo(ox,oy+dy*L);ctx.stroke();
+    });
+  }
+  if (document.readyState==='loading') document.addEventListener('DOMContentLoaded',_initGuide);
+  else _initGuide();
+})();
 
 </script>
 
@@ -5793,7 +5905,7 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
 
 <!-- ── TROPHY CASE ADD/EDIT MODAL ── -->
 <div id="tc-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.88);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);align-items:center;justify-content:center;padding:20px;">
-  <div id="tc-modal" style="background:#111118;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:22px 20px 18px;width:100%;max-width:560px;max-height:88vh;overflow-y:auto;box-shadow:0 32px 80px rgba(0,0,0,.9);scrollbar-width:thin;scrollbar-color:rgba(200,168,75,.25) transparent;">
+  <div id="tc-modal" style="background:#111118;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:20px 18px 16px;width:100%;max-width:380px;max-height:88vh;overflow-y:auto;box-shadow:0 32px 80px rgba(0,0,0,.9);scrollbar-width:thin;scrollbar-color:rgba(200,168,75,.25) transparent;">
     <div class="tc-modal-title" id="tc-modal-title-el">Add / Request Title</div>
 
     <!-- Step 0: eFed lookup (new adds only) -->
@@ -5830,13 +5942,19 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
 
     <!-- Step 1B: Self-add (inactive/not found) or Edit existing -->
     <div id="tc-s1b" style="display:none;">
-      <!-- Image viewer (no click-to-open) -->
-      <div class="tc-img-upload-area" style="cursor:default;">
-        <img id="tc-img-preview" src="" alt="" style="display:none;">
-        <div id="tc-img-hint" class="tc-img-upload-hint">
+      <!-- Inline canvas image editor -->
+      <div id="tc-canvas-wrap">
+        <canvas id="tc-canvas" width="560" height="320"></canvas>
+        <div id="tc-img-hint">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           <span>No image uploaded</span>
         </div>
+      </div>
+      <!-- Zoom strip (shown after image loaded) -->
+      <div id="tc-zoom-strip">
+        <button onclick="_tc.cvZoom(-0.12)">−</button>
+        <div id="tc-zoom-track" onclick="_tc.cvZoomBar(event)"><div id="tc-zoom-fill"></div></div>
+        <button onclick="_tc.cvZoom(0.12)">+</button>
       </div>
       <input type="file" id="tc-img-file" accept="image/*" style="display:none;" onchange="_tc.handleImgPick(event)">
       <!-- Clear / Upload -->
