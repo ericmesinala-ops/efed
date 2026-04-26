@@ -9704,11 +9704,19 @@ async function loadProfile() {
     try {
       users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,spotify_handle,discord_handle,facebook_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment,style,debut,brand,faction,entrance_music,moveset`);
     } catch(e) {
-      // One or more social columns may not exist yet — fall back without them
-      if (e.message && (e.message.includes('spotify_handle') || e.message.includes('discord_handle') || e.message.includes('facebook_handle'))) {
+      // One or more columns may not exist yet — progressively fall back
+      const missing = ['spotify_handle','discord_handle','facebook_handle','height','weight','hometown','nickname','alignment','faction','style','debut','brand','entrance_music','moveset'];
+      const isMissingCol = e.message && missing.some(c => e.message.includes(c));
+      if (isMissingCol) {
         try {
-          users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment,style,debut,brand,faction,entrance_music,moveset`);
-        } catch(e2) { throw e2; }
+          // Fallback: core fields only — always exist
+          users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships`);
+        } catch(e2) {
+          // Last resort: absolute minimum
+          try {
+            users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,bio`);
+          } catch(e3) { throw e3; }
+        }
       } else { throw e; }
     }
     if (!users.length) { document.getElementById('profile-name').textContent = 'User not found'; return; }
