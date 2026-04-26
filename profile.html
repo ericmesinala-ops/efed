@@ -3105,6 +3105,29 @@ html.day-mode .rv-name-input::placeholder { color: rgba(0,0,0,.2); }
 /* Gold border on the winner's avatar */
 .rec-banner.rec-win  .rec-av.rec-av-self { border-color: rgba(200,168,75,.8); box-shadow: 0 0 0 1.5px rgba(200,168,75,.25); }
 .rec-banner.rec-loss .rec-av.rec-av-opp  { border-color: rgba(200,168,75,.8); box-shadow: 0 0 0 1.5px rgba(200,168,75,.25); }
+
+/* ── YouTube play button on rec-banner ── */
+.rec-yt-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: none; cursor: pointer;
+  color: rgba(255,255,255,.35); font-size: .58rem; font-family: 'DM Sans',sans-serif;
+  padding: 3px 0; margin-top: 4px; transition: color .15s;
+}
+.rec-yt-btn:hover { color: #ff4444; }
+.rec-yt-btn svg { flex-shrink: 0; }
+
+/* ── Inline YouTube embed wrapper (sits outside the banner, after it) ── */
+.rec-yt-embed {
+  display: none;
+  width: 100%;
+  aspect-ratio: 16/9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #000;
+  margin: 0 0 6px 0;
+}
+.rec-yt-embed.open { display: block; }
+.rec-yt-embed iframe { width: 100%; height: 100%; border: none; display: block; }
 .rec-vs-label {
   font-family: 'Bebas Neue', sans-serif;
   font-size: .7rem; letter-spacing: 1.5px;
@@ -3449,6 +3472,18 @@ html.day-mode .rec-vs-label { color: rgba(0,0,0,.2); }
             style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
         </div>
 
+        <!-- YouTube Link -->
+        <div>
+          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:7px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="#ff0000" style="vertical-align:middle;margin-right:4px;margin-bottom:1px;"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+            YouTube Link <span style="opacity:.4;font-size:.45rem;letter-spacing:1px;">(optional)</span>
+          </div>
+          <input id="rm2-youtube" type="url" placeholder="https://www.youtube.com/watch?v=…" maxlength="200"
+            style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;"
+            oninput="this.style.borderColor=this.value&&!_rm2ExtractYtId(this.value)?'rgba(255,80,80,.5)':'rgba(255,255,255,.1)'">
+          <div id="rm2-yt-hint" style="font-size:.58rem;color:rgba(255,255,255,.2);margin-top:5px;">Paste a YouTube video URL — a play button will appear on the match card.</div>
+        </div>
+
         <div style="display:flex;gap:8px;margin-top:2px;">
           <button onclick="rm2PrevStep()" style="flex:0 0 80px;padding:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">← Back</button>
           <button onclick="rm2SaveRecord()" style="flex:1;padding:11px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'" id="rm2-save-btn">Save Match</button>
@@ -3577,6 +3612,7 @@ async function recAddNew() {
   document.getElementById('rm2-date').value = '';
   document.getElementById('rm2-show').value = '';
   document.getElementById('rm2-champ-name').value = '';
+  document.getElementById('rm2-youtube').value = '';
   document.getElementById('rm2-msg-0').textContent = '';
   document.getElementById('rm2-msg-1').textContent = '';
   document.getElementById('rm2-msg-2').textContent = '';
@@ -3655,6 +3691,7 @@ async function recEdit(idx) {
   document.getElementById('rm2-date').value = r.date || '';
   document.getElementById('rm2-show').value = r.efed_show || '';
   document.getElementById('rm2-champ-name').value = r.champ_name || '';
+  document.getElementById('rm2-youtube').value = r.youtube_url || '';
   document.getElementById('rm2-msg-0').textContent = '';
   document.getElementById('rm2-msg-1').textContent = '';
   document.getElementById('rm2-msg-2').textContent = '';
@@ -4286,12 +4323,31 @@ function _rm2MatchDisplayFromSlots(selfName, r) {
 }
 
 // ── SAVE record from modal ──
+// ── YouTube ID extractor ──
+function _rm2ExtractYtId(url) {
+  if (!url) return '';
+  try {
+    // Handles youtu.be/ID, youtube.com/watch?v=ID, youtube.com/embed/ID, youtube.com/shorts/ID
+    const u = new URL(url.trim());
+    if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('?')[0];
+    if (u.hostname.includes('youtube.com')) {
+      if (u.searchParams.get('v')) return u.searchParams.get('v');
+      const pathMatch = u.pathname.match(/\/(embed|shorts|v)\/([^/?&]+)/);
+      if (pathMatch) return pathMatch[2];
+    }
+  } catch(e) {}
+  // Fallback: raw ID (11 chars)
+  const m = url.match(/[?&]v=([^&]+)/);
+  return m ? m[1] : '';
+}
+
 async function rm2SaveRecord() {
   const session = getSession(); if (!session) return;
   const type  = document.getElementById('rm2-type').value.trim();
   const dateV = document.getElementById('rm2-date').value;
   const show  = document.getElementById('rm2-show').value.trim();
   const champ = _rm2ChampOn ? document.getElementById('rm2-champ-name').value.trim() : '';
+  const ytRaw = document.getElementById('rm2-youtube').value.trim();
   const msg   = document.getElementById('rm2-msg-2');
 
   const wrestlers = window._rm2Slots.filter(s => s.type === 'wrestler');
@@ -4334,6 +4390,7 @@ async function rm2SaveRecord() {
     date: dateV || '',
     champ_name: champ || '',
     role: _rm2ChampOn ? _rm2Role : '',
+    youtube_url: ytRaw || '',
     slots: window._rm2Slots.filter(s => !s.isSelf && s.username !== (session.username || '__self_never_match__')).map(s => ({ type: s.type, username: s.username || '', name: s.name || '', avatar: s.avatar || '' })),
   };
 
@@ -4617,6 +4674,37 @@ function renderRecords() {
       ${metaParts.length ? `<div class="rec-banner-meta">${metaParts.join(' · ')}</div>` : ''}
       ${champLabelHtml}`;
 
+    // YouTube play button (if URL present)
+    if (r.youtube_url && _rm2ExtractYtId(r.youtube_url)) {
+      const ytBtn = document.createElement('button');
+      ytBtn.className = 'rec-yt-btn';
+      ytBtn.title = 'Watch on YouTube';
+      ytBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg><span>Watch match</span>`;
+      bodyEl.appendChild(ytBtn);
+
+      // Create the embed div (placed after the banner in the DOM)
+      const embedDiv = document.createElement('div');
+      embedDiv.className = 'rec-yt-embed';
+
+      ytBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = embedDiv.classList.contains('open');
+        if (isOpen) {
+          embedDiv.classList.remove('open');
+          embedDiv.innerHTML = '';
+          ytBtn.querySelector('span').textContent = 'Watch match';
+        } else {
+          const vid = _rm2ExtractYtId(r.youtube_url);
+          embedDiv.innerHTML = `<iframe src="https://www.youtube.com/embed/${vid}?autoplay=1" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
+          embedDiv.classList.add('open');
+          ytBtn.querySelector('span').textContent = 'Hide video';
+        }
+      });
+
+      // Insert embedDiv after banner (we'll do it after banner is appended)
+      banner._ytEmbedDiv = embedDiv;
+    }
+
     // Right: champ badge only (no W/L — winner indicated by gold avatar border)
     const rightEl = document.createElement('div');
     rightEl.className = 'rec-banner-right';
@@ -4654,6 +4742,7 @@ function renderRecords() {
     }
 
     list.appendChild(banner);
+    if (banner._ytEmbedDiv) list.appendChild(banner._ytEmbedDiv);
   });
 
   // ── Rivalry-style expand/collapse chevron ──
