@@ -1999,9 +1999,12 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     <div class="sec-title" style="margin-bottom:0;flex:1;">🏆 Title Status</div>
   </div>
   <div id="championships-display" style="display:flex;flex-direction:column;gap:10px;"></div>
+  <div id="title-verified-legend" style="display:none;font-size:.62rem;color:#6a6a7a;letter-spacing:.3px;margin-top:10px;line-height:1.8;">
+    <span style="color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.6rem;">✓</span> Verified by eFed owner
+  </div>
 </div>
 <style>
-/* ── CHAMPIONSHIP BANNER DELETE BUTTON — mirrors move-del-btn ── */
+/* ── CHAMPIONSHIP BANNER DELETE BUTTON — owner-only, hover-hidden ── */
 .champ-banner-del {
   position: absolute; top: 8px; right: 8px;
   width: 16px; height: 16px; border-radius: 50%;
@@ -2013,10 +2016,9 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 .champ-banner-card:hover .champ-banner-del {
   background: rgba(192,0,14,.7); color: #fff;
 }
-@media (hover: none) {
-  .champ-banner-del { background: rgba(192,0,14,.35) !important; color: rgba(255,255,255,.8) !important; }
-  .champ-banner-del:active { background: rgba(192,0,14,.85) !important; color: #fff !important; }
-}
+/* Mobile: show subtly for owner only (class set by JS) */
+.champ-banner-del.mobile-show { background: rgba(192,0,14,.35) !important; color: rgba(255,255,255,.8) !important; }
+.champ-banner-del.mobile-show:active { background: rgba(192,0,14,.85) !important; color: #fff !important; }
 </style>
 
 
@@ -9102,32 +9104,32 @@ function renderChampionships(championships) {
   stopReignTimers();
 
   const list = Array.isArray(championships) ? championships.filter(c => c.name) : [];
-
-  // Store for modal pre-fill
   if (sec) sec.dataset.championships = JSON.stringify(list);
 
-  if (!list.length) {
-    sec.style.display = 'none';
-    return;
-  }
-
+  if (!list.length) { sec.style.display = 'none'; return; }
   sec.style.display = 'block';
+
+  const isMobile = window.matchMedia('(hover: none)').matches;
+
   display.innerHTML = list.map((c, i) => {
     const timerId = 'reign-timer-' + i;
     const beltIcon = c.belt_img
       ? `<img loading="lazy" src="${c.belt_img}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid rgba(200,168,75,.2);flex-shrink:0;">`
       : `<div style="font-size:1.3rem;flex-shrink:0;">🥇</div>`;
-    // Verified checkmark — same logic as trophy case (belt_img = set by eFed owner)
+    // Verified = set by eFed owner (has belt_img)
     const verified = !!c.belt_img;
+    // Small checkmark matching trophy case style
     const checkmark = verified
-      ? `<span style="color:#c8a84b;font-style:normal;margin-right:3px;">✓</span>`
+      ? `<span style="font-family:'DM Sans',sans-serif;font-size:.58rem;font-weight:700;color:#c8a84b;vertical-align:middle;margin-right:4px;letter-spacing:0;">✓</span>`
       : '';
-    // Delete button — only for own profile, hidden like move-del-btn
+    // Owner-only delete button — cascade is primary, this is backup
     const delBtn = _isOwnProfile
-      ? `<button class="champ-banner-del" title="Remove" onclick="event.stopPropagation();deleteChampionship(${i})">✕</button>`
+      ? `<button class="champ-banner-del${isMobile ? ' mobile-show' : ''}" title="Remove" onclick="event.stopPropagation();deleteChampionship(${i})">✕</button>`
       : '';
+    const cardOpacity = verified ? '1' : '0.45';
+    const cardFilter  = verified ? '' : 'grayscale(0.4)';
     return `
-      <div class="champ-banner-card" style="background:rgba(200,168,75,.04);border:1px solid rgba(200,168,75,.15);border-radius:12px;padding:14px 16px;position:relative;">
+      <div class="champ-banner-card" style="background:rgba(200,168,75,.04);border:1px solid rgba(200,168,75,.15);border-radius:12px;padding:14px 16px;position:relative;opacity:${cardOpacity};filter:${cardFilter};transition:opacity .2s,filter .2s;">
         ${delBtn}
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
           ${beltIcon}
@@ -9143,7 +9145,11 @@ function renderChampionships(championships) {
       </div>`;
   }).join('');
 
-  // Start timers
+  // Legend — show only when at least one verified entry
+  const legend = document.getElementById('title-verified-legend');
+  if (legend) legend.style.display = list.some(c => c.belt_img) ? 'block' : 'none';
+
+  // Start reign timers
   list.forEach((c, i) => {
     if (!c.date) return;
     const el = document.getElementById('reign-timer-' + i);
