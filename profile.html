@@ -2000,6 +2000,24 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
   </div>
   <div id="championships-display" style="display:flex;flex-direction:column;gap:10px;"></div>
 </div>
+<style>
+/* ── CHAMPIONSHIP BANNER DELETE BUTTON — mirrors move-del-btn ── */
+.champ-banner-del {
+  position: absolute; top: 8px; right: 8px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: rgba(192,0,14,.0); border: none; cursor: pointer;
+  color: rgba(255,255,255,.0); font-size: .52rem; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s, color .15s; padding: 0;
+}
+.champ-banner-card:hover .champ-banner-del {
+  background: rgba(192,0,14,.7); color: #fff;
+}
+@media (hover: none) {
+  .champ-banner-del { background: rgba(192,0,14,.35) !important; color: rgba(255,255,255,.8) !important; }
+  .champ-banner-del:active { background: rgba(192,0,14,.85) !important; color: #fff !important; }
+}
+</style>
 
 
 <!-- ── MY EFEDS (Part of / Roster) ── -->
@@ -9099,12 +9117,22 @@ function renderChampionships(championships) {
     const beltIcon = c.belt_img
       ? `<img loading="lazy" src="${c.belt_img}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid rgba(200,168,75,.2);flex-shrink:0;">`
       : `<div style="font-size:1.3rem;flex-shrink:0;">🥇</div>`;
+    // Verified checkmark — same logic as trophy case (belt_img = set by eFed owner)
+    const verified = !!c.belt_img;
+    const checkmark = verified
+      ? `<span style="color:#c8a84b;font-style:normal;margin-right:3px;">✓</span>`
+      : '';
+    // Delete button — only for own profile, hidden like move-del-btn
+    const delBtn = _isOwnProfile
+      ? `<button class="champ-banner-del" title="Remove" onclick="event.stopPropagation();deleteChampionship(${i})">✕</button>`
+      : '';
     return `
-      <div style="background:rgba(200,168,75,.04);border:1px solid rgba(200,168,75,.15);border-radius:12px;padding:14px 16px;">
+      <div class="champ-banner-card" style="background:rgba(200,168,75,.04);border:1px solid rgba(200,168,75,.15);border-radius:12px;padding:14px 16px;position:relative;">
+        ${delBtn}
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
           ${beltIcon}
           <div style="flex:1;min-width:0;">
-            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.05rem;letter-spacing:2px;color:#c8a84b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(c.name)}</div>
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:1.05rem;letter-spacing:2px;color:#c8a84b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${checkmark}${_esc(c.name)}</div>
             <div style="font-size:.68rem;color:rgba(255,255,255,.4);margin-top:1px;">${_esc(c.efed || '')}</div>
           </div>
         </div>
@@ -9130,6 +9158,22 @@ function renderChampionships(championships) {
     tick();
     _champTimers.push(setInterval(tick, 1000));
   });
+}
+
+async function deleteChampionship(idx) {
+  if (!_isOwnProfile) return;
+  const session = getSession(); if (!session) return;
+  const sec = document.getElementById('title-section');
+  const list = sec?.dataset.championships ? JSON.parse(sec.dataset.championships) : [];
+  list.splice(idx, 1);
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS,
+      body: JSON.stringify({ championships: list.length ? list : null })
+    });
+    renderChampionships(list);
+    showToast('Title removed');
+  } catch(e) { showToast('Save failed'); }
 }
 
 // Legacy shim — in case any old code calls renderTitle
