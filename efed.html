@@ -2018,7 +2018,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           My Profile
         </button>
-        <button class="dropdown-item" id="my-efed-btn" style="display:none;">
+        <button class="dropdown-item" id="my-efed-btn" onclick="handleMyEfedClick()" style="display:none;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></svg>
           My eFed
         </button>
@@ -2087,7 +2087,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     </div>
     <span class="hub-back-label">My Profile</span>
   </button>
-  <button class="profile-nav-tab profile-nav-tab--plain" id="nav-tab-myefed" onclick="_myEfedList.length === 1 ? window.location.href='efed.html?e=' + encodeURIComponent(_myEfedList[0]) : openMyEfedPicker(_myEfedList)" style="display:none;">
+  <button class="profile-nav-tab profile-nav-tab--plain" id="nav-tab-myefed" onclick="handleMyEfedClick()" style="display:none;">
     <div class="hub-back-circle">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></svg>
     </div>
@@ -3385,49 +3385,101 @@ async function loadMyEfedBtn() {
   if (!btn) return;
   try {
     const [userRows, rosterRows] = await Promise.all([
-      sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
+      sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role,promo_logo`),
       sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&select=efed,status`)
     ]);
     const user = userRows[0];
     const efeds = [], seen = new Set();
-    if ((user?.is_efed_owner || user?.role === 'owner') && user?.promo_name) { seen.add(user.promo_name.toLowerCase()); efeds.push(user.promo_name); }
-    for (const r of (rosterRows || []).filter(r => r.status === 'approved' && r.efed)) {
-      if (!seen.has(r.efed.toLowerCase())) { seen.add(r.efed.toLowerCase()); efeds.push(r.efed); }
+    if ((user?.is_efed_owner || user?.role === 'owner') && user?.promo_name) {
+      seen.add(user.promo_name.toLowerCase());
+      efeds.push({ name: user.promo_name, logo: user.promo_logo || null, owned: true });
     }
-    _myEfedList = efeds;
+    for (const r of (rosterRows || []).filter(r => r.status === 'approved' && r.efed)) {
+      if (!seen.has(r.efed.toLowerCase())) { seen.add(r.efed.toLowerCase()); efeds.push({ name: r.efed, logo: null, owned: false }); }
+    }
+    _myEfedList = efeds.map(e => e.name);
     if (!efeds.length) { btn.style.display = 'none'; return; }
     btn.style.display = 'flex';
-    btn.onclick = () => { toggleDropdown(true); efeds.length === 1 ? window.location.href = 'efed.html?e=' + encodeURIComponent(efeds[0]) : openMyEfedPicker(efeds); };
-    // Show planner button for owners (desktop only — admin always sees it)
     const plannerBtn = document.getElementById('planner-btn');
     const _isMobileDev = window.innerWidth <= 700;
-    const _isAdmin = (session?.username || '').toLowerCase() === 'derrick_maximus';
     if (plannerBtn && (user?.is_efed_owner || user?.role === 'owner') && !_isMobileDev) plannerBtn.style.display = 'flex';
+    const navEfed = document.getElementById('nav-tab-myefed');
+    if (navEfed) navEfed.onclick = () => handleMyEfedClick();
   } catch(e) { btn.style.display = 'none'; }
 }
-function openMyEfedPicker(efeds) {
-  let modal = document.getElementById('myefed-picker-bg');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'myefed-picker-bg';
-    modal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.7);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:20px;';
-    var inner = document.createElement('div');
-    inner.setAttribute('onclick', 'event.stopPropagation()');
-    inner.style.cssText = 'background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:340px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.7);';
-    inner.innerHTML = '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.2rem;letter-spacing:2px;color:#fff;margin-bottom:4px;">My eFeds</div>'
-      + '<div style="font-size:.72rem;color:#8a8a9a;margin-bottom:18px;">Choose which eFed to visit</div>'
-      + '<div id="myefed-picker-list" style="display:flex;flex-direction:column;gap:8px;"></div>'
-      + '<button onclick="document.getElementById(\'myefed-picker-bg\').style.display=\'none\'" style="width:100%;margin-top:16px;padding:10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.5);font-family:\'DM Sans\',sans-serif;font-size:.75rem;font-weight:600;cursor:pointer;">Cancel</button>';
-    modal.appendChild(inner);
-    modal.onclick = function(e) { if (e.target === modal) modal.style.display = 'none'; };
-    document.body.appendChild(modal);
+async function handleMyEfedClick() {
+  toggleDropdown(true);
+  const session = getSession();
+  if (!session) return;
+  try {
+    const [userRows, rosterRows] = await Promise.all([
+      sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role,promo_logo`),
+      sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
+    ]);
+    const user = userRows[0];
+    const efeds = [], seen = new Set();
+    if ((user?.is_efed_owner || user?.role === 'owner') && user?.promo_name) {
+      seen.add(user.promo_name.toLowerCase());
+      efeds.push({ name: user.promo_name, logo: user.promo_logo || null, owned: true });
+    }
+    for (const r of (rosterRows || []).filter(r => r.efed)) {
+      if (!seen.has(r.efed.toLowerCase())) { seen.add(r.efed.toLowerCase()); efeds.push({ name: r.efed, logo: null, owned: false }); }
+    }
+    if (!efeds.length) return;
+    if (efeds.length === 1) { window.location.href = 'efed.html?e=' + encodeURIComponent(efeds[0].name); return; }
+    showMyEfedPopup(efeds);
+  } catch(e) {
+    const name = session.promo_name || session.promoName || '';
+    if (name) window.location.href = 'efed.html?e=' + encodeURIComponent(name);
   }
-  document.getElementById('myefed-picker-list').innerHTML = efeds.map(function(name) {
-    return '<a href="efed.html?e=' + encodeURIComponent(name) + '" style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;text-decoration:none;color:#e8e8e8;font-size:.85rem;font-weight:600;" onmouseenter="this.style.background=\'rgba(255,255,255,.09)\'" onmouseleave="this.style.background=\'rgba(255,255,255,.04)\'">'
-      + '<div style="width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-size:1rem;color:#c8a84b;flex-shrink:0;">' + name[0].toUpperCase() + '</div>'
-      + name + '</a>';
-  }).join('');
-  modal.style.display = 'flex';
+}
+function showMyEfedPopup(efeds) {
+  const bg = document.getElementById('myefed-popup-bg');
+  if (!bg) return;
+  const ITEMS_PER_PAGE = 5;
+  let currentPage = 0;
+  const totalPages = Math.ceil(efeds.length / ITEMS_PER_PAGE);
+  function renderEfedPage() {
+    const pageItems = efeds.slice(currentPage * ITEMS_PER_PAGE, (currentPage + 1) * ITEMS_PER_PAGE);
+    const paginationHtml = totalPages > 1
+      ? '<div class="myefed-popup-pages">'
+          + Array.from({length: totalPages}, (_, i) =>
+              '<button class="myefed-page-btn' + (i === currentPage ? ' active' : '') + '" onclick="window._myEfedGoPage(' + i + ')">' + (i + 1) + '</button>'
+            ).join('')
+          + '</div>'
+      : '';
+    bg.innerHTML = '<div class="myefed-popup-inner" onclick="event.stopPropagation()">'
+      + '<div class="myefed-popup-header">'
+        + '<div class="myefed-popup-eyebrow">Choose Destination</div>'
+        + '<div class="myefed-popup-title">My EFEDs</div>'
+      + '</div>'
+      + '<div class="myefed-popup-list">'
+      + pageItems.map(function(e) {
+          return '<button class="myefed-popup-item' + (e.owned ? ' owned' : '') + '" onclick="closeMyEfedPopup();window.location.href='efed.html?e='+encodeURIComponent(' + JSON.stringify(e.name) + ');">'
+            + '<div class="myefed-logo-wrap ' + (e.owned ? 'owned-logo' : 'member-logo') + '">'
+              + (e.logo ? '<img loading="lazy" src="' + e.logo + '" alt="' + _esc(e.name) + '">' : '<span>' + (e.name[0]||'?').toUpperCase() + '</span>')
+            + '</div>'
+            + '<div style="flex:1;min-width:0;text-align:left;">'
+              + '<div class="myefed-item-name">' + _esc(e.name) + '</div>'
+              + '<div class="myefed-item-role ' + (e.owned ? 'owned' : 'member') + '">' + (e.owned ? '★ Owner' : 'Member') + '</div>'
+            + '</div>'
+            + '<div class="myefed-item-arrow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>'
+            + '</button>';
+        }).join('')
+      + '</div>'
+      + paginationHtml
+      + '<button class="myefed-popup-cancel" onclick="closeMyEfedPopup()">Cancel</button>'
+      + '</div>';
+    bg.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+  window._myEfedGoPage = function(page) { currentPage = page; renderEfedPage(); };
+  renderEfedPage();
+}
+function closeMyEfedPopup() {
+  const bg = document.getElementById('myefed-popup-bg');
+  if (bg) bg.style.display = 'none';
+  document.body.style.overflow = '';
 }
 
 function goToProfile() {
@@ -9011,6 +9063,68 @@ function triggerInstall() {
   html.day-mode .ram-btn-icon { background:rgba(0,0,0,.05); border-color:rgba(0,0,0,.1); }
   html.day-mode .ram-btn-danger { background:none !important; border-color:rgba(192,0,14,.25) !important; color:#c0000e !important; }
   html.day-mode .ram-btn-danger:hover { background:rgba(192,0,14,.06) !important; }
+
+/* ── MY EFED POPUP ── */
+#myefed-popup-bg {
+  display: none; position: fixed; inset: 0; z-index: 99999;
+  background: rgba(0,0,0,.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  align-items: center; justify-content: center;
+  padding: 20px;
+}
+.myefed-popup-inner {
+  width: 90%; max-width: 360px;
+  border-radius: 20px; overflow: hidden;
+  box-shadow: 0 32px 80px rgba(0,0,0,.8), 0 0 0 1px rgba(255,255,255,.06);
+  transform: translateY(10px) scale(.97);
+  animation: efedPopIn .28s cubic-bezier(.16,1,.3,1) forwards;
+}
+@keyframes efedPopIn { to { transform: translateY(0) scale(1); } }
+.myefed-popup-header { padding: 22px 22px 16px; background: #111115; border-bottom: 1px solid rgba(255,255,255,.06); }
+.myefed-popup-eyebrow { font-size: .55rem; letter-spacing: 3px; text-transform: uppercase; font-weight: 700; color: var(--gold); margin-bottom: 4px; }
+.myefed-popup-title { font-family: 'Bebas Neue', sans-serif; font-size: 1.4rem; letter-spacing: 3px; color: #fff; }
+html.day-mode .myefed-popup-header { background: #ffffff; border-bottom-color: rgba(0,0,0,.08); }
+html.day-mode .myefed-popup-title { color: #111118; }
+.myefed-popup-list { background: #0d0d10; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+html.day-mode .myefed-popup-list { background: #f5f5f9; }
+.myefed-popup-item {
+  display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 12px;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+  cursor: pointer; text-align: left; width: 100%; font-family: 'DM Sans', sans-serif;
+  transition: background .18s, border-color .18s, transform .15s;
+}
+.myefed-popup-item:hover { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.14); transform: translateX(3px); }
+.myefed-popup-item.owned { background: rgba(200,168,75,.05); border-color: rgba(200,168,75,.18); }
+.myefed-popup-item.owned:hover { background: rgba(200,168,75,.1); border-color: rgba(200,168,75,.3); }
+html.day-mode .myefed-popup-item { background: rgba(0,0,0,.03); border-color: rgba(0,0,0,.07); }
+html.day-mode .myefed-popup-item:hover { background: rgba(0,0,0,.07); border-color: rgba(0,0,0,.15); }
+html.day-mode .myefed-popup-item.owned { background: rgba(168,130,10,.05); border-color: rgba(168,130,10,.18); }
+.myefed-logo-wrap { width: 42px; height: 42px; border-radius: 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; font-family: 'Bebas Neue', sans-serif; font-size: 1rem; }
+.myefed-logo-wrap.owned-logo { background: rgba(200,168,75,.12); border: 1px solid rgba(200,168,75,.25); color: var(--gold); }
+.myefed-logo-wrap.member-logo { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: rgba(255,255,255,.6); }
+html.day-mode .myefed-logo-wrap.member-logo { background: rgba(0,0,0,.06); border-color: rgba(0,0,0,.12); color: rgba(0,0,0,.5); }
+.myefed-logo-wrap img { width: 100%; height: 100%; object-fit: cover; border-radius: 9px; }
+.myefed-item-name { font-size: .88rem; font-weight: 700; color: #fff; line-height: 1.2; margin-bottom: 2px; }
+html.day-mode .myefed-item-name { color: #111118; }
+.myefed-item-role { font-size: .6rem; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 600; }
+.myefed-item-role.owned { color: var(--gold); }
+.myefed-item-role.member { color: rgba(255,255,255,.35); }
+html.day-mode .myefed-item-role.member { color: rgba(0,0,0,.35); }
+.myefed-item-arrow { margin-left: auto; color: rgba(255,255,255,.2); flex-shrink: 0; }
+html.day-mode .myefed-item-arrow { color: rgba(0,0,0,.2); }
+.myefed-popup-cancel { width: 100%; padding: 13px; margin: 0; background: #0d0d10; border: none; border-top: 1px solid rgba(255,255,255,.06); color: rgba(255,255,255,.3); font-family: 'DM Sans', sans-serif; font-size: .72rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: color .15s, background .15s; }
+.myefed-popup-cancel:hover { color: rgba(255,255,255,.6); background: rgba(255,255,255,.03); }
+html.day-mode .myefed-popup-cancel { background: #f5f5f9; border-top-color: rgba(0,0,0,.07); color: rgba(0,0,0,.3); }
+html.day-mode .myefed-popup-cancel:hover { color: rgba(0,0,0,.6); background: rgba(0,0,0,.04); }
+.myefed-popup-pages { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 14px; background: #0d0d10; border-top: 1px solid rgba(255,255,255,.05); }
+.myefed-page-btn { width: 30px; height: 30px; border-radius: 8px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); color: rgba(255,255,255,.4); font-family: 'DM Sans', sans-serif; font-size: .72rem; font-weight: 700; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+.myefed-page-btn:hover { background: rgba(255,255,255,.1); color: rgba(255,255,255,.7); }
+.myefed-page-btn.active { background: rgba(200,168,75,.15); border-color: rgba(200,168,75,.35); color: var(--gold); }
+html.day-mode .myefed-popup-pages { background: #f5f5f9; border-top-color: rgba(0,0,0,.06); }
+html.day-mode .myefed-page-btn { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.08); color: rgba(0,0,0,.4); }
+html.day-mode .myefed-page-btn:hover { background: rgba(0,0,0,.08); color: rgba(0,0,0,.7); }
+html.day-mode .myefed-page-btn.active { background: rgba(168,130,10,.08); border-color: rgba(168,130,10,.25); color: #a08020; }
 </style>
 
 <style>
@@ -15925,6 +16039,9 @@ const _imgCrop = (() => {
 })();
 
 </script>
+
+<!-- ── MY EFED PICKER POPUP ── -->
+<div id="myefed-popup-bg" onclick="if(event.target===this)closeMyEfedPopup()"></div>
 
 </body>
 </html>
