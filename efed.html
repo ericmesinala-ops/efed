@@ -1851,6 +1851,26 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
         const _chatBox = document.getElementById('efed-chat-messages');
         if (_chatBox) _chatBox.scrollTop = _chatBox.scrollHeight;
       });
+      // Ensure feed and chat sections are visible if they have content
+      const _feedSec = document.getElementById('efed-feed-section');
+      if (_feedSec && _feedSec.innerHTML.trim()) _feedSec.style.display = '';
+      const _chatSec = document.getElementById('efed-chat-section');
+      if (_chatSec && document.getElementById('efed-chat-messages')) _chatSec.style.display = '';
+    }
+    if (tabName === 'schedule') {
+      // Force hype wrap and upcoming events visible if they have content
+      const _hype = document.getElementById('ev-hype-wrap');
+      if (_hype && _hype.querySelector('iframe')?.src) _hype.style.display = '';
+      const _upcoming = document.getElementById('upcoming-event-section');
+      if (_upcoming) _upcoming.style.display = '';
+      const _heroSec = document.getElementById('hero-video-section');
+      if (_heroSec) _heroSec.style.display = '';
+    }
+    if (tabName === 'videos') {
+      const _epSec = document.getElementById('episodes-section');
+      if (_epSec) _epSec.style.display = '';
+      const _bmSec = document.getElementById('best-matches-section');
+      if (_bmSec) _bmSec.style.display = '';
     }
     // Stats bar: only on Info tab
     const _statsBar = document.querySelector('.stats-bar');
@@ -11701,15 +11721,24 @@ const _cvTrophyPanel = (() => {
     panel.style.display = 'block';
     panel.innerHTML = '<div style="font-size:.72rem;color:rgba(255,255,255,.3);padding:8px 0;">Loading trophies…</div>';
     try {
-      _trophies = await sbGet('trophies', `efed_name=eq.${encodeURIComponent(EFED_NAME)}&order=year.asc`);
+      const session = getSession();
+      const ownerUsername = session?.username || '';
+      // Fetch by efed_name (case-insensitive) OR by awarded_by (owner username) to catch all owner-sent trophies
+      const [byEfed, byOwner] = await Promise.all([
+        sbGet('trophies', `efed_name=ilike.${encodeURIComponent(EFED_NAME)}&order=year.asc`).catch(() => []),
+        sbGet('trophies', `awarded_by=eq.${encodeURIComponent(ownerUsername)}&source=eq.owner&order=year.asc`).catch(() => [])
+      ]);
+      // Merge and deduplicate by id
+      const seen = new Set();
+      _trophies = [...byEfed, ...byOwner].filter(t => { if (seen.has(t.id)) return false; seen.add(t.id); return true; });
     } catch(e) { _trophies = []; }
     render();
   }
 
   function render() {
     const panel = _panel(); if (!panel) return;
-    const active   = _trophies.filter(t => t.year === 'present').sort((a,b) => (b.date_won||'').localeCompare(a.date_won||''));
-    const inactive = _trophies.filter(t => t.year !== 'present').sort((a,b) => parseInt(b.year||0) - parseInt(a.year||0) || (b.date_won||'').localeCompare(a.date_won||''));
+    const active   = _trophies.filter(t => (t.year||'').toLowerCase() === 'present').sort((a,b) => (b.date_won||'').localeCompare(a.date_won||''));
+    const inactive = _trophies.filter(t => (t.year||'').toLowerCase() !== 'present').sort((a,b) => parseInt(b.year||0) - parseInt(a.year||0) || (b.date_won||'').localeCompare(a.date_won||''));
     const list     = _tab === 'active' ? active : inactive;
     const pages    = Math.ceil(list.length / PAGE_SIZE) || 1;
     if (_page >= pages) _page = pages - 1;
@@ -11723,12 +11752,12 @@ const _cvTrophyPanel = (() => {
       </div>
       <!-- guide text -->
       <div style="font-size:.68rem;color:rgba(255,255,255,.4);line-height:1.6;margin-bottom:14px;padding:10px 12px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);border-radius:8px;">
-        Manage trophies you've sent to wrestlers. <strong style="color:rgba(255,255,255,.6);">Present</strong> means they currently hold the title — toggle it off when the title changes hands and enter the year won. Year edits require saving individually. Deleting a trophy removes it permanently.
+        Manage trophies you've sent to wrestlers. Titles on the <strong style="color:rgba(255,255,255,.6);">Active Championships</strong> tab are currently held — toggle <strong style="color:rgba(255,255,255,.6);">Present</strong> off when a title changes hands and enter the year won. Titles on <strong style="color:rgba(255,255,255,.6);">Inactive Championships</strong> have no current champion. Year edits require saving individually. Deleting a trophy removes it permanently.
       </div>
       <!-- tabs -->
       <div style="display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.08);margin-bottom:14px;">
-        <button onclick="_cvTrophyPanel.setTab('active')" style="flex:1;padding:8px 0;font-size:.6rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:${_tab==='active'?'rgba(200,168,75,.15)':'transparent'};border:none;color:${_tab==='active'?'#c8a84b':'rgba(255,255,255,.3)'};cursor:pointer;font-family:'DM Sans',sans-serif;border-right:1px solid rgba(255,255,255,.08);">Active (${active.length})</button>
-        <button onclick="_cvTrophyPanel.setTab('inactive')" style="flex:1;padding:8px 0;font-size:.6rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:${_tab==='inactive'?'rgba(200,168,75,.15)':'transparent'};border:none;color:${_tab==='inactive'?'#c8a84b':'rgba(255,255,255,.3)'};cursor:pointer;font-family:'DM Sans',sans-serif;">Inactive (${inactive.length})</button>
+        <button onclick="_cvTrophyPanel.setTab('active')" style="flex:1;padding:8px 0;font-size:.6rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:${_tab==='active'?'rgba(200,168,75,.15)':'transparent'};border:none;color:${_tab==='active'?'#c8a84b':'rgba(255,255,255,.3)'};cursor:pointer;font-family:'DM Sans',sans-serif;border-right:1px solid rgba(255,255,255,.08);">Active Championships (${active.length})</button>
+        <button onclick="_cvTrophyPanel.setTab('inactive')" style="flex:1;padding:8px 0;font-size:.6rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:${_tab==='inactive'?'rgba(200,168,75,.15)':'transparent'};border:none;color:${_tab==='inactive'?'#c8a84b':'rgba(255,255,255,.3)'};cursor:pointer;font-family:'DM Sans',sans-serif;">Inactive Championships (${inactive.length})</button>
       </div>`;
 
     if (!slice.length) {
@@ -11749,12 +11778,12 @@ const _cvTrophyPanel = (() => {
               <input id="ctp-year-${t.id}" type="text" maxlength="7" value="${isPresent ? '' : _esc(t.year||'')}" placeholder="Year" ${isPresent ? 'disabled' : ''}
                 style="width:64px;padding:6px 8px;background:${isPresent?'rgba(255,255,255,.03)':'rgba(255,255,255,.07)'};border:1px solid ${isPresent?'rgba(255,255,255,.06)':'rgba(255,255,255,.15)'};border-radius:7px;color:${isPresent?'rgba(255,255,255,.2)':'#e8e8e8'};font-family:'DM Sans',sans-serif;font-size:.72rem;outline:none;text-align:center;"
                 oninput="_cvTrophyPanel.markDirty('${t.id}')">
-              <!-- present toggle -->
-              <button id="ctp-tog-${t.id}" onclick="_cvTrophyPanel.togglePresent('${t.id}',${isPresent})"
+              <!-- present toggle — only shown on active tab -->
+              ${_tab === 'active' ? `<button id="ctp-tog-${t.id}" onclick="_cvTrophyPanel.togglePresent('${t.id}',${isPresent})"
                 title="${isPresent?'Mark as inactive':'Mark as Present Champion'}"
                 style="padding:5px 9px;border-radius:7px;border:1px solid ${isPresent?'rgba(200,168,75,.5)':'rgba(255,255,255,.15)'};background:${isPresent?'rgba(200,168,75,.12)':'rgba(255,255,255,.05)'};color:${isPresent?'#c8a84b':'rgba(255,255,255,.35)'};font-size:.6rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;">
                 ${isPresent?'★ Present':'Present'}
-              </button>
+              </button>` : `<span id="ctp-tog-${t.id}" style="display:none;"></span>`}
             </div>
             <!-- feedback + update + delete -->
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
