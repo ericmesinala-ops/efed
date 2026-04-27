@@ -10460,11 +10460,15 @@ function _ceClose() {
 async function _ceOpen(idx, champ) {
   _champAccordionIdx = idx;
   _champEditWrestler = null;
+  window._ceSelectedBeltId = champ.beltId || '';
+  window._ceSelectedBeltName = champ.beltName || champ.title || '';
+  window._ceSelectedBeltImg = champ.beltImageUrl || champ._liveImg || '';
   const acc = document.getElementById('champ-edit-accordion');
   if (!acc) return;
   const isVacant = !champ.username || !!champ._vacant;
   const beltName = champ.beltName || champ.title || '';
   const beltId   = champ.beltId || '';
+  const needsBeltPick = !beltId; // new champion flow — need to pick a belt
 
   // Check if user already has a "present" trophy for this belt
   let hasPresentTrophy = false;
@@ -10485,9 +10489,14 @@ async function _ceOpen(idx, champ) {
   acc.innerHTML = `<div style="padding:18px 0 6px;">
   <div style="background:rgba(200,168,75,.04);border:1px solid rgba(200,168,75,.18);border-radius:14px;padding:20px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:2px;color:#c8a84b;">${isVacant?'Assign Champion':'Edit Champion'} — <span style="opacity:.65;">${beltName.replace(/</g,'&lt;')}</span></div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:2px;color:#c8a84b;">${isVacant?'Assign Champion':'Edit Champion'}${beltName ? ' — <span style="opacity:.65;">'+beltName.replace(/</g,'&lt;')+'</span>' : ''}</div>
       <button onclick="_ceClose()" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.45);width:24px;height:24px;border-radius:50%;cursor:pointer;font-size:.75rem;display:flex;align-items:center;justify-content:center;">✕</button>
     </div>
+    ${needsBeltPick ? `
+    <div style="font-size:.45rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:8px;">Select Championship</div>
+    <div id="ce-belt-chips" style="display:flex;gap:8px;flex-wrap:wrap;max-height:160px;overflow-y:auto;padding:2px;margin-bottom:14px;"></div>
+    <div id="ce-belt-none" style="display:none;font-size:.7rem;color:#5a5a6a;margin-bottom:14px;">No active belts in vault. Add belts to your Championship Vault first.</div>
+    ` : ''}
     <div style="font-size:.45rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:8px;">Select Wrestler</div>
     <div style="display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.08);margin-bottom:12px;">
       <button id="ce-tab-roster" onclick="_ceTab('roster')" style="flex:1;padding:7px 0;font-size:.55rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:rgba(200,168,75,.15);border:none;color:#c8a84b;cursor:pointer;font-family:'DM Sans',sans-serif;border-right:1px solid rgba(255,255,255,.08);">Roster</button>
@@ -10528,6 +10537,7 @@ async function _ceOpen(idx, champ) {
     _ceUpdateSel();
   }
   _cePopulateRoster();
+  if (needsBeltPick) _cePopulateBelts();
 
   const card = document.querySelector(`.champ-card[data-idx="${idx}"]`);
   if (card) { card.dataset.selected='true'; card.style.borderColor='rgba(200,168,75,.7)'; card.style.boxShadow='0 0 0 2px rgba(200,168,75,.18)'; }
@@ -10553,15 +10563,46 @@ function _cePopulateRoster() {
   if(!members.length){el.innerHTML='<div style="font-size:.7rem;color:#5a5a6a;">No roster members yet.</div>';return;}
   members.forEach(m=>{
     const chip=document.createElement('div');
-    chip.style.cssText='flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;padding:6px 5px;border-radius:10px;border:2px solid transparent;transition:border-color .15s,background .15s;width:62px;';
+    chip.className='ce-roster-chip';chip.style.cssText='flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;padding:6px 5px;border-radius:10px;border:2px solid transparent;transition:border-color .15s,background .15s;width:62px;';
     const avInner=m.avatar_url?`<img src="${m.avatar_url}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.15);">`:`<div style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:1.05rem;color:rgba(255,255,255,.5);">${(m.display_name||'?')[0].toUpperCase()}</div>`;
     chip.innerHTML=avInner+`<div style="font-size:.57rem;color:rgba(255,255,255,.45);text-align:center;width:58px;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;">${(m.display_name||m.username).replace(/</g,'&lt;')}</div>`;
     if(_champEditWrestler?.username===m.username){chip.style.borderColor='rgba(200,168,75,.7)';chip.style.background='rgba(200,168,75,.07)';}
     chip.onclick=()=>{
-      el.querySelectorAll('div[style*="flex-direction:column"]').forEach(c=>{c.style.borderColor='transparent';c.style.background='';});
+      el.querySelectorAll('.ce-roster-chip').forEach(c=>{c.style.borderColor='transparent';c.style.background='';});
       chip.style.borderColor='rgba(200,168,75,.7)';chip.style.background='rgba(200,168,75,.07)';
       _champEditWrestler={username:m.username,displayName:m.display_name||m.username,avatarUrl:m.avatar_url||null,isGhost:false};
       _ceUpdateSel();
+    };
+    el.appendChild(chip);
+  });
+}
+
+function _cePopulateBelts() {
+  const el = document.getElementById('ce-belt-chips');
+  const none = document.getElementById('ce-belt-none');
+  if (!el) return;
+  el.innerHTML = '';
+  const activeVault = typeof _vault !== 'undefined' ? _vault.getActiveItems() : [];
+  if (!activeVault.length) {
+    if (none) none.style.display = '';
+    return;
+  }
+  if (none) none.style.display = 'none';
+  activeVault.forEach(belt => {
+    const chip = document.createElement('div');
+    chip.className = 'ce-belt-chip';
+    chip.style.cssText = 'flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;padding:8px 6px;border-radius:10px;border:2px solid transparent;transition:border-color .15s,background .15s;width:72px;';
+    const imgInner = belt.image_url
+      ? `<img src="${belt.image_url}" style="width:44px;height:44px;object-fit:contain;">`
+      : `<div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:1.4rem;">🏆</div>`;
+    chip.innerHTML = imgInner + `<div style="font-size:.52rem;color:rgba(255,255,255,.5);text-align:center;width:68px;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;">${(belt.name||'').replace(/</g,'&lt;')}</div>`;
+    if (window._ceSelectedBeltId === belt.id) { chip.style.borderColor='rgba(200,168,75,.7)'; chip.style.background='rgba(200,168,75,.07)'; }
+    chip.onclick = () => {
+      el.querySelectorAll('.ce-belt-chip').forEach(c => { c.style.borderColor='transparent'; c.style.background=''; });
+      chip.style.borderColor = 'rgba(200,168,75,.7)'; chip.style.background = 'rgba(200,168,75,.07)';
+      window._ceSelectedBeltId = belt.id;
+      window._ceSelectedBeltName = belt.name;
+      window._ceSelectedBeltImg = belt.image_url || '';
     };
     el.appendChild(chip);
   });
@@ -10618,13 +10659,14 @@ async function _ceSave(idx) {
   if(!_champEditWrestler){_ceMsg('Select a wrestler.');return;}
   const dateVal=(document.getElementById('ce-date-input')?.value||'').trim();
   if(!dateVal){_ceMsg('Date won is required.');return;}
-
   const activeVault = typeof _vault!=='undefined' ? _vault.getActiveItems() : [];
-  const belt = activeVault[idx] || null;
-  const beltId       = belt?.id       || _champData.find((c,i)=>i===idx)?.beltId;
-  const beltName     = belt?.name     || _champData.find((c,i)=>i===idx)?.beltName || _champData.find((c,i)=>i===idx)?.title;
-  const beltImageUrl = belt?.image_url|| _champData.find((c,i)=>i===idx)?.beltImageUrl||null;
-  if(!beltId){_ceMsg('Could not identify belt.');return;}
+
+  const belt = activeVault.find(b=>b.id===window._ceSelectedBeltId) || activeVault[idx] || null;
+  const beltId       = window._ceSelectedBeltId || belt?.id       || _champData.find((c,i)=>i===idx)?.beltId;
+  const beltName     = window._ceSelectedBeltName|| belt?.name     || _champData.find((c,i)=>i===idx)?.beltName || _champData.find((c,i)=>i===idx)?.title;
+  const beltImageUrl = window._ceSelectedBeltImg || belt?.image_url|| _champData.find((c,i)=>i===idx)?.beltImageUrl||null;
+  if(!beltId){_ceMsg('Select a championship belt first.');return;}
+
 
   const saveBtn=document.querySelector('#champ-edit-accordion button[onclick*="_ceSave"]');
   if(saveBtn){saveBtn.disabled=true;saveBtn.textContent='Saving…';}
