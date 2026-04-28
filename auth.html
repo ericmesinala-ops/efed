@@ -529,11 +529,12 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
       // If signed in: leave #view-auth empty (no password inputs = no iOS AutoFill toolbar).
       // If NOT signed in: inject the full form immediately so there's no flash.
       (function() {
+        var isAddAccount = new URLSearchParams(window.location.search).get('add') === '1';
         try {
           var s = JSON.parse(localStorage.getItem('efed_session'));
-          if (s && s.username) return; // signed in — leave the form out entirely
+          if (s && s.username && !isAddAccount) return; // signed in and not adding — leave the form out
         } catch(e) {}
-        // Not signed in — inject the form now, synchronously
+        // Not signed in (or ?add=1) — inject the form now, synchronously
         document.getElementById('view-auth').innerHTML = `
           <div class="tabs">
             <button class="tab active" id="tab-login" onclick="switchTab('login')">Sign In</button>
@@ -834,6 +835,7 @@ async function doLogin() {
   clearMsgs();
   const email = document.getElementById('login-user').value.trim().toLowerCase();
   const pass = document.getElementById('login-pass').value;
+  const isAddAccount = new URLSearchParams(window.location.search).get('add') === '1';
   if (!email || !pass) return showErr('login-err', 'Please fill in all fields.');
   if (!email.includes('@')) return showErr('login-err', 'Please enter a valid email.');
   setLoading('login-btn', true);
@@ -843,8 +845,18 @@ async function doLogin() {
     const account = users[0];
     if (account.password_hash !== await hash(pass)) return showErr('login-err', 'Incorrect password.');
     if (account.banned) return showErr('login-err', 'This account has been suspended from the EFED Streaming Hub.');
-    setSession({ username: account.username, displayName: account.display_name || account.username });
-    window.location.replace('index.html');
+    const newSession = { username: account.username, displayName: account.display_name || account.username };
+    if (isAddAccount) {
+      // Save to switcher without replacing the active session, then go back
+      const saved = JSON.parse(localStorage.getItem('efed_saved_accounts') || '[]');
+      const idx = saved.findIndex(a => a.username === newSession.username);
+      if (idx >= 0) saved[idx] = newSession; else saved.push(newSession);
+      localStorage.setItem('efed_saved_accounts', JSON.stringify(saved));
+      window.location.replace('index.html');
+    } else {
+      setSession(newSession);
+      window.location.replace('index.html');
+    }
   } catch(e) {
     showErr('login-err', 'Could not connect. Try again.');
     console.error(e);
