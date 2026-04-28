@@ -16183,59 +16183,122 @@ const _imgCrop = (() => {
     ctx.save();
     ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([]);
 
-    // ── strap body zone (subtle fill) ──
-    const sT = cy - 28, sB = cy + 28;
-    ctx.fillStyle = 'rgba(255,255,255,.03)';
-    ctx.fillRect(0, sT, w, 56);
-    // strap top & bottom edge — white dashed guide lines
-    ctx.setLineDash([6, 4]);
-    ctx.strokeStyle = 'rgba(255,255,255,.38)'; ctx.lineWidth = 1.1;
-    ctx.beginPath(); ctx.moveTo(0, sT); ctx.lineTo(w, sT); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, sB); ctx.lineTo(w, sB); ctx.stroke();
-    ctx.setLineDash([]);
-    // center seam line — faint white
-    ctx.strokeStyle = 'rgba(255,255,255,.09)'; ctx.lineWidth = 0.8;
-    ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
+    // ── Belt silhouette measurements ──
+    // Center plate: wide octagon
+    const cpW = 108, cpH = 70, cpCut = 12;
+    const cpL = cx - cpW/2, cpR = cx + cpW/2, cpT = cy - cpH/2, cpB = cy + cpH/2;
 
-    // shared measures
-    const cpW = 106, cpH = 72, cpCut = 13; // center plate
-    const spW = 48, spH = 56, spCut = 8, spGap = 5; // side plates
-    const lx = cx - cpW/2 - spGap - spW;
-    const rx = cx + cpW/2 + spGap;
+    // Side plates: smaller octagons
+    const spW = 46, spH = 52, spCut = 7, spGap = 4;
+    const lx = cpL - spGap - spW;  // left side plate x
+    const rx = cpR + spGap;         // right side plate x
+    const spT = cy - spH/2, spB = cy + spH/2;
 
-    // ── side plates — white outline ──
-    ctx.fillStyle = 'rgba(255,255,255,.04)';
-    _beltOct(ctx, lx, cy - spH/2, spW, spH, spCut); ctx.fill();
-    _beltOct(ctx, rx, cy - spH/2, spW, spH, spCut); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1.5;
-    _beltOct(ctx, lx, cy - spH/2, spW, spH, spCut); ctx.stroke();
-    _beltOct(ctx, rx, cy - spH/2, spW, spH, spCut); ctx.stroke();
-    // side plate inner circle detail
-    ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = 0.9;
-    ctx.beginPath(); ctx.arc(lx + spW/2, cy, 11, 0, Math.PI*2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(rx + spW/2, cy, 11, 0, Math.PI*2); ctx.stroke();
+    // Strap: curves from side plates to edges, narrowing as it goes out
+    // The strap is narrower at the edges (real belt tapers)
+    const strapEdgeHalf = 18; // half-height of strap at the very edge of canvas
+    const strapJoinHalf = spH/2 - 4; // connects flush to side plate top/bottom
 
-    // ── center plate — bright white outline, clearly visible ──
-    ctx.fillStyle = 'rgba(255,255,255,.05)';
-    _beltOct(ctx, cx - cpW/2, cy - cpH/2, cpW, cpH, cpCut); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,.92)'; ctx.lineWidth = 2;
-    _beltOct(ctx, cx - cpW/2, cy - cpH/2, cpW, cpH, cpCut); ctx.stroke();
-    // inner oval
-    ctx.strokeStyle = 'rgba(255,255,255,.38)'; ctx.lineWidth = 1.1;
-    ctx.beginPath(); ctx.ellipse(cx, cy, 30, 20, 0, 0, Math.PI*2); ctx.stroke();
-    // inner tiny ring
-    ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = 0.8;
-    ctx.beginPath(); ctx.arc(cx, cy, 9, 0, Math.PI*2); ctx.stroke();
-    // horizontal accent line through center plate
-    ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 0.8;
-    ctx.beginPath(); ctx.moveTo(cx - cpW/2 + cpCut, cy); ctx.lineTo(cx + cpW/2 - cpCut, cy); ctx.stroke();
+    // ── Draw full belt silhouette as a single filled+stroked path ──
+    // We draw the complete outer silhouette: left edge → top strap curve →
+    // top of left plate → top of center plate → top of right plate →
+    // top strap curve → right edge → mirror bottom back
 
-    // ── "FIT HERE" label on center plate ──
-    ctx.font = 'bold 7px "DM Sans", sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,.55)';
-    ctx.textAlign = 'center';
-    ctx.letterSpacing = '1px';
-    ctx.fillText('FIT BELT HERE', cx, cy - cpH/2 - 5);
+    function strapPath(going) {
+      // going = 1 for top edge (left→right), -1 for bottom edge (right→left)
+      const sign = going;
+      if (going === 1) {
+        // TOP: left edge → across top → right edge
+        ctx.moveTo(0, cy - strapEdgeHalf);
+        // curve up to left side plate top
+        ctx.bezierCurveTo(
+          lx * 0.5, cy - strapEdgeHalf,          // cp1
+          lx - 2,   spT + spCut,                  // cp2
+          lx,       spT + spCut                   // end: top-left corner of left plate
+        );
+        // left plate top edge
+        ctx.lineTo(lx + spCut, spT);
+        ctx.lineTo(lx + spW - spCut, spT);
+        ctx.lineTo(lx + spW, spT + spCut);
+        // small notch/gap between side plate and center plate (top)
+        ctx.lineTo(cpL - spGap, spT + spCut);
+        // center plate top edge
+        ctx.lineTo(cpL + cpCut, cpT);
+        ctx.lineTo(cpR - cpCut, cpT);
+        ctx.lineTo(cpR, cpT + cpCut);
+        // gap between center and right side plate (top)
+        ctx.lineTo(rx, spT + spCut);
+        ctx.lineTo(rx + spCut, spT);
+        ctx.lineTo(rx + spW - spCut, spT);
+        ctx.lineTo(rx + spW, spT + spCut);
+        // curve from right plate top to right edge
+        ctx.bezierCurveTo(
+          rx + spW + 2, spT + spCut,
+          w - (lx * 0.5), cy - strapEdgeHalf,
+          w, cy - strapEdgeHalf
+        );
+      } else {
+        // BOTTOM: right edge → across bottom → left edge
+        ctx.lineTo(w, cy + strapEdgeHalf);
+        ctx.bezierCurveTo(
+          w - (lx * 0.5), cy + strapEdgeHalf,
+          rx + spW + 2, spB - spCut,
+          rx + spW, spB - spCut
+        );
+        ctx.lineTo(rx + spW - spCut, spB);
+        ctx.lineTo(rx + spCut, spB);
+        ctx.lineTo(rx, spB - spCut);
+        ctx.lineTo(cpR, cpB - cpCut);
+        ctx.lineTo(cpR - cpCut, cpB);
+        ctx.lineTo(cpL + cpCut, cpB);
+        ctx.lineTo(cpL, cpB - cpCut);
+        ctx.lineTo(cpL - spGap, spB - spCut);
+        ctx.lineTo(lx + spW, spB - spCut);
+        ctx.lineTo(lx + spW - spCut, spB);
+        ctx.lineTo(lx + spCut, spB);
+        ctx.lineTo(lx, spB - spCut);
+        ctx.bezierCurveTo(
+          lx - 2, spB - spCut,
+          lx * 0.5, cy + strapEdgeHalf,
+          0, cy + strapEdgeHalf
+        );
+        ctx.closePath();
+      }
+    }
+
+    // Draw filled silhouette (very subtle white tint)
+    ctx.beginPath();
+    strapPath(1);
+    strapPath(-1);
+    ctx.fillStyle = 'rgba(255,255,255,.07)';
+    ctx.fill();
+
+    // Draw the main outline — bright white
+    ctx.beginPath();
+    strapPath(1);
+    strapPath(-1);
+    ctx.strokeStyle = 'rgba(255,255,255,.88)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // ── Center plate inner details ──
+    // Inner oval
+    ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.ellipse(cx, cy, 28, 18, 0, 0, Math.PI*2); ctx.stroke();
+    // Tiny center ring
+    ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI*2); ctx.stroke();
+    // Side plate inner circles
+    ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = 0.9;
+    ctx.beginPath(); ctx.arc(lx + spW/2, cy, 10, 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(rx + spW/2, cy, 10, 0, Math.PI*2); ctx.stroke();
+
+    // ── Center divider lines between plates (vertical separators) ──
+    ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1;
+    // left gap divider
+    ctx.beginPath(); ctx.moveTo(cpL - spGap/2, spT + spCut); ctx.lineTo(cpL - spGap/2, spB - spCut); ctx.stroke();
+    // right gap divider
+    ctx.beginPath(); ctx.moveTo(rx - spGap/2, spT + spCut); ctx.lineTo(rx - spGap/2, spB - spCut); ctx.stroke();
 
     ctx.restore();
   }
