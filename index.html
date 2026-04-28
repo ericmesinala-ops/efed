@@ -6630,9 +6630,7 @@ const _soSearch = (() => {
   /* ---- fetch videos matching a search term from DB (server-side) ---- */
   async function _searchVideos(q) {
     // Use the global `videos` array if available and small enough — fine for early scale
-    if (typeof videos !== 'undefined' && videos.length && videos.length < 800) {
-      return videos;
-    }
+
     try {
       const enc = encodeURIComponent(`%${q}%`);
       const rows = await sbGet('submissions',
@@ -6656,14 +6654,9 @@ const _soSearch = (() => {
   }
   function _matchesQuery(text, ql) {
     if (!text) return false;
-    // Normalized match (strips punctuation both sides)
     const qlN = _normQ(ql);
     if (_normQ(text).includes(qlN)) return true;
-    // Fallback: plain lowercase (catches edge cases)
     if (text.toLowerCase().includes(ql.toLowerCase())) return true;
-    // Acronym match: "fsw" matches "First Strike Wrestling"
-    const acronym = text.match(/\b\w/g);
-    if (acronym && acronym.join('').toLowerCase().includes(qlN)) return true;
     return false;
   }
 
@@ -6673,13 +6666,17 @@ const _soSearch = (() => {
     const ql = _normQ(q);
     const enc = encodeURIComponent(`%${q}%`);
 
+    const encAcronym = encodeURIComponent(q + '%'); // starts-with for acronym
+
     // Fire all queries in parallel
-    const [matchedVids, efedRows, peopleRows] = await Promise.all([
+    const [matchedVids, efedRows, peopleRows, acronymOwners] = await Promise.all([
       _searchVideos(q),
       // eFeds — query distinct efed names matching the term
       sbGet('submissions', `status=eq.approved&efed.ilike.${enc}&select=efed&limit=200`).catch(() => []),
       // People — server-side ilike on username, display_name, promo_name
-      sbGet('users', `or=(username.ilike.${enc},display_name.ilike.${enc},promo_name.ilike.${enc})&select=username,display_name,promo_name,avatar_url,promo_logo,is_efed_owner,role&limit=50`).catch(() => [])
+      sbGet('users', `or=(username.ilike.${enc},display_name.ilike.${enc},promo_name.ilike.${enc})&select=username,display_name,promo_name,avatar_url,promo_logo,is_efed_owner,role&limit=50`).catch(() => []),
+      // Acronym — find eFed owners whose acronym starts with the query
+      sbGet('users', `acronym.ilike.${encAcronym}&promo_name=not.is.null&select=promo_name,promo_logo,acronym&limit=20`).catch(() => [])
     ]);
 
     // Shows
@@ -6695,6 +6692,13 @@ const _soSearch = (() => {
       if (!name) return;
       if (!efedMap[name]) efedMap[name] = { count: 0, logo: null };
       efedMap[name].count++;
+    });
+    // Merge in acronym-matched eFeds (owners whose acronym starts with the query)
+    acronymOwners.forEach(u => {
+      const name = (u.promo_name||'').trim();
+      if (!name) return;
+      if (!efedMap[name]) efedMap[name] = { count: 0, logo: u.promo_logo || null };
+      if (u.promo_logo && !efedMap[name].logo) efedMap[name].logo = u.promo_logo;
     });
     // Attach logos from people results
     peopleRows.forEach(u => {
