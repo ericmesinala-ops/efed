@@ -918,8 +918,7 @@ async function doRegister() {
     }
 
     // ── SOCIAL BAN CHECK ──
-    // Wrapped in its own try/catch — if the table doesn't exist or network fails,
-    // silently skip rather than blocking the whole registration.
+    // Fails CLOSED — if the check errors, block registration rather than letting it through.
     try {
       const socialBanChecks = [];
       if (xHandle) socialBanChecks.push(
@@ -929,14 +928,14 @@ async function doRegister() {
         sbGet('banned_socials', `handle=eq.${encodeURIComponent(igHandle)}&platform=eq.ig&select=id`).then(r => r.length ? 'ig' : null).catch(() => null)
       );
       if (isEfedOwner && ytChannel) socialBanChecks.push(
-        sbGet('banned_links', `select=id`).then(rows => {
+        sbGet('banned_links', `select=url`).then(rows => {
           const yt = ytChannel.trim().toLowerCase();
           const hit = rows.some(r => {
             const banned = (r.url || '').trim().toLowerCase();
             return banned && (yt === banned || yt.includes(banned) || banned.includes(yt));
           });
           return hit ? 'yt' : null;
-        }).catch(() => null)
+        }).catch(() => 'yt_check_failed')
       );
       if (socialBanChecks.length) {
         const banResults = await Promise.all(socialBanChecks);
@@ -946,7 +945,8 @@ async function doRegister() {
         }
       }
     } catch(banErr) {
-      console.warn('Ban check skipped due to error:', banErr);
+      console.warn('Ban check error:', banErr);
+      return showErr('reg-err2', 'Could not verify registration eligibility. Please try again.');
     }
 
     console.log('[reg] inserting user...', user, email);
