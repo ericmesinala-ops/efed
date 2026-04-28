@@ -5124,27 +5124,11 @@ function renderRecords() {
       ytBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg><span>Watch match</span>`;
       bodyEl.appendChild(ytBtn);
 
-      // Create the embed div (placed after the banner in the DOM)
-      const embedDiv = document.createElement('div');
-      embedDiv.className = 'rec-yt-embed';
-
       ytBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const isOpen = embedDiv.classList.contains('open');
-        if (isOpen) {
-          embedDiv.classList.remove('open');
-          embedDiv.innerHTML = '';
-          ytBtn.querySelector('span').textContent = 'Watch match';
-        } else {
-          const src = _rm2YtEmbedSrc(r.youtube_url);
-          embedDiv.innerHTML = `<iframe src="${src}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
-          embedDiv.classList.add('open');
-          ytBtn.querySelector('span').textContent = 'Hide video';
-        }
+        const src = _rm2YtEmbedSrc(r.youtube_url);
+        openVideoPopup(src, matchDisplayName);
       });
-
-      // Insert embedDiv after banner (we'll do it after banner is appended)
-      banner._ytEmbedDiv = embedDiv;
     }
 
     // Right: champ badge only (no W/L — winner indicated by gold avatar border)
@@ -5630,61 +5614,19 @@ function _rvAttachYtListeners(list) {
     let promoEmbed = null, matchEmbed = null;
 
     if (promoBtn) {
-      promoEmbed = document.createElement('div');
-      promoEmbed.id = 'rv-promo-embed-' + idx;
-      promoEmbed.className = 'rec-yt-embed';
-      insertAfter.after(promoEmbed);
-      insertAfter = promoEmbed;
-    }
-    if (matchBtn) {
-      matchEmbed = document.createElement('div');
-      matchEmbed.id = 'rv-yt-embed-' + idx;
-      matchEmbed.className = 'rec-yt-embed';
-      insertAfter.after(matchEmbed);
-    }
-
-    function closeEmbed(embed, btn, defaultLabel) {
-      if (!embed) return;
-      embed.classList.remove('open');
-      embed.innerHTML = '';
-      if (btn) btn.querySelector('span').textContent = defaultLabel;
-    }
-
-    function openEmbed(embed, btn, urlKey, openLabel, closeLabel) {
-      const r = _rivalries[idx];
-      if (!r || !r[urlKey]) return;
-      const src = _rm2YtEmbedSrc(r[urlKey]);
-      const iframe = document.createElement('iframe');
-      iframe.src = src;
-      iframe.allow = 'autoplay; encrypted-media';
-      iframe.allowFullscreen = true;
-      iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
-      embed.innerHTML = '';
-      embed.appendChild(iframe);
-      embed.classList.add('open');
-      btn.querySelector('span').textContent = closeLabel;
-    }
-
-    if (promoBtn && promoEmbed) {
       promoBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (promoEmbed.classList.contains('open')) {
-          closeEmbed(promoEmbed, promoBtn, 'Notable Promo');
-        } else {
-          closeEmbed(matchEmbed, matchBtn, 'Notable Match'); // close match if open
-          openEmbed(promoEmbed, promoBtn, 'promo_url', 'Notable Promo', 'Hide video');
-        }
+        const r = _rivalries[idx];
+        if (!r || !r.promo_url) return;
+        openVideoPopup(_rm2YtEmbedSrc(r.promo_url), 'Notable Promo');
       });
     }
-    if (matchBtn && matchEmbed) {
+    if (matchBtn) {
       matchBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (matchEmbed.classList.contains('open')) {
-          closeEmbed(matchEmbed, matchBtn, 'Notable Match');
-        } else {
-          closeEmbed(promoEmbed, promoBtn, 'Notable Promo'); // close promo if open
-          openEmbed(matchEmbed, matchBtn, 'youtube_url', 'Notable Match', 'Hide video');
-        }
+        const r = _rivalries[idx];
+        if (!r || !r.youtube_url) return;
+        openVideoPopup(_rm2YtEmbedSrc(r.youtube_url), 'Notable Match');
       });
     }
   });
@@ -14302,41 +14244,38 @@ document.addEventListener('DOMContentLoaded', () => { checkLockerRoomAccess(); }
 
 <script>
 (function(){
-  // Skip TV static on touch devices — ~44k SVG DOM mutations/sec crashes mobile
-  if (window.matchMedia('(pointer: fine)').matches) {
-    var SX=15,SY=27,SW=90,SH=52,PX=1;
-    var darkG=['#000','#111','#222','#333','#444','#555','#666','#777','#888','#999','#aaa','#bbb','#ccc','#ddd','#eee','#fff'];
-    var dayG =['#333','#444','#555','#666','#777','#888','#999','#aaa','#bbb','#ccc','#ddd','#eee','#fff'];
-    var NS='http://www.w3.org/2000/svg';
-    var _tvPaused = false;
-    document.addEventListener('visibilitychange', function() { _tvPaused = document.hidden; });
-    function renderFrame(el,greys){
-      var frag=document.createDocumentFragment();
-      for(var y=SY;y<SY+SH;y+=PX){
-        var x=SX;
-        while(x<SX+SW){
-          var w=Math.floor(Math.random()*4)+1;
-          if(x+w>SX+SW) w=SX+SW-x;
-          var r=document.createElementNS(NS,'rect');
-          r.setAttribute('x',x); r.setAttribute('y',y);
-          r.setAttribute('width',w); r.setAttribute('height',PX);
-          r.setAttribute('fill',greys[Math.floor(Math.random()*greys.length)]);
-          frag.appendChild(r); x+=w;
-        }
+  var SX=15,SY=27,SW=90,SH=52,PX=1;
+  var darkG=['#000','#111','#222','#333','#444','#555','#666','#777','#888','#999','#aaa','#bbb','#ccc','#ddd','#eee','#fff'];
+  var dayG =['#333','#444','#555','#666','#777','#888','#999','#aaa','#bbb','#ccc','#ddd','#eee','#fff'];
+  var NS='http://www.w3.org/2000/svg';
+  var _tvPaused = false;
+  document.addEventListener('visibilitychange', function() { _tvPaused = document.hidden; });
+  function renderFrame(el,greys){
+    var frag=document.createDocumentFragment();
+    for(var y=SY;y<SY+SH;y+=PX){
+      var x=SX;
+      while(x<SX+SW){
+        var w=Math.floor(Math.random()*4)+1;
+        if(x+w>SX+SW) w=SX+SW-x;
+        var r=document.createElementNS(NS,'rect');
+        r.setAttribute('x',x); r.setAttribute('y',y);
+        r.setAttribute('width',w); r.setAttribute('height',PX);
+        r.setAttribute('fill',greys[Math.floor(Math.random()*greys.length)]);
+        frag.appendChild(r); x+=w;
       }
-      while(el.firstChild) el.removeChild(el.firstChild);
-      el.appendChild(frag);
     }
-    function start(){
-      var d=document.getElementById('tv-static-dark');
-      var l=document.getElementById('tv-static-day');
-      if(!d&&!l) return;
-      function tick(){ if(!_tvPaused){ if(d) renderFrame(d,darkG); if(l) renderFrame(l,dayG); } }
-      tick(); setInterval(tick,42);
-    }
-    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start);
-    else start();
+    while(el.firstChild) el.removeChild(el.firstChild);
+    el.appendChild(frag);
   }
+  function start(){
+    var d=document.getElementById('tv-static-dark');
+    var l=document.getElementById('tv-static-day');
+    if(!d&&!l) return;
+    function tick(){ if(!_tvPaused){ if(d) renderFrame(d,darkG); if(l) renderFrame(l,dayG); } }
+    tick(); setInterval(tick,42);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start);
+  else start();
 })();
 </script>
 
@@ -14779,6 +14718,40 @@ function _copySpotifySQL(el) { _copyMigrationSQL(el); }
 
 <!-- ── MY EFED PICKER POPUP ── -->
 <div id="myefed-popup-bg" onclick="if(event.target===this)closeMyEfedPopup()"></div>
+
+
+<!-- ── VIDEO POPUP ── -->
+<div id="vid-popup-bg" style="display:none;position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,.96);flex-direction:column;align-items:center;justify-content:center;">
+  <button onclick="closeVideoPopup()" style="position:absolute;top:16px;right:16px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2;font-family:sans-serif;line-height:1;">✕</button>
+  <div style="width:100%;max-width:920px;padding:0 16px;box-sizing:border-box;">
+    <div id="vid-popup-frame" style="width:100%;aspect-ratio:16/9;background:#000;border-radius:12px;overflow:hidden;box-shadow:0 8px 48px rgba(0,0,0,.8);"></div>
+  </div>
+  <div style="width:100%;max-width:920px;padding:10px 20px 0;box-sizing:border-box;display:flex;align-items:center;gap:8px;">
+    <span style="width:8px;height:8px;border-radius:50%;background:#c0000e;flex-shrink:0;display:inline-block;"></span>
+    <span id="vid-popup-label" style="font-family:'DM Sans',sans-serif;font-size:.75rem;color:rgba(255,255,255,.45);letter-spacing:2px;text-transform:uppercase;"></span>
+  </div>
+</div>
+
+<script>
+function openVideoPopup(src, label) {
+  const bg = document.getElementById('vid-popup-bg');
+  const frame = document.getElementById('vid-popup-frame');
+  const lbl = document.getElementById('vid-popup-label');
+  if (!bg || !frame) return;
+  frame.innerHTML = '<iframe src="' + src + '" allow="autoplay; encrypted-media; accelerometer; gyroscope; picture-in-picture; fullscreen" allowfullscreen style="width:100%;height:100%;border:none;display:block;"></iframe>';
+  if (lbl) lbl.textContent = label || '';
+  bg.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+function closeVideoPopup() {
+  const bg = document.getElementById('vid-popup-bg');
+  const frame = document.getElementById('vid-popup-frame');
+  if (!bg) return;
+  if (frame) frame.innerHTML = '';
+  bg.style.display = 'none';
+  document.body.style.overflow = '';
+}
+</script>
 
 </body>
 </html>
