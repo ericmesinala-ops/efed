@@ -6872,17 +6872,22 @@ const _soSearch = (() => {
   if (!session) return;
 
   // ── LIVE SESSION VALIDATION ──
-  // Verify the account still exists and isn't banned.
-  // If deleted or banned, clear session and redirect to auth immediately.
+  // Verify the account still exists, isn't banned, and hasn't been force-logged-out.
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=username,banned`);
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=username,banned,force_logout_at`);
     if (!rows.length || rows[0].banned) {
       localStorage.removeItem('efed_session');
       window.location.replace('auth.html');
       return;
     }
+    const forceAt = rows[0].force_logout_at || 0;
+    const loggedInAt = session.logged_in_at || 0;
+    if (forceAt > loggedInAt) {
+      localStorage.removeItem('efed_session');
+      window.location.replace('auth.html');
+      return;
+    }
   } catch(e) {
-    // If the check fails (network down etc.) let them stay — don't kick on uncertainty
     console.warn('Session validation skipped:', e);
   }
   saveAccountToSwitcher(session); // persist to account switcher

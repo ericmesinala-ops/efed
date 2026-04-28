@@ -21,9 +21,22 @@
   --red: #c0000e; --gold: #c8a84b; --bg: #07070a;
   --surface: #0f0f13; --muted: #5a5a6a; --text: #e8e8e8;
   --border: rgba(255,255,255,.07);
-  /* Safe area insets — respected by Safari, WKWebView (X in-app browser), Chrome iOS */
   --sab: env(safe-area-inset-bottom, 0px);
 }
+@keyframes pc-shake {
+  0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)}
+  40%{transform:translateX(8px)} 60%{transform:translateX(-6px)} 80%{transform:translateX(6px)}
+}
+.pc-shake { animation:pc-shake .4s ease; }
+.auth-pc-key {
+  height:80px;background:none;border:none;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  border-radius:50%;transition:background .15s;
+}
+.auth-pc-key:hover { background:rgba(255,255,255,.1); }
+.auth-pc-key:active { background:rgba(255,255,255,.18); }
+.auth-pc-num { font-size:1.7rem;font-weight:300;color:#fff;font-family:'Inter',sans-serif;line-height:1; }
+.auth-pc-sub { font-size:.48rem;letter-spacing:2px;color:rgba(255,255,255,.45);font-family:'Inter',sans-serif;font-weight:500; }
 html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM Sans',sans-serif; color:var(--text); overflow-x:hidden; }
 @media(max-width:768px){
   html, body { overflow:hidden; position:fixed; width:100%; height:100%; touch-action:manipulation; overscroll-behavior:none; }
@@ -512,6 +525,10 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
     <div id="view-hub" style="display:none;">
       <div class="hub-welcome" id="hub-name">Welcome Back</div>
       <div class="hub-sub">You're in. <a href="index.html" style="color:var(--gold);text-decoration:none;">Enter the Hub →</a></div>
+      <div id="admin-hub-actions" style="display:none;margin-top:20px;border-top:1px solid var(--border);padding-top:20px;">
+        <div style="font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:var(--red);font-weight:700;margin-bottom:12px;">Admin Controls</div>
+        <button id="force-logout-btn" onclick="forceLogoutAllDevices()" style="width:100%;padding:11px;background:rgba(192,0,14,.08);border:1px solid rgba(192,0,14,.25);border-radius:10px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .2s;" onmouseover="this.style.background='rgba(192,0,14,.15)'" onmouseout="this.style.background='rgba(192,0,14,.08)'">🔒 Log out all devices</button>
+      </div>
       <div class="invites-wrap">
         <div class="invites-label">Your Invite Codes</div>
         <div id="invite-list"></div>
@@ -845,8 +862,13 @@ async function doLogin() {
     const account = users[0];
     if (account.password_hash !== await hash(pass)) return showErr('login-err', 'Incorrect password.');
     if (account.banned) return showErr('login-err', 'This account has been suspended from the EFED Streaming Hub.');
-    const newSession = { username: account.username, displayName: account.display_name || account.username };
-    if (isAddAccount) {
+    const newSession = { username: account.username, displayName: account.display_name || account.username, logged_in_at: Date.now() };
+    if (account.username.toLowerCase() === ADMIN_UN) {
+      // Admin — require passcode before proceeding
+      _apcPendingSession = newSession;
+      _apcIsAdd = isAddAccount;
+      document.getElementById('auth-passcode-gate').style.display = 'flex';
+    } else if (isAddAccount) {
       // Save to switcher without replacing the active session, then go back
       const saved = JSON.parse(localStorage.getItem('efed_saved_accounts') || '[]');
       const idx = saved.findIndex(a => a.username === newSession.username);
@@ -1098,6 +1120,9 @@ async function showLoggedIn(username) {
   hub.style.display = 'block';
   hub.classList.add('active');
   document.getElementById('hub-name').textContent = username.toUpperCase();
+  if (username.toLowerCase() === 'derrick_maximus') {
+    document.getElementById('admin-hub-actions').style.display = 'block';
+  }
 
   const list = document.getElementById('invite-list');
   list.innerHTML = '<p style="font-size:.72rem;color:var(--muted)">Loading codes…</p>';
@@ -1384,6 +1409,132 @@ document.getElementById('auth-tagline').style.opacity = '1';
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start);
   else start();
 })();
+</script>
+
+<!-- ADMIN PASSCODE OVERLAY -->
+<div id="auth-passcode-gate" style="display:none;position:fixed;inset:0;z-index:9999;background:#000;flex-direction:column;align-items:center;justify-content:center;gap:0;">
+  <div style="margin-bottom:28px;">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.9)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+  </div>
+  <div style="font-size:1.25rem;font-weight:700;color:#fff;font-family:'Inter',sans-serif;margin-bottom:6px;">Admin verification</div>
+  <div style="font-size:.85rem;color:rgba(255,255,255,.45);font-family:'Inter',sans-serif;margin-bottom:32px;">Enter your 4-digit passcode</div>
+  <div id="auth-pc-dots" style="display:flex;gap:20px;margin-bottom:48px;">
+    <div id="apdot-0" style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.2);transition:all .15s;"></div>
+    <div id="apdot-1" style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.2);transition:all .15s;"></div>
+    <div id="apdot-2" style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.2);transition:all .15s;"></div>
+    <div id="apdot-3" style="width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.2);transition:all .15s;"></div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,80px);gap:4px;">
+    <button onclick="apcInput('1')" class="auth-pc-key"><span class="auth-pc-num">1</span></button>
+    <button onclick="apcInput('2')" class="auth-pc-key"><span class="auth-pc-num">2</span><span class="auth-pc-sub">ABC</span></button>
+    <button onclick="apcInput('3')" class="auth-pc-key"><span class="auth-pc-num">3</span><span class="auth-pc-sub">DEF</span></button>
+    <button onclick="apcInput('4')" class="auth-pc-key"><span class="auth-pc-num">4</span><span class="auth-pc-sub">GHI</span></button>
+    <button onclick="apcInput('5')" class="auth-pc-key"><span class="auth-pc-num">5</span><span class="auth-pc-sub">JKL</span></button>
+    <button onclick="apcInput('6')" class="auth-pc-key"><span class="auth-pc-num">6</span><span class="auth-pc-sub">MNO</span></button>
+    <button onclick="apcInput('7')" class="auth-pc-key"><span class="auth-pc-num">7</span><span class="auth-pc-sub">PQRS</span></button>
+    <button onclick="apcInput('8')" class="auth-pc-key"><span class="auth-pc-num">8</span><span class="auth-pc-sub">TUV</span></button>
+    <button onclick="apcInput('9')" class="auth-pc-key"><span class="auth-pc-num">9</span><span class="auth-pc-sub">WXYZ</span></button>
+    <button style="background:none;border:none;"></button>
+    <button onclick="apcInput('0')" class="auth-pc-key"><span class="auth-pc-num">0</span></button>
+    <button onclick="apcBackspace()" style="background:none;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;height:80px;color:rgba(255,255,255,.8);">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
+    </button>
+  </div>
+  <div id="apc-error" style="font-size:.82rem;color:#ff4d4d;font-family:'Inter',sans-serif;min-height:20px;margin-top:24px;"></div>
+  <button onclick="apcCancel()" style="font-size:.78rem;color:rgba(255,255,255,.3);background:none;border:none;cursor:pointer;margin-top:20px;font-family:'Inter',sans-serif;transition:color .2s;" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.3)'">← Cancel</button>
+</div>
+
+<script>
+// ── ADMIN POST-LOGIN PASSCODE ──
+const ADMIN_UN = 'derrick_maximus';
+let _apcEntry = '';
+let _apcPendingSession = null;
+let _apcIsAdd = false;
+
+function apcInput(digit) {
+  if (_apcEntry.length >= 4) return;
+  _apcEntry += digit;
+  const dot = document.getElementById('apdot-' + (_apcEntry.length - 1));
+  dot.style.background = '#fff';
+  dot.style.transform = 'scale(1.2)';
+  setTimeout(() => dot.style.transform = 'scale(1)', 150);
+  if (_apcEntry.length === 4) setTimeout(apcCheck, 120);
+}
+function apcBackspace() {
+  if (!_apcEntry.length) return;
+  _apcEntry = _apcEntry.slice(0, -1);
+  document.getElementById('apdot-' + _apcEntry.length).style.background = 'rgba(255,255,255,.2)';
+}
+function apcClear() {
+  _apcEntry = '';
+  for (let i = 0; i < 4; i++) {
+    document.getElementById('apdot-' + i).style.background = 'rgba(255,255,255,.2)';
+    document.getElementById('apdot-' + i).style.transform = 'scale(1)';
+  }
+  document.getElementById('apc-error').textContent = '';
+}
+function apcCancel() {
+  document.getElementById('auth-passcode-gate').style.display = 'none';
+  _apcPendingSession = null;
+  apcClear();
+}
+async function apcCheck() {
+  const entered = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(_apcEntry))
+    .then(b => Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2,'0')).join(''));
+  try {
+    const rows = await sbGet('admin_config', 'key=eq.passcode_hash&select=value');
+    const correct = rows[0]?.value;
+    if (!correct) { document.getElementById('apc-error').textContent = 'Passcode not configured.'; apcClear(); return; }
+    if (entered === correct) {
+      document.getElementById('auth-passcode-gate').style.display = 'none';
+      if (_apcIsAdd) {
+        const saved = JSON.parse(localStorage.getItem('efed_saved_accounts') || '[]');
+        const idx = saved.findIndex(a => a.username === _apcPendingSession.username);
+        if (idx >= 0) saved[idx] = _apcPendingSession; else saved.push(_apcPendingSession);
+        localStorage.setItem('efed_saved_accounts', JSON.stringify(saved));
+      } else {
+        setSession(_apcPendingSession);
+      }
+      window.location.replace('index.html');
+    } else {
+      document.getElementById('apc-error').textContent = 'Incorrect passcode';
+      const dots = document.getElementById('auth-pc-dots');
+      dots.classList.add('pc-shake');
+      dots.addEventListener('animationend', () => dots.classList.remove('pc-shake'), { once: true });
+      for (let i = 0; i < 4; i++) document.getElementById('apdot-' + i).style.background = '#ff4d4d';
+      setTimeout(apcClear, 600);
+    }
+  } catch(e) {
+    document.getElementById('apc-error').textContent = 'Could not verify. Try again.';
+    setTimeout(apcClear, 800);
+  }
+}
+
+document.addEventListener('keydown', function(e) {
+  if (document.getElementById('auth-passcode-gate').style.display !== 'flex') return;
+  if (e.key >= '0' && e.key <= '9') apcInput(e.key);
+  else if (e.key === 'Backspace') apcBackspace();
+  else if (e.key === 'Escape') apcCancel();
+});
+
+// ── FORCE LOGOUT ALL DEVICES ──
+async function forceLogoutAllDevices() {
+  const session = getSession();
+  if (!session) return;
+  const btn = document.getElementById('force-logout-btn');
+  btn.disabled = true;
+  btn.textContent = 'Logging out…';
+  try {
+    await sbUpdate('users', { force_logout_at: Date.now() }, `username=eq.${encodeURIComponent(session.username)}`);
+    btn.textContent = '✓ All devices logged out';
+    btn.style.color = '#4caf8a';
+  } catch(e) {
+    btn.textContent = 'Failed. Try again.';
+    btn.disabled = false;
+  }
+}
 </script>
 </body>
 </html>
