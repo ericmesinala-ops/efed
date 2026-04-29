@@ -6148,7 +6148,6 @@ const _tc = (() => {
     ctx.clearRect(0, 0, CW, CH);
     ctx.fillStyle = '#08080d'; ctx.fillRect(0, 0, CW, CH);
     if (_cvImg) ctx.drawImage(_cvImg, _cvX, _cvY, _cvImg.naturalWidth * _cvZoom, _cvImg.naturalHeight * _cvZoom);
-    _cvGuide(ctx);
   }
 
   function _cvGuide(ctx) {
@@ -6291,7 +6290,7 @@ const _tc = (() => {
 
   function _cvReset() {
     _cvImg=null; _cvX=0; _cvY=0; _cvZoom=1; _cvDrag=false; _cvUserUploaded=false;
-    const c=_cvCanvas(); if(c){const ctx=c.getContext('2d');ctx.clearRect(0,0,CW,CH);} _cvGuide(_cvCanvas()&&_cvCanvas().getContext('2d')||{save:()=>{},restore:()=>{}});
+    const c=_cvCanvas(); if(c){const ctx=c.getContext('2d');ctx.clearRect(0,0,CW,CH);ctx.fillStyle='#08080d';ctx.fillRect(0,0,CW,CH);}
     const hint=document.getElementById('tc-img-hint'); if(hint)hint.style.display='flex';
     const strip=document.getElementById('tc-zoom-strip'); if(strip)strip.style.display='none';
     const wrap=document.getElementById('tc-canvas-wrap'); if(wrap)wrap.style.cursor='default';
@@ -6410,8 +6409,7 @@ const _tc = (() => {
       const sec = document.getElementById('trophy-case-section'); if (sec) sec.appendChild(noteEl);
     }
     noteEl.style.cssText = 'font-size:.65rem;color:#6a6a7a;letter-spacing:.3px;margin-top:10px;line-height:1.8;';
-    const hasVerified = _items.some(i => i.source === 'owner');
-    noteEl.style.display = hasVerified ? 'block' : 'none';
+    noteEl.style.display = count > 0 ? 'block' : 'none';
     noteEl.innerHTML = '<span style="color:#c8a84b;">✓</span> Verified by eFed owner';
 
     _updateChevrons();
@@ -10566,22 +10564,48 @@ async function removeAvatar() {
 }
 
 // ── VIDEO CARD ──
+function _vidCardThumbError(img, fallback) {
+  if (img._fb) {
+    img.style.display = 'none';
+    const ph = document.createElement('div');
+    ph.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;';
+    ph.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="1.5" stroke-linecap="round" width="32" height="32"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>';
+    if (img.parentNode) img.parentNode.insertBefore(ph, img);
+  } else {
+    img._fb = 1;
+    img.src = fallback;
+  }
+}
 function makeVidCard(url, showName, date, thumbUrl) {
   const id = extractId(url);
-  const thumb = thumbUrl || (id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : '');
-  const fallbackThumb = id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : '';
-  const placeholderSvg = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--surface2);border-radius:6px;"><svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="1.5" stroke-linecap="round" width="32" height="32"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`;
-  const imgHtml = thumb
-    ? `<img loading="lazy" src="${thumb}" alt="" onerror="if(this._fb){this.style.display='none';this.parentNode.insertAdjacentHTML('afterbegin','${placeholderSvg.replace(/'/g,"\\'")}');}else{this._fb=1;this.src='${fallbackThumb}';}"`
-    : placeholderSvg;
-  return `<div class="vid-card" onclick="window.location.href='index.html?play=${encodeURIComponent(url)}'">
-    <div class="vid-thumb">
-      ${imgHtml}
-      <div class="vid-play-overlay"><div class="play-dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="white" style="margin-left:2px"><polygon points="5 3 19 12 5 21 5 3"/></svg></div></div>
-    </div>
-    <div class="vid-title">${_esc(showName || '')}</div>
-    <div class="vid-date">${_esc(date || '')}</div>
-  </div>`;
+  const thumb = thumbUrl || (id ? 'https://i.ytimg.com/vi/' + id + '/hqdefault.jpg' : '');
+  const fallback = id ? 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg' : '';
+  const div = document.createElement('div');
+  div.className = 'vid-card';
+  div.onclick = function() { window.location.href = 'index.html?play=' + encodeURIComponent(url); };
+  const thumbDiv = document.createElement('div');
+  thumbDiv.className = 'vid-thumb';
+  if (thumb) {
+    const img = document.createElement('img');
+    img.loading = 'lazy'; img.alt = '';
+    img.src = thumb;
+    img.onerror = function() { _vidCardThumbError(this, fallback); };
+    thumbDiv.appendChild(img);
+  }
+  const overlay = document.createElement('div');
+  overlay.className = 'vid-play-overlay';
+  overlay.innerHTML = '<div class="play-dot"><svg width="9" height="9" viewBox="0 0 24 24" fill="white" style="margin-left:2px"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>';
+  thumbDiv.appendChild(overlay);
+  div.appendChild(thumbDiv);
+  const titleDiv = document.createElement('div');
+  titleDiv.className = 'vid-title';
+  titleDiv.textContent = showName || '';
+  div.appendChild(titleDiv);
+  const dateDiv = document.createElement('div');
+  dateDiv.className = 'vid-date';
+  dateDiv.textContent = date || '';
+  div.appendChild(dateDiv);
+  return div.outerHTML;
 }
 function makeBookmarkVidCard(url, showName, date, thumbUrl, canDelete, session, bmRow) {
   const id = extractId(url);
