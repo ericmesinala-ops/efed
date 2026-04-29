@@ -16179,101 +16179,148 @@ const _imgCrop = (() => {
   }
 
   function _drawBeltGuide(ctx, w, h) {
-    // Close-up guide: belt fills entire canvas edge-to-edge
-    // Center plate = dominant, side plates flush to left/right edges
-    const cx = w / 2, cy = h / 2;
+    // Traced from reference: belt fills frame, center plate tall, side plates flanking,
+    // thin strap exits left/right edges. Canvas = 280×160.
     ctx.save();
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([]);
+    ctx.lineCap  = 'round';
+    ctx.lineJoin = 'round';
+    ctx.setLineDash([]);
 
-    // Center plate — tall, takes up the middle ~50% of width
-    const cpW = 138, cpH = h - 6, cpCut = 14;
-    const cpL = cx - cpW/2, cpR = cx + cpW/2;
-    const cpT = 3, cpB = h - 3;
+    // ── All coords tuned to 280×160 canvas ──
+    // Strap exits canvas at these Y bounds
+    const stT = 52,  stB = 108;   // strap top/bottom at edges
 
-    // Side plates — each fills the gap from center plate to edge
-    const spGap = 5;                         // gap between center and side plates
-    const spW = Math.floor(cpL) - spGap;     // ~(280-138)/2 - 5 = 61px
-    const spH = h - 20, spCut = 9;
-    const lx = 0;                            // left plate starts at canvas edge
-    const rx = cpR + spGap;                  // right plate starts after gap
-    const spT = cy - spH / 2, spB = cy + spH / 2;
+    // Left side plate (octagon)
+    const lpX  = 16,  lpW  = 54;
+    const lpT  = 24,  lpB  = 136, lpC = 10;  // lpC = corner bevel size
 
-    // Strap: the thin band that exits the canvas at left/right edges
-    const stH = 20;                          // strap height at edges
+    // Center plate (octagon) — dominant, tall, wide
+    const cpX  = 74,  cpW  = 132;
+    const cpT  = 4,   cpB  = 156, cpC = 16;
+
+    // Right side plate (mirror of left)
+    const rpX  = cpX + cpW + 4;
+    const rpW  = lpW;
+    const rpT  = lpT, rpB  = lpB, rpC = lpC;
+
+    // Gap between side plate right edge and center plate left edge (and mirror)
+    // lpX + lpW = 70,  cpX = 74  → 4px gap  ✓
+    // cpX + cpW = 206, rpX = 210 → 4px gap  ✓
 
     function drawBelt() {
-      // ── TOP edge: left→right ──
-      ctx.moveTo(0, cy - stH / 2);
-      // sweep up into left plate top-left
-      ctx.bezierCurveTo(spW * 0.25, cy - stH / 2, 0, spT + spCut, 0, spT + spCut);
-      ctx.lineTo(spCut, spT);                          // left plate TL bevel
-      ctx.lineTo(spW - spCut, spT);                    // left plate top
-      ctx.lineTo(spW, spT + spCut);                    // left plate TR bevel
-      // gap → center plate top-left
-      ctx.lineTo(cpL, cpT + cpCut);
-      ctx.lineTo(cpL + cpCut, cpT);                    // center TL bevel
-      ctx.lineTo(cpR - cpCut, cpT);                    // center top
-      ctx.lineTo(cpR, cpT + cpCut);                    // center TR bevel
-      // gap → right plate top-left
-      ctx.lineTo(rx, spT + spCut);
-      ctx.lineTo(rx + spCut, spT);                     // right plate TL bevel
-      ctx.lineTo(rx + spW - spCut, spT);               // right plate top
-      ctx.lineTo(rx + spW, spT + spCut);               // right plate TR bevel
-      // sweep down to right canvas edge
-      ctx.bezierCurveTo(rx + spW, spT + spCut, w - spW * 0.25, cy - stH / 2, w, cy - stH / 2);
+      // ── TOP path: left edge → right edge ──
+
+      // Left strap enters canvas top-left at strap height
+      ctx.moveTo(0, stT);
+
+      // Curve up into left side plate top-left corner
+      ctx.bezierCurveTo(
+        lpX * 0.5, stT,          // pull toward left
+        lpX,       lpT + lpC,    // arrive at plate corner
+        lpX,       lpT + lpC
+      );
+      // Left plate — top edge (beveled octagon)
+      ctx.lineTo(lpX + lpC,       lpT);
+      ctx.lineTo(lpX + lpW - lpC, lpT);
+      ctx.lineTo(lpX + lpW,       lpT + lpC);
+
+      // Gap → center plate top-left
+      ctx.lineTo(cpX,             cpT + cpC);
+      ctx.lineTo(cpX + cpC,       cpT);
+      ctx.lineTo(cpX + cpW - cpC, cpT);
+      ctx.lineTo(cpX + cpW,       cpT + cpC);
+
+      // Gap → right plate top-left
+      ctx.lineTo(rpX,             rpT + rpC);
+      ctx.lineTo(rpX + rpC,       rpT);
+      ctx.lineTo(rpX + rpW - rpC, rpT);
+      ctx.lineTo(rpX + rpW,       rpT + rpC);
+
+      // Curve from right plate top-right down to strap exit at right edge
+      ctx.bezierCurveTo(
+        rpX + rpW,              rpT + rpC,
+        w - lpX * 0.5,          stT,
+        w,                      stT
+      );
 
       // ── RIGHT EDGE ──
-      ctx.lineTo(w, cy + stH / 2);
+      ctx.lineTo(w, stB);
 
-      // ── BOTTOM edge: right→left ──
-      ctx.bezierCurveTo(w - spW * 0.25, cy + stH / 2, rx + spW, spB - spCut, rx + spW, spB - spCut);
-      ctx.lineTo(rx + spW - spCut, spB);               // right plate BR bevel
-      ctx.lineTo(rx + spCut, spB);                     // right plate bottom
-      ctx.lineTo(rx, spB - spCut);                     // right plate BL bevel
-      // gap → center plate bottom-right
-      ctx.lineTo(cpR, cpB - cpCut);
-      ctx.lineTo(cpR - cpCut, cpB);                    // center BR bevel
-      ctx.lineTo(cpL + cpCut, cpB);                    // center bottom
-      ctx.lineTo(cpL, cpB - cpCut);                    // center BL bevel
-      // gap → left plate bottom-right
-      ctx.lineTo(spW, spB - spCut);
-      ctx.lineTo(spW - spCut, spB);                    // left plate BR bevel
-      ctx.lineTo(spCut, spB);                          // left plate bottom
-      ctx.lineTo(0, spB - spCut);                      // left plate BL bevel
-      // sweep back to left canvas edge
-      ctx.bezierCurveTo(0, spB - spCut, spW * 0.25, cy + stH / 2, 0, cy + stH / 2);
+      // ── BOTTOM path: right edge → left edge ──
+
+      // Curve from right edge back into right plate bottom-right
+      ctx.bezierCurveTo(
+        w - lpX * 0.5,          stB,
+        rpX + rpW,              rpB - rpC,
+        rpX + rpW,              rpB - rpC
+      );
+      // Right plate — bottom edge
+      ctx.lineTo(rpX + rpW - rpC, rpB);
+      ctx.lineTo(rpX + rpC,       rpB);
+      ctx.lineTo(rpX,             rpB - rpC);
+
+      // Gap → center plate bottom-right
+      ctx.lineTo(cpX + cpW,       cpB - cpC);
+      ctx.lineTo(cpX + cpW - cpC, cpB);
+      ctx.lineTo(cpX + cpC,       cpB);
+      ctx.lineTo(cpX,             cpB - cpC);
+
+      // Gap → left plate bottom-right
+      ctx.lineTo(lpX + lpW,       lpB - lpC);
+      ctx.lineTo(lpX + lpW - lpC, lpB);
+      ctx.lineTo(lpX + lpC,       lpB);
+      ctx.lineTo(lpX,             lpB - lpC);
+
+      // Curve from left plate bottom-left back to strap exit at left edge
+      ctx.bezierCurveTo(
+        lpX,       lpB - lpC,
+        lpX * 0.5, stB,
+        0,         stB
+      );
+
       ctx.closePath();
     }
 
-    // Subtle fill
+    // Subtle fill so guide reads as a shape
     ctx.beginPath(); drawBelt();
-    ctx.fillStyle = 'rgba(255,255,255,.06)';
+    ctx.fillStyle = 'rgba(255,255,255,.07)';
     ctx.fill();
 
-    // Crisp white outline
+    // Bright white stroke — the actual trace
     ctx.beginPath(); drawBelt();
     ctx.strokeStyle = 'rgba(255,255,255,.92)';
-    ctx.lineWidth = 2.2;
+    ctx.lineWidth   = 2;
     ctx.stroke();
 
-    // ── Divider lines between plates ──
-    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(cpL - spGap/2, spT + 3); ctx.lineTo(cpL - spGap/2, spB - 3); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(rx - spGap/2,  spT + 3); ctx.lineTo(rx - spGap/2,  spB - 3); ctx.stroke();
+    // ── Vertical gap lines between plates ──
+    ctx.strokeStyle = 'rgba(255,255,255,.6)';
+    ctx.lineWidth   = 1.5;
+    // left gap (between left plate and center plate)
+    const lgX = (lpX + lpW + cpX) / 2;
+    ctx.beginPath(); ctx.moveTo(lgX, lpT + lpC + 2); ctx.lineTo(lgX, lpB - lpC - 2); ctx.stroke();
+    // right gap (between center plate and right plate)
+    const rgX = (cpX + cpW + rpX) / 2;
+    ctx.beginPath(); ctx.moveTo(rgX, rpT + rpC + 2); ctx.lineTo(rgX, rpB - rpC - 2); ctx.stroke();
 
     // ── Center plate inner oval ──
-    ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.ellipse(cx, cy, cpW/2 - 16, cpH/2 - 12, 0, 0, Math.PI * 2); ctx.stroke();
+    const cxc = cpX + cpW / 2, cyc = (cpT + cpB) / 2;
+    ctx.strokeStyle = 'rgba(255,255,255,.42)';
+    ctx.lineWidth   = 1.4;
+    ctx.beginPath(); ctx.ellipse(cxc, cyc, cpW/2 - 18, (cpB-cpT)/2 - 14, 0, 0, Math.PI*2); ctx.stroke();
 
     // ── Center tiny ring ──
-    ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(cx, cy, 12, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.22)';
+    ctx.lineWidth   = 1;
+    ctx.beginPath(); ctx.arc(cxc, cyc, 13, 0, Math.PI*2); ctx.stroke();
 
     // ── Side plate inner circles ──
-    const siR = Math.min(spW, spH) / 2 - 12;
-    ctx.strokeStyle = 'rgba(255,255,255,.3)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(spW / 2, cy, siR, 0, Math.PI * 2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(rx + spW / 2, cy, siR, 0, Math.PI * 2); ctx.stroke();
+    const lpCx = lpX + lpW/2, lpCy = (lpT + lpB) / 2;
+    const rpCx = rpX + rpW/2, rpCy = (rpT + rpB) / 2;
+    const siR  = Math.min(lpW, lpB-lpT) / 2 - 10;
+    ctx.strokeStyle = 'rgba(255,255,255,.28)';
+    ctx.lineWidth   = 1;
+    ctx.beginPath(); ctx.arc(lpCx, lpCy, siR, 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(rpCx, rpCy, siR, 0, Math.PI*2); ctx.stroke();
 
     ctx.restore();
   }
