@@ -7037,7 +7037,6 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
         <div id="tc-zoom-track" onclick="_tc.cvZoomBar(event)"><div id="tc-zoom-fill"></div></div>
         <button onclick="_tc.cvZoom(0.12)">+</button>
       </div>
-      <div style="font-size:.56rem;color:rgba(255,255,255,.32);text-align:center;margin-top:7px;letter-spacing:.5px;">White outline = belt plate guide · Align your belt to match · All championships display at the same size</div>
       <input type="file" id="tc-img-file" accept="image/*" style="display:none;" onchange="_tc.handleImgPick(event)">
       <!-- Clear / Upload -->
       <div style="display:flex;gap:8px;margin-top:8px;">
@@ -10666,7 +10665,7 @@ function _applyPublicNav() {
 async function _loadPublicProfile(username) {
   if (!username) return;
   try {
-    const users = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment,faction,entrance_music,moveset,open_for_signings`);
+    const users = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment,faction,entrance_music,moveset,open_for_signings,points,credits,hours_watched`);
     if (!users.length) { document.getElementById('profile-name').textContent = 'User not found'; return; }
     const user = users[0];
     // Fetch images
@@ -10847,26 +10846,17 @@ async function _loadPublicProfile(username) {
     hideIds.forEach(id => { const el=document.getElementById(id); if(el) el.style.display='none'; });
     document.getElementById('profile-av-box').style.cursor = 'default';
 
-    // Stats
+    // Stats — read stored values from DB
     try {
-      const [subs, watchRows, ratings, supports] = await Promise.all([
-        sbGet('submissions', `submitted_by=eq.${encodeURIComponent(username)}&status=eq.approved&select=id`),
-        sbGet('watch_time', `username=eq.${encodeURIComponent(username)}&select=total_seconds`),
-        sbGet('ratings', `username=eq.${encodeURIComponent(username)}&select=id`).catch(() => []),
-        sbGet('supports', `username=eq.${encodeURIComponent(username)}&select=id`).catch(() => [])
-      ]);
-      // Points: supports×2 (simplified for guest view — no login/booking data)
-      const guestPoints = (supports.length * 2);
-      document.getElementById('stat-points').textContent = guestPoints;
-      // Credits: subs×6 + ratings×6 + watch hours×2
-      const totalSecs = watchRows.reduce((s, r) => s + (r.total_seconds || 0), 0);
-      const watchHrs  = totalSecs / 3600;
-      const guestCredits = (subs.length * 6) + (ratings.length * 6) + (Math.floor(watchHrs) * 2);
-      document.getElementById('stat-credits').textContent = guestCredits;
-      const hrs  = Math.floor(watchHrs);
-      const mins = Math.floor((totalSecs % 3600) / 60);
-      document.getElementById('stat-watch-hours').textContent =
-        hrs > 0 ? `${hrs}:${String(mins).padStart(2, '0')}` : `0:${String(mins).padStart(2, '0')}`;
+      const _gRow = (await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=points,credits,hours_watched`))[0];
+      if (_gRow) {
+        document.getElementById('stat-points').textContent  = _gRow.points  ?? 0;
+        document.getElementById('stat-credits').textContent = _gRow.credits ?? 0;
+        const _gHrs  = Math.floor(parseFloat(_gRow.hours_watched) || 0);
+        const _gMins = Math.round(((parseFloat(_gRow.hours_watched) || 0) % 1) * 60);
+        document.getElementById('stat-watch-hours').textContent =
+          _gHrs > 0 ? `${_gHrs}:${String(_gMins).padStart(2,'0')}` : `0:${String(_gMins).padStart(2,'0')}`;
+      }
     } catch(e) {}
 
     // Links count — visible on guest view
@@ -11032,7 +11022,7 @@ async function loadProfile() {
   try {
     let users;
     try {
-      users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,spotify_handle,discord_handle,facebook_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment,faction,entrance_music,moveset`);
+      users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,spotify_handle,discord_handle,facebook_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,hometown,alignment,faction,entrance_music,moveset,points,credits,hours_watched,is_efed_owner`);
     } catch(e) {
       // One or more columns may not exist yet — progressively fall back
       const missing = ['spotify_handle','discord_handle','facebook_handle','height','weight','hometown','nickname','alignment','faction','entrance_music','moveset'];
@@ -11193,47 +11183,27 @@ async function loadProfile() {
   const inviteCount = 0; // invites removed
   const allInviteBonus = 0;
 
-  // ── POINTS (loyalty/earned) ──
-  const loginCount  = 0; // placeholder — daily login tracking not yet wired to DB
-  const bookedCount = 0; // placeholder — planner booking data TBD
-  const trophyCount = Array.isArray(user?.championships) ? user.championships.filter(c => c.verified).length : 0;
-  const profileDone = 0; // placeholder — profile completion check TBD
-  const points =
-    (loginCount    * 3)  +
-    (supportsData.length * 2)  +
-    (bookedCount   * 4)  +
-    (trophyCount   * 12) +
-    (profileDone   * 20);
-  document.getElementById('stat-points').textContent = points;
-  document.getElementById('pts-logins').value         = loginCount;
-  document.getElementById('pts-supports').value       = supportsData.length;
-  document.getElementById('pts-booked').value         = bookedCount;
-  document.getElementById('pts-trophies').value       = trophyCount;
-  document.getElementById('pts-profile-complete').value = profileDone;
-
-  // ── CREDITS (work/contribution) ──
-  const watchRowsC = await sbGet('watch_time', `username=eq.${encodeURIComponent(resolvedUser)}&select=total_seconds`).catch(()=>[]);
-  const totalSecsC = watchRowsC.reduce((s,r) => s+(r.total_seconds||0), 0);
-  const watchHrsC  = totalSecsC / 3600;
-  const taggedCount   = 0; // placeholder — show tagging TBD
-  const partOfCount   = 0; // placeholder — part-of-show TBD
-  const credits =
-    (Math.floor(watchHrsC) * 2) +
-    (subsData.length       * 6) +
-    (ratingsData.length    * 6) +
-    (taggedCount           * 4) +
-    (partOfCount           * 4) +
-    (profileDone           * 20);
-  document.getElementById('stat-credits').textContent    = credits;
-  document.getElementById('crd-watch-hours').value       = watchHrsC.toFixed(2);
-  // subs where video_owner = self (owner submitted their own content)
+  // ── POINTS & CREDITS — read from DB ──
+  const dbPoints     = user.points  ?? 0;
+  const dbCredits    = user.credits ?? 0;
+  const dbHrsWatched = parseFloat(user.hours_watched) || 0;
+  const trophyCount  = Array.isArray(user?.championships) ? user.championships.filter(c => c.verified).length : 0;
+  document.getElementById('stat-points').textContent  = dbPoints;
+  document.getElementById('stat-credits').textContent = dbCredits;
+  document.getElementById('pts-logins').value           = 0; // wired via daily login trigger
+  document.getElementById('pts-supports').value         = supportsData.length;
+  document.getElementById('pts-booked').value           = 0; // wired via booking trigger
+  document.getElementById('pts-trophies').value         = trophyCount;
+  document.getElementById('pts-profile-complete').value = 0;
+  document.getElementById('crd-watch-hours').value      = dbHrsWatched.toFixed(2);
+  // subs where video_owner = self or unset
   const _ownedSubsCount = subsData.filter(s => !s.video_owner || s.video_owner === resolvedUser).length;
-  document.getElementById('crd-owned-subs').value          = _ownedSubsCount;
-  document.getElementById('crd-submitted').value           = subsData.length;
-  document.getElementById('crd-rated').value             = ratingsData.length;
-  document.getElementById('crd-tagged').value            = taggedCount;
-  document.getElementById('crd-part-of-show').value      = partOfCount;
-  document.getElementById('crd-profile-complete').value  = profileDone;
+  document.getElementById('crd-owned-subs').value       = _ownedSubsCount;
+  document.getElementById('crd-submitted').value        = subsData.length;
+  document.getElementById('crd-rated').value            = ratingsData.length;
+  document.getElementById('crd-tagged').value           = 0;
+  document.getElementById('crd-part-of-show').value     = 0;
+  document.getElementById('crd-profile-complete').value = 0;
 
   // ── OWNER FLAG + STATS ──
   const _isOwner = (user.is_efed_owner || user.role === 'owner') ? 1 : 0;
@@ -11260,14 +11230,12 @@ async function loadProfile() {
     } catch(e) {}
   }
 
-  // Total watch hours
+  // Total watch hours — read from DB
   try {
-    const watchRows = await sbGet('watch_time', `username=eq.${encodeURIComponent(resolvedUser)}&select=total_seconds`);
-    const totalSecs = watchRows.reduce((sum, r) => sum + (r.total_seconds || 0), 0);
-    const hrs = Math.floor(totalSecs / 3600);
-    const mins = Math.floor((totalSecs % 3600) / 60);
+    const _wHrs  = Math.floor(dbHrsWatched);
+    const _wMins = Math.round((dbHrsWatched % 1) * 60);
     const watchEl = document.getElementById('stat-watch-hours');
-    if (watchEl) watchEl.textContent = hrs + ':' + String(mins).padStart(2, '0');
+    if (watchEl) watchEl.textContent = _wHrs + ':' + String(_wMins).padStart(2, '0');
   } catch(e) {}
 
   // Submitted videos row
