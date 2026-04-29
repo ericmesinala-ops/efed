@@ -7788,6 +7788,19 @@ async function savePassword() {
         <div id="submit-cat-placement" style="display:none;font-size:.86rem;color:rgba(255,255,255,.75);margin-top:9px;font-weight:500;"></div>
       </div>
 
+      <!-- Video Owner (admin only) -->
+      <div id="submit-owner-wrap" style="display:none;margin-bottom:18px;">
+        <label style="display:block;font-size:.78rem;letter-spacing:1.5px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:10px;">Video Owner <span style="font-size:.65rem;color:rgba(255,255,255,.3);text-transform:none;letter-spacing:0;font-weight:400;">(optional — leave blank to earn credits yourself)</span></label>
+        <input id="submit-owner-input" type="text" placeholder="Username..." autocomplete="off"
+          style="width:100%;padding:13px 15px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:10px;color:#fff;font-family:DM Sans,sans-serif;font-size:1rem;outline:none;box-sizing:border-box;"
+          oninput="debounceOwnerSearch(this.value)" />
+        <div id="submit-owner-results" style="display:none;background:#1e1e24;border:1px solid rgba(255,255,255,.2);border-radius:10px;overflow:hidden;margin-top:4px;z-index:9999;position:relative;"></div>
+        <div id="submit-owner-selected" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.3);border-radius:8px;font-size:.82rem;color:#c8a84b;align-items:center;justify-content:space-between;">
+          <span id="submit-owner-selected-name"></span>
+          <span onclick="clearOwnerSelection()" style="cursor:pointer;color:rgba(255,255,255,.4);font-size:.75rem;">&#x2715; clear</span>
+        </div>
+      </div>
+
       <!-- Preview -->
       <div id="submit-preview" style="display:none;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:14px 16px;margin-bottom:16px;">
         <div style="font-size:.68rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:7px;">Preview</div>
@@ -7867,6 +7880,60 @@ function openSubmitModal() {
   clearSubmitPreview();
   document.getElementById('submit-err').style.display = 'none';
   document.getElementById('submit-ok').style.display = 'none';
+  // Show owner field for admin only
+  const _sm = getSession();
+  const _isAdminSubmit = _sm && _sm.username.toLowerCase() === ADMIN_USERNAME;
+  document.getElementById('submit-owner-wrap').style.display = _isAdminSubmit ? 'block' : 'none';
+  clearOwnerSelection();
+}
+
+
+// ── VIDEO OWNER SEARCH (admin submit) ──
+let _ownerSearchTimer = null;
+let _selectedOwner = null;
+
+function debounceOwnerSearch(val) {
+  clearTimeout(_ownerSearchTimer);
+  if (!val || val.length < 2) {
+    document.getElementById('submit-owner-results').style.display = 'none';
+    return;
+  }
+  _ownerSearchTimer = setTimeout(() => searchOwnerUsers(val), 300);
+}
+
+async function searchOwnerUsers(q) {
+  try {
+    const rows = await sbGet('users', `username=ilike.*${encodeURIComponent(q)}*&select=username,display_name&limit=6`);
+    const box = document.getElementById('submit-owner-results');
+    if (!rows.length) { box.style.display = 'none'; return; }
+    box.innerHTML = rows.map(u => `
+      <div onclick="selectOwner('${u.username}','${(u.display_name||u.username).replace(/'/g,"\'")}') "
+        style="padding:11px 14px;color:#fff;font-family:DM Sans,sans-serif;font-size:.88rem;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.06);"
+        onmouseenter="this.style.background='rgba(255,255,255,.08)'" onmouseleave="this.style.background=''">
+        <span style="font-weight:600;">${u.username}</span>
+        ${u.display_name && u.display_name !== u.username ? `<span style="color:rgba(255,255,255,.4);margin-left:6px;font-size:.78rem;">${u.display_name}</span>` : ''}
+      </div>`).join('');
+    box.style.display = 'block';
+  } catch(e) {}
+}
+
+function selectOwner(username, displayName) {
+  _selectedOwner = username;
+  document.getElementById('submit-owner-input').value = '';
+  document.getElementById('submit-owner-results').style.display = 'none';
+  const sel = document.getElementById('submit-owner-selected');
+  document.getElementById('submit-owner-selected-name').textContent = username + (displayName !== username ? ' (' + displayName + ')' : '');
+  sel.style.display = 'flex';
+}
+
+function clearOwnerSelection() {
+  _selectedOwner = null;
+  const inp = document.getElementById('submit-owner-input');
+  if (inp) inp.value = '';
+  const res = document.getElementById('submit-owner-results');
+  if (res) res.style.display = 'none';
+  const sel = document.getElementById('submit-owner-selected');
+  if (sel) sel.style.display = 'none';
 }
 
 function closeSubmitModal() {
@@ -8301,6 +8368,7 @@ function doSubmitPost(submissionType) {
 
       let inserted;
       try {
+        const _videoOwner = (typeof _selectedOwner === 'string' && _selectedOwner) ? _selectedOwner : null;
         inserted = await sbInsert('submissions', {
           url,
           video_id: extractId(url),
@@ -8313,7 +8381,8 @@ function doSubmitPost(submissionType) {
           community: true,
           status: submitStatus,
           thumb_url: thumbUrl || null,
-          submission_type: submissionType || null
+          submission_type: submissionType || null,
+          video_owner: _videoOwner
         });
       } catch(insertErr) {
         const el = document.getElementById('submit-err');
@@ -8321,6 +8390,31 @@ function doSubmitPost(submissionType) {
         el.style.display = 'block';
         btn.textContent = 'Submit to Hub'; btn.disabled = false; btn.style.opacity = '1';
         return;
+      }
+
+      // ── CREDITS: award 6 cr to video_owner (if set) or submitter ──
+      if (submitStatus === 'approved') {
+        try {
+          const _creditEarner = _videoOwner || session.username;
+          // Increment credits by 6
+          const _earnerRow = await sbGet('users', `username=eq.${encodeURIComponent(_creditEarner)}&select=credits`);
+          if (_earnerRow[0]) {
+            const _newCr = (_earnerRow[0].credits || 0) + 6;
+            await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(_creditEarner)}`, {
+              method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ credits: _newCr })
+            });
+            // Notify earner if they're not the one submitting
+            if (_creditEarner !== session.username) {
+              await sbInsert('notifications', {
+                username: _creditEarner,
+                type: 'credits',
+                message: `+6 credits — a video was submitted for you and approved.`,
+                created_at: Date.now(),
+                read: false
+              }).catch(() => {});
+            }
+          }
+        } catch(e) { console.warn('[credits] award failed:', e); }
       }
 
       // ── NEW EFED AUTO-ASSIGN + ADMIN NOTIFICATION ──
