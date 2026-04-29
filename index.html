@@ -5747,17 +5747,11 @@ async function initHub() {
   showSkeletons(8);
   buildPills();
   try {
-    // Paginate to get ALL approved submissions — Supabase defaults to 1000 row limit
-    let subs = [];
-    let offset = 0;
-    const PAGE = 1000;
-    while (true) {
-      const page = await sbGetWithTimeout('submissions',
-        `status=eq.approved&order=submitted_at.desc&select=*&limit=${PAGE}&offset=${offset}`, 8000);
-      subs = subs.concat(page);
-      if (page.length < PAGE) break; // last page
-      offset += PAGE;
-    }
+    // ── PHASE 1: fetch first 60 videos immediately so the page renders fast ──
+    const FIRST_PAGE = 60;
+    const firstPage = await sbGetWithTimeout('submissions',
+      `status=eq.approved&order=submitted_at.desc&select=url,show_name,efed,date,date_ms,submitted_at,submitted_by,thumb_url,tags&limit=${FIRST_PAGE}`, 8000);
+    let subs = firstPage;
     const dbApprovedUrls = new Set(subs.map(s => s.url));
     // Remove hardcoded videos that were submitted to DB but later deleted
     // Only check hardcoded (non-community) videos instead of fetching entire submissions table
@@ -5827,29 +5821,87 @@ async function initHub() {
     });
   }
 
-  // Fetch display names for community video posters
+  // Fetch display names for community video posters (first page)
   try {
     const usernames = [...new Set(videos.filter(v => v.community && v.submittedBy).map(v => v.submittedBy))];
     if (usernames.length) {
       const users = await sbGet('users', 'username=in.(' + usernames.map(u => encodeURIComponent(u)).join(',') + ')&select=username,display_name,promo_name');
       const nameMap = {};
       users.forEach(u => { nameMap[u.username] = u.promo_name || u.display_name || u.username; });
-      videos.forEach(v => { if (v.community && nameMap[v.submittedBy]) v.displayName = nameMap[v.submittedBy]; });
+      videos.forEach(v => { if (v.community && nameMap[v.submittedBy]) { v.displayName = nameMap[v.submittedBy]; v._nameResolved = true; } });
     }
   } catch(e) {}
 
-  // Fetch durations first so isMatch() works before any row builds
+  // ── PHASE 2: render immediately with what we have, then load everything else in background ──
+  buildPills();
+  renderGrid();
+  loadUpcomingRow();
+  loadWatchlistRow();
+  loadEfedOwnerRow();
+  buildHeroDots();
+  loadSlide();
+  loadMostViewed(videos);
+  loadRecentlyAdded(videos);
+  loadSpotlight(videos);
+  loadBestMatches(videos);
+  loadShowcaseRow(videos);
+  loadPromosRow(videos);
+  loadPodcastRow(videos);
+
+  // ── BACKGROUND: fetch remaining videos + all durations/metadata in parallel ──
   (async () => {
     try {
-      // Paginate metadata fetch — Supabase 1000 row default limit
-      let dbDurRows = [];
-      let _durOffset = 0;
-      while (true) {
-        const page = await sbGet('submissions', `status=eq.approved&select=url,duration_seconds,section_override,submission_type,tags&limit=1000&offset=${_durOffset}`).catch(() => []);
-        dbDurRows = dbDurRows.concat(page);
-        if (page.length < 1000) break;
-        _durOffset += 1000;
-      }
+      // Fetch rest of submissions (offset past the first page) + durations in parallel
+      const FIRST_PAGE = 60;
+      const [remainingSubs, dbDurRows] = await Promise.all([
+        // All remaining videos beyond the first 60
+        (async () => {
+          let all = [];
+          let offset = FIRST_PAGE;
+          const PAGE = 1000;
+          while (true) {
+            const page = await sbGet('submissions',
+              `status=eq.approved&order=submitted_at.desc&select=url,show_name,efed,date,date_ms,submitted_at,submitted_by,thumb_url,tags&limit=${PAGE}&offset=${offset}`).catch(() => []);
+            all = all.concat(page);
+            if (page.length < PAGE) break;
+            offset += PAGE;
+          }
+          return all;
+        })(),
+        // All durations/metadata
+        (async () => {
+          let all = [];
+          let offset = 0;
+          while (true) {
+            const page = await sbGet('submissions',
+              `status=eq.approved&select=url,duration_seconds,section_override,submission_type,tags&limit=1000&offset=${offset}`).catch(() => []);
+            all = all.concat(page);
+            if (page.length < 1000) break;
+            offset += 1000;
+          }
+          return all;
+        })()
+      ]);
+
+      // Merge remaining videos into the global list
+      const existingIds = new Set(videos.map(v => extractId(v.url)).filter(Boolean));
+      const existingUrls = new Set(videos.map(v => v.url).filter(Boolean));
+      let addedNew = false;
+      remainingSubs.forEach(s => {
+        const sId = extractId(s.url);
+        if (!existingIds.has(sId) && !existingUrls.has(s.url)) {
+          videos.push({
+            url: s.url, show: s.show_name || '', efed: s.efed || '',
+            date: s.date || '', dateMs: s.date_ms || (s.date ? new Date(s.date).getTime() : 0) || 0,
+            submittedAt: s.submitted_at || 0, submittedBy: s.submitted_by || '',
+            displayName: s.submitted_by || '', community: true, status: 'approved',
+            thumb: s.thumb_url || null, tags: safeParseTagsJson(s.tags)
+          });
+          addedNew = true;
+        }
+      });
+
+      // Merge duration/metadata into existing videos
       dbDurRows.forEach(r => {
         const v = videos.find(v => v.url === r.url);
         if (!v) return;
@@ -5858,8 +5910,8 @@ async function initHub() {
         if (r.submission_type) v.submission_type = r.submission_type;
         if (r.tags) v.tags = safeParseTagsJson(r.tags);
       });
-      // Fix: if a video was opened before tags arrived from DB (race condition on mobile),
-      // re-render the Tags and Similar Videos sections now that tags are merged in.
+
+      // Fix race condition: if a video was opened before tags arrived, re-render
       if (typeof _expandVideo !== 'undefined' && _expandVideo) {
         const fresh = videos.find(v => v.url === _expandVideo.url);
         if (fresh && fresh.tags && fresh.tags.length) {
@@ -5868,6 +5920,20 @@ async function initHub() {
           if (typeof renderRecommended === 'function') renderRecommended(_expandVideo);
         }
       }
+
+      // Fetch display names for any newly added community videos
+      try {
+        const newCommunity = videos.filter(v => v.community && v.submittedBy && !v._nameResolved);
+        const newUsernames = [...new Set(newCommunity.map(v => v.submittedBy))];
+        if (newUsernames.length) {
+          const users = await sbGet('users', 'username=in.(' + newUsernames.map(u => encodeURIComponent(u)).join(',') + ')&select=username,display_name,promo_name');
+          const nameMap = {};
+          users.forEach(u => { nameMap[u.username] = u.promo_name || u.display_name || u.username; });
+          videos.forEach(v => { if (v.community && nameMap[v.submittedBy]) { v.displayName = nameMap[v.submittedBy]; v._nameResolved = true; } });
+        }
+      } catch(e) {}
+
+      // YouTube duration fallback for any still missing
       const stillNeed = videos.filter(v => v.url && !v.durationSecs && !v.url.includes('twitch'));
       for (let i = 0; i < stillNeed.length; i += 50) {
         const batch = stillNeed.slice(i, i + 50);
@@ -5886,21 +5952,20 @@ async function initHub() {
           });
         } catch(e) {}
       }
-    } catch(e) { console.warn('Duration fetch failed:', e); }
-    buildPills();
-    renderGrid();
-    loadUpcomingRow();
-    loadWatchlistRow();
-    loadEfedOwnerRow();
-    buildHeroDots();
-    loadSlide();
-    loadMostViewed(videos);
-    loadRecentlyAdded(videos);
-    loadSpotlight(videos);
-    loadBestMatches(videos);
-    loadShowcaseRow(videos);
-    loadPromosRow(videos);
-    loadPodcastRow(videos);
+
+      // Re-render rows now that we have the full dataset
+      if (addedNew) {
+        buildPills();
+        renderGrid();
+        loadMostViewed(videos);
+        loadRecentlyAdded(videos);
+        loadSpotlight(videos);
+        loadBestMatches(videos);
+        loadShowcaseRow(videos);
+        loadPromosRow(videos);
+        loadPodcastRow(videos);
+      }
+    } catch(e) { console.warn('Background fetch failed:', e); }
   })();
   // ?play= param handled before initHub for instant open
 }
