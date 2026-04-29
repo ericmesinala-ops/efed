@@ -7120,6 +7120,21 @@ const _soSearch = (() => {
       }
       // My eFed button — show for owners AND roster members
       loadMyEfedBtn();
+
+      // ── DAILY LOGIN +3 PTS (once per calendar day) ──
+      try {
+        const _today = new Date().toDateString();
+        const _lastLoginPts = localStorage.getItem('efed_last_login_pts');
+        if (_lastLoginPts !== _today) {
+          const _ptsRow = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=points`);
+          if (_ptsRow[0] !== undefined) {
+            await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(session.username)}`, {
+              method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ points: (_ptsRow[0].points || 0) + 3 })
+            });
+            localStorage.setItem('efed_last_login_pts', _today);
+          }
+        }
+      } catch(e) { console.warn('[points] daily login award failed:', e); }
     }
   } catch(_) {} // non-critical — nav still works from local session
   loadMyEfedsRow();
@@ -9714,6 +9729,20 @@ async function toggleExpandAppear() {
         thumb_url: _expandVideo.thumb || ''
       });
       btn.classList.add('appeared');
+
+      // ── PART OF THIS SHOW +4 CR (one-time per video) ──
+      try {
+        const _apKey = 'efed_appeared_' + videoId;
+        if (!localStorage.getItem(_apKey)) {
+          const _apRow = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=credits`);
+          if (_apRow[0] !== undefined) {
+            await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(session.username)}`, {
+              method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ credits: (_apRow[0].credits || 0) + 4 })
+            });
+            localStorage.setItem(_apKey, '1');
+          }
+        }
+      } catch(e) { console.warn('[credits] appear award failed:', e); }
     }
     loadFeaturedAvatars(videoId);
   } catch(e) { console.warn('Appear failed', e); }
@@ -10530,6 +10559,16 @@ async function submitRating() {
 
     await sbInsert('ratings', data);
 
+    // ── RATING +6 CR ──
+    try {
+      const _rCrRow = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=credits`);
+      if (_rCrRow[0] !== undefined) {
+        await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(session.username)}`, {
+          method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ credits: (_rCrRow[0].credits || 0) + 6 })
+        });
+      }
+    } catch(e) { console.warn('[credits] rating award failed:', e); }
+
     closeRatingModal();
 
     // Update rate button to show rated state
@@ -10652,6 +10691,22 @@ function tickWatchTimer(url) {
   }
   // Save to DB every 60s
   if (_watchTimers[url] && _watchTimers[url].seconds % 60 === 0) saveWatchTime(url, total);
+  // ── HOUR WATCHED +2 CR (every full hour crossed) ──
+  const _prevHour = Math.floor((total - 1) / 3600);
+  const _currHour = Math.floor(total / 3600);
+  if (_currHour > _prevHour && _currHour > 0) {
+    const _wSess = getSession();
+    if (_wSess) {
+      sbGet('users', `username=eq.${encodeURIComponent(_wSess.username)}&select=credits,hours_watched`).then(_wRow => {
+        if (_wRow[0] !== undefined) {
+          fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(_wSess.username)}`, {
+            method: 'PATCH', headers: SB_HEADERS,
+            body: JSON.stringify({ credits: (_wRow[0].credits || 0) + 2, hours_watched: total / 3600 })
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+  }
 }
 
 async function checkWatchTime(url) {
@@ -13590,6 +13645,21 @@ async function saveVideoTags() {
     if (_expandVideo && _expandVideo.url === _tagVideoUrl) _expandVideo.tags = tags;
     renderExpandTags(tags);
     renderRecommended(_expandVideo);
+    // ── TAG A SHOW +4 CR (one-time per video) ──
+    try {
+      const _tagKey = 'efed_tagged_' + (extractId(_tagVideoUrl) || _tagVideoUrl);
+      const _tagSess = getSession();
+      if (_tagSess && !localStorage.getItem(_tagKey)) {
+        const _tagCrRow = await sbGet('users', `username=eq.${encodeURIComponent(_tagSess.username)}&select=credits`);
+        if (_tagCrRow[0] !== undefined) {
+          await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(_tagSess.username)}`, {
+            method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ credits: (_tagCrRow[0].credits || 0) + 4 })
+          });
+          localStorage.setItem(_tagKey, '1');
+        }
+      }
+    } catch(e) { console.warn('[credits] tag award failed:', e); }
+
     closeTagModal();
     showToast('Tags saved!');
   } catch(e) { console.error('Tag save error:', e); showToast('Could not save tags: ' + e.message); }
