@@ -4494,6 +4494,20 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
               if (rowId) {
                 await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(rowId), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: null }) });
               }
+
+              // ── UNBOOK -4 PTS (deduct from owner + all opponents) ──
+              const _unbookAll = [ownerUsername, ...opponents.filter(u => u && !u.startsWith('__'))];
+              for (const _ubUser of _unbookAll) {
+                try {
+                  const _ubRow = await sbGet('users', `username=eq.${encodeURIComponent(_ubUser)}&select=points`);
+                  if (_ubRow[0] !== undefined) {
+                    await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(_ubUser)}`, {
+                      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ points: Math.max(0, (_ubRow[0].points || 0) - 4) })
+                    });
+                  }
+                } catch(e) { console.warn('[points] unbook deduct failed:', e); }
+              }
+
               for (const oppU of opponents) {
                 if (!oppU || oppU.startsWith('__')) continue;
                 try {
@@ -7638,7 +7652,7 @@ async function bkSubmitBooking() {
         });
       }
     }
-    // Notifications
+    // Notifications + Points
     const allNames = realWrestlers.map(s=>s.name).join(' & ');
     const showPart = show ? ` at ${show}` : '';
     const typePart = matchType ? ` [${matchType}]` : '';
@@ -7646,7 +7660,34 @@ async function bkSubmitBooking() {
       if (w.username.startsWith('__')) continue;
       const others = realWrestlers.filter(s=>s.username!==w.username).map(s=>s.name).join(' & ');
       if (others) try { await sbInsert('notifications', { username:w.username, type:'booking', message:`Your next match${typePart} is booked against ${others}${showPart} (${EFED_NAME}).`, read:false, created_at:new Date().toISOString() }); } catch(e) {}
+
+      // ── BOOKED IN SHOW +4 PTS (new booking only, not re-book) ──
+      try {
+        const _wRoster = _bkTab.rosterCache.find(r => r.username === w.username);
+        const _wasBooked = !!(_wRoster?.plan_note);
+        if (!_wasBooked) {
+          const _bkPtsRow = await sbGet('users', `username=eq.${encodeURIComponent(w.username)}&select=points`);
+          if (_bkPtsRow[0] !== undefined) {
+            await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(w.username)}`, {
+              method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ points: (_bkPtsRow[0].points || 0) + 4 })
+            });
+          }
+        }
+      } catch(e) { console.warn('[points] booking award failed:', e); }
     }
+    // ── MATCH BOOKED +2 CR to owner (once per booking save) ──
+    try {
+      const _mbSess = getSession();
+      if (_mbSess) {
+        const _mbRow = await sbGet('users', `username=eq.${encodeURIComponent(_mbSess.username)}&select=credits`);
+        if (_mbRow[0] !== undefined) {
+          await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(_mbSess.username)}`, {
+            method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ credits: (_mbRow[0].credits || 0) + 2 })
+          });
+        }
+      }
+    } catch(e) { console.warn('[credits] match booked award failed:', e); }
+
     // Refresh schedule banners so the booking appears immediately
     if (typeof _injectScheduleBookingBanners === 'function') {
       setTimeout(() => _injectScheduleBookingBanners(window._efedPrimaryEvent || {}, window._efedExtraEvents || []), 200);
@@ -10936,6 +10977,18 @@ async function _ceSendTrophy(idx) {
   try{
     await sbInsert('trophies',{username:champ.username,name:beltName,year:'present',image_url:beltImg,sort_order:0,source:'owner',awarded_by:getSession()?.username||'',efed_name:EFED_NAME,belt_id:beltId,date_won:dateWon});
     showToast('🏆 Trophy sent to @'+champ.username+'!');
+    // +5 CR to owner for sending trophy
+    try {
+      const _sess = getSession();
+      if (_sess) {
+        const _crRow = await sbGet('users', `username=eq.${encodeURIComponent(_sess.username)}&select=credits`);
+        if (_crRow[0] !== undefined) {
+          await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(_sess.username)}`, {
+            method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ credits: (_crRow[0].credits || 0) + 5 })
+          });
+        }
+      }
+    } catch(e) {}
     // Re-open accordion to refresh trophy button state
     const card=document.querySelector(`.champ-card[data-idx="${idx}"]`);
     _ceClose();setTimeout(()=>_ceOpen(idx,champ),60);
@@ -11467,6 +11520,23 @@ const _vault = (() => {
         _items.push({ id: (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'cv_'+Date.now()+'_'+Math.random().toString(36).slice(2,9)), name, image_url: _imgData||null, active: _newStatus });
       }
       await _saveVault();
+      // ── 3+ CHAMPIONSHIPS → +15 PTS ONE-TIME ──
+      const _activeCount = _items.filter(i => i.active !== false).length;
+      const _champPtsKey = 'efed_champ3_pts_' + EFED_NAME;
+      if (_activeCount >= 3 && !localStorage.getItem(_champPtsKey)) {
+        try {
+          const _cSess = getSession();
+          if (_cSess) {
+            const _cRow = await sbGet('users', `username=eq.${encodeURIComponent(_cSess.username)}&select=points`);
+            if (_cRow[0] !== undefined) {
+              await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(_cSess.username)}`, {
+                method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ points: (_cRow[0].points || 0) + 15 })
+              });
+              localStorage.setItem(_champPtsKey, '1');
+            }
+          }
+        } catch(e) {}
+      }
       // Sync trophy images for this belt when image changed
       if (changedId && newImg) {
         try { await fetch(SUPABASE_URL+'/rest/v1/trophies?belt_id=eq.'+encodeURIComponent(changedId),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({image_url:newImg})}); } catch(e) {}
@@ -11694,6 +11764,18 @@ const _vault = (() => {
         });
       } catch(notifErr) { console.warn('Award notif failed (non-fatal):', notifErr); }
 
+      // +5 CR to owner for awarding trophy
+      try {
+        const _asSess = getSession();
+        if (_asSess) {
+          const _asCrRow = await sbGet('users', `username=eq.${encodeURIComponent(_asSess.username)}&select=credits`);
+          if (_asCrRow[0] !== undefined) {
+            await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(_asSess.username)}`, {
+              method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ credits: (_asCrRow[0].credits || 0) + 5 })
+            });
+          }
+        }
+      } catch(e) {}
       closeAwardModal();
       showToast('🏆 Awarded to @'+_awardUser.username+'!');
     } catch(e) {
@@ -11906,6 +11988,18 @@ const _cvTrophyPanel = (() => {
       await sbDelete('trophies', `id=eq.${id}`);
       _trophies = _trophies.filter(t => String(t.id) !== String(id));
       render();
+      // -5 CR from owner for revoking trophy
+      try {
+        const _sess = getSession();
+        if (_sess) {
+          const _crRow = await sbGet('users', `username=eq.${encodeURIComponent(_sess.username)}&select=credits`);
+          if (_crRow[0] !== undefined) {
+            await fetch(`${SUPABASE_URL}/rest/v1/users?username=eq.${encodeURIComponent(_sess.username)}`, {
+              method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ credits: Math.max(0, (_crRow[0].credits || 0) - 5) })
+            });
+          }
+        }
+      } catch(e) {}
     } catch(e) { showToast('Failed to delete trophy.'); }
   }
 
