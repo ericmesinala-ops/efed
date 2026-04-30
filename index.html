@@ -4853,22 +4853,63 @@ function makeUpcomingCard(v) {
   if (dateMs) {
     const cwrap = document.createElement('div');
     cwrap.className = 'countdown-wrap';
-    const units = days > 0
-      ? [{ n: days, l: 'Days' }, { n: hrs, l: 'Hrs' }, { n: mins, l: 'Min' }]
-      : [{ n: hrs, l: 'Hrs' }, { n: mins, l: 'Min' }];
-    units.forEach((u, i) => {
-      const unit = document.createElement('div');
-      unit.className = 'countdown-unit';
-      unit.innerHTML = `<span class="countdown-num">${String(u.n).padStart(2,'0')}</span><span class="countdown-label">${u.l}</span>`;
-      cwrap.appendChild(unit);
-      if (i < units.length - 1) {
-        const sep = document.createElement('div');
-        sep.className = 'countdown-sep';
-        sep.textContent = ':';
-        cwrap.appendChild(sep);
-      }
-    });
+
+    function renderCountdownUnits(diffMs) {
+      const d = Math.max(0, Math.floor(diffMs / 86400000));
+      const h = Math.max(0, Math.floor((diffMs % 86400000) / 3600000));
+      const m = Math.max(0, Math.floor((diffMs % 3600000) / 60000));
+      const units = d > 0
+        ? [{ n: d, l: 'Days' }, { n: h, l: 'Hrs' }, { n: m, l: 'Min' }]
+        : [{ n: h, l: 'Hrs' }, { n: m, l: 'Min' }];
+      cwrap.innerHTML = '';
+      units.forEach((u, i) => {
+        const unit = document.createElement('div');
+        unit.className = 'countdown-unit';
+        unit.innerHTML = `<span class="countdown-num">${String(u.n).padStart(2,'0')}</span><span class="countdown-label">${u.l}</span>`;
+        cwrap.appendChild(unit);
+        if (i < units.length - 1) {
+          const sep = document.createElement('div');
+          sep.className = 'countdown-sep';
+          sep.textContent = ':';
+          cwrap.appendChild(sep);
+        }
+      });
+    }
+
+    // Render initial state
+    renderCountdownUnits(diff);
     overlay.appendChild(cwrap);
+
+    // Tick every 30 seconds; remove card when countdown hits zero
+    const _cdInterval = setInterval(() => {
+      const remaining = dateMs - Date.now();
+      if (remaining <= 0) {
+        clearInterval(_cdInterval);
+        // Promote to latest videos and remove from upcoming row
+        if (!videos.find(vv => vv.url === v.url)) {
+          videos.push({ ...v, status: 'approved', submittedAt: v.dateMs || Date.now() });
+        }
+        const idx = upcomingVideos.findIndex(u => u.url === v.url);
+        if (idx !== -1) upcomingVideos.splice(idx, 1);
+        if (v.dbId) sbUpdate('submissions', { status: 'approved' }, `id=eq.${v.dbId}`).catch(() => {});
+        el.remove();
+        // Update count / hide section if empty
+        const countEl = document.getElementById('upcoming-count');
+        const grid = document.getElementById('row-upcoming');
+        const section = document.getElementById('section-upcoming');
+        if (grid && countEl) {
+          const remaining2 = grid.querySelectorAll('.upcoming-card').length;
+          if (countEl) countEl.textContent = remaining2 ? ' · ' + remaining2 + ' upcoming' : '';
+          if (!remaining2 && section) section.style.display = 'none';
+        }
+        renderGrid();
+        return;
+      }
+      renderCountdownUnits(remaining);
+      // Also update the TODAY / COMING SOON badge
+      const d2 = Math.floor(remaining / 86400000);
+      if (soonBadge) soonBadge.textContent = d2 === 0 ? 'TODAY' : 'COMING SOON';
+    }, 30000);
   }
 
   thumbDiv.appendChild(overlay);
