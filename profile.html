@@ -7546,6 +7546,7 @@ const _posts = (() => {
   }
 
   let _myEfeds = null; // cached list of efed names for the current session user
+  let _myOwnerEfed = null; // the efed this user owns (if any)
 
   async function _loadMyEfeds() {
     if (_myEfeds !== null) return _myEfeds;
@@ -7557,17 +7558,24 @@ const _posts = (() => {
       ]);
       const u = userRows[0];
       const efeds = [];
-      if ((u?.is_efed_owner || u?.role === 'owner') && u?.promo_name) efeds.push(u.promo_name);
+      if ((u?.is_efed_owner || u?.role === 'owner') && u?.promo_name) {
+        efeds.push(u.promo_name);
+        _myOwnerEfed = u.promo_name;
+      }
       rosterRows.forEach(r => { if (r.efed && !efeds.map(e=>e.toLowerCase()).includes(r.efed.toLowerCase())) efeds.push(r.efed); });
       _myEfeds = efeds;
     } catch(e) { _myEfeds = []; }
     return _myEfeds;
   }
 
-  let _selectedEfed = null; // null = "My Feed Only", string = efed name
+  // _selectedEfed values:
+  //   null        = "My Feed Only" (no efed)
+  //   '__all__'   = "All" (post to all efeds)
+  //   'EfedName'  = specific efed
+  let _selectedEfed = null;
 
   async function openModal(){
-    _editingId=null;_selectedEfed=null;_resetModal();setMode('ooc');
+    _editingId=null;_selectedEfed=null;_myEfeds=null;_myOwnerEfed=null;_resetModal();setMode('ooc');
     document.getElementById('post-modal-bg').classList.add('open');
     document.getElementById('pm-text').focus();
     _buildPmStamp(document.getElementById('pm-stamp-picker'),document.getElementById('pm-text'));
@@ -7580,18 +7588,10 @@ const _posts = (() => {
     const row = document.getElementById('pm-efed-row');
     const pillsWrap = document.getElementById('pm-efed-pills');
     if (!row || !pillsWrap) return;
-    if (!efeds || efeds.length <= 1) { row.style.display = 'none'; return; }
+    if (!efeds || efeds.length === 0) { row.style.display = 'none'; return; }
     row.style.display = '';
     pillsWrap.innerHTML = '';
-    // "My Feed Only" pill
-    const myFeedPill = document.createElement('button');
-    myFeedPill.type='button';
-    myFeedPill.dataset.efedVal='';
-    myFeedPill.className='pm-efed-pill active';
-    myFeedPill.textContent='My Feed Only';
-    myFeedPill.onclick=()=>_selectEfedPill('',efeds);
-    pillsWrap.appendChild(myFeedPill);
-    // One pill per efed
+    // Order: owned efed first (already first in efeds[]), then roster efeds, then "All", then "My Feed Only"
     efeds.forEach(name=>{
       const pill=document.createElement('button');
       pill.type='button';
@@ -7601,28 +7601,48 @@ const _posts = (() => {
       pill.onclick=()=>_selectEfedPill(name,efeds);
       pillsWrap.appendChild(pill);
     });
-    // Default selection = My Feed Only
-    _selectedEfed=null;
+    // "All" pill — second to last
+    if(efeds.length>1){
+      const allPill=document.createElement('button');
+      allPill.type='button';
+      allPill.dataset.efedVal='__all__';
+      allPill.className='pm-efed-pill';
+      allPill.textContent='All';
+      allPill.onclick=()=>_selectEfedPill('__all__',efeds);
+      pillsWrap.appendChild(allPill);
+    }
+    // "My Feed Only" pill — last
+    const myFeedPill=document.createElement('button');
+    myFeedPill.type='button';
+    myFeedPill.dataset.efedVal='__myfeed__';
+    myFeedPill.className='pm-efed-pill';
+    myFeedPill.textContent='My Feed Only';
+    myFeedPill.onclick=()=>_selectEfedPill('__myfeed__',efeds);
+    pillsWrap.appendChild(myFeedPill);
+    // Default: select first efed (owned if available, otherwise first roster)
+    _selectEfedPill(efeds[0], efeds);
     // Wire scroll listener
     const strip=document.getElementById('pm-efed-pills');
     if(strip){strip.onscroll=()=>_updateEfedArrows();}
     setTimeout(_updateEfedArrows,60);
-    _refreshStampLock();
   }
 
   function _selectEfedPill(name, efeds){
-    const old = _selectedEfed;
-    // If switching away from an efed that may have stamps in the text, warn
-    if(old && old !== name){
+    const prev = _selectedEfed;
+    const isSpecial = (name==='__all__'||name==='__myfeed__');
+    // If switching away from an efed that has stamps in the text, warn
+    if(prev && prev!=='__all__' && prev!=='__myfeed__' && prev!==name){
       const ta=document.getElementById('pm-text');
       const hasStamps=ta&&ta.value.includes('[stamp:');
       if(hasStamps){
         if(!confirm('Changing eFed will remove stamps used in this post. Text will be kept. Continue?'))return;
-        // Strip stamps but keep text
         ta.value=ta.value.replace(/\[stamp:[^\]]+\]/g,'').trim();
       }
     }
-    _selectedEfed = name || null;
+    // Map pill values to _selectedEfed
+    if(name==='__myfeed__') _selectedEfed=null;
+    else if(name==='__all__') _selectedEfed='__all__';
+    else _selectedEfed=name||null;
     document.querySelectorAll('#pm-efed-pills .pm-efed-pill').forEach(p=>{
       p.classList.toggle('active', p.dataset.efedVal===name);
     });
@@ -7633,24 +7653,25 @@ const _posts = (() => {
   }
 
   function _refreshStampLock(){
-    // If user has multiple efeds and hasn't chosen one, lock stamps
-    const efeds = _myEfeds||[];
-    const needsChoice = efeds.length>1 && !_selectedEfed;
+    // When "All" or "My Feed Only" is selected, only show user's special stamp (hide efed grid)
+    const isGeneric = (_selectedEfed===null || _selectedEfed==='__all__');
     const grid=document.querySelector('#pm-stamp-picker .stamp-picker-grid');
     const special=document.querySelector('#pm-stamp-picker .stamp-picker-special-wrap');
+    const labelEl=document.querySelector('#pm-stamp-picker .stamp-picker-efed-label');
+    const divider=document.querySelector('#pm-stamp-picker .stamp-picker-divider');
     const lockHint=document.getElementById('pm-stamp-lock-hint');
-    if(needsChoice){
-      if(grid) grid.style.opacity='.25';
-      if(grid) grid.style.pointerEvents='none';
-      if(special) special.style.opacity='.25';
-      if(special) special.style.pointerEvents='none';
-      if(lockHint) lockHint.style.display='';
-    } else {
-      if(grid) grid.style.opacity='';
-      if(grid) grid.style.pointerEvents='';
-      if(special) special.style.opacity='';
-      if(special) special.style.pointerEvents='';
+    if(isGeneric){
+      if(grid){grid.innerHTML='';grid.style.display='none';}
+      if(labelEl) labelEl.style.display='none';
+      if(divider) divider.style.display='none';
       if(lockHint) lockHint.style.display='none';
+      if(special){special.style.opacity='';special.style.pointerEvents='';}
+    } else {
+      if(grid){grid.style.display='';grid.style.opacity='';grid.style.pointerEvents='';}
+      if(labelEl) labelEl.style.display='';
+      if(divider) divider.style.display='';
+      if(lockHint) lockHint.style.display='none';
+      if(special){special.style.opacity='';special.style.pointerEvents='';}
     }
   }
   let _editingId=null,_imgData=null;
@@ -7697,6 +7718,8 @@ const _posts = (() => {
     const btn=document.getElementById('pm-submit');if(btn){btn.textContent='Post';btn.onclick=()=>_posts.submit();}
     const sel=document.getElementById('pm-efed-select');if(sel)sel.value='';
     const efedRow=document.getElementById('pm-efed-row');if(efedRow)efedRow.style.display='none';
+    // Clear pill active states
+    document.querySelectorAll('#pm-efed-pills .pm-efed-pill').forEach(p=>p.classList.remove('active'));
     pmCloseEfedDrop();
   }
   function updateCharCount(){
@@ -7732,33 +7755,32 @@ const _posts = (() => {
     if (!pickerEl) return;
     const session = typeof getSession === 'function' ? getSession() : null;
     const username = session?.username || '';
-    // Use selected efed if multi-efed, else fall back to owner name
-    const efedName = (_selectedEfed) || (typeof _ownerEfedName !== 'undefined' && _ownerEfedName) || (window._chatCurrentEfedName) || '';
+    // "All" or "My Feed Only" → no efed stamps, only personal stamp
+    const isGeneric = (_selectedEfed === null || _selectedEfed === '__all__');
+    const efedName = isGeneric ? '' : ((_selectedEfed) || (typeof _ownerEfedName !== 'undefined' && _ownerEfedName) || (window._chatCurrentEfedName) || '');
     const labelEl = pickerEl.querySelector('.stamp-picker-efed-label');
-    if (labelEl) labelEl.textContent = (efedName || 'eFed') + ' Official Stamps';
+    if (labelEl) { labelEl.textContent = (efedName || 'eFed') + ' Official Stamps'; labelEl.style.display = isGeneric ? 'none' : ''; }
+    const divider = pickerEl.querySelector('.stamp-picker-divider');
+    if (divider) divider.style.display = isGeneric ? 'none' : '';
     const grid = pickerEl.querySelector('.stamp-picker-grid');
 
-    // Inject lock hint element if not present
-    let lockHint = document.getElementById('pm-stamp-lock-hint');
-    if (!lockHint) {
-      lockHint = document.createElement('div');
-      lockHint.id = 'pm-stamp-lock-hint';
-      lockHint.style.cssText = 'font-size:.65rem;color:rgba(255,255,255,.35);text-align:center;padding:6px 10px 2px;display:none;';
-      lockHint.textContent = '⬆ Select an eFed above to access stamps';
-      if (grid && grid.parentNode) grid.parentNode.insertBefore(lockHint, grid);
-    }
-
     if (grid) {
-      grid.innerHTML = '';
-      const stamps = getEfedStamps(efedName);
-      stamps.forEach(s => {
-        const btn = document.createElement('button');
-        btn.className = 'stamp-picker-btn';
-        btn.title = s.label;
-        btn.innerHTML = stampImg(s.code, 28);
-        btn.onclick = () => { insertStampAtCursor(inputEl, s.code); pickerEl.classList.remove('open'); };
-        grid.appendChild(btn);
-      });
+      if (isGeneric) {
+        grid.innerHTML = '';
+        grid.style.display = 'none';
+      } else {
+        grid.style.display = '';
+        grid.innerHTML = '';
+        const stamps = getEfedStamps(efedName);
+        stamps.forEach(s => {
+          const btn = document.createElement('button');
+          btn.className = 'stamp-picker-btn';
+          btn.title = s.label;
+          btn.innerHTML = stampImg(s.code, 28);
+          btn.onclick = () => { insertStampAtCursor(inputEl, s.code); pickerEl.classList.remove('open'); };
+          grid.appendChild(btn);
+        });
+      }
     }
     const specialEl = pickerEl.querySelector('.stamp-picker-special-wrap');
     if (specialEl) {
@@ -7796,14 +7818,7 @@ const _posts = (() => {
     const session=getSession();if(!session)return;
     const text=document.getElementById('pm-text').value.trim();
     if(!text&&!_imgData)return;
-    // If multi-efed user, require an efed choice (or My Feed Only)
     const efeds = _myEfeds||[];
-    // Check if efed row is visible — means they have 2+ efeds and must have interacted
-    const efedRow = document.getElementById('pm-efed-row');
-    if(efeds.length>1 && efedRow && efedRow.style.display!=='none'){
-      // _selectedEfed===null means "My Feed Only" — that's fine, it's a valid choice.
-      // No blocking needed since My Feed Only is default-selected. Just proceed.
-    }
     const btn=document.getElementById('pm-submit');
     btn.disabled=true;btn.textContent='Posting…';
     // Upload image to Cloudinary first so we store a CDN URL, not raw base64
@@ -7818,14 +7833,17 @@ const _posts = (() => {
         imageUrl = null;
       }
     }
-    // Determine efed targets: if multi-efed, use selected (null = my feed only); if single/zero efed, use old logic
+    // Determine efed targets
     let targets;
-    if(efeds.length>1){
-      // Chosen efed or null (my feed only)
-      targets=[_selectedEfed||null];
-    } else {
-      // Old logic — single efed or none
+    if(_selectedEfed==='__all__'){
+      // Post to all efeds
       targets=efeds.length?efeds:[null];
+    } else if(_selectedEfed===null){
+      // My Feed Only — no efed
+      targets=[null];
+    } else {
+      // Specific efed selected
+      targets=[_selectedEfed];
     }
     try{
       let firstSaved=null;
