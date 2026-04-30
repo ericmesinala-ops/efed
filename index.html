@@ -4499,7 +4499,7 @@ function sortByDate(arr) {
 }
 
 function isMatch(v) {
-  // Upcoming videos never appear in matches or latest rows
+  // Upcoming videos never appear in matches or latest rows (pre-live handled by isLatest)
   if (v.sectionOverride === 'upcoming' || v.status === 'upcoming') return false;
   // submission_type from user selection takes priority
   if (v.submission_type === 'match') return true;
@@ -4525,9 +4525,17 @@ function isMatch(v) {
   }
   return false;
 }
+function isPreLive(v) {
+  // Returns true if this upcoming video is within 15 min of its scheduled broadcast
+  if (v.status !== 'upcoming' && v.sectionOverride !== 'upcoming') return false;
+  if (!v.dateMs) return false;
+  const msUntil = v.dateMs - Date.now();
+  return msUntil <= 15 * 60 * 1000; // within 15 min (or already past)
+}
+
 function isLatest(v) {
-  // Upcoming videos never appear in latest row
-  if (v.sectionOverride === 'upcoming' || v.status === 'upcoming') return false;
+  // Upcoming videos never appear in latest row — UNLESS within 15 min of broadcast
+  if ((v.sectionOverride === 'upcoming' || v.status === 'upcoming') && !isPreLive(v)) return false;
   // Showcase/Promo/Podcast types don't show in latest
   if (v.submission_type === 'showcase') return false;
   if (v.submission_type === 'promo') return false;
@@ -4686,30 +4694,38 @@ async function updateLiveBadges() {
     }
   });
 
-  // Auto-promote upcoming videos that are now live or ended
+  // Auto-promote upcoming videos to Latest Videos:
+  //   • 15 min before broadcast → move to Latest Videos (status stays 'pre-live' so LIVE badge can appear)
+  //   • When actually live    → show LIVE badge on the card
+  //   • After stream ends     → keep in Latest Videos as a normal VOD
   let promoted = false;
   for (let i = upcomingVideos.length - 1; i >= 0; i--) {
     const uv = upcomingVideos[i];
     const id = extractId(uv.url);
     const ytEntry = liveMap[id];
     const ytStatus = ytEntry?.status;
+
     // Update scheduledMs from API if we now have a more accurate time
     if (ytStatus === 'upcoming' && ytEntry.scheduledMs && ytEntry.scheduledMs !== uv.dateMs) {
       uv.dateMs = ytEntry.scheduledMs;
       uv.date = new Date(ytEntry.scheduledMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     }
-    // Promote if now live OR if the scheduled date has passed and YT returned it as a normal vod (undefined = no longer upcoming)
-    const datePassed = uv.dateMs && Date.now() > uv.dateMs + 4 * 3600000; // 4hr grace
-    if (ytStatus === 'live' || (!ytEntry && datePassed)) {
-      // Promote to main grid
-      const promoted_v = { ...uv, status: 'approved', submittedAt: uv.dateMs || Date.now() };
+
+    const now = Date.now();
+    const msUntilBroadcast = uv.dateMs ? uv.dateMs - now : null;
+    const within15Min = msUntilBroadcast !== null && msUntilBroadcast <= 15 * 60 * 1000;
+    const isNowLive = ytStatus === 'live';
+    const datePassed = uv.dateMs && now > uv.dateMs + 4 * 3600000; // 4hr grace for VOD
+    const noLongerUpcoming = !ytEntry && datePassed;
+
+    // Move to Latest Videos 15 min before broadcast, or when live, or when VOD is ready
+    if (within15Min || isNowLive || noLongerUpcoming) {
+      const promoted_v = { ...uv, status: 'approved', submittedAt: uv.dateMs || now };
       if (!videos.find(v => v.url === promoted_v.url)) {
         videos.push(promoted_v);
       }
-      // Remove from liveVideoMap so it sorts by date not pinned as live
-      delete liveVideoMap[extractId(uv.url)];
       upcomingVideos.splice(i, 1);
-      // Update DB status
+      // Update DB status to approved
       if (uv.dbId) {
         sbUpdate('submissions', { status: 'approved' }, `id=eq.${uv.dbId}`).catch(() => {});
       }

@@ -3607,6 +3607,34 @@ html.day-mode .myefed-popup-pages { background: #f5f5f9; border-top-color: rgba(
 html.day-mode .myefed-page-btn { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.08); color: rgba(0,0,0,.4); }
 html.day-mode .myefed-page-btn:hover { background: rgba(0,0,0,.08); color: rgba(0,0,0,.7); }
 html.day-mode .myefed-page-btn.active { background: rgba(168,130,10,.08); border-color: rgba(168,130,10,.25); color: #a08020; }
+
+/* ── Post Modal: eFed Pills ── */
+.pm-efed-pill {
+  padding: 5px 12px; border-radius: 20px;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+  color: rgba(255,255,255,.45); font-family: 'DM Sans', sans-serif;
+  font-size: .68rem; font-weight: 700; cursor: pointer;
+  letter-spacing: .3px; transition: all .15s; white-space: nowrap;
+}
+.pm-efed-pill:hover { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.22); color: rgba(255,255,255,.75); }
+.pm-efed-pill.active { background: rgba(200,168,75,.14); border-color: rgba(200,168,75,.4); color: #c8a84b; }
+
+/* ── Post Modal: IC = dark cinematic, OOC = lighter realism ── */
+#post-modal.mode-ic {
+  background: #0a090d;
+  border-color: rgba(74,222,128,.12);
+  box-shadow: 0 0 0 1px rgba(74,222,128,.08), 0 32px 80px rgba(0,0,0,.95);
+}
+#post-modal.mode-ic .pm-header { border-bottom-color: rgba(74,222,128,.1); }
+#post-modal.mode-ic #pm-text { background: rgba(0,0,0,.45); border-color: rgba(74,222,128,.1); color: #e8ffe8; }
+#post-modal.mode-ic #pm-text::placeholder { color: rgba(74,222,128,.25); }
+#post-modal.mode-ooc {
+  background: #111218;
+  border-color: rgba(122,179,255,.1);
+  box-shadow: 0 0 0 1px rgba(122,179,255,.06), 0 32px 80px rgba(0,0,0,.9);
+}
+#post-modal.mode-ooc .pm-header { border-bottom-color: rgba(122,179,255,.1); }
+#post-modal.mode-ooc #pm-text { background: rgba(255,255,255,.04); border-color: rgba(122,179,255,.1); }
 </style>
 
 <!-- ── RIVALRY ADD/EDIT INLINE PANEL ── -->
@@ -7067,6 +7095,13 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
       </div>
       <button class="pm-close" onclick="_posts.closeModal()">✕</button>
     </div>
+    <!-- IC/OOC vibe hint -->
+    <div id="pm-mode-hint" style="display:flex;align-items:center;gap:6px;padding:5px 16px 0;font-size:.62rem;color:rgba(255,255,255,.3);letter-spacing:.3px;min-height:18px;transition:color .2s;"></div>
+    <!-- eFed selector row (shown only when user belongs to 2+ eFeds) -->
+    <div id="pm-efed-row" style="display:none;padding:8px 14px 2px;">
+      <div style="font-size:.58rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:5px;">Post to eFed</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;" id="pm-efed-pills"></div>
+    </div>
     <textarea class="pm-textarea" id="pm-text" placeholder="What's on your mind…" maxlength="800"
       oninput="_posts.updateCharCount()"></textarea>
     <div class="pm-img-preview" id="pm-img-preview">
@@ -7455,6 +7490,14 @@ const _posts = (() => {
     if(modal){modal.classList.toggle('mode-ic',m==='ic');modal.classList.toggle('mode-ooc',m==='ooc');}
     if(ic) ic.className='pm-mode-btn'+(m==='ic'?' active-ic':'');
     if(ooc) ooc.className='pm-mode-btn'+(m==='ooc'?' active-ooc':'');
+    const hint=document.getElementById('pm-mode-hint');
+    if(hint){
+      if(m==='ic'){
+        hint.innerHTML='<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(74,222,128,.6)" stroke-width="2.2" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>&nbsp;<span style="color:rgba(74,222,128,.7);">In-Character</span>&nbsp;&mdash; cinematic, character voice, story-driven';
+      } else {
+        hint.innerHTML='<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(122,179,255,.6)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>&nbsp;<span style="color:rgba(122,179,255,.7);">Out-of-Character</span>&nbsp;&mdash; real you, casual, behind the scenes';
+      }
+    }
   }
 
   let _myEfeds = null; // cached list of efed names for the current session user
@@ -7476,12 +7519,89 @@ const _posts = (() => {
     return _myEfeds;
   }
 
-  function openModal(){
-    _editingId=null;_resetModal();setMode('ooc');
+  let _selectedEfed = null; // null = "My Feed Only", string = efed name
+
+  async function openModal(){
+    _editingId=null;_selectedEfed=null;_resetModal();setMode('ooc');
     document.getElementById('post-modal-bg').classList.add('open');
-    document.getElementById('pm-text').focus();_buildPmStamp(document.getElementById('pm-stamp-picker'),document.getElementById('pm-text'));
-    // Pre-cache efeds (used in submit to broadcast to all)
-    _loadMyEfeds();
+    document.getElementById('pm-text').focus();
+    _buildPmStamp(document.getElementById('pm-stamp-picker'),document.getElementById('pm-text'));
+    // Load efeds and build pills
+    const efeds = await _loadMyEfeds();
+    _buildEfedPills(efeds);
+  }
+
+  function _buildEfedPills(efeds){
+    const row = document.getElementById('pm-efed-row');
+    const pillsWrap = document.getElementById('pm-efed-pills');
+    if (!row || !pillsWrap) return;
+    if (!efeds || efeds.length <= 1) { row.style.display = 'none'; return; }
+    row.style.display = '';
+    pillsWrap.innerHTML = '';
+    // "My Feed Only" pill
+    const myFeedPill = document.createElement('button');
+    myFeedPill.type='button';
+    myFeedPill.dataset.efedVal='';
+    myFeedPill.className='pm-efed-pill active';
+    myFeedPill.textContent='My Feed Only';
+    myFeedPill.onclick=()=>_selectEfedPill('',efeds);
+    pillsWrap.appendChild(myFeedPill);
+    // One pill per efed
+    efeds.forEach(name=>{
+      const pill=document.createElement('button');
+      pill.type='button';
+      pill.dataset.efedVal=name;
+      pill.className='pm-efed-pill';
+      pill.textContent=name;
+      pill.onclick=()=>_selectEfedPill(name,efeds);
+      pillsWrap.appendChild(pill);
+    });
+    // Default selection = My Feed Only
+    _selectedEfed=null;
+    _refreshStampLock();
+  }
+
+  function _selectEfedPill(name, efeds){
+    const old = _selectedEfed;
+    // If switching away from an efed that may have stamps in the text, warn
+    if(old && old !== name){
+      const ta=document.getElementById('pm-text');
+      const hasStamps=ta&&ta.value.includes('[stamp:');
+      if(hasStamps){
+        if(!confirm('Changing eFed will remove stamps used in this post. Text will be kept. Continue?'))return;
+        // Strip stamps but keep text
+        ta.value=ta.value.replace(/\[stamp:[^\]]+\]/g,'').trim();
+      }
+    }
+    _selectedEfed = name || null;
+    document.querySelectorAll('#pm-efed-pills .pm-efed-pill').forEach(p=>{
+      p.classList.toggle('active', p.dataset.efedVal===name);
+    });
+    // Rebuild stamp picker for new efed context
+    _buildPmStamp(document.getElementById('pm-stamp-picker'),document.getElementById('pm-text'));
+    _refreshStampLock();
+  }
+
+  function _refreshStampLock(){
+    // If user has multiple efeds and hasn't chosen one, lock stamps
+    const efeds = _myEfeds||[];
+    const needsChoice = efeds.length>1 && !_selectedEfed;
+    const grid=document.querySelector('#pm-stamp-picker .stamp-picker-grid');
+    const special=document.querySelector('#pm-stamp-picker .stamp-picker-special-wrap');
+    const lockHint=document.getElementById('pm-stamp-lock-hint');
+    if(needsChoice){
+      if(grid) grid.style.opacity='.25';
+      if(grid) grid.style.pointerEvents='none';
+      if(special) special.style.opacity='.25';
+      if(special) special.style.pointerEvents='none';
+      if(lockHint) lockHint.style.display='';
+    } else {
+      if(grid) grid.style.opacity='';
+      if(grid) grid.style.pointerEvents='';
+      if(special) special.style.opacity='';
+      if(special) special.style.pointerEvents='';
+      if(lockHint) lockHint.style.display='none';
+    }
   }
   let _editingId=null,_imgData=null;
 
@@ -7494,12 +7614,13 @@ const _posts = (() => {
     _resetModal();
   }
   function _resetModal(){
-    _editingId=null;removeImg();
+    _editingId=null;removeImg();_selectedEfed=null;
     const ta=document.getElementById('pm-text');if(ta)ta.value='';
     const charEl=document.getElementById('pm-char');if(charEl)charEl.textContent='0 / 800';
     const title=document.getElementById('pm-modal-title');if(title)title.textContent='New Post';
     const btn=document.getElementById('pm-submit');if(btn){btn.textContent='Post';btn.onclick=()=>_posts.submit();}
     const sel=document.getElementById('pm-efed-select');if(sel)sel.value='';
+    const efedRow=document.getElementById('pm-efed-row');if(efedRow)efedRow.style.display='none';
     pmCloseEfedDrop();
   }
   function updateCharCount(){
@@ -7535,10 +7656,22 @@ const _posts = (() => {
     if (!pickerEl) return;
     const session = typeof getSession === 'function' ? getSession() : null;
     const username = session?.username || '';
-    const efedName = (typeof _ownerEfedName !== 'undefined' && _ownerEfedName) || (window._chatCurrentEfedName) || '';
+    // Use selected efed if multi-efed, else fall back to owner name
+    const efedName = (_selectedEfed) || (typeof _ownerEfedName !== 'undefined' && _ownerEfedName) || (window._chatCurrentEfedName) || '';
     const labelEl = pickerEl.querySelector('.stamp-picker-efed-label');
     if (labelEl) labelEl.textContent = (efedName || 'eFed') + ' Official Stamps';
     const grid = pickerEl.querySelector('.stamp-picker-grid');
+
+    // Inject lock hint element if not present
+    let lockHint = document.getElementById('pm-stamp-lock-hint');
+    if (!lockHint) {
+      lockHint = document.createElement('div');
+      lockHint.id = 'pm-stamp-lock-hint';
+      lockHint.style.cssText = 'font-size:.65rem;color:rgba(255,255,255,.35);text-align:center;padding:6px 10px 2px;display:none;';
+      lockHint.textContent = '⬆ Select an eFed above to access stamps';
+      if (grid && grid.parentNode) grid.parentNode.insertBefore(lockHint, grid);
+    }
+
     if (grid) {
       grid.innerHTML = '';
       const stamps = getEfedStamps(efedName);
@@ -7568,6 +7701,8 @@ const _posts = (() => {
         specialEl.appendChild(empty);
       }
     }
+    // Apply lock state after building
+    _refreshStampLock();
   }
   function toggleStamp(e){
     e.stopPropagation();
@@ -7585,6 +7720,14 @@ const _posts = (() => {
     const session=getSession();if(!session)return;
     const text=document.getElementById('pm-text').value.trim();
     if(!text&&!_imgData)return;
+    // If multi-efed user, require an efed choice (or My Feed Only)
+    const efeds = _myEfeds||[];
+    // Check if efed row is visible — means they have 2+ efeds and must have interacted
+    const efedRow = document.getElementById('pm-efed-row');
+    if(efeds.length>1 && efedRow && efedRow.style.display!=='none'){
+      // _selectedEfed===null means "My Feed Only" — that's fine, it's a valid choice.
+      // No blocking needed since My Feed Only is default-selected. Just proceed.
+    }
     const btn=document.getElementById('pm-submit');
     btn.disabled=true;btn.textContent='Posting…';
     // Upload image to Cloudinary first so we store a CDN URL, not raw base64
@@ -7599,9 +7742,15 @@ const _posts = (() => {
         imageUrl = null;
       }
     }
-    // Auto-broadcast to all efeds the user belongs to
-    const efeds = await _loadMyEfeds();
-    const targets = efeds.length ? efeds : [null];
+    // Determine efed targets: if multi-efed, use selected (null = my feed only); if single/zero efed, use old logic
+    let targets;
+    if(efeds.length>1){
+      // Chosen efed or null (my feed only)
+      targets=[_selectedEfed||null];
+    } else {
+      // Old logic — single efed or none
+      targets=efeds.length?efeds:[null];
+    }
     try{
       let firstSaved=null;
       for(let i=0;i<targets.length;i++){
