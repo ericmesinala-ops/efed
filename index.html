@@ -4695,10 +4695,22 @@ async function updateLiveBadges() {
   });
 
   // Auto-promote upcoming videos to Latest Videos:
-  //   • 15 min before broadcast → move to Latest Videos (status stays 'pre-live' so LIVE badge can appear)
-  //   • When actually live    → show LIVE badge on the card
-  //   • After stream ends     → keep in Latest Videos as a normal VOD
+  //   • 15 min before broadcast → move to Latest Videos
+  //   • When actually live      → show LIVE badge on the card
+  //   • After stream ends       → keep in Latest Videos as a normal VOD
+
+  // Also promote any hardcoded upcoming entries that are now past/live
   let promoted = false;
+  (typeof upcoming !== 'undefined' ? upcoming : []).forEach(hv => {
+    const dMs = hv.dateMs || (hv.date ? new Date(hv.date).getTime() : 0);
+    if (dMs && Date.now() >= dMs - 15 * 60 * 1000) {
+      if (!videos.find(vv => vv.url === hv.url)) {
+        videos.push({ ...hv, dateMs: dMs, status: 'approved', submittedAt: dMs });
+        promoted = true;
+      }
+    }
+  });
+
   for (let i = upcomingVideos.length - 1; i >= 0; i--) {
     const uv = upcomingVideos[i];
     const id = extractId(uv.url);
@@ -4745,7 +4757,25 @@ setInterval(updateLiveBadges, 60000);
 // ── UPCOMING SHOWS ROW ──
 function loadUpcomingRow() {
   // Merge hardcoded + DB upcoming, dedupe by url
-  const hardcoded = (typeof upcoming !== 'undefined' ? upcoming : []).map(v => ({ ...v, status: 'upcoming' }));
+  const _now = Date.now();
+  const PROMOTE_THRESHOLD = 15 * 60 * 1000; // 15 min before broadcast
+
+  const rawHardcoded = (typeof upcoming !== 'undefined' ? upcoming : []).map(v => {
+    const dMs = v.dateMs || (v.date ? new Date(v.date).getTime() : 0);
+    return { ...v, dateMs: dMs, status: 'upcoming' };
+  });
+
+  // Promote any hardcoded entry that is within 15 min or past into the main videos grid
+  rawHardcoded.forEach(v => {
+    if (v.dateMs && (_now >= v.dateMs - PROMOTE_THRESHOLD)) {
+      if (!videos.find(vv => vv.url === v.url)) {
+        videos.push({ ...v, status: 'approved', submittedAt: v.dateMs });
+      }
+    }
+  });
+
+  // Only keep hardcoded entries that are still more than 15 min away
+  const hardcoded = rawHardcoded.filter(v => !v.dateMs || v.dateMs - _now > PROMOTE_THRESHOLD);
   const dbUrls = new Set(upcomingVideos.map(v => v.url));
   const merged = [...upcomingVideos, ...hardcoded.filter(v => !dbUrls.has(v.url))];
 
