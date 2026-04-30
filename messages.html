@@ -345,9 +345,11 @@ function setTab(i,btn){
   const name=s.display_name||s.username||'?';
   document.getElementById('dd-name').textContent=name;
   document.getElementById('dd-sub').textContent=s.role||'';
-  const img=document.getElementById('nav-av-img'),ini=document.getElementById('nav-initials');
-  if(s.avatar_url){img.src=s.avatar_url;img.style.display='';ini.style.display='none';}
-  else{ini.textContent=name.slice(0,2).toUpperCase();}
+  const ini=document.getElementById('nav-initials');
+  ini.textContent=name.slice(0,2).toUpperCase();
+  if(s.avatar_url){
+    document.getElementById('nav-av').innerHTML=`<img src="${s.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+  }
   if(s.is_efed_owner||s.role==='owner')document.getElementById('efed-tab').style.display='flex';
 })();
 </script>
@@ -359,6 +361,37 @@ import{getFirestore,collection,doc,addDoc,setDoc,getDocs,onSnapshot,query,orderB
 
 const cfg={apiKey:"AIzaSyDqtd_BdmxW4r3mAhs8rWFz-xTu3EkFwYo",authDomain:"efed-hub-4a899.firebaseapp.com",projectId:"efed-hub-4a899",storageBucket:"efed-hub-4a899.firebasestorage.app",messagingSenderId:"827965605330",appId:"1:827965605330:web:848a485cd50188e1fd740b",measurementId:"G-F8BC1GJYFD"};
 const fbApp=initializeApp(cfg),auth=getAuth(fbApp),db=getFirestore(fbApp);
+
+// ── SUPABASE AVATAR LOOKUP ────────────────────────────────────────────────────
+const SB_URL='https://osbarvhklizidsffytye.supabase.co';
+const SB_KEY='sb_publishable_oM4jtWMR0I2bAkmJ4d-Prg_nf-lGD7y'; // anon/publishable key
+const avatarCache={};
+
+async function fetchAvatar(username){
+  if(avatarCache[username]!==undefined)return avatarCache[username];
+  try{
+    const res=await fetch(`${SB_URL}/rest/v1/users?username=eq.${encodeURIComponent(username)}&select=avatar_url&limit=1`,{
+      headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}
+    });
+    const data=await res.json();
+    const url=(data[0]?.avatar_url)||null;
+    avatarCache[username]=url;
+    return url;
+  }catch(e){avatarCache[username]=null;return null;}
+}
+
+function mkAvatar(username,size=40,cls=''){
+  const id='av-'+username.replace(/[^a-z0-9]/gi,'')+'-'+Math.random().toString(36).slice(2,6);
+  const ini=username.slice(0,2).toUpperCase();
+  const html=`<div id="${id}" style="width:${size}px;height:${size}px;min-width:${size}px;min-height:${size}px;border-radius:50%;background:var(--surface3);border:1.5px solid rgba(200,168,75,.25);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:${Math.round(size*.3)}px;color:var(--gold);flex-shrink:0;overflow:hidden;" class="${cls}">${ini}</div>`;
+  // async fill
+  fetchAvatar(username).then(url=>{
+    if(!url)return;
+    const el=document.getElementById(id);
+    if(el)el.innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.textContent='${ini}'">`;
+  });
+  return {id,html};
+}
 
 function getSess(){try{return JSON.parse(localStorage.getItem('efed_session'));}catch{return null;}}
 const _toast=m=>{const t=document.getElementById('toast');t.textContent=m;t.style.opacity='1';setTimeout(()=>t.style.opacity='0',2800);};
@@ -413,8 +446,9 @@ window.renderList=function(){
   }
   el.innerHTML=list.map(c=>{
     const p=partner(c),u=c.unreadCount?.[me?.username]||0,ts=c.lastMessageAt?.toDate?fmtT(c.lastMessageAt.toDate()):'';
+    const av=mkAvatar(p,42,'convo-av-img');
     return`<div class="convo${c.id===activeId?' active':''}" onclick="sel('${c.id}','${p}')">
-      <div class="convo-av">${p.slice(0,2).toUpperCase()}</div>
+      ${av.html}
       <div class="convo-info">
         <div class="convo-top"><span class="convo-name">${p}</span><span class="convo-ts">${ts}</span></div>
         <div class="convo-prev${u?' unread':''}">${c.lastMessage||'No messages yet'}</div>
@@ -450,14 +484,16 @@ async function searchUsers(term){
     const snap=await getDocs(q);
     const results=snap.docs.map(d=>d.data()).filter(u=>u.username!==me.username);
     if(!results.length){closeResults();return;}
-    res.innerHTML=results.map(u=>`
-      <div class="user-result" onclick="startChat('${u.username}')">
-        <div class="user-result-av">${u.username.slice(0,2).toUpperCase()}</div>
+    res.innerHTML=results.map(u=>{
+      const av=mkAvatar(u.username,32,'user-result-av');
+      return`<div class="user-result" onclick="startChat('${u.username}')">
+        ${av.html}
         <div>
           <div class="user-result-name">${u.displayName||u.username}</div>
           <div class="user-result-sub">@${u.username}</div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     res.classList.add('open');
     res.style.display='block';
   }catch(e){console.error('user search error',e);closeResults();}
@@ -499,7 +535,12 @@ window.sel=function(id,p){
   renderList();
   document.getElementById('no-chat').style.display='none';
   const cv=document.getElementById('chat-view');cv.style.display='flex';
-  document.getElementById('chat-av').textContent=p.slice(0,2).toUpperCase();
+  // Set chat header avatar
+  const hdrAv=document.getElementById('chat-av');
+  hdrAv.innerHTML=p.slice(0,2).toUpperCase();
+  fetchAvatar(p).then(url=>{
+    if(url)hdrAv.innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.textContent='${p.slice(0,2).toUpperCase()}'">`;
+  });
   document.getElementById('chat-name').textContent=p;
   document.getElementById('send-btn').disabled=false;
   document.getElementById('panel-right').classList.add('open');
