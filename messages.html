@@ -359,15 +359,31 @@ function setTab(i,btn){
 }
 
 // populate nav
-(function(){
+(async function(){
   const s=getSess();if(!s)return;
   const name=s.display_name||s.username||'?';
   document.getElementById('dd-name').textContent=name;
   document.getElementById('dd-sub').textContent=s.role||'';
   const ini=document.getElementById('nav-initials');
   ini.textContent=name.slice(0,2).toUpperCase();
-  if(s.avatar_url){
-    document.getElementById('nav-av').innerHTML=`<img src="${s.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+  // Support both camelCase (avatarUrl) and snake_case (avatar_url) from session
+  let avatarUrl=s.avatarUrl||s.avatar_url||null;
+  // If not in session, fetch fresh from Supabase
+  if(!avatarUrl&&s.username){
+    try{
+      const SB_URL='https://osbarvhklizidsffytye.supabase.co';
+      const SB_KEY='sb_publishable_oM4jtWMR0I2bAkmJ4d-Prg_nf-lGD7y';
+      const res=await fetch(`${SB_URL}/rest/v1/users?username=eq.${encodeURIComponent(s.username)}&select=avatar_url&limit=1`,{
+        headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}
+      });
+      const data=await res.json();
+      avatarUrl=data[0]?.avatar_url||null;
+      // Cache it back to session
+      if(avatarUrl){s.avatarUrl=avatarUrl;try{localStorage.setItem('efed_session',JSON.stringify(s));}catch(e){}}
+    }catch(e){}
+  }
+  if(avatarUrl){
+    document.getElementById('nav-av').innerHTML=`<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.innerHTML='${name.slice(0,2).toUpperCase()}'">`;
   }
   if(s.is_efed_owner||s.role==='owner')document.getElementById('efed-tab').style.display='flex';
 })();
