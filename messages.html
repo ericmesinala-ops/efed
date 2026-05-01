@@ -15,12 +15,12 @@
   --muted:#8a8a9a; --border:rgba(255,255,255,.07);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-html{font-size:17px;}
-body{background:#000;color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;scrollbar-width:none;overflow-x:hidden;}
+html,body{font-size:17px;height:100%;overflow:hidden;}
+body{background:#000;color:var(--text);font-family:'DM Sans',sans-serif;scrollbar-width:none;overflow-x:hidden;}
 body::-webkit-scrollbar{display:none;}
 
-/* PAGE CARD */
-.page-card{max-width:960px;margin:0 auto;background:var(--bg);box-shadow:0 0 0 1px rgba(255,255,255,.05),0 32px 80px rgba(0,0,0,.9);min-height:100vh;position:relative;}
+/* PAGE CARD — fixed full-height, no scroll */
+.page-card{max-width:960px;margin:0 auto;background:var(--bg);box-shadow:0 0 0 1px rgba(255,255,255,.05),0 32px 80px rgba(0,0,0,.9);height:100vh;display:flex;flex-direction:column;overflow:hidden;position:relative;}
 
 /* NAV */
 nav{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:8px 56px;background:rgba(7,7,10,.97);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.04);}
@@ -91,9 +91,9 @@ nav{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-co
 /* MESSAGES AREA */
 .msg-area{
   display:flex;
-  height:calc(100vh - 57px - 44px - 48px - 44px);
-  max-height:calc(100vh - 193px);
+  flex:1;
   overflow:hidden;
+  min-height:0;
 }
 
 /* LEFT PANEL */
@@ -178,7 +178,7 @@ nav{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-co
   #panel-right{position:fixed;inset:0;z-index:200;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);background:var(--bg);}
   #panel-right.open{transform:translateX(0);}
   #mob-back{display:flex !important;}
-  .msg-area{height:calc(100vh - 57px - 44px - 48px - 44px);}
+  .msg-area{flex:1;min-height:0;}
 }
 @media(max-width:480px){
   .hub-label{font-size:.6rem;letter-spacing:1px;}
@@ -365,31 +365,35 @@ function setTab(i,btn){
 // populate nav
 (async function(){
   const s=getSess();if(!s)return;
-  const name=s.display_name||s.username||'?';
-  document.getElementById('dd-name').textContent=name;
-  document.getElementById('dd-sub').textContent=s.role||'';
-  const idU=document.getElementById('identity-username');
-  if(idU)idU.textContent=name;
-  const ini=document.getElementById('nav-initials');
-  ini.textContent=name.slice(0,2).toUpperCase();
-  // Support both camelCase (avatarUrl) and snake_case (avatar_url) from session
+  const SB_URL='https://osbarvhklizidsffytye.supabase.co';
+  const SB_KEY='sb_publishable_oM4jtWMR0I2bAkmJ4d-Prg_nf-lGD7y';
+
+  // Start with what's in session, then upgrade from Supabase
+  let displayName=s.display_name||s.username||'?';
   let avatarUrl=s.avatarUrl||s.avatar_url||null;
-  // If not in session, fetch fresh from Supabase
-  if(!avatarUrl&&s.username){
+
+  // Always fetch fresh display_name + avatar from Supabase
+  if(s.username){
     try{
-      const SB_URL='https://osbarvhklizidsffytye.supabase.co';
-      const SB_KEY='sb_publishable_oM4jtWMR0I2bAkmJ4d-Prg_nf-lGD7y';
-      const res=await fetch(`${SB_URL}/rest/v1/users?username=eq.${encodeURIComponent(s.username)}&select=avatar_url&limit=1`,{
+      const res=await fetch(`${SB_URL}/rest/v1/users?username=eq.${encodeURIComponent(s.username)}&select=display_name,avatar_url&limit=1`,{
         headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}
       });
       const data=await res.json();
-      avatarUrl=data[0]?.avatar_url||null;
-      // Cache it back to session
-      if(avatarUrl){s.avatarUrl=avatarUrl;try{localStorage.setItem('efed_session',JSON.stringify(s));}catch(e){}}
+      if(data[0]?.display_name)displayName=data[0].display_name;
+      if(data[0]?.avatar_url)avatarUrl=data[0].avatar_url;
+      // Cache back to session
+      try{s.display_name=displayName;s.avatarUrl=avatarUrl;localStorage.setItem('efed_session',JSON.stringify(s));}catch(e){}
     }catch(e){}
   }
+
+  document.getElementById('dd-name').textContent=displayName;
+  document.getElementById('dd-sub').textContent=s.role||'';
+  const idU=document.getElementById('identity-username');
+  if(idU)idU.textContent=displayName;
+  const ini=document.getElementById('nav-initials');
+  ini.textContent=displayName.slice(0,2).toUpperCase();
   if(avatarUrl){
-    document.getElementById('nav-av').innerHTML=`<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.innerHTML='${name.slice(0,2).toUpperCase()}'">`;
+    document.getElementById('nav-av').innerHTML=`<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.innerHTML='${displayName.slice(0,2).toUpperCase()}'">`;
   }
   if(s.is_efed_owner||s.role==='owner')document.getElementById('efed-tab').style.display='flex';
 })();
