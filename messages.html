@@ -15,12 +15,12 @@
   --muted:#8a8a9a; --border:rgba(255,255,255,.07);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-html{font-size:17px;height:100%;}
-body{height:100%;background:#000;color:var(--text);font-family:'DM Sans',sans-serif;overflow:hidden;scrollbar-width:none;}
+html,body{font-size:17px;height:100%;overflow:hidden;}
+body{background:#000;color:var(--text);font-family:'DM Sans',sans-serif;scrollbar-width:none;overflow-x:hidden;}
 body::-webkit-scrollbar{display:none;}
 
-/* PAGE CARD — fills the full visible viewport including dynamic browser chrome */
-.page-card{max-width:960px;width:100%;margin:0 auto;background:var(--bg);box-shadow:0 0 0 1px rgba(255,255,255,.05),0 32px 80px rgba(0,0,0,.9);height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
+/* PAGE CARD — position:fixed so it always fills the exact visible viewport, composer never buried */
+.page-card{max-width:960px;width:100%;margin:0 auto;background:var(--bg);box-shadow:0 0 0 1px rgba(255,255,255,.05),0 32px 80px rgba(0,0,0,.9);position:fixed;top:0;bottom:0;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;overflow:hidden;}
 
 /* NAV */
 nav{position:relative;flex-shrink:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:8px 56px;background:rgba(7,7,10,.97);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.04);}
@@ -97,7 +97,7 @@ nav{position:relative;flex-shrink:0;z-index:100;display:flex;align-items:center;
 }
 
 /* LEFT PANEL */
-#panel-left{width:272px;min-width:272px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid var(--border);background:var(--surface);min-height:0;overflow:hidden;}
+#panel-left{width:272px;min-width:272px;flex-shrink:0;display:flex;flex-direction:column;border-right:1px solid var(--border);background:var(--surface);height:100%;}
 .list-top{padding:10px 12px 0;flex-shrink:0;}
 .list-search{position:relative;}
 .list-search svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none;}
@@ -125,12 +125,12 @@ nav{position:relative;flex-shrink:0;z-index:100;display:flex;align-items:center;
 .empty-state svg{opacity:.2;}
 
 /* RIGHT PANEL */
-#panel-right{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg);height:100%;overflow:hidden;}
+#panel-right{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg);overflow:hidden;}
 #no-chat{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--muted);}
 #no-chat svg{opacity:.15;}
 #no-chat strong{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:2px;color:rgba(255,255,255,.12);display:block;margin-bottom:2px;}
 #no-chat p{font-size:.73rem;}
-#chat-view{display:none;flex-direction:column;height:100%;overflow:hidden;}
+#chat-view{flex:1;display:none;flex-direction:column;min-height:0;overflow:hidden;}
 #chat-hdr{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
 #mob-back{display:none;background:none;border:none;color:var(--gold);cursor:pointer;padding:4px;flex-shrink:0;}
 /* Avatar in chat header — larger, with photo ring like profile */
@@ -415,14 +415,14 @@ const avatarCache={};
 async function fetchAvatar(username){
   if(avatarCache[username]!==undefined)return avatarCache[username];
   try{
-    const res=await fetch(`${SB_URL}/rest/v1/users?username=eq.${encodeURIComponent(username)}&select=avatar_url&limit=1`,{
+    const res=await fetch(`${SB_URL}/rest/v1/users?username=eq.${encodeURIComponent(username)}&select=avatar_url,display_name&limit=1`,{
       headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}
     });
     const data=await res.json();
-    const url=(data[0]?.avatar_url)||null;
-    avatarCache[username]=url;
-    return url;
-  }catch(e){avatarCache[username]=null;return null;}
+    const result={url:(data[0]?.avatar_url)||null,displayName:(data[0]?.display_name)||null};
+    avatarCache[username]=result;
+    return result;
+  }catch(e){avatarCache[username]={url:null,displayName:null};return avatarCache[username];}
 }
 
 function mkAvatar(username,size=40,cls=''){
@@ -430,10 +430,10 @@ function mkAvatar(username,size=40,cls=''){
   const ini=username.slice(0,2).toUpperCase();
   const html=`<div id="${id}" style="width:${size}px;height:${size}px;min-width:${size}px;min-height:${size}px;border-radius:50%;background:var(--surface3);border:1.5px solid rgba(200,168,75,.25);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:${Math.round(size*.3)}px;color:var(--gold);flex-shrink:0;overflow:hidden;" class="${cls}">${ini}</div>`;
   // async fill
-  fetchAvatar(username).then(url=>{
-    if(!url)return;
+  fetchAvatar(username).then(result=>{
+    if(!result?.url)return;
     const el=document.getElementById(id);
-    if(el)el.innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.textContent='${ini}'">`;
+    if(el)el.innerHTML=`<img src="${result.url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.textContent='${ini}'">`;
   });
   return {id,html};
 }
@@ -589,12 +589,21 @@ window.sel=function(id,p){
   const hdrAv=document.getElementById('chat-av');
   const ini=p.slice(0,2).toUpperCase();
   hdrAv.innerHTML=`<span style="font-weight:800;font-size:.75rem;color:var(--gold);">${ini}</span>`;
-  fetchAvatar(p).then(url=>{
-    if(url){
-      hdrAv.innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.innerHTML='<span style=\\'font-weight:800;font-size:.75rem;color:var(--gold);\\'>'+ini+'</span>'">`;
+  document.getElementById('chat-name').textContent=p;
+  document.getElementById('chat-status').textContent='';
+  fetchAvatar(p).then(result=>{
+    if(result?.url){
+      hdrAv.innerHTML=`<img src="${result.url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.parentElement.innerHTML='<span style=\\'font-weight:800;font-size:.75rem;color:var(--gold);\\'>'+ini+'</span>'">`;
+    }
+    // Show display name bold + username gray underneath
+    if(result?.displayName && result.displayName !== p){
+      document.getElementById('chat-name').textContent=result.displayName;
+      document.getElementById('chat-status').textContent='@'+p;
+    } else {
+      document.getElementById('chat-name').textContent=p;
+      document.getElementById('chat-status').textContent='';
     }
   });
-  document.getElementById('chat-name').textContent=p;
   document.getElementById('send-btn').disabled=false;
   document.getElementById('panel-right').classList.add('open');
   if(unsubMsgs)unsubMsgs();
