@@ -8973,12 +8973,36 @@ async function loadAppearances(targetUser, isOwn) {
       const myName = avatarMap[targetUser]?.name || targetUser;
       const dateTxt = (bk.tba || bk.date === 'TBA') ? 'TBA' : (bk.date || '');
 
-      // Build the participant row: me + vs + each opponent (with vs between each)
-      // For multi-man, use the slots order if available; otherwise just list sequentially
-      let participantHtml = avChip(targetUser, myName, false, false);
-      bk.opponentList.forEach(opp => {
-        participantHtml += vsSep + avChip(opp.username, opp.name, opp.isExternal, true);
-      });
+      // Build participant row using bk.slots (respects VS placement) — matches efed calendar logic exactly
+      let participantHtml = '';
+      if (Array.isArray(bk.slots) && bk.slots.length) {
+        // slots = ['username_a', 'username_b', 'vs', 'username_c', 'username_d']
+        // VS only where explicitly placed — consecutive usernames = same team (no separator)
+        const slotNameMap = {};
+        slotNameMap[targetUser] = myName;
+        bk.opponentList.forEach(o => { slotNameMap[o.username] = o.name; });
+        bk.slots.forEach(s => {
+          if (s === 'vs') {
+            participantHtml += vsSep;
+          } else {
+            const isMe = s === targetUser;
+            const opp = bk.opponentList.find(o => o.username === s);
+            const label = slotNameMap[s] || s;
+            const isExt = typeof s === 'string' && s.startsWith('__ext__');
+            participantHtml += avChip(s, label, isExt || (!isMe && !opp), !isMe);
+          }
+        });
+        // Safety: if the profile user wasn't in slots at all, prepend them
+        if (!bk.slots.includes(targetUser)) {
+          participantHtml = avChip(targetUser, myName, false, false) + (participantHtml ? vsSep + participantHtml : '');
+        }
+      } else {
+        // Fallback: no slots — VS between every participant
+        participantHtml = avChip(targetUser, myName, false, false);
+        bk.opponentList.forEach(opp => {
+          participantHtml += vsSep + avChip(opp.username, opp.name, opp.isExternal, true);
+        });
+      }
 
       const card = document.createElement('div');
       card.style.cssText = `position:relative;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:14px 16px;transition:opacity .2s;${isHidden ? 'opacity:.3;' : ''}`;
