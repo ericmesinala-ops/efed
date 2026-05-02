@@ -712,6 +712,23 @@ async function hash(str) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
+// ── RATE LIMITER ──
+// Tracks attempts in localStorage. key = action name, limit = max attempts, windowMs = time window.
+function checkRateLimit(key, limit, windowMs) {
+  const now = Date.now();
+  const store = JSON.parse(localStorage.getItem('efed_rl_' + key) || '[]');
+  const recent = store.filter(t => now - t < windowMs);
+  if (recent.length >= limit) {
+    const oldest = Math.min(...recent);
+    const waitSec = Math.ceil((windowMs - (now - oldest)) / 1000);
+    const waitMin = Math.ceil(waitSec / 60);
+    return { blocked: true, wait: waitSec >= 60 ? waitMin + ' minute' + (waitMin > 1 ? 's' : '') : waitSec + ' seconds' };
+  }
+  recent.push(now);
+  localStorage.setItem('efed_rl_' + key, JSON.stringify(recent));
+  return { blocked: false };
+}
+
 // ── PASSWORD TOGGLE ──
 function togglePass(inputId, btn) {
   const input = document.getElementById(inputId);
@@ -808,6 +825,9 @@ async function doLogin() {
   const isAddAccount = new URLSearchParams(window.location.search).get('add') === '1';
   if (!email || !pass) return showErr('login-err', 'Please fill in all fields.');
   if (!email.includes('@')) return showErr('login-err', 'Please enter a valid email.');
+  // Rate limit: max 5 login attempts per 10 minutes
+  const rl = checkRateLimit('login', 5, 10 * 60 * 1000);
+  if (rl.blocked) return showErr('login-err', `Too many login attempts. Please wait ${rl.wait} before trying again.`);
   setLoading('login-btn', true);
   try {
     const users = await sbGet('users', `email=eq.${encodeURIComponent(email)}`);
