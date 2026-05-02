@@ -1006,7 +1006,8 @@ async function doForgotReset() {
     const token = genResetToken();
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
-    await sbInsert('password_resets', { email, token, expires_at: expiresAt, used: false });
+    const tokenHash = await hash(token); // hash before storing — raw token only lives in the email link
+    await sbInsert('password_resets', { email, token: tokenHash, expires_at: expiresAt, used: false });
 
     const resetLink = `https://efed-stream.vercel.app/auth.html?reset=${token}`;
     await emailjs.send('service_zxvndxs', 'template_rrbxs08', {
@@ -1038,14 +1039,15 @@ async function doPasswordReset() {
   btn.textContent = 'Saving…';
 
   try {
-    const resets = await sbGet('password_resets', `token=eq.${encodeURIComponent(token)}&used=eq.false`);
+    const tokenHash = await hash(token); // hash the incoming token to match what's stored
+    const resets = await sbGet('password_resets', `token=eq.${encodeURIComponent(tokenHash)}&used=eq.false`);
     if (!resets.length) return showErr('reset-err', 'This reset link is invalid or has already been used.');
 
     const reset = resets[0];
     if (new Date(reset.expires_at) < new Date()) return showErr('reset-err', 'This link has expired. Please request a new one.');
 
     await sbUpdate('users', { password_hash: await hash(newPass) }, `email=eq.${encodeURIComponent(reset.email)}`);
-    await sbUpdate('password_resets', { used: true }, `token=eq.${encodeURIComponent(token)}`);
+    await sbUpdate('password_resets', { used: true }, `token=eq.${encodeURIComponent(tokenHash)}`);
 
     document.getElementById('reset-form').style.display = 'none';
     const ok = document.getElementById('reset-ok');
