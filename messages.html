@@ -105,20 +105,27 @@ nav{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-co
 #srch::placeholder{color:var(--muted);}
 #convo-list{flex:1;overflow-y:auto;scrollbar-width:none;}
 #convo-list::-webkit-scrollbar{display:none;}
-.convo{display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .15s;position:relative;}
+.convo-wrap{position:relative;overflow:hidden;border-bottom:1px solid var(--border);}
+.convo-del-swipe{position:absolute;right:0;top:0;bottom:0;width:72px;background:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transform:translateX(100%);transition:transform .25s ease;z-index:1;}
+.convo-del-swipe svg{color:#fff;}
+.convo-wrap.swiped .convo-del-swipe{transform:translateX(0);}
+.convo-wrap.swiped .convo{transform:translateX(-72px);}
+.convo{display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:pointer;transition:background .15s,transform .25s ease;position:relative;background:var(--surface);}
 .convo:hover{background:rgba(255,255,255,.03);}
 .convo.active{background:rgba(200,168,75,.07);border-left:2px solid var(--gold);padding-left:11px;}
-.convo:hover .convo-del{opacity:1 !important;}
+.active-wrap{background:rgba(200,168,75,.04);}
+.convo-wrap:hover .convo-del{opacity:1 !important;}
 .convo-del{opacity:0;position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.25);border-radius:50%;width:26px;height:26px;min-width:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:opacity .2s,background .2s;z-index:5;}
 .convo-del:hover{background:rgba(192,0,14,.4) !important;}
 .convo-del svg{color:#ff6b6b;pointer-events:none;}
+@media(max-width:640px){.convo-del{display:none;}}
 .convo-av{width:40px;height:40px;min-width:40px;min-height:40px;border-radius:50%;background:var(--surface3);border:1.5px solid rgba(200,168,75,.25);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.72rem;color:var(--gold);flex-shrink:0;letter-spacing:.5px;}
 .convo-info{flex:1;min-width:0;}
-.convo-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px;}
-.convo-name{font-size:.78rem;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;}
-.convo-ts{font-size:.57rem;color:var(--muted);flex-shrink:0;}
-.convo-prev{font-size:.68rem;color:rgba(255,255,255,.28);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.convo-prev.unread{color:var(--text);font-weight:500;}
+.convo-top{display:flex;align-items:baseline;margin-bottom:2px;}
+.convo-name{font-size:.8rem;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.convo-ts{font-size:.58rem;color:var(--muted);margin-top:2px;display:block;}
+.convo-prev{display:none;}
+.convo-prev.unread{display:none;}
 .unread-dot{position:absolute;right:12px;top:50%;transform:translateY(-50%);width:7px;height:7px;border-radius:50%;background:var(--accent);}
 .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:180px;color:var(--muted);font-size:.72rem;gap:8px;}
 .empty-state svg{opacity:.2;}
@@ -567,7 +574,8 @@ window.startChat=function(username){
 
 // ── OPEN / CREATE CONVO ───────────────────────────────────────────────────────
 async function openOrCreate(p){
-  const ex=convos.find(c=>c.participants?.includes(p));
+  // Always check existing first — never create duplicate
+  const ex=convos.find(c=>c.participants?.includes(p)&&c.participants?.includes(me.username));
   if(ex){sel(ex.id,p);return;}
   try{
     const ref=await addDoc(collection(db,'conversations'),{
@@ -674,6 +682,44 @@ const mi=document.getElementById('msg-inp');
 mi.addEventListener('input',()=>{mi.style.height='auto';mi.style.height=Math.min(mi.scrollHeight,100)+'px';});
 mi.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
 document.getElementById('send-btn').addEventListener('click',send);
+
+// ── DISPLAY NAME CACHE ───────────────────────────────────────────────────────
+const _dnCache={};
+async function fetchDisplayName(username){
+  if(_dnCache[username])return _dnCache[username];
+  try{
+    const res=await fetch(`${SB_URL}/rest/v1/users?username=eq.${encodeURIComponent(username)}&select=display_name&limit=1`,
+      {headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});
+    const rows=await res.json();
+    const dn=rows[0]?.display_name||username;
+    _dnCache[username]=dn;
+    return dn;
+  }catch(e){return username;}
+}
+
+// ── SWIPE TO DELETE (mobile) ──────────────────────────────────────────────────
+function attachSwipe(){
+  document.querySelectorAll('.convo-wrap').forEach(wrap=>{
+    let startX=0,startY=0,swiping=false;
+    wrap.addEventListener('touchstart',e=>{
+      startX=e.touches[0].clientX;
+      startY=e.touches[0].clientY;
+      swiping=false;
+    },{passive:true});
+    wrap.addEventListener('touchmove',e=>{
+      const dx=startX-e.touches[0].clientX;
+      const dy=Math.abs(startY-e.touches[0].clientY);
+      if(!swiping&&dy>10)return; // vertical scroll takes priority
+      if(dx>10){swiping=true;}
+      if(swiping&&dx>40){wrap.classList.add('swiped');}
+      if(swiping&&dx<-20){wrap.classList.remove('swiped');}
+    },{passive:true});
+    // Close swipe if tapped elsewhere
+    document.addEventListener('touchstart',e=>{
+      if(!wrap.contains(e.target))wrap.classList.remove('swiped');
+    },{passive:true});
+  });
+}
 
 // ── DELETE CONVERSATION ───────────────────────────────────────────────────────
 let _pendingDelId=null;
