@@ -86,6 +86,22 @@
     const txt = await r.text();
     return txt ? JSON.parse(txt) : [];
   }
+  // ── RATE LIMITER ──
+  function checkRateLimit(key, limit, windowMs) {
+    const now = Date.now();
+    const store = JSON.parse(localStorage.getItem('efed_rl_' + key) || '[]');
+    const recent = store.filter(t => now - t < windowMs);
+    if (recent.length >= limit) {
+      const oldest = Math.min(...recent);
+      const waitSec = Math.ceil((windowMs - (now - oldest)) / 1000);
+      const waitMin = Math.ceil(waitSec / 60);
+      return { blocked: true, wait: waitSec >= 60 ? waitMin + ' min' + (waitMin > 1 ? 's' : '') : waitSec + 's' };
+    }
+    recent.push(now);
+    localStorage.setItem('efed_rl_' + key, JSON.stringify(recent));
+    return { blocked: false };
+  }
+
   // ── PAGE VIEW TRACKING ──
   // Tracks views on profile and efed pages. Owner views don't count.
   // SQL to run once in Supabase:
@@ -8764,6 +8780,11 @@ function doSubmitPost(submissionType) {
   if (!session) { showSubmitErr('Not logged in.'); return; }
   const url = document.getElementById('submit-url').value.trim();
   if (!url) { showSubmitErr('Please paste a YouTube link.'); return; }
+
+  // Rate limit: max 5 submissions per hour
+  const rlSub = checkRateLimit('submit', 5, 60 * 60 * 1000);
+  if (rlSub.blocked) { showSubmitErr(`Slow down — you can only submit 5 videos per hour. Try again in ${rlSub.wait}.`); return; }
+
   const btn = document.getElementById('submit-post-btn');
 
   // If preview hasn't loaded yet, cancel any pending debounce and fetch+post in one shot
@@ -10017,6 +10038,11 @@ async function submitRepost() {
   const session = getSession();
   if (!session || !_expandVideo) return;
   const text = document.getElementById('repost-text-input').value.trim();
+
+  // Rate limit: max 10 posts per minute
+  const rlPost = checkRateLimit('post', 10, 60 * 1000);
+  if (rlPost.blocked) { alert(`You're posting too fast. Wait ${rlPost.wait} before posting again.`); return; }
+
   const btn = document.getElementById('repost-post-btn');
   btn.disabled = true;
   btn.textContent = 'Posting…';
@@ -10579,6 +10605,11 @@ async function postExpandComment() {
   const input = document.getElementById('expand-comment-input');
   const text = input.value.trim();
   if (!text) return;
+
+  // Rate limit: max 10 comments per minute
+  const rlComment = checkRateLimit('comment', 10, 60 * 1000);
+  if (rlComment.blocked) { alert(`You're posting too fast. Wait ${rlComment.wait} before commenting again.`); return; }
+
   const btn = document.querySelector('.expand-comment-send');
   btn.disabled = true; btn.textContent = 'Checking…';
 
@@ -12933,6 +12964,10 @@ async function sendChatMessage() {
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text || text.length > 400) return;
+
+  // Rate limit: max 1 message per 2 seconds
+  const rlChat = checkRateLimit('chat', 1, 2000);
+  if (rlChat.blocked) return;
 
   if (isMessageBlocked(text)) {
     input.value = '';
