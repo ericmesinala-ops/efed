@@ -4214,7 +4214,9 @@ function renderEvent(ev, extraEvents) {
   // ── Inject per-event booking banners for the logged-in CAW ──
   _injectScheduleBookingBanners(ev, extraEvents);
   // ── Inject voice promo cards under each event ──
-  _injectVoicePromos(ev, extraEvents);
+  if (typeof _injectVoicePromos === 'function') {
+    _injectVoicePromos(ev, extraEvents).catch(() => {});
+  }
 }
 
 // Build and inject a booking banner below each event card that matches the CAW's booking
@@ -16643,7 +16645,104 @@ async function loadEfedSocialFeed(isOwner) {
   _efedSfRender();
 }
 
+// ── VOICE PROMO CARDS ON SCHEDULE ─────────────────────────────────────────
+const _efedVpPlayers = {};
+
+async function _injectVoicePromos(primaryEv, extraEvents) {
+  document.querySelectorAll('.efed-vp-section').forEach(el => el.remove());
+  let promos = [];
+  try {
+    promos = await sbGet('voice_promos', `efed_name=ilike.${encodeURIComponent(EFED_NAME)}&select=id,username,efed_acronym,event_name,event_date,audio_url,expires_at`);
+    promos = promos.filter(p => !p.expires_at || new Date(p.expires_at) > new Date());
+  } catch(e) { return; }
+  if (!promos.length) return;
+
+  const unames = [...new Set(promos.map(p => p.username).filter(Boolean))];
+  let avMap = {};
+  try {
+    if (unames.length) {
+      const rows = await sbGet('users', `username=in.(${unames.map(u=>encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url`);
+      rows.forEach(r => { avMap[r.username] = { name: r.display_name||r.username, av: r.avatar_url }; });
+    }
+  } catch(e) {}
+
+  const allEvs = [];
+  if (primaryEv && primaryEv.title) allEvs.push({ title: primaryEv.title, sel: '#event-card' });
+  (extraEvents || []).forEach((xev, i) => {
+    if (xev && xev.title) allEvs.push({ title: xev.title, sel: `.ev-extra-card:nth-of-type(${i+1})` });
+  });
+
+  allEvs.forEach(({ title, sel }) => {
+    const matching = promos.filter(p => p.event_name && p.event_name.toLowerCase() === title.toLowerCase());
+    const generic  = promos.filter(p => !p.event_name);
+    const toShow   = matching.length ? matching : (sel === '#event-card' ? generic : []);
+    if (!toShow.length) return;
+    const card = document.querySelector(sel); if (!card) return;
+    const sec = document.createElement('div');
+    sec.className = 'efed-vp-section';
+    sec.innerHTML = '<div class="efed-vp-hd">🎙 Voice Promos</div>' +
+      toShow.map(p => {
+        const info = avMap[p.username] || { name: p.username || '?', av: null };
+        const nm = info.name || '?';
+        const avHtml = info.av
+          ? `<img src="${info.av}" alt="">`
+          : `<div class="ini">${nm[0].toUpperCase()}</div>`;
+        return `<div class="efed-vp-card">
+          <div class="efed-vp-user">${avHtml}<span>${nm}</span></div>
+          <div class="efed-vp-play-row">
+            <button class="efed-vp-btn" onclick="efedVpToggle('${p.id}','${p.audio_url}',this)" data-vpid="${p.id}">
+              <span class="efed-vp-icon">▶</span>
+            </button>
+            <canvas id="efedvpcv-${p.id}" width="260" height="28" style="flex:1;height:28px;border-radius:3px;cursor:pointer;"></canvas>
+          </div>
+        </div>`;
+      }).join('');
+    card.insertAdjacentElement('afterend', sec);
+    toShow.forEach(p => requestAnimationFrame(() => efedVpDrawStatic(`efedvpcv-${p.id}`, 0)));
+  });
+}
+
+function efedVpDrawStatic(cvId, prog) {
+  const SB=[.3,.55,.75,.9,.7,.5,.85,.95,.6,.4,.8,.65,.5,.9,.6,.4,.75,.55,.85,.45,.7,.9,.5,.35];
+  const c=document.getElementById(cvId); if(!c) return;
+  const ctx=c.getContext('2d'), W=c.offsetWidth||c.width, H=c.height; c.width=W;
+  ctx.clearRect(0,0,W,H);
+  const n=SB.length,gap=2,bw=Math.max(2,Math.floor((W-gap*(n-1))/n));
+  function rr2(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();ctx.fill();}
+  for(let i=0;i<n;i++){const v=SB[i],bh=Math.max(2,v*H),y=(H-bh)/2,played=(i/n)<=prog;ctx.fillStyle=played?'rgba(74,222,128,.8)':'rgba(74,222,128,.16)';rr2(i*(bw+gap),y,bw,bh,2);}
+}
+
+function efedVpToggle(id, url, btn) {
+  Object.keys(_efedVpPlayers).forEach(k => {
+    if(k!==id){const p=_efedVpPlayers[k];if(p&&!p.audio.paused){p.audio.pause();if(p.raf){cancelAnimationFrame(p.raf);p.raf=null;}const ob=document.querySelector(`[data-vpid="${k}"]`);if(ob)ob.querySelector('.efed-vp-icon').textContent='▶';efedVpDrawStatic(`efedvpcv-${k}`,0);}}
+  });
+  if(!_efedVpPlayers[id]){
+    const audio=new Audio(url); audio.preload='auto';
+    const p={audio,raf:null,an:null,sn:null,actx:null};
+    audio.onended=()=>{p.raf&&(cancelAnimationFrame(p.raf),p.raf=null);const ob=document.querySelector(`[data-vpid="${id}"]`);if(ob)ob.querySelector('.efed-vp-icon').textContent='▶';audio.currentTime=0;efedVpDrawStatic(`efedvpcv-${id}`,1);};
+    audio.ontimeupdate=()=>{if(audio.paused)efedVpDrawStatic(`efedvpcv-${id}`,audio.currentTime/(audio.duration||1));};
+    p.startViz=()=>{
+      if(!p.actx)p.actx=new(window.AudioContext||window.webkitAudioContext)();
+      if(p.actx.state==='suspended')p.actx.resume();
+      if(!p.sn){p.an=p.actx.createAnalyser();p.an.fftSize=64;p.sn=p.actx.createMediaElementSource(audio);p.sn.connect(p.an);p.an.connect(p.actx.destination);}
+      const lv=()=>{
+        const cv=document.getElementById(`efedvpcv-${id}`); if(!cv||!p.an)return;
+        const ctx2=cv.getContext('2d'),W=cv.offsetWidth||cv.width,H=cv.height;cv.width=W;
+        const d=new Uint8Array(p.an.frequencyBinCount);p.an.getByteFrequencyData(d);
+        ctx2.clearRect(0,0,W,H);const n=24,gap=2,bw=Math.max(2,Math.floor((W-gap*(n-1))/n));
+        for(let i=0;i<n;i++){const ix=Math.floor(i*d.length/n),v=d[ix]/255,bh=Math.max(2,v*H),y=(H-bh)/2;ctx2.fillStyle=`rgba(74,222,128,${.25+v*.75})`;const b=ctx2;b.beginPath();b.moveTo(i*(bw+gap)+2,y);b.lineTo(i*(bw+gap)+bw-2,y);b.quadraticCurveTo(i*(bw+gap)+bw,y,i*(bw+gap)+bw,y+2);b.lineTo(i*(bw+gap)+bw,y+bh-2);b.quadraticCurveTo(i*(bw+gap)+bw,y+bh,i*(bw+gap)+bw-2,y+bh);b.lineTo(i*(bw+gap)+2,y+bh);b.quadraticCurveTo(i*(bw+gap),y+bh,i*(bw+gap),y+bh-2);b.lineTo(i*(bw+gap),y+2);b.quadraticCurveTo(i*(bw+gap),y,i*(bw+gap)+2,y);b.closePath();b.fill();}
+        p.raf=requestAnimationFrame(lv);
+      };lv();
+    };
+    _efedVpPlayers[id]=p;
+  }
+  const p=_efedVpPlayers[id], icon=btn?btn.querySelector('.efed-vp-icon'):null;
+  if(p.audio.paused){p.audio.play();p.startViz();if(icon)icon.textContent='⏸';}
+  else{p.audio.pause();if(p.raf){cancelAnimationFrame(p.raf);p.raf=null;}efedVpDrawStatic(`efedvpcv-${id}`,p.audio.currentTime/(p.audio.duration||1));if(icon)icon.textContent='▶';}
+}
+
 </script>
+
 <style>
 /* ── efed.html Voice Promo cards ── */
 .efed-vp-section{margin:0;padding:10px 14px 12px;background:rgba(74,222,128,.04);border:1px solid rgba(74,222,128,.13);border-top:none;border-radius:0 0 10px 10px;}
@@ -16660,110 +16759,6 @@ async function loadEfedSocialFeed(isOwner) {
 html.day-mode .efed-vp-section{background:rgba(22,163,74,.04);border-color:rgba(22,163,74,.15);}
 html.day-mode .efed-vp-card{background:rgba(22,163,74,.04);border-color:rgba(22,163,74,.14);}
 </style>
-
-<script>
-// ── efed.html: inject voice promo cards under matching event cards ──────────
-async function _injectVoicePromos(primaryEv, extraEvents) {
-  document.querySelectorAll('.efed-vp-section').forEach(el => el.remove());
-  let promos = [];
-  try {
-    promos = await sbGet('voice_promos', `efed_name=ilike.${encodeURIComponent(EFED_NAME)}&select=id,username,efed_acronym,event_name,event_date,audio_url`);
-    // filter out expired
-    promos = promos.filter(p => !p.expires_at || new Date(p.expires_at) > new Date());
-  } catch(e) { return; }
-  if (!promos.length) return;
-
-  // Build avatar map
-  const unames = [...new Set(promos.map(p => p.username))];
-  let avMap = {};
-  try {
-    const rows = await sbGet('users', `username=in.(${unames.map(u=>encodeURIComponent(u)).join(',')})&select=username,display_name,avatar_url`);
-    rows.forEach(r => { avMap[r.username] = { name: r.display_name||r.username, av: r.avatar_url }; });
-  } catch(e) {}
-
-  // Build allEventNames: [{title, cardSelector}]
-  const allEvs = [];
-  if (primaryEv && primaryEv.title) allEvs.push({ title: primaryEv.title, sel: '#event-card' });
-  (extraEvents || []).forEach((xev, i) => {
-    if (xev && xev.title) allEvs.push({ title: xev.title, sel: `.ev-extra-card:nth-of-type(${i+1})` });
-  });
-
-  // For each event that has matching promos, inject a section
-  allEvs.forEach(({ title, sel }) => {
-    const matching = promos.filter(p => p.event_name && p.event_name.toLowerCase() === title.toLowerCase());
-    const generic  = promos.filter(p => !p.event_name); // no specific event — attach to first event card
-    const toShow   = matching.length ? matching : (sel === '#event-card' ? generic : []);
-    if (!toShow.length) return;
-
-    const card = document.querySelector(sel); if (!card) return;
-
-    const sec = document.createElement('div');
-    sec.className = 'efed-vp-section';
-    sec.innerHTML = `<div class="efed-vp-hd">🎙 Voice Promos</div>` +
-      toShow.map(p => {
-        const info = avMap[p.username] || { name: p.username, av: null };
-        const avHtml = info.av
-          ? `<img src="${info.av}" alt="">`
-          : `<div class="ini">${info.name[0].toUpperCase()}</div>`;
-        return `<div class="efed-vp-card">
-          <div class="efed-vp-user">${avHtml}<span>${info.name}</span></div>
-          <div class="efed-vp-play-row">
-            <button class="efed-vp-btn" onclick="efedVpToggle('${p.id}','${p.audio_url}',this)" data-vpid="${p.id}">
-              <span class="efed-vp-icon">▶</span>
-            </button>
-            <canvas id="efedvpcv-${p.id}" width="260" height="28" style="flex:1;height:28px;border-radius:3px;cursor:pointer;" onclick="efedVpToggle('${p.id}','${p.audio_url}',document.querySelector('[data-vpid=&quot;${p.id}&quot;]'))"></canvas>
-          </div>
-        </div>`;
-      }).join('');
-    card.insertAdjacentElement('afterend', sec);
-    // draw static bars
-    toShow.forEach(p => requestAnimationFrame(() => efedVpDrawStatic(`efedvpcv-${p.id}`, 0)));
-  });
-}
-
-// Canvas + playback helpers for efed VP cards
-const _efedVpPlayers = {};
-function efedVpDrawStatic(cvId, prog) {
-  const SB=[.3,.55,.75,.9,.7,.5,.85,.95,.6,.4,.8,.65,.5,.9,.6,.4,.75,.55,.85,.45,.7,.9,.5,.35];
-  const c=document.getElementById(cvId); if(!c) return;
-  const ctx=c.getContext('2d'), W=c.offsetWidth||c.width, H=c.height; c.width=W;
-  ctx.clearRect(0,0,W,H);
-  const n=SB.length,gap=2,bw=Math.max(2,Math.floor((W-gap*(n-1))/n));
-  function rr2(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();ctx.fill();}
-  for(let i=0;i<n;i++){const v=SB[i],bh=Math.max(2,v*H),y=(H-bh)/2,played=(i/n)<=prog;ctx.fillStyle=played?'rgba(74,222,128,.8)':'rgba(74,222,128,.16)';rr2(i*(bw+gap),y,bw,bh,2);}
-}
-
-function efedVpToggle(id, url, btn) {
-  // pause others
-  Object.keys(_efedVpPlayers).forEach(k => {
-    if(k!==id){const p=_efedVpPlayers[k];if(p&&!p.audio.paused){p.audio.pause();if(p.raf){cancelAnimationFrame(p.raf);p.raf=null;}const ob=document.querySelector(`[data-vpid="${k}"]`);if(ob)ob.querySelector('.efed-vp-icon').textContent='▶';efedVpDrawStatic(`efedvpcv-${k}`,0);}}
-  });
-  if(!_efedVpPlayers[id]){
-    const audio=new Audio(url); audio.preload='auto';
-    const p={audio,raf:null,an:null,sn:null,actx:null};
-    audio.onended=()=>{p.raf&&(cancelAnimationFrame(p.raf),p.raf=null);const ob=document.querySelector(`[data-vpid="${id}"]`);if(ob)ob.querySelector('.efed-vp-icon').textContent='▶';audio.currentTime=0;efedVpDrawStatic(`efedvpcv-${id}`,1);};
-    audio.ontimeupdate=()=>{if(audio.paused)efedVpDrawStatic(`efedvpcv-${id}`,audio.currentTime/(audio.duration||1));};
-    p.startViz=()=>{
-      if(!p.actx)p.actx=new(window.AudioContext||window.webkitAudioContext)();
-      if(p.actx.state==='suspended')p.actx.resume();
-      if(!p.sn){p.an=p.actx.createAnalyser();p.an.fftSize=64;p.sn=p.actx.createMediaElementSource(audio);p.sn.connect(p.an);p.an.connect(p.actx.destination);}
-      const draw=()=>{
-        const cv=document.getElementById(`efedvpcv-${id}`); if(!cv||!p.an)return;
-        const ctx=cv.getContext('2d'),W=cv.offsetWidth||cv.width,H=cv.height;cv.width=W;
-        const d=new Uint8Array(p.an.frequencyBinCount);p.an.getByteFrequencyData(d);
-        ctx.clearRect(0,0,W,H);const n=24,gap=2,bw=Math.max(2,Math.floor((W-gap*(n-1))/n));
-        function rr3(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();ctx.fill();}
-        for(let i=0;i<n;i++){const ix=Math.floor(i*d.length/n),v=d[ix]/255,bh=Math.max(2,v*H),y=(H-bh)/2;ctx.fillStyle=`rgba(74,222,128,${.25+v*.75})`;rr3(i*(bw+gap),y,bw,bh,2);}
-        p.raf=requestAnimationFrame(draw);
-      };draw();
-    };
-    _efedVpPlayers[id]=p;
-  }
-  const p=_efedVpPlayers[id], icon=btn?btn.querySelector('.efed-vp-icon'):null;
-  if(p.audio.paused){p.audio.play();p.startViz();if(icon)icon.textContent='⏸';}
-  else{p.audio.pause();if(p.raf){cancelAnimationFrame(p.raf);p.raf=null;}efedVpDrawStatic(`efedvpcv-${id}`,p.audio.currentTime/(p.audio.duration||1));if(icon)icon.textContent='▶';}
-}
-</script>
 
 <div id="myefed-popup-bg" onclick="if(event.target===this)closeMyEfedPopup()"></div>
 
