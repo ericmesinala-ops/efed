@@ -5609,27 +5609,41 @@ async function saveRivalryFromModal() {
   renderRivalries();
   await saveRivalries(session);
 
-  // Push copy to the rival's profile if they're a platform user
+  // Push ONE mirror entry to the rival's profile (platform users only)
   const rivalUsername = entry.name;
   if (rivalUsername && rivalUsername !== session.username) {
     try {
-      const rows = await sbGet('users', `username=eq.${encodeURIComponent(rivalUsername)}&select=username,display_name,avatar_url,rivalries`);
+      const rows = await sbGet('users', `username=eq.${encodeURIComponent(rivalUsername)}&select=rivalries`);
       if (rows.length) {
-        const rivalRow = rows[0];
-        let rivalRivalries = rivalRow.rivalries || [];
-        // Build the mirror entry — swap names so rival sees the creator
+        // Fetch creator's own avatar from DB so it's always accurate
+        let creatorAvatar = session.avatarUrl || '';
+        try {
+          const meRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=avatar_url`);
+          if (meRows.length && meRows[0].avatar_url) creatorAvatar = meRows[0].avatar_url;
+        } catch(_) {}
+
+        // Mirror: B sees the creator (A) as the rival
         const mirror = {
-          ...entry,
+          id:           rivalryId,
           name:         session.username,
           display_name: myDisplayName,
-          avatar_url:   session.avatar_url || '',
-          received:     true
+          avatar_url:   creatorAvatar,
+          efed:         entry.efed,
+          year:         entry.year,
+          promo_url:    entry.promo_url,
+          youtube_url:  entry.youtube_url,
+          status:       entry.status,
+          received:     true,
+          created_by:   myDisplayName
         };
-        // Remove old copy by id, insert/prepend new
-        rivalRivalries = rivalRivalries.filter(rv => rv.id !== rivalryId);
-        rivalRivalries.unshift(mirror);
+
+        // Replace only our mirror — keep all of B's own rivalries untouched
+        const existingRivals = rows[0].rivalries || [];
+        const updatedRivals = existingRivals.filter(rv => rv.id !== rivalryId);
+        updatedRivals.unshift(mirror);
+
         await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(rivalUsername), {
-          method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ rivalries: rivalRivalries })
+          method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ rivalries: updatedRivals })
         });
       }
     } catch(e) { console.warn('Could not sync rivalry to rival:', e); }
@@ -5912,7 +5926,7 @@ function renderRivalries() {
 
     // Subtle attribution note
     const attrNote = r.received && r.created_by
-      ? `<div style="font-size:.58rem;color:rgba(255,255,255,.25);margin-top:3px;font-style:italic;">${r.edited_by ? 'Edited by ' + _esc(r.edited_by) : 'Rivalry created by ' + _esc(r.created_by)}</div>`
+      ? `<div style="font-size:.58rem;color:rgba(255,255,255,.25);margin-top:3px;font-style:italic;">Rivalry with ${_esc(r.created_by)}</div>`
       : (r.edited_by ? `<div style="font-size:.58rem;color:rgba(255,255,255,.25);margin-top:3px;font-style:italic;">Edited by ${_esc(r.edited_by)}</div>` : '');
 
     if (editable) {
