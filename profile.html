@@ -2903,7 +2903,22 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
     </div>
   </div>
 
-  <div id="post-btn-wrap" style="display:none;justify-content:flex-end;padding:8px 20px 12px;">
+  <div id="post-btn-wrap" style="display:none;justify-content:flex-end;align-items:center;gap:10px;padding:8px 20px 12px;">
+    <!-- Voice Promo button -->
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;">
+      <button id="vp-open-btn" onclick="_vp.open()" title="Record Voice Promo"
+        style="display:none;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;
+               background:rgba(74,222,128,.09);border:1px solid rgba(74,222,128,.25);color:#4ade80;
+               font-size:.72rem;font-weight:700;letter-spacing:.6px;cursor:pointer;transition:opacity .2s,filter .2s;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round">
+          <rect x="9" y="1" width="6" height="11" rx="3"/>
+          <path d="M5 10v1a7 7 0 0 0 14 0v-1"/>
+          <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        Voice Promo
+      </button>
+      <div id="vp-btn-hint" style="display:none;font-size:.6rem;color:#4a4a5a;letter-spacing:.2px;">Delete old promo to record a new one</div>
+    </div>
     <button class="post-btn" id="open-post-modal-btn" onclick="_posts.openModal()" style="display:none;">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       Post
@@ -2950,6 +2965,15 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
       <span style="color:rgba(200,168,75,.5);">ℹ</span> Create ongoing rivalries on the <strong style="color:rgba(255,255,255,.4);">Career</strong> tab. To edit or delete, go to <strong style="color:rgba(255,255,255,.4);">Career → Rivalries</strong>.
     </div>
   </div>
+</div>
+
+<!-- ── VOICE PROMOS ── -->
+<div id="voice-promos-section" class="section" style="display:none;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <div class="sec-title" style="margin-bottom:0;">🎙 Voice Promos</div>
+  </div>
+  <div id="vp-promos-list"></div>
+  <div id="vp-promos-empty" style="display:none;font-size:.78rem;color:#5a5a6a;padding:4px 0;">No voice promos yet.</div>
 </div>
 
 <!-- ── SUPPORTING EFEDS ── -->
@@ -11513,6 +11537,8 @@ async function _loadPublicProfile(username) {
     loadSocialFeed(username, false);
     loadTrophyCase(username);
     loadFeaturedVideos(username);
+    // Voice Promos (visitor view)
+    try { await _vp.load(username, false, {}); } catch(e) {}
 
     // ── eFeds (public/guest view) ──
     const _pubEfedList = document.getElementById('myefeds-list');
@@ -11929,6 +11955,13 @@ async function loadProfile() {
     loadRivalries(resolvedUser, _isOwnProfile);
     loadSocialFeed(resolvedUser, _isOwnProfile);
     loadTrophyCase(resolvedUser);
+    // ── Voice Promos ──
+    try {
+      const cdRow = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=vp_cooldown`);
+      const cd = cdRow[0] ? (typeof cdRow[0].vp_cooldown === 'string' ? JSON.parse(cdRow[0].vp_cooldown) : (cdRow[0].vp_cooldown||{})) : {};
+      await _vp.load(resolvedUser, _isOwnProfile, cd);
+    } catch(e) { await _vp.load(resolvedUser, _isOwnProfile, {}); }
+    if (_isOwnProfile) _vp.cleanExpired();
     const bioEl = document.getElementById('profile-bio');
     const bioSec = document.getElementById('bio-section');
     const bioWrap = document.getElementById('bio-display-wrap');
@@ -16118,5 +16151,558 @@ function closeVideoPopup() {
 </script>
 
 
+<!-- ══ VOICE PROMO MODAL ══════════════════════════════════════════════════ -->
+<style>
+@keyframes vp-rec-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.25;transform:scale(.65)}}
+@keyframes vp-modal-in{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+#vp-modal-bg{position:fixed;inset:0;z-index:9200;background:rgba(0,0,0,.85);backdrop-filter:blur(7px);
+  display:none;align-items:flex-end;justify-content:center;}
+#vp-modal-bg.open{display:flex;}
+@media(min-width:520px){#vp-modal-bg{align-items:center;}}
+#vp-modal{background:linear-gradient(160deg,#090d0b 0%,#08090c 100%);
+  border:1px solid rgba(74,222,128,.2);border-radius:18px 18px 0 0;
+  width:100%;max-width:460px;padding:22px 20px 30px;position:relative;
+  box-shadow:0 -4px 40px rgba(74,222,128,.08);animation:vp-modal-in .22s ease;}
+@media(min-width:520px){#vp-modal{border-radius:18px;max-height:88vh;overflow-y:auto;}}
+.vp-hd{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:3px;color:#4ade80;text-align:center;margin-bottom:2px;}
+.vp-sub{font-size:.68rem;color:rgba(74,222,128,.4);text-align:center;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:16px;}
+.vp-sel{width:100%;padding:9px 12px;border-radius:10px;font-size:.8rem;background:rgba(255,255,255,.04);
+  border:1px solid rgba(74,222,128,.2);color:#e8e8e8;font-family:'DM Sans',sans-serif;
+  outline:none;appearance:none;cursor:pointer;margin-bottom:9px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(74,222,128,.5)' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 11px center;padding-right:30px;}
+.vp-sel:focus{border-color:rgba(74,222,128,.4);}
+.vp-sel option{background:#111;}
+.vp-instr{font-size:.73rem;color:rgba(255,255,255,.38);line-height:1.7;border-left:2px solid rgba(74,222,128,.2);
+  padding:8px 12px;border-radius:0 6px 6px 0;background:rgba(74,222,128,.03);margin-bottom:14px;font-style:italic;}
+.vp-dot-row{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:12px;}
+.vp-dot{width:9px;height:9px;border-radius:50%;background:rgba(74,222,128,.18);border:1px solid rgba(74,222,128,.3);transition:background .2s;}
+.vp-dot.used{background:rgba(248,113,113,.55);border-color:rgba(248,113,113,.4);}
+.vp-dot-lbl{font-size:.62rem;color:#5a5a6a;margin-left:4px;letter-spacing:.3px;}
+.vp-btn-row{display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap;}
+.vp-btn{display:flex;align-items:center;gap:6px;padding:8px 18px;border-radius:20px;
+  font-size:.76rem;font-weight:700;letter-spacing:.7px;cursor:pointer;
+  transition:background .15s,opacity .15s;font-family:'DM Sans',sans-serif;border:1px solid transparent;}
+.vp-btn:disabled{opacity:.35;cursor:not-allowed;}
+.vp-g{background:rgba(74,222,128,.1);border-color:rgba(74,222,128,.3);color:#4ade80;}
+.vp-g:hover:not(:disabled){background:rgba(74,222,128,.2);}
+.vp-r{background:rgba(248,113,113,.1);border-color:rgba(248,113,113,.3);color:#f87171;}
+.vp-r:hover:not(:disabled){background:rgba(248,113,113,.2);}
+.vp-au{background:rgba(200,168,75,.09);border-color:rgba(200,168,75,.28);color:#c8a84b;}
+.vp-au:hover:not(:disabled){background:rgba(200,168,75,.18);}
+.vp-gh{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.1);color:#8a8a9a;}
+.vp-gh:hover:not(:disabled){background:rgba(255,255,255,.09);}
+#vp-canvas,#vp-rev-canvas{display:block;width:100%;height:40px;border-radius:6px;
+  background:rgba(74,222,128,.03);border:1px solid rgba(74,222,128,.1);cursor:pointer;margin-bottom:5px;}
+#vp-countdown{font-family:'Bebas Neue',sans-serif;font-size:1.9rem;letter-spacing:2px;
+  color:#4ade80;text-align:center;min-height:2.4rem;margin-bottom:6px;transition:color .3s;}
+#vp-countdown.vp-warn{color:#fbbf24;}#vp-countdown.vp-danger{color:#f87171;}
+.vp-rec-dot{width:7px;height:7px;border-radius:50%;background:#4ade80;box-shadow:0 0 7px #4ade80;
+  animation:vp-rec-pulse 1s ease-in-out infinite;flex-shrink:0;}
+#vp-cooldown-msg{font-size:.7rem;color:#f87171;text-align:center;margin-top:8px;letter-spacing:.3px;display:none;}
+/* feed card */
+.vp-feed-card{background:rgba(74,222,128,.04);border:1px solid rgba(74,222,128,.15);
+  border-radius:12px;padding:13px 15px;margin-bottom:10px;position:relative;}
+.vp-fc-tag{font-family:'Bebas Neue',sans-serif;font-size:.75rem;letter-spacing:2.5px;color:#4ade80;}
+.vp-fc-efed{font-size:.65rem;color:rgba(74,222,128,.4);letter-spacing:1px;text-transform:uppercase;margin-left:auto;}
+.vp-fc-event{font-size:.68rem;color:rgba(255,255,255,.28);letter-spacing:.3px;margin-bottom:7px;}
+.vp-play-btn{width:33px;height:33px;border-radius:50%;flex-shrink:0;
+  background:rgba(74,222,128,.11);border:1px solid rgba(74,222,128,.28);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s;}
+.vp-play-btn:hover{background:rgba(74,222,128,.22);}
+.vp-play-icon{font-size:.75rem;color:#4ade80;user-select:none;line-height:1;}
+.vp-fc-canvas{display:block;flex:1;height:33px;border-radius:4px;cursor:pointer;}
+.vp-act-btn{display:flex;align-items:center;gap:4px;padding:4px 9px;border-radius:10px;
+  font-size:.63rem;font-weight:600;letter-spacing:.4px;cursor:pointer;border:1px solid transparent;
+  font-family:'DM Sans',sans-serif;transition:background .15s;}
+.vp-dl{background:rgba(200,168,75,.07);border-color:rgba(200,168,75,.2);color:#c8a84b;}
+.vp-dl:hover{background:rgba(200,168,75,.15);}
+.vp-del{background:rgba(248,113,113,.07);border-color:rgba(248,113,113,.2);color:#f87171;}
+.vp-del:hover{background:rgba(248,113,113,.15);}
+.vp-flag{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.08);color:#5a5a6a;}
+.vp-flag:hover{background:rgba(255,255,255,.08);color:#aaa;}
+html.day-mode #vp-modal{background:linear-gradient(160deg,#eefaf2 0%,#f5f5f8 100%);border-color:rgba(22,163,74,.2);}
+html.day-mode .vp-hd{color:#16a34a;}html.day-mode .vp-sub{color:rgba(22,163,74,.45);}
+html.day-mode .vp-sel{background-color:rgba(0,0,0,.03);border-color:rgba(22,163,74,.2);color:#111;}
+html.day-mode .vp-instr{color:rgba(0,0,0,.4);border-left-color:rgba(22,163,74,.25);background:rgba(22,163,74,.04);}
+html.day-mode #vp-canvas,html.day-mode #vp-rev-canvas{background:rgba(22,163,74,.04);border-color:rgba(22,163,74,.12);}
+html.day-mode .vp-feed-card{background:rgba(22,163,74,.04);border-color:rgba(22,163,74,.15);}
+</style>
+
+<div id="vp-modal-bg">
+<div id="vp-modal">
+  <button onclick="_vp.close()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:#5a5a6a;font-size:1.1rem;cursor:pointer;line-height:1;padding:4px;">✕</button>
+  <div class="vp-hd">🎙 Voice Promo</div>
+  <div class="vp-sub">In-Character Only</div>
+
+  <!-- STEP: select -->
+  <div id="vp-step-select">
+    <select id="vp-efed-sel" class="vp-sel" onchange="_vp.onEfedChange()">
+      <option value="">— Select eFed —</option>
+    </select>
+    <select id="vp-event-sel" class="vp-sel" style="display:none;">
+      <option value="">— No specific event —</option>
+    </select>
+    <div class="vp-instr" id="vp-instr">Select your eFed above to get started.</div>
+    <div class="vp-dot-row">
+      <span class="vp-dot" id="vp-d0"></span>
+      <span class="vp-dot" id="vp-d1"></span>
+      <span class="vp-dot" id="vp-d2"></span>
+      <span class="vp-dot-lbl">recordings today</span>
+    </div>
+    <div id="vp-cooldown-msg"></div>
+    <div class="vp-btn-row">
+      <button class="vp-btn vp-g" id="vp-start-btn" onclick="_vp.startRecord()" disabled>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round"><rect x="9" y="1" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/></svg>
+        Start Recording
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP: recording -->
+  <div id="vp-step-record" style="display:none;">
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px;">
+      <span class="vp-rec-dot"></span>
+      <span style="font-size:.7rem;color:#4ade80;letter-spacing:1.2px;font-weight:700;">RECORDING</span>
+    </div>
+    <canvas id="vp-canvas" width="420" height="40"></canvas>
+    <div id="vp-countdown">0:20</div>
+    <div class="vp-btn-row">
+      <button class="vp-btn vp-r" onclick="_vp.stopRecord()">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="#f87171" stroke="none"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+        Stop
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP: review -->
+  <div id="vp-step-review" style="display:none;">
+    <div style="font-size:.7rem;color:rgba(74,222,128,.55);text-align:center;letter-spacing:1.2px;margin-bottom:10px;font-family:'Bebas Neue',sans-serif;">REVIEW YOUR PROMO</div>
+    <canvas id="vp-rev-canvas" width="420" height="40"></canvas>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+      <button class="vp-play-btn" onclick="_vp.toggleRevPlay()" id="vp-rev-play-btn">
+        <span class="vp-play-icon" id="vp-rev-icon">▶</span>
+      </button>
+      <div id="vp-rev-time" style="font-size:.64rem;color:#5a5a6a;letter-spacing:.3px;flex:1;">0:00</div>
+    </div>
+    <audio id="vp-rev-audio" style="display:none;" preload="auto"></audio>
+    <div style="font-size:.64rem;color:rgba(248,113,113,.45);text-align:center;letter-spacing:.3px;margin-bottom:2px;">
+      ⚠ Redo will permanently delete this recording
+    </div>
+    <div class="vp-btn-row">
+      <button class="vp-btn vp-gh" onclick="_vp.redo()">↺ Redo</button>
+      <button class="vp-btn vp-au" onclick="_vp.dlReview()">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Download
+      </button>
+      <button class="vp-btn vp-g" onclick="_vp.post()" id="vp-post-btn">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+        Post Promo
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP: uploading -->
+  <div id="vp-step-uploading" style="display:none;text-align:center;padding:22px 0;">
+    <div style="font-size:.78rem;color:#4ade80;letter-spacing:1px;margin-bottom:10px;">Uploading…</div>
+    <div style="width:100%;height:3px;background:rgba(74,222,128,.1);border-radius:2px;overflow:hidden;">
+      <div id="vp-prog-bar" style="height:100%;background:#4ade80;border-radius:2px;width:0%;transition:width .3s;"></div>
+    </div>
+  </div>
+
+  <!-- STEP: done -->
+  <div id="vp-step-done" style="display:none;text-align:center;padding:18px 0;">
+    <div style="font-size:2rem;margin-bottom:8px;">🎙</div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:2px;color:#4ade80;margin-bottom:5px;">PROMO POSTED</div>
+    <div style="font-size:.7rem;color:#5a5a6a;letter-spacing:.3px;">Your voice promo is now live.</div>
+    <div class="vp-btn-row" style="margin-top:16px;">
+      <button class="vp-btn vp-gh" onclick="_vp.close()">Close</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+// ══ VOICE PROMO MODULE ══════════════════════════════════════════════════════
+const _vp = (() => {
+  const EMAILJS_SVC = 'service_zxvndxs';
+  const EMAILJS_TPL = 'template_rrbxs08';
+  const EMAILJS_KEY = 'QQrnblwSwGWLa1G5_';
+  const MAX_S       = 20;
+  const MAX_ATT     = 3;
+  const CD_MS       = 24 * 60 * 60 * 1000;
+
+  let _user = '', _isOwn = false;
+  let _efeds = [];            // [{efed_name, acronym, events:[]}]
+  let _promos = {};           // { efed_name: promo_row }
+  let _cd = {};               // cooldown object
+  let _mr = null, _chunks = [], _rtimer = null, _elapsed = 0;
+  let _analyser = null, _raf = null, _actx = null;
+  let _revBlob = null, _revUrl = null, _revSrc = null;
+  let _fcPlayers = {};        // per-card audio players
+
+  const $  = id => document.getElementById(id);
+  const fmt = s  => '0:' + String(Math.max(0, Math.floor(s))).padStart(2, '0');
+
+  // ── Canvas ────────────────────────────────────────────────────────────────
+  const SB = [.3,.55,.75,.9,.7,.5,.85,.95,.6,.4,.8,.65,.5,.9,.6,.4,.75,.55,.85,.45,.7,.9,.5,.35];
+  function rr(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();ctx.fill();}
+
+  function drawStatic(cv, prog=0, col='74,222,128') {
+    const c = typeof cv==='string' ? $(cv) : cv; if(!c) return;
+    const ctx=c.getContext('2d'), W=c.offsetWidth||c.width, H=c.height; c.width=W;
+    ctx.clearRect(0,0,W,H);
+    const n=SB.length, gap=2, bw=Math.max(2,Math.floor((W-gap*(n-1))/n));
+    for(let i=0;i<n;i++){const v=SB[i],bh=Math.max(3,v*H),y=(H-bh)/2,played=(i/n)<=prog;ctx.fillStyle=played?`rgba(${col},.85)`:`rgba(${col},.18)`;rr(ctx,i*(bw+gap),y,bw,bh,2);}
+  }
+
+  function drawLive(cv, col='74,222,128') {
+    const c = typeof cv==='string' ? $(cv) : cv; if(!c||!_analyser) return;
+    const ctx=c.getContext('2d'), W=c.offsetWidth||c.width, H=c.height; c.width=W;
+    const d=new Uint8Array(_analyser.frequencyBinCount); _analyser.getByteFrequencyData(d);
+    ctx.clearRect(0,0,W,H);
+    const n=24,gap=2,bw=Math.max(2,Math.floor((W-gap*(n-1))/n));
+    for(let i=0;i<n;i++){const idx=Math.floor(i*d.length/n),v=d[idx]/255,bh=Math.max(3,v*H),y=(H-bh)/2;ctx.fillStyle=`rgba(${col},${.28+v*.72})`;rr(ctx,i*(bw+gap),y,bw,bh,2);}
+    _raf = requestAnimationFrame(() => drawLive(cv, col));
+  }
+
+  function stopViz(){if(_raf){cancelAnimationFrame(_raf);_raf=null;}if(_analyser){try{_analyser.disconnect();}catch(e){}}_analyser=null;}
+
+  function getCtx(){if(!_actx)_actx=new(window.AudioContext||window.webkitAudioContext)();if(_actx.state==='suspended')_actx.resume();return _actx;}
+
+  // ── Cooldown ──────────────────────────────────────────────────────────────
+  function cdState(){
+    const now=Date.now(), lu=_cd.locked_until, ws=_cd.window_start, att=_cd.attempts||0;
+    if(lu && now < new Date(lu).getTime()) return {locked:true, att};
+    if(ws && (now-new Date(ws).getTime()) < CD_MS && att >= MAX_ATT) return {locked:true, att};
+    if(ws && (now-new Date(ws).getTime()) >= CD_MS) return {locked:false, att:0};
+    return {locked:false, att};
+  }
+
+  async function bumpAtt(){
+    const now=Date.now(), st=cdState();
+    let att=(st.att||0)+1, ws=_cd.window_start;
+    if(!ws||(now-new Date(ws).getTime())>=CD_MS){ws=new Date(now).toISOString();att=1;}
+    const locked_until=att>=MAX_ATT?new Date(new Date(ws).getTime()+CD_MS).toISOString():null;
+    _cd={attempts:att,window_start:ws,locked_until};
+    try{await sbPatch('users',`username=eq.${encodeURIComponent(_user)}`,{vp_cooldown:JSON.stringify(_cd)});}catch(e){}
+  }
+
+  function updateDots(used){for(let i=0;i<3;i++){const d=$(`vp-d${i}`);if(d)d.classList.toggle('used',i<used);}}
+
+  // ── eFed dropdown ──────────────────────────────────────────────────────────
+  function buildEfedDrop(){
+    const sel=$('vp-efed-sel'); if(!sel) return;
+    sel.innerHTML='<option value="">— Select eFed —</option>';
+    _efeds.forEach(e=>{const o=document.createElement('option');o.value=e.efed_name;o.textContent=e.acronym?`${e.efed_name} (${e.acronym})`:e.efed_name;sel.appendChild(o);});
+    if(_efeds.length===1){sel.value=_efeds[0].efed_name;onEfedChange();}
+  }
+
+  function onEfedChange(){
+    const sel=$('vp-efed-sel'); if(!sel) return;
+    const name=sel.value, efed=_efeds.find(e=>e.efed_name===name);
+    const evSel=$('vp-event-sel'), instr=$('vp-instr'), startBtn=$('vp-start-btn'), cdMsg=$('vp-cooldown-msg');
+    if(!efed){if(evSel)evSel.style.display='none';if(instr)instr.textContent='Select your eFed above to get started.';if(startBtn)startBtn.disabled=true;return;}
+    const existing=_promos[name];
+    const st=cdState(); updateDots(st.att);
+    if(existing){
+      if(instr)instr.innerHTML=`You already have an active promo for <strong style="color:#4ade80;">${efed.acronym||name}</strong>.<br><span style="color:rgba(248,113,113,.55);font-size:.68rem;">Delete it from your feed to record a new one.</span>`;
+      if(startBtn)startBtn.disabled=true; if(evSel)evSel.style.display='none'; return;
+    }
+    if(cdMsg)cdMsg.style.display='none';
+    if(st.locked){if(cdMsg){cdMsg.textContent='You are out of voice recordings until the next day';cdMsg.style.display='block';}if(startBtn)startBtn.disabled=true;}
+    else{if(startBtn)startBtn.disabled=false;}
+    if(efed.events&&efed.events.length){
+      if(evSel){evSel.style.display='block';evSel.innerHTML='<option value="">— No specific event —</option>';
+      efed.events.forEach(ev=>{const o=document.createElement('option');o.value=JSON.stringify({name:ev.title||ev.name,date:ev.date||''});o.textContent=(ev.title||ev.name)+((ev.date&&ev.date!=='TBA')?' — '+ev.date:' (TBA)');evSel.appendChild(o);});
+      if(efed.events.length===1)evSel.value=JSON.stringify({name:efed.events[0].title||efed.events[0].name,date:efed.events[0].date||''});}
+    } else {if(evSel)evSel.style.display='none';}
+    const acronym=efed.acronym||name;
+    if(instr)instr.textContent=`Create a 20-second in-character voice promo for ${acronym}. This may be regarding your current rivalry. Keep it in-character. OOC recordings will be deleted.`;
+  }
+
+  // ── Steps ─────────────────────────────────────────────────────────────────
+  function showStep(s){['select','record','review','uploading','done'].forEach(n=>{const e=$(`vp-step-${n}`);if(e)e.style.display='none';});const t=$(`vp-step-${s}`);if(t)t.style.display='block';}
+
+  // ── Record ────────────────────────────────────────────────────────────────
+  async function startRecord(){
+    const sel=$('vp-efed-sel'); if(!sel||!sel.value) return;
+    if(cdState().locked) return;
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const ctx=getCtx(), src=ctx.createMediaStreamSource(stream);
+      _analyser=ctx.createAnalyser(); _analyser.fftSize=64; src.connect(_analyser);
+      const mime=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+      _mr=new MediaRecorder(stream,mime?{mimeType:mime}:{});
+      _chunks=[];
+      _mr.ondataavailable=e=>{if(e.data.size>0)_chunks.push(e.data);};
+      _mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());onRecStop();};
+      _mr.start(100); _elapsed=0;
+      showStep('record'); drawLive('vp-canvas'); updCD(MAX_S);
+      _rtimer=setInterval(()=>{_elapsed++;const rem=MAX_S-_elapsed;updCD(rem);if(_elapsed>=MAX_S)stopRecord();},1000);
+    }catch(e){alert('Microphone access denied. Please allow mic access and try again.');}
+  }
+
+  function updCD(rem){const el=$('vp-countdown');if(el){el.textContent=fmt(rem);el.className=rem<=5?'vp-danger':rem<=10?'vp-warn':'' ;}}
+
+  function stopRecord(){clearInterval(_rtimer);if(_mr&&_mr.state!=='inactive')_mr.stop();_mr=null;}
+
+  function onRecStop(){
+    stopViz();
+    if(!_chunks.length){showStep('select');return;}
+    _revBlob=new Blob(_chunks,{type:_chunks[0].type||'audio/webm'});
+    _revUrl=URL.createObjectURL(_revBlob);
+    const audio=$('vp-rev-audio');
+    if(audio){
+      audio.src=_revUrl;
+      audio.onended=()=>{$('vp-rev-icon').textContent='▶';stopViz();drawStatic('vp-rev-canvas',1);};
+      audio.ontimeupdate=()=>{const dur=audio.duration||MAX_S,td=$('vp-rev-time');if(td)td.textContent=fmt(audio.currentTime)+' / '+fmt(dur);if(audio.paused)drawStatic('vp-rev-canvas',audio.currentTime/(dur||1));};
+    }
+    requestAnimationFrame(()=>drawStatic('vp-rev-canvas',0));
+    showStep('review');
+  }
+
+  function toggleRevPlay(){
+    const audio=$('vp-rev-audio'); if(!audio) return;
+    if(audio.paused){
+      const ctx=getCtx();
+      if(!_revSrc){_analyser=ctx.createAnalyser();_analyser.fftSize=64;_revSrc=ctx.createMediaElementSource(audio);_revSrc.connect(_analyser);_analyser.connect(ctx.destination);}
+      audio.play(); $('vp-rev-icon').textContent='⏸'; drawLive('vp-rev-canvas');
+    } else {audio.pause();$('vp-rev-icon').textContent='▶';stopViz();drawStatic('vp-rev-canvas',audio.currentTime/(audio.duration||1));}
+  }
+
+  function redo(){
+    const audio=$('vp-rev-audio'); if(audio){audio.pause();audio.src='';}
+    stopViz(); _revSrc=null;
+    if(_revUrl){URL.revokeObjectURL(_revUrl);_revUrl=null;} _revBlob=null;
+    bumpAtt();
+    const st=cdState(); updateDots(st.att);
+    if(st.locked){const m=$('vp-cooldown-msg');if(m){m.textContent='You are out of voice recordings until the next day';m.style.display='block';}const sb=$('vp-start-btn');if(sb)sb.disabled=true;}
+    showStep('select');
+  }
+
+  function dlReview(){
+    if(!_revBlob) return;
+    const ext=_revBlob.type.includes('ogg')?'ogg':'webm';
+    const a=document.createElement('a');a.href=_revUrl;a.download=`voice-promo-${Date.now()}.${ext}`;a.click();
+  }
+
+  // ── Post ──────────────────────────────────────────────────────────────────
+  async function post(){
+    if(!_revBlob) return;
+    const efedName=($('vp-efed-sel')||{}).value||'';
+    if(!efedName) return;
+    const efed=_efeds.find(e=>e.efed_name===efedName);
+    let evName=null, evDate=null;
+    const evV=($('vp-event-sel')||{}).value;
+    if(evV){try{const ev=JSON.parse(evV);evName=ev.name;evDate=ev.date;}catch(e){}}
+    const pb=$('vp-post-btn'); if(pb)pb.disabled=true;
+    showStep('uploading'); fakeProgress();
+    try{
+      const ext=_revBlob.type.includes('ogg')?'ogg':'webm';
+      const path=`${_user}_${efedName.replace(/\s+/g,'_')}.${ext}`;
+      const audioUrl=await uploadBlob(_revBlob, ext, path);
+      let expires_at=null;
+      if(evDate&&evDate!=='TBA'){const d=new Date(evDate);d.setDate(d.getDate()+3);expires_at=d.toISOString();}
+      const payload={username:_user,efed_name:efedName,efed_acronym:efed?efed.acronym||null:null,event_name:evName,event_date:evDate,audio_url:audioUrl,created_at:new Date().toISOString(),expires_at};
+      // delete existing first then insert (handles UNIQUE constraint)
+      await fetch(`${SUPABASE_URL}/rest/v1/voice_promos?username=eq.${encodeURIComponent(_user)}&efed_name=eq.${encodeURIComponent(efedName)}`,{method:'DELETE',headers:SB_HEADERS});
+      const inserted=await sbInsert('voice_promos',payload);
+      if(inserted&&inserted[0])payload.id=inserted[0].id;
+      await bumpAtt();
+      _promos[efedName]=payload;
+      showStep('done');
+      renderPromosSection();
+      updateOpenBtn();
+    }catch(e){console.error(e);alert('Upload failed. Please try again.');if(pb)pb.disabled=false;showStep('review');}
+  }
+
+  function fakeProgress(){
+    let p=0; const bar=$('vp-prog-bar');
+    const iv=setInterval(()=>{p+=Math.random()*15;if(p>88)p=88;if(bar)bar.style.width=p+'%';if(p>=88)clearInterval(iv);},180);
+  }
+
+  async function uploadBlob(blob, ext, path){
+    try{await fetch(`${SUPABASE_URL}/storage/v1/object/voice-promos/${path}`,{method:'DELETE',headers:SB_HEADERS});}catch(e){}
+    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/voice-promos/${path}`,{method:'POST',headers:{...SB_HEADERS,'Content-Type':blob.type,'x-upsert':'true'},body:blob});
+    if(!r.ok)throw new Error(await r.text());
+    return `${SUPABASE_URL}/storage/v1/object/public/voice-promos/${path}`;
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+  async function deletePromo(promoId, efedName){
+    if(!confirm('Delete this voice promo?')) return;
+    try{
+      await fetch(`${SUPABASE_URL}/rest/v1/voice_promos?id=eq.${encodeURIComponent(promoId)}`,{method:'DELETE',headers:SB_HEADERS});
+      // also delete from storage
+      const promo=Object.values(_promos).find(p=>p.id===promoId);
+      if(promo){const url=promo.audio_url,seg=url.split('/voice-promos/')[1];if(seg){try{await fetch(`${SUPABASE_URL}/storage/v1/object/voice-promos/${seg}`,{method:'DELETE',headers:SB_HEADERS});}catch(e){}}}
+      delete _promos[efedName];
+      renderPromosSection(); updateOpenBtn();
+    }catch(e){alert('Could not delete. Try again.');}
+  }
+
+  // ── Flag ──────────────────────────────────────────────────────────────────
+  async function flagPromo(promoId, ownerUser, efedName){
+    const session=typeof getSession==='function'?getSession():null;
+    if(!session){alert('Sign in to report.');return;}
+    if(!confirm('Report this voice promo as out-of-character?')) return;
+    try{
+      await sbInsert('flags',{flagged_by:session.username,content_type:'voice_promo',content_id:promoId,owner:ownerUser,efed_name:efedName,created_at:new Date().toISOString()});
+      if(typeof emailjs!=='undefined'){emailjs.send(EMAILJS_SVC,EMAILJS_TPL,{to_email:'efedstreaminghub@yahoo.com',subject:'🚩 Voice Promo Flagged',message:`Voice promo flagged.\nOwner: ${ownerUser}\neFed: ${efedName}\nFlagged by: ${session.username}\nPromo ID: ${promoId}`},EMAILJS_KEY).catch(()=>{});}
+      alert('Reported. Thank you.');
+    }catch(e){alert('Could not submit report. Try again.');}
+  }
+
+  // ── Render helpers ────────────────────────────────────────────────────────
+  function buildFeedCard(promo){
+    const session=typeof getSession==='function'?getSession():null;
+    const own=session&&session.username.toLowerCase()===_user.toLowerCase();
+    const canFlag=session&&!own;
+    const id=promo.id||'';
+    const evLine=promo.event_name?`<div class="vp-fc-event">🗓 ${promo.event_name}${promo.event_date&&promo.event_date!=='TBA'?' — '+promo.event_date:' (TBA)'}</div>`:'';
+    const dlBtn=own?`<button class="vp-act-btn vp-dl" onclick="_vp.dlCard('${id}')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</button>`:'';
+    const delBtn=own?`<button class="vp-act-btn vp-del" onclick="_vp.deletePromo('${id}','${promo.efed_name}')"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>Delete</button>`:'';
+    const flagBtn=canFlag?`<button class="vp-act-btn vp-flag" onclick="_vp.flagPromo('${id}','${_user}','${promo.efed_name}')">🚩 Report</button>`:'';
+    return `<div class="vp-feed-card" id="vp-card-${id}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <span class="vp-fc-tag">🎙 Voice Promo</span>
+        <span class="vp-fc-efed">${promo.efed_acronym||promo.efed_name}</span>
+      </div>
+      ${evLine}
+      <div class="vp-feed-play-row" style="display:flex;align-items:center;gap:9px;">
+        <button class="vp-play-btn" onclick="_vp.toggleCard('${id}','${promo.audio_url}')" id="vp-pb-${id}">
+          <span class="vp-play-icon" id="vp-pi-${id}">▶</span>
+        </button>
+        <canvas class="vp-fc-canvas" id="vp-cv-${id}" width="300" height="33"></canvas>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:8px;justify-content:flex-end;">
+        ${dlBtn}${delBtn}${flagBtn}
+      </div>
+    </div>`;
+  }
+
+  function renderPromosSection(){
+    const sec=$('voice-promos-section'), list=$('vp-promos-list'), emp=$('vp-promos-empty');
+    if(!sec) return;
+    const arr=Object.values(_promos);
+    if(!arr.length){if(list)list.innerHTML='';if(emp)emp.style.display='block';sec.style.display=_isOwn?'':'none';return;}
+    sec.style.display='';
+    if(emp)emp.style.display='none';
+    if(list)list.innerHTML=arr.map(p=>buildFeedCard(p)).join('');
+    arr.forEach(p=>requestAnimationFrame(()=>drawStatic(`vp-cv-${p.id}`,0)));
+  }
+
+  function updateOpenBtn(){
+    const btn=$('vp-open-btn'), hint=$('vp-btn-hint'); if(!btn) return;
+    // Check if user has ANY active promo
+    const hasSome=Object.keys(_promos).length>0;
+    // Actually: button is per-efed, so gray only if ALL efeds have promos
+    const allCovered=_efeds.length>0&&_efeds.every(e=>_promos[e.efed_name]);
+    if(allCovered){
+      btn.style.opacity='.38'; btn.style.filter='grayscale(1)'; btn.style.pointerEvents='none';
+      if(hint)hint.style.display='block';
+    } else {
+      btn.style.opacity='1'; btn.style.filter='none'; btn.style.pointerEvents='';
+      if(hint)hint.style.display='none';
+    }
+  }
+
+  // ── Card playback ─────────────────────────────────────────────────────────
+  function toggleCard(id, url){
+    // Pause any other playing card
+    Object.keys(_fcPlayers).forEach(k=>{
+      if(k!==id){const p=_fcPlayers[k];if(p&&p.audio&&!p.audio.paused){p.audio.pause();const pi=$(`vp-pi-${k}`);if(pi)pi.textContent='▶';if(p.stopViz)p.stopViz();drawStatic(`vp-cv-${k}`,0);}}
+    });
+    if(!_fcPlayers[id]){
+      const audio=new Audio(url); audio.preload='auto';
+      let raf2=null, an2=null, sn=null;
+      const ctx=getCtx();
+      const sv=()=>{if(raf2){cancelAnimationFrame(raf2);raf2=null;}if(an2){try{an2.disconnect();}catch(e){}an2=null;}};
+      audio.onended=()=>{const pi=$(`vp-pi-${id}`);if(pi)pi.textContent='▶';sv();audio.currentTime=0;drawStatic(`vp-cv-${id}`,1);};
+      audio.ontimeupdate=()=>{if(audio.paused)drawStatic(`vp-cv-${id}`,audio.currentTime/(audio.duration||1));};
+      _fcPlayers[id]={audio,stopViz:sv,play:()=>{
+        if(!sn){an2=ctx.createAnalyser();an2.fftSize=64;sn=ctx.createMediaElementSource(audio);sn.connect(an2);an2.connect(ctx.destination);}
+        audio.play();
+        const lv=c=>{const cv=$(c);if(!cv||!an2)return;const W=cv.offsetWidth||cv.width,H=cv.height;cv.width=W;const ctx2=cv.getContext('2d'),d=new Uint8Array(an2.frequencyBinCount);an2.getByteFrequencyData(d);ctx2.clearRect(0,0,W,H);const n=24,gap=2,bw=Math.max(2,Math.floor((W-gap*(n-1))/n));for(let i=0;i<n;i++){const ix=Math.floor(i*d.length/n),v=d[ix]/255,bh=Math.max(3,v*H),y=(H-bh)/2;ctx2.fillStyle=`rgba(74,222,128,${.28+v*.72})`;rr(ctx2,i*(bw+gap),y,bw,bh,2);}raf2=requestAnimationFrame(()=>lv(c));};
+        lv(`vp-cv-${id}`);
+      }};
+    }
+    const p=_fcPlayers[id];
+    if(p.audio.paused){p.play();$(`vp-pi-${id}`).textContent='⏸';}
+    else{p.audio.pause();p.stopViz();$(`vp-pi-${id}`).textContent='▶';drawStatic(`vp-cv-${id}`,p.audio.currentTime/(p.audio.duration||1));}
+  }
+
+  function dlCard(id){
+    const promo=Object.values(_promos).find(p=>p.id===id); if(!promo) return;
+    const ext=promo.audio_url.split('.').pop();
+    const a=document.createElement('a');a.href=promo.audio_url;a.download=`voice-promo-${promo.efed_name}-${Date.now()}.${ext}`;a.target='_blank';a.click();
+  }
+
+  // ── Open/close ────────────────────────────────────────────────────────────
+  function open(){
+    const bg=$('vp-modal-bg'); if(!bg) return;
+    buildEfedDrop(); showStep('select');
+    const st=cdState(); updateDots(st.att);
+    bg.classList.add('open'); document.body.style.overflow='hidden';
+  }
+
+  function close(){
+    const bg=$('vp-modal-bg'); if(bg){bg.classList.remove('open');document.body.style.overflow='';}
+    const ra=$('vp-rev-audio'); if(ra){ra.pause();ra.src='';}
+    stopViz(); _revSrc=null;
+    if(_revUrl){URL.revokeObjectURL(_revUrl);_revUrl=null;} _revBlob=null;
+    showStep('select');
+  }
+
+  // ── Load ──────────────────────────────────────────────────────────────────
+  async function load(username, isOwn, cooldown){
+    _user=username; _isOwn=isOwn; _cd=cooldown||{};
+    // Load user's roster memberships + each eFed's events
+    _efeds=[];
+    try{
+      const rows=await sbGet('roster',`username=eq.${encodeURIComponent(username)}&status=eq.approved&select=efed`);
+      const efedNames=[...new Set(rows.map(r=>r.efed))].filter(Boolean);
+      for(const en of efedNames){
+        try{
+          const eu=await sbGet('users',`promo_name=ilike.${encodeURIComponent(en)}&select=promo_name,acronym,efed_event_title,efed_event_date,efed_events_json&limit=1`);
+          if(!eu.length) continue;
+          const u=eu[0]; const events=[];
+          if(u.efed_event_title)events.push({title:u.efed_event_title,date:u.efed_event_date||'TBA'});
+          if(Array.isArray(u.efed_events_json))u.efed_events_json.forEach(ev=>{if(ev.title)events.push({title:ev.title,date:ev.date||'TBA'});});
+          _efeds.push({efed_name:en,acronym:u.acronym||'',events});
+        }catch(e){}
+      }
+    }catch(e){}
+    // Load existing promos for this user
+    _promos={};
+    try{
+      const rows=await sbGet('voice_promos',`username=eq.${encodeURIComponent(username)}&select=id,username,efed_name,efed_acronym,event_name,event_date,audio_url,created_at,expires_at`);
+      rows.forEach(r=>{
+        // Check not expired
+        if(r.expires_at&&new Date(r.expires_at)<new Date()) return;
+        _promos[r.efed_name]=r;
+      });
+    }catch(e){}
+    renderPromosSection();
+    if(isOwn){
+      const btn=$('vp-open-btn'), wrap=$('post-btn-wrap');
+      if(btn)btn.style.display='flex';
+      if(wrap)wrap.style.display='flex';
+      updateOpenBtn();
+    }
+  }
+
+  // ── Background expiry cleanup (on load) ───────────────────────────────────
+  async function cleanExpired(){
+    try{
+      await fetch(`${SUPABASE_URL}/rest/v1/voice_promos?expires_at=lt.${encodeURIComponent(new Date().toISOString())}&expires_at=not.is.null`,{method:'DELETE',headers:SB_HEADERS});
+    }catch(e){}
+  }
+
+  return {open,close,onEfedChange,startRecord,stopRecord,toggleRevPlay,redo,dlReview,post,deletePromo,flagPromo,toggleCard,dlCard,load,cleanExpired};
+})();
+</script>
 </body>
 </html>
