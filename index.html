@@ -5526,22 +5526,24 @@ async function _loadDashMyShows(session) {
   if (!session) { body.innerHTML = '<div class="dash-empty">Sign in to see your shows.</div>'; return; }
   body.innerHTML = '<div class="dash-empty">Loading…</div>';
   try {
-    // Get efeds user is on roster for (approved)
     const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`);
-    // Also include user's own efed if owner
     const myEfeds = new Set(rosterRows.map(r => r.efed).filter(Boolean));
     if (session.promo_name || session.promoName) myEfeds.add(session.promo_name || session.promoName);
     if (!myEfeds.size) { body.innerHTML = '<div class="dash-empty">You\'re not on any eFed roster yet.</div>'; return; }
 
     const efedList = [...myEfeds];
     const efedInFilter = efedList.map(e => encodeURIComponent(e)).join(',');
-
-    // Get 3 most recent approved submissions per efed (up to 3 total per efed, limit 9 across all)
     const subs = await sbGet('submissions', `status=eq.approved&efed=in.(${efedInFilter})&order=date_ms.desc&limit=9`);
 
     if (!subs.length) { body.innerHTML = '<div class="dash-empty">No episodes found yet.</div>'; return; }
 
-    // Group by efed (3 most recent each, but we just show all up to 9 sorted by efed + date)
+    // Fetch efed logos
+    const efedLogoMap = {};
+    try {
+      const efedUsers = await sbGet('users', `promo_name=in.(${efedList.map(e=>encodeURIComponent(e)).join(',')})&select=promo_name,promo_logo`);
+      efedUsers.forEach(u => { if (u.promo_logo) efedLogoMap[u.promo_name] = u.promo_logo; });
+    } catch(e) {}
+
     const grouped = {};
     efedList.forEach(e => { grouped[e] = []; });
     subs.forEach(s => { if (grouped[s.efed] && grouped[s.efed].length < 3) grouped[s.efed].push(s); });
@@ -5551,128 +5553,290 @@ async function _loadDashMyShows(session) {
       const videos = grouped[efed] || [];
       if (!videos.length) return;
 
-      // Efed section header
-      const sectionHead = document.createElement('div');
-      sectionHead.style.cssText = 'padding:10px 14px 5px;border-bottom:1px solid rgba(255,255,255,.05);';
-      sectionHead.innerHTML = `<div style="font-family:'Bebas Neue',sans-serif;font-size:.9rem;letter-spacing:2px;color:var(--gold);">${_dEsc(efed)}</div>`;
-      body.appendChild(sectionHead);
+      const logo = efedLogoMap[efed];
 
+      // Efed section header — bold, with logo
+      const secWrap = document.createElement('div');
+      secWrap.style.cssText = 'padding:14px 16px 6px;';
+      secWrap.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;">
+          ${logo ? `<img src="${_dEsc(logo)}" style="width:22px;height:22px;border-radius:5px;object-fit:cover;border:1px solid rgba(255,255,255,.12);" loading="lazy" onerror="this.style.display='none'">` : ''}
+          <span style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:2.5px;color:#c8a84b;">${_dEsc(efed)}</span>
+        </div>`;
+      body.appendChild(secWrap);
+
+      // Big thumbnail cards for each episode
       videos.forEach(v => {
-        const thumb = v.thumb || (v.video_id ? `https://i.ytimg.com/vi/${v.video_id}/mqdefault.jpg` : '');
-        const item = document.createElement('div');
-        item.className = 'dash-feed-item';
-        item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;';
-        item.innerHTML = `
-          ${thumb ? `<img src="${_dEsc(thumb)}" loading="lazy" style="width:54px;height:36px;border-radius:5px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,.08);" onerror="this.style.display='none'">` : ''}
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:.78rem;font-weight:700;color:rgba(255,255,255,.9);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_dEsc(v.show || v.title || 'Untitled')}</div>
-            <div style="font-size:.62rem;color:rgba(255,255,255,.35);margin-top:2px;">${_dEsc(v.date || '')}</div>
-          </div>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="rgba(255,255,255,.18)" style="flex-shrink:0;"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
-        item.onclick = () => { if (v.url) window.open(v.url, '_blank'); };
-        body.appendChild(item);
+        const thumb = v.thumb || (v.video_id ? `https://i.ytimg.com/vi/${v.video_id}/hqdefault.jpg` : '');
+        const card = document.createElement('div');
+        card.style.cssText = 'margin:0 12px 14px;border-radius:10px;overflow:hidden;cursor:pointer;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);transition:border-color .18s,background .18s;';
+        card.onmouseenter = () => { card.style.borderColor='rgba(255,255,255,.18)'; card.style.background='rgba(255,255,255,.07)'; };
+        card.onmouseleave = () => { card.style.borderColor='rgba(255,255,255,.08)'; card.style.background='rgba(255,255,255,.04)'; };
+        card.innerHTML = `
+          ${thumb ? `<div style="width:100%;aspect-ratio:16/9;overflow:hidden;position:relative;">
+            <img src="${_dEsc(thumb)}" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;filter:brightness(.85);transition:filter .2s;" onerror="this.parentElement.style.display='none'">
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
+              <div style="width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,.55);border:1.5px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="rgba(255,255,255,.9)"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              </div>
+            </div>
+          </div>` : ''}
+          <div style="padding:10px 12px 11px;">
+            <div style="font-size:.84rem;font-weight:700;color:rgba(255,255,255,.92);line-height:1.35;margin-bottom:3px;">${_dEsc(v.show || v.title || 'Untitled Episode')}</div>
+            <div style="font-size:.62rem;color:rgba(255,255,255,.35);letter-spacing:.3px;">${_dEsc(v.date || '')}</div>
+          </div>`;
+        card.onclick = () => { if (v.url) window.open(v.url, '_blank'); };
+        body.appendChild(card);
       });
     });
   } catch(e) { body.innerHTML = '<div class="dash-empty">Could not load shows.</div>'; }
 }
 
-// My Schedule — match cards the user appears in
+// My Schedule — real match cards from efed events + roster bookings
 async function _loadDashMySchedule(session) {
   const body = document.getElementById('dash-schedule-body');
   if (!body) return;
   if (!session) { body.innerHTML = '<div class="dash-empty">Sign in to see your schedule.</div>'; return; }
   body.innerHTML = '<div class="dash-empty">Loading…</div>';
   try {
-    // Get efeds user is on roster for
+    // Get all efeds the user belongs to
     const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`);
     const myEfeds = new Set(rosterRows.map(r => r.efed).filter(Boolean));
     if (session.promo_name || session.promoName) myEfeds.add(session.promo_name || session.promoName);
-
     if (!myEfeds.size) { body.innerHTML = '<div class="dash-empty">Join an eFed to see your schedule.</div>'; return; }
 
     const efedList = [...myEfeds];
-    const efedInFilter = efedList.map(e => encodeURIComponent(e)).join(',');
 
-    // Query upcoming/scheduled submissions that user is booked in via video_appearances OR by efed membership
-    // First try video_appearances to find videos the user appears in
-    let myVideoIds = [];
+    // For each efed: fetch the event data (from users table) + all roster bookings
+    const efedData = await Promise.all(efedList.map(async efed => {
+      const [ownerRows, allRosterRows] = await Promise.all([
+        sbGet('users', `promo_name=ilike.${encodeURIComponent(efed)}&select=username,promo_name,promo_logo,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_events_json&limit=1`).catch(() => []),
+        sbGet('roster', `efed=eq.${encodeURIComponent(efed)}&status=eq.approved&select=id,username,plan_note`).catch(() => [])
+      ]);
+      return { efed, owner: ownerRows[0] || null, rosterRows: allRosterRows };
+    }));
+
+    // Collect all usernames to fetch avatars/names for
+    const allUsernames = new Set([session.username]);
+    efedData.forEach(({ rosterRows }) => {
+      rosterRows.forEach(row => {
+        allUsernames.add(row.username);
+        if (row.plan_note) {
+          try {
+            const bk = typeof row.plan_note === 'string' ? JSON.parse(row.plan_note) : row.plan_note;
+            const opps = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
+            opps.forEach(u => { if (u && !u.startsWith('__')) allUsernames.add(u); });
+          } catch(e) {}
+        }
+      });
+    });
+
+    let avatarMap = {};
     try {
-      const appearances = await sbGet('video_appearances', `username=eq.${encodeURIComponent(session.username)}&select=video_id`);
-      myVideoIds = appearances.map(a => a.video_id).filter(Boolean);
+      const uRows = await sbGet('users', `username=in.(${[...allUsernames].map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
+      uRows.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
     } catch(e) {}
 
-    // Get upcoming events from their efeds
-    const upcomingInEfeds = await sbGet('submissions', `status=eq.upcoming&efed=in.(${efedInFilter})&order=date_ms.asc&limit=20`).catch(() => []);
-
-    // Also get approved videos they appear in
-    let appearedVideos = [];
-    if (myVideoIds.length) {
-      const inFilter = myVideoIds.slice(0, 20).map(id => encodeURIComponent(id)).join(',');
-      appearedVideos = await sbGet('submissions', `video_id=in.(${inFilter})&status=eq.approved&order=date_ms.desc&limit=10`).catch(() => []);
-    }
-
-    const calSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
+    const _avCircle = (username, fallbackLabel, size = 32) => {
+      const info = avatarMap[username] || {};
+      return info.avatar
+        ? `<img loading="lazy" src="${_dEsc(info.avatar)}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.15);flex-shrink:0;">`
+        : `<div style="width:${size}px;height:${size}px;border-radius:50%;background:rgba(192,0,14,.15);border:2px solid rgba(192,0,14,.3);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:${Math.round(size*.45)}px;color:#c0000e;flex-shrink:0;">${(fallbackLabel||'?')[0].toUpperCase()}</div>`;
+    };
 
     body.innerHTML = '';
-    const _now = Date.now();
 
-    if (upcomingInEfeds.length) {
-      const secHead = document.createElement('div');
-      secHead.style.cssText = 'padding:10px 14px 4px;';
-      secHead.innerHTML = `<div style="font-size:.6rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);">Upcoming Events</div>`;
-      body.appendChild(secHead);
+    // Build per-efed schedule sections
+    let hasAnyContent = false;
 
-      upcomingInEfeds.forEach(v => {
-        const dateMs = v.date_ms || v.dateMs || 0;
-        const diff = dateMs - _now;
-        const d = Math.max(0, Math.floor(diff / 86400000));
-        const h = Math.max(0, Math.floor((diff % 86400000) / 3600000));
-        const countdown = diff > 0 ? (d > 0 ? `${d}d ${h}h` : `${h}h`) : 'Live Now';
-        const isLive = diff <= 0;
-        const item = document.createElement('div');
-        item.className = 'dash-show-item';
-        item.innerHTML = `
-          <div class="dash-show-item-left">
-            <div class="dash-show-name">${_dEsc(v.show || v.title || 'Upcoming Show')}</div>
-            <div class="dash-show-efed">${_dEsc(v.efed || '')}</div>
-          </div>
-          <div class="dash-show-item-right">
-            <div class="dash-show-cal-icon">${calSvg}</div>
-            <div class="dash-show-date">${_dEsc(v.date || 'TBA')}</div>
-            <div class="dash-show-countdown" ${isLive ? 'style="color:rgba(74,222,128,.85);"' : ''}>${isLive ? '🔴 ' : ''}${countdown}</div>
+    efedData.forEach(({ efed, owner, rosterRows }) => {
+      if (!owner) return;
+
+      // Parse primary + extra events
+      const primaryEv = owner.efed_event_title ? { title: owner.efed_event_title, date: owner.efed_event_date, location: owner.efed_event_location, main: owner.efed_event_main } : null;
+      const extraEvs = Array.isArray(owner.efed_events_json) ? owner.efed_events_json : [];
+      const allEvents = [];
+      if (primaryEv?.title) allEvents.push(primaryEv);
+      extraEvs.forEach(ev => { if (ev?.title) allEvents.push(ev); });
+
+      // Parse bookings from roster, deduplicating
+      const seen = new Set();
+      const bookings = [];
+      for (const row of rosterRows) {
+        if (!row.plan_note) continue;
+        let bk = null;
+        try { bk = typeof row.plan_note === 'string' ? JSON.parse(row.plan_note) : row.plan_note; } catch(e) { continue; }
+        if (!bk || bk.ghost) continue;
+        const opps = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
+        const hasGhosts = Array.isArray(bk.ghostOpponents) && bk.ghostOpponents.length > 0;
+        if (!opps.length && !hasGhosts) continue;
+        const key = [row.username, ...opps].sort().join('||');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        bookings.push({ rowId: row.id, owner: row.username, bk });
+      }
+
+      if (!allEvents.length && !bookings.length) return;
+      hasAnyContent = true;
+
+      // ── Efed header ──
+      const logo = owner.promo_logo;
+      const efedHead = document.createElement('div');
+      efedHead.style.cssText = 'display:flex;align-items:center;gap:8px;padding:14px 16px 8px;border-top:1px solid rgba(255,255,255,.05);';
+      efedHead.innerHTML = `
+        ${logo ? `<img src="${_dEsc(logo)}" style="width:20px;height:20px;border-radius:4px;object-fit:cover;border:1px solid rgba(255,255,255,.12);" loading="lazy" onerror="this.style.display='none'">` : ''}
+        <span style="font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:2.5px;color:#c8a84b;">${_dEsc(efed)}</span>`;
+      body.appendChild(efedHead);
+
+      // ── Event blocks — one per event ──
+      allEvents.forEach((ev, evIdx) => {
+        // Event header card
+        const evCard = document.createElement('div');
+        evCard.style.cssText = 'margin:0 12px 2px;border-radius:10px 10px 0 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.13);border-bottom:none;padding:12px 14px;';
+        evCard.innerHTML = `
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+            <div>
+              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:2px;color:#fff;line-height:1.1;">${_dEsc(ev.title)}</div>
+              ${ev.main ? `<div style="font-size:.65rem;color:rgba(255,255,255,.35);font-style:italic;margin-top:2px;">${_dEsc(ev.main)}</div>` : ''}
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;">
+              ${ev.date ? `<div style="display:flex;align-items:center;gap:4px;font-size:.65rem;color:rgba(255,255,255,.5);">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                ${_dEsc(ev.date)}
+              </div>` : ''}
+              ${ev.location ? `<div style="display:flex;align-items:center;gap:4px;font-size:.65rem;color:rgba(255,255,255,.35);">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                ${_dEsc(ev.location)}
+              </div>` : ''}
+            </div>
           </div>`;
-        item.onclick = () => { if (v.url) window.open(v.url, '_blank'); };
-        body.appendChild(item);
+        body.appendChild(evCard);
+
+        // Match bookings that belong to this event (matched by show name)
+        const evTitle = ev.title.trim().toLowerCase();
+        const matchedBookings = bookings.filter(({ bk }) => {
+          const bkShow = (bk.show || '').trim().toLowerCase();
+          return bkShow && (bkShow === evTitle || evTitle.includes(bkShow) || bkShow.includes(evTitle));
+        });
+
+        if (matchedBookings.length) {
+          matchedBookings.forEach(({ owner: ownerU, bk }, bi) => {
+            const isLast = bi === matchedBookings.length - 1;
+            const isMyMatch = ownerU === session.username ||
+              bk.opponent === session.username ||
+              (Array.isArray(bk.opponents) && bk.opponents.includes(session.username));
+            const opps = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
+            const oppNames = Array.isArray(bk.opponentNames) ? bk.opponentNames : (bk.opponentName ? [bk.opponentName] : []);
+            const matchType = bk.matchType || '';
+
+            // Build participant HTML from slots or fallback
+            const nameA = avatarMap[ownerU]?.name || ownerU;
+            const _vsChip = () => `<span style="font-size:.58rem;font-weight:800;color:${isMyMatch?'rgba(200,168,75,.7)':'rgba(255,255,255,.2)'};letter-spacing:1.5px;padding:0 2px;">VS</span>`;
+            const _chip = (avHtml, name, italic) => `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex-shrink:0;">
+              ${avHtml}
+              <span style="font-size:.58rem;font-weight:600;color:${isMyMatch?(italic?'rgba(255,255,255,.6)':'rgba(255,255,255,.9)'):(italic?'rgba(255,255,255,.28)':'rgba(255,255,255,.38)')};${italic?'font-style:italic;':''}text-align:center;max-width:58px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span>
+            </div>`;
+
+            let participantsHtml = '';
+            let ghostCount = 0;
+            if (Array.isArray(bk.slots) && bk.slots.length) {
+              bk.slots.forEach(s => {
+                if (s === 'vs') { participantsHtml += _vsChip(); }
+                else if (s === ownerU) { participantsHtml += _chip(_avCircle(ownerU, nameA), nameA.replace(/</g,'&lt;'), false); }
+                else if (s.startsWith('__mystery__')) {
+                  const ghost = (bk.ghostOpponents||[])[ghostCount++];
+                  const gName = (ghost?.name || '???').replace(/</g,'&lt;');
+                  const gAv = gName === '???' ? `<div style="width:32px;height:32px;border-radius:50%;background:rgba(80,60,120,.25);border:2px dashed rgba(180,140,255,.35);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0;">❓</div>` : `<div style="width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.06);border:2px dashed rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.7rem;color:rgba(255,255,255,.45);flex-shrink:0;">${gName[0].toUpperCase()}</div>`;
+                  participantsHtml += _chip(gAv, gName, true);
+                } else {
+                  const isExt = s.startsWith('__ext__');
+                  const idx = opps.indexOf(s);
+                  const oppN = (idx >= 0 && oppNames[idx] ? oppNames[idx] : avatarMap[s]?.name || s).replace(/</g,'&lt;');
+                  const avHtml = isExt ? `<div style="width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.7rem;color:rgba(255,255,255,.5);flex-shrink:0;">${(oppN||'?')[0].toUpperCase()}</div>` : _avCircle(s, oppN);
+                  participantsHtml += _chip(avHtml, oppN, false);
+                }
+              });
+            } else {
+              participantsHtml = _chip(_avCircle(ownerU, nameA), nameA.replace(/</g,'&lt;'), false);
+              opps.forEach((oppU, i) => {
+                const oppN = (oppNames[i] || avatarMap[oppU]?.name || oppU || '').replace(/</g,'&lt;');
+                const isExt = oppU.startsWith('__ext__');
+                const avHtml = isExt ? `<div style="width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.7rem;color:rgba(255,255,255,.5);flex-shrink:0;">${(oppN||'?')[0].toUpperCase()}</div>` : _avCircle(oppU, oppN);
+                participantsHtml += _vsChip() + _chip(avHtml, oppN, false);
+              });
+              (bk.ghostOpponents||[]).forEach(ghost => {
+                const gName = (ghost.name || '???').replace(/</g,'&lt;');
+                const isMystery = gName === '???';
+                const gAv = isMystery ? `<div style="width:32px;height:32px;border-radius:50%;background:rgba(80,60,120,.25);border:2px dashed rgba(180,140,255,.35);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0;">❓</div>` : `<div style="width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.06);border:2px dashed rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.7rem;color:rgba(255,255,255,.45);flex-shrink:0;">${gName[0].toUpperCase()}</div>`;
+                participantsHtml += _vsChip() + _chip(gAv, gName, true);
+              });
+            }
+
+            const matchRow = document.createElement('div');
+            const isLastRow = isLast;
+            matchRow.style.cssText = `margin:0 12px ${isLastRow ? '14' : '0'}px;padding:10px 14px 11px;background:${isMyMatch ? 'rgba(200,168,75,.07)' : 'rgba(255,255,255,.025)'};border:1px solid ${isMyMatch ? 'rgba(200,168,75,.28)' : 'rgba(255,255,255,.07)'};border-top:none;border-radius:${isLastRow ? '0 0 10px 10px' : '0'};`;
+            matchRow.innerHTML = `
+              <div style="font-size:.48rem;letter-spacing:2px;text-transform:uppercase;font-weight:700;color:${isMyMatch ? '#c8a84b' : 'rgba(255,255,255,.22)'};margin-bottom:8px;">${isMyMatch ? '⚡ Your Match' : 'Match'}${matchType ? ` · ${_dEsc(matchType)}` : ''}</div>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${participantsHtml}</div>`;
+            body.appendChild(matchRow);
+          });
+        } else {
+          // No bookings for this event — show event card with closed bottom
+          const evClose = document.createElement('div');
+          evClose.style.cssText = `margin:0 12px 14px;height:6px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-top:none;border-radius:0 0 10px 10px;`;
+          body.appendChild(evClose);
+        }
       });
-    }
 
-    if (appearedVideos.length) {
-      const secHead = document.createElement('div');
-      secHead.style.cssText = 'padding:10px 14px 4px;border-top:1px solid rgba(255,255,255,.05);';
-      secHead.innerHTML = `<div style="font-size:.6rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);">Past Appearances</div>`;
-      body.appendChild(secHead);
-
-      appearedVideos.forEach(v => {
-        const thumb = v.thumb || (v.video_id ? `https://i.ytimg.com/vi/${v.video_id}/mqdefault.jpg` : '');
-        const item = document.createElement('div');
-        item.className = 'dash-feed-item';
-        item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;';
-        item.innerHTML = `
-          ${thumb ? `<img src="${_dEsc(thumb)}" loading="lazy" style="width:54px;height:36px;border-radius:5px;object-fit:cover;flex-shrink:0;border:1px solid rgba(255,255,255,.08);" onerror="this.style.display='none'">` : ''}
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:.78rem;font-weight:700;color:rgba(255,255,255,.9);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_dEsc(v.show || v.title || 'Untitled')}</div>
-            <div style="font-size:.62rem;color:rgba(255,255,255,.35);margin-top:2px;">${_dEsc(v.efed || '')} ${v.date ? '· ' + _dEsc(v.date) : ''}</div>
-          </div>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="rgba(255,255,255,.18)" style="flex-shrink:0;"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
-        item.onclick = () => { if (v.url) window.open(v.url, '_blank'); };
-        body.appendChild(item);
+      // ── Unassigned bookings (not matched to a named event) ──
+      const assignedKeys = new Set();
+      allEvents.forEach(ev => {
+        const evTitle = ev.title.trim().toLowerCase();
+        bookings.forEach(({ bk }) => {
+          const bkShow = (bk.show || '').trim().toLowerCase();
+          if (bkShow && (bkShow === evTitle || evTitle.includes(bkShow) || bkShow.includes(evTitle))) {
+            assignedKeys.add(bkShow);
+          }
+        });
       });
-    }
 
-    if (!upcomingInEfeds.length && !appearedVideos.length) {
-      body.innerHTML = '<div class="dash-empty">No scheduled matches found.</div>';
+      const unassigned = bookings.filter(({ bk }) => {
+        const bkShow = (bk.show || '').trim().toLowerCase();
+        return !bkShow || !assignedKeys.has(bkShow);
+      });
+
+      if (unassigned.length) {
+        const uaHead = document.createElement('div');
+        uaHead.style.cssText = 'padding:6px 16px 4px;';
+        uaHead.innerHTML = `<div style="font-size:.55rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.25);">Other Bookings</div>`;
+        body.appendChild(uaHead);
+
+        unassigned.forEach(({ owner: ownerU, bk }) => {
+          const isMyMatch = ownerU === session.username || bk.opponent === session.username || (Array.isArray(bk.opponents) && bk.opponents.includes(session.username));
+          const opps = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
+          const oppNames = Array.isArray(bk.opponentNames) ? bk.opponentNames : (bk.opponentName ? [bk.opponentName] : []);
+          const nameA = avatarMap[ownerU]?.name || ownerU;
+          const oppDisplay = opps.map((u,i) => oppNames[i] || avatarMap[u]?.name || u).join(' & ');
+
+          const uaItem = document.createElement('div');
+          uaItem.style.cssText = `margin:0 12px 10px;padding:10px 14px;background:${isMyMatch?'rgba(200,168,75,.06)':'rgba(255,255,255,.025)'};border:1px solid ${isMyMatch?'rgba(200,168,75,.25)':'rgba(255,255,255,.07)'};border-radius:10px;`;
+          uaItem.innerHTML = `
+            <div style="font-size:.48rem;letter-spacing:2px;text-transform:uppercase;font-weight:700;color:${isMyMatch?'#c8a84b':'rgba(255,255,255,.22)'};margin-bottom:6px;">${isMyMatch?'⚡ Your Match':'Match'}${bk.matchType?` · ${_dEsc(bk.matchType)}`:''}</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              ${_avCircle(ownerU, nameA, 28)}<span style="font-size:.75rem;font-weight:600;color:${isMyMatch?'rgba(255,255,255,.9)':'rgba(255,255,255,.4)'};">${_dEsc(nameA)}</span>
+              <span style="font-size:.6rem;color:rgba(255,255,255,.2);font-weight:700;letter-spacing:1px;">VS</span>
+              <span style="font-size:.75rem;color:${isMyMatch?'rgba(255,255,255,.75)':'rgba(255,255,255,.35)'};">${_dEsc(oppDisplay || '???')}</span>
+            </div>
+            ${bk.show ? `<div style="font-size:.6rem;color:rgba(255,255,255,.25);margin-top:5px;">${_dEsc(bk.show)}</div>` : ''}`;
+          body.appendChild(uaItem);
+        });
+      }
+    });
+
+    if (!hasAnyContent) {
+      body.innerHTML = '<div class="dash-empty">No match cards found for your eFeds.</div>';
     }
-  } catch(e) { body.innerHTML = '<div class="dash-empty">Could not load schedule.</div>'; }
+  } catch(e) { console.error(e); body.innerHTML = '<div class="dash-empty">Could not load schedule.</div>'; }
 }
 // ─────────────────────────────────────────────────────────────
 // ──────────────────────────────────────────────────────────────
