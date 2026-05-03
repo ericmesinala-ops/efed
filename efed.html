@@ -4698,14 +4698,24 @@ function _initMatchCardDrag() {
       const newOrder = Array.from(document.querySelectorAll('.sched-booking-banner'))
         .map(b => b.dataset.rosterId)
         .filter(Boolean);
+      console.log('[match order] saving', newOrder.length, 'items:', newOrder);
       window._efedMatchOrder = newOrder;
       try { localStorage.setItem('efed_match_order_' + EFED_NAME, JSON.stringify(newOrder)); } catch(e) {}
       const _moSession = getSession();
-      if (_moSession && _isOwnProfile) {
+      if (_moSession) {
         fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(_moSession.username), {
           method: 'PATCH', headers: SB_HEADERS,
           body: JSON.stringify({ efed_match_order: newOrder })
-        }).catch(e => console.error('[match order] Supabase save failed', e));
+        }).then(async r => {
+          if (!r.ok) {
+            const txt = await r.text().catch(() => '');
+            console.error('[match order] Supabase PATCH failed', r.status, txt);
+          } else {
+            console.log('[match order] Supabase save OK', r.status);
+          }
+        }).catch(e => console.error('[match order] Network error', e));
+      } else {
+        console.warn('[match order] No session — save skipped');
       }
     });
 
@@ -5281,6 +5291,7 @@ async function loadProfile() {
     window._efedMatchOrder = Array.isArray(user.efed_match_order) && user.efed_match_order.length
       ? user.efed_match_order
       : (() => { try { const v = localStorage.getItem('efed_match_order_' + EFED_NAME); return v ? JSON.parse(v) : []; } catch(e) { return []; } })();
+    console.log('[match order] loaded', window._efedMatchOrder.length, 'items from', Array.isArray(user.efed_match_order) && user.efed_match_order.length ? 'Supabase' : 'localStorage/default', window._efedMatchOrder);
 
     // Load champions
     _champData = Array.isArray(user.efed_champions_json) ? user.efed_champions_json : [];
