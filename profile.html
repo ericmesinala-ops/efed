@@ -15942,6 +15942,7 @@ function _sfDetectType(raw) {
   if (!raw) return null;
   if (/instagram\.com\/(p|reel|tv)\//i.test(raw)) return 'instagram';
   if (/twitter\.com|x\.com/i.test(raw)) return 'twitter';
+  if (/twitter-tweet/i.test(raw)) return 'twitter'; // bare embed code with no URL yet
   return null;
 }
 
@@ -15950,13 +15951,18 @@ function _sfExtractUrl(raw) {
   raw = raw.trim();
   const type = _sfDetectType(raw);
   if (type === 'twitter') {
-    // Full embed code: prefer /status/ URL from href
+    // href with /status/ — most reliable
     const statusMatch = raw.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]*\/status\/\d+[^"]*)"/i);
     if (statusMatch) return { url: statusMatch[1].split('?')[0], type };
+    // any href with twitter/x domain
     const hrefMatch = raw.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]+)"/i);
     if (hrefMatch) return { url: hrefMatch[1].split('?')[0], type };
+    // plain URL anywhere in string
     const urlMatch = raw.match(/https?:\/\/(?:twitter\.com|x\.com)\/\S+/i);
     if (urlMatch) return { url: urlMatch[0].split('?')[0].replace(/[)>\]'"]+$/, ''), type };
+    // bare embed code: grab URL from last <a> href (Twitter puts the post link last)
+    const allAs = [...raw.matchAll(/<a[^>]+href="([^"]+)"/gi)];
+    if (allAs.length) return { url: allAs[allAs.length - 1][1].split('?')[0], type };
   }
   if (type === 'instagram') {
     // Extract clean post URL from embed code or raw URL
