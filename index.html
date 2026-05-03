@@ -5249,9 +5249,7 @@ function makeUpcomingCard(v) {
 
 // ── HOME DASHBOARD ──────────────────────────────────────────
 async function loadDashboard() {
-  // Feed is loaded for everyone; Shows/Schedule load after login via _initTabbedDashboard
-  _loadDashFeed();
-  // _loadDashChamps and _loadDashShows kept for legacy compat but hidden via CSS
+  // Feed now loaded only via _initTabbedDashboard (filtered by user's eFeds)
 }
 
 async function _loadDashFeed() {
@@ -5645,7 +5643,7 @@ async function _loadDashEfedFeed(session) {
     const efedInFilter = efedList.map(e => encodeURIComponent(e)).join(',');
 
     // Fetch posts that belong to those efeds, most recent first
-    const rows = await sbGet('posts', `reply_to=is.null&efed=in.(${efedInFilter})&order=created_at.desc&limit=40`);
+    const rows = await sbGet('posts', `reply_to=is.null&efed=in.(${efedInFilter})&efed=not.is.null&order=created_at.desc&limit=40`);
     if (!rows.length) { body.innerHTML = '<div class="dash-empty">No posts in your eFeds yet.</div>'; return; }
 
     // Fetch avatars/names
@@ -10320,7 +10318,7 @@ async function loadSupportersRow() {
 
   try {
     // Fetch all supporters for this eFed, newest first
-    const rows = await sbGet('supports', `efed=eq.${encodeURIComponent(efed)}&order=created_at.desc`);
+    const rows = await sbGet('supports', `efed=eq.${encodeURIComponent(efed)}&order=supported_at.desc`);
     if (!rows.length) return;
 
     // Fetch user data (avatar + display_name) for all supporters
@@ -11404,7 +11402,7 @@ async function loadExistingRating(url) {
     const rows = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
     if (rows.length) {
       const r = rows[0];
-      const hasUsedEdit = (r.created_at || 0) < 0; // negative = edit was used, now locked
+      const hasUsedEdit = localStorage.getItem('rating_edited_' + extractId(url)) === '1';
 
       // Restore individual star values from existing columns
       // New format: promo_storyline >= 900000 (magic prefix 9ABCDE: A=overall,B=visual,C=promo,D=sound,E=promo2)
@@ -11570,7 +11568,7 @@ async function submitRating() {
   const url = _expandVideo.url;
   try {
     const existing = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
-    if (existing.length && (existing[0].created_at || 0) < 0) {
+    if (existing.length && localStorage.getItem('rating_edited_' + extractId(url)) === '1') {
       const msg = document.getElementById('rating-msg');
       msg.textContent = '🔒 Rating locked. You may only edit once.';
       msg.style.display = 'block';
@@ -11603,7 +11601,7 @@ async function submitRating() {
     // Check if this is an edit (existing row)
     const _existingForSave = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
     const _isEdit = _existingForSave.length > 0;
-    const _wasEdited = _isEdit && (_existingForSave[0].created_at || 0) < 0;
+    const _wasEdited = _isEdit && localStorage.getItem('rating_edited_' + extractId(url)) === '1';
 
     // Pack all individual stars into promo_storyline with magic prefix 9 to distinguish from legacy:
     // 900000 + overall_stars*10000 + visual*1000 + promo*100 + sound*10 + promo2
@@ -11614,23 +11612,26 @@ async function submitRating() {
       + _ratingValues.sound       * 10
       + _ratingValues.promo2;
 
-    const data = {
-      username: session.username,
-      video_url: url,
-      video_id: extractId(url),
-      overall: _weighted,
-      production: _ratingValues.overall,   // UI "Production & Editing" top row stars (backup)
-      promo_storyline: _packedPromo,        // packed: 9ABCDE where A=overall,B=visual,C=promo,D=sound,E=promo2
-      match_quality: _ratingValues.match,
-      roster_talent: _ratingValues.roster,
-      // Negate created_at after first edit to flag as locked
-      created_at: _isEdit ? -Math.abs(_existingForSave[0].created_at || Date.now()) : Date.now()
+    // Only the score columns — never send username/video_id/created_at on update (causes 400)
+    const _scoreData = {
+      overall:         _weighted,
+      production:      _ratingValues.overall,
+      promo_storyline: _packedPromo,
+      match_quality:   _ratingValues.match,
+      roster_talent:   _ratingValues.roster
     };
 
     if (_isEdit) {
-      await sbUpdate('ratings', data, `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
+      await sbUpdate('ratings', _scoreData, `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
+      localStorage.setItem('rating_edited_' + extractId(url), '1');
     } else {
-      await sbInsert('ratings', data);
+      await sbInsert('ratings', {
+        username:   session.username,
+        video_url:  url,
+        video_id:   extractId(url),
+        created_at: Date.now(),
+        ..._scoreData
+      });
     }
 
     // ── RATING +6 CR ──
