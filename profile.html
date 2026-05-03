@@ -11033,25 +11033,54 @@ async function saveEditProfile() {
     if (bioEl) bioEl.textContent = bio;
     if (bioSec) bioSec.style.display = (bio || _isOwnProfile) ? '' : 'none';
 
-    // ── CHECK IF NEW HANDLES MATCH BAN LIST — alert admin silently ──
+    // ── CHECK ALL UPDATED LINKS/HANDLES AGAINST banned_links TABLE ──
     try {
-      const bannedSocials = await sbGet('banned_socials', 'select=handle,platform');
-      const bannedSet = { x: new Set(), ig: new Set() };
-      bannedSocials.forEach(b => bannedSet[b.platform]?.add(b.handle.toLowerCase()));
-      const alerts = [];
-      if (x && bannedSet.x.has(x.toLowerCase())) alerts.push('X: @' + x);
-      if (ig && bannedSet.ig.has(ig.toLowerCase())) alerts.push('IG: @' + ig);
-      if (alerts.length) {
-        await sbInsert('notifications', {
-          username: ADMIN_USERNAME,
-          type: 'admin',
-          message: '🚨 BANNED SOCIAL DETECTED — @' + session.username + ' just updated their profile with a banned handle: ' + alerts.join(', '),
-          video_url: null,
-          read: false,
-          created_at: Date.now()
+      const _blRows = await sbGet('banned_links', 'select=url,reason');
+      if (_blRows.length) {
+        const _profileVals = [
+          { label: 'Instagram',   val: ig      ? '@' + ig      : '' },
+          { label: 'X (Twitter)', val: x        ? '@' + x       : '' },
+          { label: 'Facebook',    val: facebook ? '@' + facebook: '' },
+          { label: 'Reddit',      val: reddit   ? 'u/' + reddit : '' },
+          { label: 'Discord',     val: discord  ? '@' + discord : '' },
+          { label: 'Website',     val: twitch   || ''               },
+        ].filter(p => p.val);
+
+        const _matchedBan = _profileVals.find(p => {
+          const vl = p.val.replace('@','').replace('u/','').toLowerCase();
+          return _blRows.some(b => {
+            const bl = (b.url || '').replace('@','').trim().toLowerCase();
+            return bl && (vl === bl || vl.includes(bl) || bl.includes(vl));
+          });
         });
+
+        if (_matchedBan) {
+          // Notify admin
+          try {
+            await sbInsert('notifications', {
+              username: ADMIN_USERNAME,
+              type: 'flag',
+              message: '\u{1F6AB} BANNED LINK ON PROFILE \u2014 @' + session.username + ' updated their ' + _matchedBan.label + ': ' + _matchedBan.val + '. Account auto-banned.',
+              video_url: null,
+              read: false,
+              created_at: Date.now()
+            });
+          } catch(e) {}
+          // Ban + force logout the account
+          try {
+            await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+              method: 'PATCH',
+              headers: SB_HEADERS,
+              body: JSON.stringify({ banned: true, force_logout_at: Date.now() })
+            });
+          } catch(e) {}
+          // Wipe local session and redirect
+          localStorage.removeItem('efed_session');
+          window.location.replace('auth.html');
+          return;
+        }
       }
-    } catch(e) { console.warn('Ban check failed silently', e); }
+    } catch(e) { console.warn('[ban-check] failed silently', e); }
 
     if (usernameChanged) { session.username = newUsername; }
     session.displayName = name || session.username; session.igHandle = ig; session.xHandle = x;
