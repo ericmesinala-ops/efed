@@ -4704,11 +4704,13 @@ function _initMatchCardDrag() {
       dragSrc.style.cursor = 'grab';
       document.querySelectorAll('.sched-booking-banner').forEach(b => b.style.outline = '');
       _fixBannerRadii();
+      // Save the new order — scoped per evKey group so multi-event pages stay correct
+      const savedSrc = dragSrc;
       dragSrc = null;
-      // Save the new order to Supabase (cross-device) and localStorage (offline fallback)
-      const newOrder = Array.from(document.querySelectorAll('.sched-booking-banner'))
-        .map(b => b.dataset.rosterId)
-        .filter(Boolean);
+      const evKey = savedSrc ? savedSrc.dataset.evKey : null;
+      // Build full ordered array preserving per-group order
+      const allBanners = Array.from(document.querySelectorAll('.sched-booking-banner'));
+      const newOrder = allBanners.map(b => b.dataset.rosterId).filter(Boolean);
       window._efedMatchOrder = newOrder;
       try { localStorage.setItem('efed_match_order_' + EFED_NAME, JSON.stringify(newOrder)); } catch(e) {}
       const _moSession = getSession();
@@ -4716,7 +4718,20 @@ function _initMatchCardDrag() {
         fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(_moSession.username), {
           method: 'PATCH', headers: SB_HEADERS,
           body: JSON.stringify({ efed_match_order: newOrder })
-        }).catch(e => console.error('[match order] Supabase save failed', e));
+        })
+        .then(async r => {
+          if (!r.ok) {
+            const txt = await r.text().catch(()=>'');
+            if (txt.includes('efed_match_order') || r.status === 400) {
+              console.warn('[match order] Column missing! Run in Supabase SQL:\nalter table users add column if not exists efed_match_order jsonb default \'[]\';');
+            } else {
+              console.error('[match order] Save failed HTTP', r.status, txt);
+            }
+          } else {
+            console.log('[match order] saved ok', newOrder);
+          }
+        })
+        .catch(e => console.error('[match order] Supabase save failed', e));
       }
     });
 
