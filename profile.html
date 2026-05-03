@@ -16427,13 +16427,43 @@ const _vp = (() => {
 
   // ── Record ────────────────────────────────────────────────────────────────
   async function startRecord(){
-    const sel=$('vp-efed-sel'); if(!sel||!sel.value) return;
-    if(cdState().locked) return;
+    // Safari iOS requires getUserMedia to fire FIRST — synchronously from the tap
+    // Any async work before this call causes "mic denied" even with permissions on
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({audio:true, video:false});
+    } catch(e) {
+      const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+      const isAndroid=/android/i.test(navigator.userAgent);
+      let msg='';
+      if(isIOS){
+        msg=`<strong style="color:#f87171;">Microphone blocked</strong><br><br>`+
+            `On iPhone/iPad:<br>`+
+            `<span style="color:rgba(255,255,255,.55);">1. Go to <strong>Settings → Safari → Advanced → Website Data</strong><br>`+
+            `2. Find <strong>vercel.app</strong> → delete it<br>`+
+            `3. Reload the page — tap <strong>Allow</strong> when asked</span>`;
+      } else if(isAndroid){
+        msg=`<strong style="color:#f87171;">Microphone blocked</strong><br><br>`+
+            `On Android:<br>`+
+            `<span style="color:rgba(255,255,255,.55);">1. In Chrome go to <strong>Settings → Site Settings → Microphone</strong><br>`+
+            `2. Find this site in Blocked → tap <strong>Allow</strong><br>`+
+            `3. Reload the page and try again</span>`;
+      } else {
+        msg=`<strong style="color:#f87171;">Microphone blocked</strong><br><br>`+
+            `<span style="color:rgba(255,255,255,.55);">Click the <strong>lock icon</strong> in your address bar → Microphone → <strong>Allow</strong>, then reload.</span>`;
+      }
+      const instr=$('vp-instr');
+      if(instr){instr.innerHTML=msg;instr.style.borderLeftColor='rgba(248,113,113,.4)';}
+      return;
+    }
+
+    // Mic granted — now do the rest
+    const sel=$('vp-efed-sel'); if(!sel||!sel.value){stream.getTracks().forEach(t=>t.stop());return;}
+    if(cdState().locked){stream.getTracks().forEach(t=>t.stop());return;}
     try{
-      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
       const ctx=getCtx(), src=ctx.createMediaStreamSource(stream);
       _analyser=ctx.createAnalyser(); _analyser.fftSize=64; src.connect(_analyser);
-      const mime=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+      const mime=['audio/mp4','audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm'].find(t=>{try{return MediaRecorder.isTypeSupported(t);}catch(e){return false;}})||'';
       _mr=new MediaRecorder(stream,mime?{mimeType:mime}:{});
       _chunks=[];
       _mr.ondataavailable=e=>{if(e.data.size>0)_chunks.push(e.data);};
@@ -16441,7 +16471,11 @@ const _vp = (() => {
       _mr.start(100); _elapsed=0;
       showStep('record'); drawLive('vp-canvas'); updCD(MAX_S);
       _rtimer=setInterval(()=>{_elapsed++;const rem=MAX_S-_elapsed;updCD(rem);if(_elapsed>=MAX_S)stopRecord();},1000);
-    }catch(e){alert('Microphone access denied. Please allow mic access and try again.');}
+    }catch(e){
+      stream.getTracks().forEach(t=>t.stop());
+      const instr=$('vp-instr');
+      if(instr){instr.innerHTML=`<strong style="color:#f87171;">Recording failed</strong><br><span style="color:rgba(255,255,255,.45);font-size:.7rem;">Error: ${e.message||e}</span>`;instr.style.borderLeftColor='rgba(248,113,113,.4)';}
+    }
   }
 
   function updCD(rem){const el=$('vp-countdown');if(el){el.textContent=fmt(rem);el.className=rem<=5?'vp-danger':rem<=10?'vp-warn':'' ;}}
@@ -16476,7 +16510,7 @@ const _vp = (() => {
     const audio=$('vp-rev-audio'); if(audio){audio.pause();audio.src='';}
     stopViz(); _revSrc=null;
     if(_revUrl){URL.revokeObjectURL(_revUrl);_revUrl=null;} _revBlob=null;
-    // Note: redo does NOT burn an attempt — only posting does
+    bumpAtt();
     const st=cdState(); updateDots(st.att);
     if(st.locked){const m=$('vp-cooldown-msg');if(m){m.textContent='You are out of voice recordings until the next day';m.style.display='block';}const sb=$('vp-start-btn');if(sb)sb.disabled=true;}
     showStep('select');
@@ -16504,12 +16538,7 @@ const _vp = (() => {
       const path=`${_user}_${efedName.replace(/\s+/g,'_')}.${ext}`;
       const audioUrl=await uploadBlob(_revBlob, ext, path);
       let expires_at=null;
-      if(evDate&&evDate!=='TBA'){
-        const d=new Date(evDate);d.setDate(d.getDate()+3);expires_at=d.toISOString();
-      } else {
-        // No event date — hard cap of 7 days
-        const d=new Date();d.setDate(d.getDate()+7);expires_at=d.toISOString();
-      }
+      if(evDate&&evDate!=='TBA'){const d=new Date(evDate);d.setDate(d.getDate()+3);expires_at=d.toISOString();}
       const payload={username:_user,efed_name:efedName,efed_acronym:efed?efed.acronym||null:null,event_name:evName,event_date:evDate,audio_url:audioUrl,created_at:new Date().toISOString(),expires_at};
       // delete existing first then insert (handles UNIQUE constraint)
       await fetch(`${SUPABASE_URL}/rest/v1/voice_promos?username=eq.${encodeURIComponent(_user)}&efed_name=eq.${encodeURIComponent(efedName)}`,{method:'DELETE',headers:SB_HEADERS});
