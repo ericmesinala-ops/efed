@@ -5249,8 +5249,9 @@ function makeUpcomingCard(v) {
 
 // ── HOME DASHBOARD ──────────────────────────────────────────
 async function loadDashboard() {
-  // _loadDashFeed removed — unfiltered, replaced by _loadDashEfedFeed which filters by user's eFeds
-  // Shows/Schedule load after login via _initTabbedDashboard
+  // Feed is loaded for everyone; Shows/Schedule load after login via _initTabbedDashboard
+  _loadDashFeed();
+  // _loadDashChamps and _loadDashShows kept for legacy compat but hidden via CSS
 }
 
 async function _loadDashFeed() {
@@ -5644,7 +5645,7 @@ async function _loadDashEfedFeed(session) {
     const efedInFilter = efedList.map(e => encodeURIComponent(e)).join(',');
 
     // Fetch posts that belong to those efeds, most recent first
-    const rows = await sbGet('posts', `reply_to=is.null&efed=in.(${efedInFilter})&efed=not.is.null&order=created_at.desc&limit=40`);
+    const rows = await sbGet('posts', `reply_to=is.null&efed=in.(${efedInFilter})&order=created_at.desc&limit=40`);
     if (!rows.length) { body.innerHTML = '<div class="dash-empty">No posts in your eFeds yet.</div>'; return; }
 
     // Fetch avatars/names
@@ -11406,16 +11407,19 @@ async function loadExistingRating(url) {
       const hasUsedEdit = (r.created_at || 0) < 0; // negative = edit was used, now locked
 
       // Restore individual star values from existing columns
-      // production col = UI overall stars
-      // promo_storyline = packed: visual*1000 + promo*100 + sound*10 + promo2
-      const _packed = Math.round(Math.abs(r.promo_storyline || 0));
-      const _rPromo2   = _packed % 10;
-      const _rSound    = Math.floor((_packed % 100) / 10);
-      const _rPromo    = Math.floor((_packed % 1000) / 100);
-      const _rVisual   = Math.floor(_packed / 1000);
+      // New format: promo_storyline >= 900000 (magic prefix 9ABCDE: A=overall,B=visual,C=promo,D=sound,E=promo2)
+      // Legacy format: promo_storyline <= 5 (just the raw promo2 star value)
+      const _packedRaw = Math.round(Math.abs(r.promo_storyline || 0));
+      const _isNewFormat = _packedRaw >= 900000;
+      const _p = _isNewFormat ? _packedRaw - 900000 : 0;
+      const _rOverallStars = _isNewFormat ? Math.floor(_p / 10000)        : Math.round(r.production || 0);
+      const _rVisual       = _isNewFormat ? Math.floor((_p % 10000) / 1000) : 0;
+      const _rPromo        = _isNewFormat ? Math.floor((_p % 1000) / 100)   : 0;
+      const _rSound        = _isNewFormat ? Math.floor((_p % 100) / 10)     : 0;
+      const _rPromo2       = _isNewFormat ? _p % 10                          : _packedRaw;
 
       const _restoreMap = [
-        ['overall',     Math.round(r.production || 0)],
+        ['overall',     _rOverallStars],
         ['production',  _rVisual],
         ['sound',       _rSound],
         ['promo',       _rPromo],
@@ -11601,16 +11605,22 @@ async function submitRating() {
     const _isEdit = _existingForSave.length > 0;
     const _wasEdited = _isEdit && (_existingForSave[0].created_at || 0) < 0;
 
-    // Pack visual+promo+sound+promo2 into promo_storyline: visual*1000 + promo*100 + sound*10 + promo2
-    const _packedPromo = _ratingValues.production * 1000 + _ratingValues.promo * 100 + _ratingValues.sound * 10 + _ratingValues.promo2;
+    // Pack all individual stars into promo_storyline with magic prefix 9 to distinguish from legacy:
+    // 900000 + overall_stars*10000 + visual*1000 + promo*100 + sound*10 + promo2
+    const _packedPromo = 900000
+      + _ratingValues.overall     * 10000
+      + _ratingValues.production  * 1000
+      + _ratingValues.promo       * 100
+      + _ratingValues.sound       * 10
+      + _ratingValues.promo2;
 
     const data = {
       username: session.username,
       video_url: url,
       video_id: extractId(url),
       overall: _weighted,
-      production: _ratingValues.overall,   // UI "Production & Editing" top row stars
-      promo_storyline: _packedPromo,        // packed: visual*1000 + promo*100 + sound*10 + promo2
+      production: _ratingValues.overall,   // UI "Production & Editing" top row stars (backup)
+      promo_storyline: _packedPromo,        // packed: 9ABCDE where A=overall,B=visual,C=promo,D=sound,E=promo2
       match_quality: _ratingValues.match,
       roster_talent: _ratingValues.roster,
       // Negate created_at after first edit to flag as locked
