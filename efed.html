@@ -3074,6 +3074,9 @@ html.day-mode .tc-add-btn{border-color:rgba(168,130,10,.3);color:rgba(168,130,10
       <button onclick="efedSfSave()" style="background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);color:#c8a84b;font-size:.75rem;padding:7px 13px;border-radius:7px;cursor:pointer;font-family:inherit;font-weight:600;white-space:nowrap;">Save</button>
       <button onclick="efedSfToggle()" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.4);font-size:.75rem;padding:7px 11px;border-radius:7px;cursor:pointer;font-family:inherit;">✕</button>
     </div>
+    <div style="margin-top:7px;">
+      <input id="efed-sf-title-input" type="text" placeholder="Title (optional)" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:7px;color:#e8e8e8;font-size:.78rem;font-family:inherit;padding:7px 11px;outline:none;" onkeydown="if(event.key==='Enter')efedSfSave();if(event.key==='Escape')efedSfToggle();">
+    </div>
     <div id="efed-sf-err" style="font-size:.7rem;color:#ff6b6b;margin-top:6px;display:none;"></div>
   </div>
   <div id="efed-sf-list"></div>
@@ -16525,15 +16528,17 @@ function _efedSfGenId() {
 }
 
 function efedSfToggle() {
-  const form  = document.getElementById('efed-sf-inline-form');
-  const input = document.getElementById('efed-sf-input');
-  const err   = document.getElementById('efed-sf-err');
+  const form   = document.getElementById('efed-sf-inline-form');
+  const input  = document.getElementById('efed-sf-input');
+  const titleI = document.getElementById('efed-sf-title-input');
+  const err    = document.getElementById('efed-sf-err');
   if (!form) return;
   const open = form.style.display === 'none' || form.style.display === '';
   form.style.display = open ? 'block' : 'none';
   if (open) {
     if (err) { err.style.display = 'none'; err.textContent = ''; }
     if (input) { input.value = ''; input.focus(); }
+    if (titleI) titleI.value = '';
   }
 }
 
@@ -16556,9 +16561,11 @@ async function _efedSfPersist() {
 }
 
 async function efedSfSave() {
-  const input = document.getElementById('efed-sf-input');
-  const err   = document.getElementById('efed-sf-err');
-  const raw   = input ? input.value.trim() : '';
+  const input  = document.getElementById('efed-sf-input');
+  const titleI = document.getElementById('efed-sf-title-input');
+  const err    = document.getElementById('efed-sf-err');
+  const raw    = input ? input.value.trim() : '';
+  const title  = titleI ? titleI.value.trim() : '';
   const showErr = msg => { if(err){ err.textContent=msg; err.style.display='block'; } };
 
   if (!raw) { showErr('Paste an X/Twitter or Instagram URL or embed code.'); return; }
@@ -16567,7 +16574,7 @@ async function efedSfSave() {
   if (_efedSfItems.length >= EFED_SF_MAX) { showErr('Max ' + EFED_SF_MAX + ' posts. Delete one first.'); return; }
 
   const url = parsed.type === 'twitter' ? _efedSfNormalize(parsed.url) : parsed.url;
-  _efedSfItems = [{ id: _efedSfGenId(), url, type: parsed.type }, ..._efedSfItems];
+  _efedSfItems = [{ id: _efedSfGenId(), url, type: parsed.type, title: title || '' }, ..._efedSfItems];
   const result = await _efedSfPersist();
   if (result !== true) { _efedSfItems = _efedSfItems.slice(1); showErr(result); return; }
   efedSfToggle();
@@ -16591,16 +16598,6 @@ function _efedSfLoadWidgets() {
     s.charset = 'utf-8';
     document.head.appendChild(s);
   }
-  if (_efedSfItems.some(i => i.type === 'instagram')) {
-    if (window.instgrm && window.instgrm.Embeds) {
-      window.instgrm.Embeds.process();
-    } else if (!document.getElementById('instagram-wjs')) {
-      const s = document.createElement('script');
-      s.id = 'instagram-wjs'; s.async = true;
-      s.src = 'https://www.instagram.com/embed.js';
-      document.head.appendChild(s);
-    }
-  }
 }
 
 function _efedSfRender() {
@@ -16619,13 +16616,16 @@ function _efedSfRender() {
   list.innerHTML = _efedSfItems.map(item => {
     const del = _efedSfIsOwner ? '<button class="sf-delete-btn" onclick="efedSfDelete(\'' + item.id + '\')" title="Remove">✕</button>' : '';
     const type = item.type || (item.url.includes('instagram.com') ? 'instagram' : 'twitter');
+    const titleHtml = item.title ? '<div style="font-size:.8rem;font-weight:700;color:#c8a84b;letter-spacing:.4px;margin-bottom:7px;padding:0 2px;">' + item.title.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>' : '';
     let embed;
     if (type === 'instagram') {
-      embed = '<blockquote class="instagram-media" data-instgrm-captioned data-instgrm-permalink="' + item.url.replace(/"/g,'&quot;') + '" data-instgrm-version="14" style="background:#FFF;border:0;border-radius:3px;box-shadow:0 0 1px 0 rgba(0,0,0,0.5),0 1px 10px 0 rgba(0,0,0,0.15);margin:0;max-width:540px;min-width:326px;padding:0;width:calc(100% - 2px);"></blockquote>';
+      // Use Instagram's embed endpoint via iframe — avoids the broken blockquote embed.js issue
+      const igUrl = item.url.replace(/\/?$/, '/embed/');
+      embed = '<div style="max-width:540px;"><iframe src="' + igUrl.replace(/"/g,'&quot;') + '" width="100%" height="540" frameborder="0" scrolling="no" allowtransparency="true" style="border-radius:8px;display:block;"></iframe></div>';
     } else {
       embed = '<blockquote class="twitter-tweet" data-theme="dark" data-media-max-width="560"><a href="' + item.url.replace(/"/g,'&quot;') + '"></a></blockquote>';
     }
-    return '<div class="efed-sf-card" id="efed-sf-card-' + item.id + '">' + del + embed + '</div>';
+    return '<div class="efed-sf-card" id="efed-sf-card-' + item.id + '">' + del + titleHtml + embed + '</div>';
   }).join('');
   _efedSfLoadWidgets();
 }
