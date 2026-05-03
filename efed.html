@@ -997,21 +997,10 @@ html.day-mode #booking-ext-fullname { color: #111 !important; }
 
 /* ── EFED COMMUNITY FEED ── */
 .efed-feed-section { padding: 22px 0 0; border-bottom: 1px solid rgba(255,255,255,.07); }
-.efed-sf-card { position:relative; background:#000; border:1px solid rgba(255,255,255,.07); border-radius:12px; padding:0; margin-bottom:10px; overflow:hidden; }
-.efed-sf-card .efed-sf-title { font-size:.8rem; font-weight:700; color:#c8a84b; letter-spacing:.4px; padding:10px 12px 6px; }
-.efed-sf-card .sf-delete-btn { position:absolute; top:8px; right:8px; background:rgba(255,80,80,.85); border:1px solid rgba(255,80,80,.5); color:#fff; border-radius:6px; width:28px; height:28px; font-size:.8rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:opacity .2s; z-index:10; opacity:1; }
-.efed-sf-card .sf-delete-btn:hover { background:rgba(255,60,60,.95); }
-html.day-mode .efed-sf-card { background:#fff; border-color:rgba(0,0,0,.08); }
-/* Force Twitter iframe full width */
-.efed-sf-card iframe.twitter-tweet,
-.efed-sf-card iframe[id^='twitter-widget'] { width:100%!important; min-width:0!important; border-radius:0!important; }
-.efed-sf-card .twitter-tweet { width:100%!important; margin:0!important; }
-/* Mobile: hide delete btn, show on hold */
-@media (hover: none) {
-  .efed-sf-card .sf-delete-btn { opacity:0; pointer-events:none; }
-  .efed-sf-card.sf-held .sf-delete-btn { opacity:1; pointer-events:auto; }
-  .efed-sf-card.sf-held { outline:2px solid rgba(255,80,80,.4); border-radius:12px; }
-}
+.efed-sf-card { position:relative; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07); border-radius:12px; padding:14px 14px 10px; margin-bottom:10px; overflow:hidden; }
+.efed-sf-card .sf-delete-btn { position:absolute; top:8px; right:8px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.1); color:rgba(255,255,255,.35); border-radius:6px; width:22px; height:22px; font-size:.65rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .15s,color .15s; z-index:2; }
+.efed-sf-card .sf-delete-btn:hover { background:rgba(255,80,80,.22); color:#ff6b6b; }
+html.day-mode .efed-sf-card { background:#f5f5fa; border-color:rgba(0,0,0,.08); }
 .efed-feed-header { display: flex; align-items: center; gap: 6px; padding: 0 16px 14px; }
 .efed-posts-track-wrap { position: relative; overflow: hidden; touch-action: pan-y; min-height: 80px; transition: height .36s cubic-bezier(.32,.72,0,1); }
 .efed-posts-track {
@@ -4704,13 +4693,11 @@ function _initMatchCardDrag() {
       dragSrc.style.cursor = 'grab';
       document.querySelectorAll('.sched-booking-banner').forEach(b => b.style.outline = '');
       _fixBannerRadii();
-      // Save the new order — scoped per evKey group so multi-event pages stay correct
-      const savedSrc = dragSrc;
       dragSrc = null;
-      const evKey = savedSrc ? savedSrc.dataset.evKey : null;
-      // Build full ordered array preserving per-group order
-      const allBanners = Array.from(document.querySelectorAll('.sched-booking-banner'));
-      const newOrder = allBanners.map(b => b.dataset.rosterId).filter(Boolean);
+      // Save the new order to Supabase (cross-device) and localStorage (offline fallback)
+      const newOrder = Array.from(document.querySelectorAll('.sched-booking-banner'))
+        .map(b => b.dataset.rosterId)
+        .filter(Boolean);
       window._efedMatchOrder = newOrder;
       try { localStorage.setItem('efed_match_order_' + EFED_NAME, JSON.stringify(newOrder)); } catch(e) {}
       const _moSession = getSession();
@@ -4718,20 +4705,7 @@ function _initMatchCardDrag() {
         fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(_moSession.username), {
           method: 'PATCH', headers: SB_HEADERS,
           body: JSON.stringify({ efed_match_order: newOrder })
-        })
-        .then(async r => {
-          if (!r.ok) {
-            const txt = await r.text().catch(()=>'');
-            if (txt.includes('efed_match_order') || r.status === 400) {
-              console.warn('[match order] Column missing! Run in Supabase SQL:\nalter table users add column if not exists efed_match_order jsonb default \'[]\';');
-            } else {
-              console.error('[match order] Save failed HTTP', r.status, txt);
-            }
-          } else {
-            console.log('[match order] saved ok', newOrder);
-          }
-        })
-        .catch(e => console.error('[match order] Supabase save failed', e));
+        }).catch(e => console.error('[match order] Supabase save failed', e));
       }
     });
 
@@ -16723,24 +16697,6 @@ function _efedSfLoadWidgets() {
 
 function _efedSfRender() {
   const sec   = document.getElementById('efed-sf-section');
-// ── Efed social feed hold-to-delete (mobile) ─────────────────────────────
-let _efedSfHoldTimer = null;
-function _efedSfHoldStart(card) {
-  _efedSfHoldTimer = setTimeout(() => {
-    document.querySelectorAll('.efed-sf-card.sf-held').forEach(c => c.classList.remove('sf-held'));
-    card.classList.add('sf-held');
-    if (navigator.vibrate) navigator.vibrate(40);
-    setTimeout(() => document.addEventListener('touchstart', _efedSfDismissHeld, { once: true, passive: true }), 50);
-  }, 500);
-}
-function _efedSfHoldEnd(card) {
-  clearTimeout(_efedSfHoldTimer); _efedSfHoldTimer = null;
-}
-function _efedSfDismissHeld(e) {
-  if (!e.target.closest('.sf-delete-btn')) {
-    document.querySelectorAll('.efed-sf-card.sf-held').forEach(c => c.classList.remove('sf-held'));
-  }
-}
   const list  = document.getElementById('efed-sf-list');
   const empty = document.getElementById('efed-sf-empty');
   if (!sec || !list) return;
@@ -16755,16 +16711,16 @@ function _efedSfDismissHeld(e) {
   list.innerHTML = _efedSfItems.map(item => {
     const del = _efedSfIsOwner ? '<button class="sf-delete-btn" onclick="efedSfDelete(\'' + item.id + '\')" title="Remove">✕</button>' : '';
     const type = item.type || (item.url.includes('instagram.com') ? 'instagram' : 'twitter');
-    const titleHtml = item.title ? '<div class="efed-sf-title">' + item.title.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>' : '';
+    const titleHtml = item.title ? '<div style="font-size:.8rem;font-weight:700;color:#c8a84b;letter-spacing:.4px;margin-bottom:7px;padding:0 2px;">' + item.title.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>' : '';
     let embed;
     if (type === 'instagram') {
       // Use Instagram's embed endpoint via iframe — avoids the broken blockquote embed.js issue
       const igUrl = item.url.replace(/\/?$/, '/embed/');
-      embed = '<iframe src="' + igUrl.replace(/"/g,'&quot;') + '" width="100%" height="540" frameborder="0" scrolling="no" allowtransparency="true" style="display:block;"></iframe>';
+      embed = '<div style="max-width:540px;"><iframe src="' + igUrl.replace(/"/g,'&quot;') + '" width="100%" height="540" frameborder="0" scrolling="no" allowtransparency="true" style="border-radius:8px;display:block;"></iframe></div>';
     } else {
-      embed = '<blockquote class="twitter-tweet" data-theme="dark" data-media-max-width="9999" style="margin:0!important;width:100%!important;"><a href="' + item.url.replace(/"/g,'&quot;') + '"></a></blockquote>';
+      embed = '<blockquote class="twitter-tweet" data-theme="dark" data-media-max-width="560"><a href="' + item.url.replace(/"/g,'&quot;') + '"></a></blockquote>';
     }
-    return '<div class="efed-sf-card" id="efed-sf-card-' + item.id + '" ontouchstart="_efedSfHoldStart(this)" ontouchend="_efedSfHoldEnd(this)" ontouchcancel="_efedSfHoldEnd(this)">' + del + titleHtml + embed + '</div>';
+    return '<div class="efed-sf-card" id="efed-sf-card-' + item.id + '">' + del + titleHtml + embed + '</div>';
   }).join('');
   _efedSfLoadWidgets();
 }
