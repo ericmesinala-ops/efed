@@ -2024,7 +2024,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
   </div>
   <div id="bio-display-wrap" style="background:rgba(255,255,255,.02);border-left:2px solid rgba(255,255,255,.08);border-radius:0 6px 6px 0;padding:12px 16px;">
     <div id="profile-bio"
-      style="font-size:.82rem;color:rgba(255,255,255,.6);line-height:1.7;white-space:pre-wrap;word-break:break-word;outline:none;min-height:1.4em;"
+      style="font-size:.9rem;color:rgba(255,255,255,.6);line-height:1.7;white-space:pre-wrap;word-break:break-word;outline:none;min-height:1.4em;"
       spellcheck="false"
       data-placeholder="Tap to add a bio…"
       onblur="autosaveBio(this)"></div>
@@ -2064,6 +2064,18 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 <div class="section">
   <div class="sec-title" id="my-efeds-title">eFeds</div>
   <div id="myefeds-list"><div class="empty">Not part of any eFed yet.</div></div>
+</div>
+
+<!-- ── ONGOING RIVALRIES (overview display) ── -->
+<div class="section" id="ongoing-rivalries-section" style="display:none;">
+  <div class="sec-title">⚔️ Ongoing Rivalries</div>
+  <div id="ongoing-rivalries-list"></div>
+  <div id="ongoing-rivalries-empty" style="display:none;font-size:.75rem;color:rgba(255,255,255,.25);font-style:italic;padding:4px 0;">No ongoing rivalries.</div>
+  <div style="margin-top:10px;padding:8px 12px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid rgba(255,255,255,.06);">
+    <div style="font-size:.65rem;color:rgba(255,255,255,.28);line-height:1.6;">
+      <span style="color:rgba(200,168,75,.5);">ℹ</span> Create ongoing rivalries on the <strong style="color:rgba(255,255,255,.4);">Career</strong> tab. To edit or delete, go to <strong style="color:rgba(255,255,255,.4);">Career → Rivalries</strong>.
+    </div>
+  </div>
 </div>
 
 <!-- ── AUTO STREAM ON HUB ── -->
@@ -2183,7 +2195,13 @@ html.day-mode .move-original:empty:not(:focus)::before { color: rgba(0,0,0,.08);
 </style>
 
 <div class="section" id="caw-images-section">
-  <div class="sec-title">Gallery</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;">
+    <div class="sec-title" style="margin-bottom:0;flex:1;">Gallery</div>
+    <button id="gallery-lock-btn" onclick="toggleGalleryLock()" style="display:none;align-items:center;gap:5px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:4px 10px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;letter-spacing:.8px;text-transform:uppercase;cursor:pointer;transition:background .2s,color .2s,border-color .2s;flex-shrink:0;">
+      <svg id="gallery-lock-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span id="gallery-lock-label">Locked</span>
+    </button>
+  </div>
   <div id="caw-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;">
 
     <!-- Slot 1 -->
@@ -6048,6 +6066,7 @@ function renderRivalries() {
   }
 
   if (editable) _rrMobileDrag(list, _rivalries, () => { renderRivalries(); saveRivalries(getSession()); });
+  if (typeof renderOngoingRivalries === 'function') renderOngoingRivalries();
 }
 
 function _rvShowMore() {
@@ -6101,9 +6120,92 @@ async function loadRivalries(username, isOwn) {
   }
   await _fetchRivalryAvatars();
   renderRivalries();
+  renderOngoingRivalries();
 }
 
-// ── MOBILE TOUCH DRAG (tap-and-hold) ──
+function renderOngoingRivalries() {
+  const sec   = document.getElementById('ongoing-rivalries-section');
+  const list  = document.getElementById('ongoing-rivalries-list');
+  const empty = document.getElementById('ongoing-rivalries-empty');
+  if (!sec || !list) return;
+
+  const ongoing = _rivalries.filter(r => !r.hidden && (r.status === 'ongoing' || !r.status));
+
+  if (!ongoing.length) {
+    sec.style.display = 'none';
+    return;
+  }
+  sec.style.display = '';
+  if (empty) empty.style.display = 'none';
+
+  list.innerHTML = ongoing.map(r => {
+    const cached      = _rivalryAvatarCache[(r.name||'').toLowerCase().trim()];
+    const avatarUrl   = r.avatar_url || cached?.avatar_url || '';
+    const displayName = r.display_name || cached?.display_name || r.name || '';
+    const initials    = (displayName || r.name || '?').trim()
+      .split(/\s+/).slice(0,2).map(w=>(w[0]||'').toUpperCase()).join('') || '?';
+    const metaParts   = [r.efed, r.year].filter(Boolean);
+    const hasPromo    = !!(r.promo_url   && _rm2ExtractYtId(r.promo_url));
+    const hasYt       = !!(r.youtube_url && _rm2ExtractYtId(r.youtube_url));
+    const _ytIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`;
+    const promoBtn = hasPromo ? `<button class="rec-yt-btn orv-yt-promo" data-orv-promo='${JSON.stringify({promo_url:r.promo_url,display_name:displayName})}' style="cursor:pointer;">${_ytIcon}<span>Notable Promo</span></button>` : '';
+    const matchBtn = hasYt    ? `<button class="rec-yt-btn orv-yt-match" data-orv-yt='${JSON.stringify({youtube_url:r.youtube_url,display_name:displayName})}' style="cursor:pointer;">${_ytIcon}<span>Notable Match</span></button>` : '';
+    const ytRow    = (hasPromo || hasYt) ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:5px;">${promoBtn}${matchBtn}</div>` : '';
+
+    const avatarInner = avatarUrl
+      ? (r.name
+          ? `<a href="profile.html?u=${encodeURIComponent(r.name)}" onclick="event.stopPropagation();" style="display:flex;width:100%;height:100%;border-radius:50%;overflow:hidden;text-decoration:none;"><img loading="lazy" src="${_esc(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none';this.parentNode.insertAdjacentHTML('beforeend','<span style=\'display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-family:Bebas Neue,sans-serif;font-size:.95rem;color:rgba(255,255,255,.55);\'>${initials}</span>');"></a>`
+          : `<img loading="lazy" src="${_esc(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none';">`)
+      : `<span style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.95rem;color:rgba(255,255,255,.55);">${initials}</span>`;
+
+    return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);">
+      <div style="width:42px;height:42px;border-radius:50%;flex-shrink:0;overflow:hidden;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;">${avatarInner}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:.88rem;font-weight:700;color:#e8e8e8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${withProfileVerified(displayName, r.name)}</div>
+        ${metaParts.length ? `<div style="font-size:.65rem;color:rgba(255,255,255,.3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(metaParts.join(' · '))}</div>` : ''}
+        ${ytRow}
+      </div>
+      <span class="rv-status ongoing" style="flex-shrink:0;">Ongoing</span>
+    </div>`;
+  }).join('');
+
+  // wire up YT buttons
+  list.querySelectorAll('.orv-yt-promo').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      try { const d = JSON.parse(btn.dataset.orvPromo); openVideoPopup(_rm2ExtractYtId(d.promo_url), {type:'rivalry', label: d.display_name + ' — Notable Promo', status:'ongoing'}); } catch(_){}
+    });
+  });
+  list.querySelectorAll('.orv-yt-match').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      try { const d = JSON.parse(btn.dataset.orvYt); openVideoPopup(_rm2ExtractYtId(d.youtube_url), {type:'rivalry', label: d.display_name + ' — Notable Match', status:'ongoing'}); } catch(_){}
+    });
+  });
+}
+
+// ── GALLERY DRAG LOCK (mobile) ──
+let _galDragLocked = true;
+function toggleGalleryLock() {
+  _galDragLocked = !_galDragLocked;
+  const btn   = document.getElementById('gallery-lock-btn');
+  const icon  = document.getElementById('gallery-lock-icon');
+  const label = document.getElementById('gallery-lock-label');
+  if (!btn) return;
+  if (_galDragLocked) {
+    btn.style.background    = 'rgba(255,255,255,.06)';
+    btn.style.borderColor   = 'rgba(255,255,255,.1)';
+    btn.style.color         = 'rgba(255,255,255,.45)';
+    if (label) label.textContent = 'Locked';
+    if (icon)  icon.innerHTML = '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>';
+  } else {
+    btn.style.background    = 'rgba(200,168,75,.12)';
+    btn.style.borderColor   = 'rgba(200,168,75,.35)';
+    btn.style.color         = '#c8a84b';
+    if (label) label.textContent = 'Unlocked';
+    if (icon)  icon.innerHTML = '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>';
+  }
+}
 function _rrMobileDrag(list, arr, onDone) {
   if (window.matchMedia('(hover: hover)').matches) return; // desktop only uses arrows
   let dragEl = null, dragIdx = null, startY = 0, initScrollTop = 0;
@@ -12216,6 +12318,11 @@ function _galSetImg(slot, src) {
 
 function initGalleryDrag(isOwner) {
   if (!isOwner) return;
+  const isMobile = window.innerWidth <= 600 || !window.matchMedia('(hover: hover)').matches;
+  if (isMobile) {
+    const btn = document.getElementById('gallery-lock-btn');
+    if (btn) btn.style.display = 'flex';
+  }
   [1,2,3,4,5,6,7,8].forEach(slot => {
     const el = document.getElementById('caw-slot-' + slot);
     if (!el) return;
@@ -12259,6 +12366,8 @@ function initGalleryDrag(isOwner) {
     }, { passive: true });
     el.addEventListener('touchmove', e => {
       touchMoved = true;
+      // If gallery is locked on mobile, don't drag
+      if (_galDragLocked) { clearTimeout(touchTimer); touchTimer = null; return; }
       // If longpress timer already fired we're in ctx-menu mode — don't drag
       if (!touchDragging && touchTimer) {
         // Start drag only if finger moved before timer fired
