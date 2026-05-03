@@ -11410,26 +11410,37 @@ async function loadExistingRating(url) {
       const r = rows[0];
       const hasUsedEdit = localStorage.getItem('rating_edited_' + extractId(url)) === '1';
 
-      // Restore individual star values from existing columns
-      // New format: promo_storyline >= 900000 (magic prefix 9ABCDE: A=overall,B=visual,C=promo,D=sound,E=promo2)
-      // Legacy format: promo_storyline <= 5 (just the raw promo2 star value)
-      const _packedRaw = Math.round(Math.abs(r.promo_storyline || 0));
+      // Decode promo_storyline — could be string or number from DB
+      const _packedRaw = parseInt(String(r.promo_storyline || '0').replace(/[^0-9]/g, ''), 10) || 0;
       const _isNewFormat = _packedRaw >= 900000;
-      const _p = _isNewFormat ? _packedRaw - 900000 : 0;
-      const _rOverallStars = _isNewFormat ? Math.floor(_p / 10000)        : Math.round(r.production || 0);
-      const _rVisual       = _isNewFormat ? Math.floor((_p % 10000) / 1000) : 0;
-      const _rPromo        = _isNewFormat ? Math.floor((_p % 1000) / 100)   : 0;
-      const _rSound        = _isNewFormat ? Math.floor((_p % 100) / 10)     : 0;
-      const _rPromo2       = _isNewFormat ? _p % 10                          : _packedRaw;
 
+      let _rOverallStars, _rVisual, _rPromo, _rSound, _rPromo2;
+      if (_isNewFormat) {
+        const _p = _packedRaw - 900000;
+        _rOverallStars = Math.floor(_p / 10000);
+        _rVisual       = Math.floor((_p % 10000) / 1000);
+        _rPromo        = Math.floor((_p % 1000) / 100);
+        _rSound        = Math.floor((_p % 100) / 10);
+        _rPromo2       = _p % 10;
+      } else {
+        // Legacy row — use whatever individual cols exist, default others to 3
+        _rOverallStars = Math.round(r.production || 0) || 3;
+        _rVisual  = 3;
+        _rPromo   = 3;
+        _rSound   = 3;
+        _rPromo2  = Math.round(parseFloat(r.promo_storyline) || 0) || 3;
+      }
+
+      // Clamp all values to 1-5
+      const clamp = v => Math.min(5, Math.max(1, v || 1));
       const _restoreMap = [
-        ['overall',     _rOverallStars],
-        ['production',  _rVisual],
-        ['sound',       _rSound],
-        ['promo',       _rPromo],
-        ['match',       Math.round(r.match_quality || 0)],
-        ['promo2',      _rPromo2],
-        ['roster',      Math.round(r.roster_talent || 0)]
+        ['overall',  clamp(_rOverallStars)],
+        ['production', clamp(_rVisual)],
+        ['sound',    clamp(_rSound)],
+        ['promo',    clamp(_rPromo)],
+        ['match',    clamp(Math.round(r.match_quality || 0))],
+        ['promo2',   clamp(_rPromo2)],
+        ['roster',   clamp(Math.round(r.roster_talent || 0))]
       ];
       _restoreMap.forEach(([cat, val]) => {
         setStars(cat, val);
@@ -11609,14 +11620,16 @@ async function submitRating() {
     const _isEdit = _existingForSave.length > 0;
     const _wasEdited = _isEdit && localStorage.getItem('rating_edited_' + extractId(url)) === '1';
 
-    // Pack all individual stars into promo_storyline with magic prefix 9 to distinguish from legacy:
+    // Pack all individual stars into promo_storyline with magic prefix 9:
     // 900000 + overall_stars*10000 + visual*1000 + promo*100 + sound*10 + promo2
+    // Ensure all values are integers 1-5 before packing
+    const _clampStar = v => Math.min(5, Math.max(1, parseInt(v) || 1));
     const _packedPromo = 900000
-      + _ratingValues.overall     * 10000
-      + _ratingValues.production  * 1000
-      + _ratingValues.promo       * 100
-      + _ratingValues.sound       * 10
-      + _ratingValues.promo2;
+      + _clampStar(_ratingValues.overall)     * 10000
+      + _clampStar(_ratingValues.production)  * 1000
+      + _clampStar(_ratingValues.promo)       * 100
+      + _clampStar(_ratingValues.sound)       * 10
+      + _clampStar(_ratingValues.promo2);
 
     // Only the score columns — never send username/video_id/created_at on update (causes 400)
     const _scoreData = {
