@@ -997,6 +997,10 @@ html.day-mode #booking-ext-fullname { color: #111 !important; }
 
 /* ── EFED COMMUNITY FEED ── */
 .efed-feed-section { padding: 22px 0 0; border-bottom: 1px solid rgba(255,255,255,.07); }
+.efed-sf-card { position:relative; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07); border-radius:12px; padding:14px 14px 10px; margin-bottom:10px; overflow:hidden; }
+.efed-sf-card .sf-delete-btn { position:absolute; top:8px; right:8px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.1); color:rgba(255,255,255,.35); border-radius:6px; width:22px; height:22px; font-size:.65rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .15s,color .15s; z-index:2; }
+.efed-sf-card .sf-delete-btn:hover { background:rgba(255,80,80,.22); color:#ff6b6b; }
+html.day-mode .efed-sf-card { background:#f5f5fa; border-color:rgba(0,0,0,.08); }
 .efed-feed-header { display: flex; align-items: center; gap: 6px; padding: 0 16px 14px; }
 .efed-posts-track-wrap { position: relative; overflow: hidden; touch-action: pan-y; min-height: 80px; transition: height .36s cubic-bezier(.32,.72,0,1); }
 .efed-posts-track {
@@ -3055,6 +3059,25 @@ html.day-mode .tc-add-btn{border-color:rgba(168,130,10,.3);color:rgba(168,130,10
   </div>
 </div>
 
+<!-- ── EFED SOCIAL FEED ── -->
+<div class="section" id="efed-sf-section" style="display:none;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <div class="sec-title" style="margin-bottom:0;flex:1;">Social Feed</div>
+    <button id="efed-sf-add-btn" onclick="efedSfToggle()" title="Add post" style="display:none;" class="rr-add-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+  </div>
+  <div id="efed-sf-inline-form" style="display:none;margin-bottom:12px;background:rgba(255,255,255,.03);border:1px solid rgba(200,168,75,.18);border-radius:10px;padding:12px 14px;">
+    <div style="font-size:.68rem;color:rgba(255,255,255,.35);margin-bottom:7px;letter-spacing:.5px;">Paste an X/Twitter or Instagram URL or embed code</div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input id="efed-sf-input" type="text" placeholder="https://x.com/... or https://instagram.com/p/..." style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:7px;color:#e8e8e8;font-size:.78rem;font-family:inherit;padding:7px 11px;outline:none;min-width:0;" onkeydown="if(event.key==='Enter')efedSfSave();if(event.key==='Escape')efedSfToggle();">
+      <button onclick="efedSfSave()" style="background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);color:#c8a84b;font-size:.75rem;padding:7px 13px;border-radius:7px;cursor:pointer;font-family:inherit;font-weight:600;white-space:nowrap;">Save</button>
+      <button onclick="efedSfToggle()" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);color:rgba(255,255,255,.4);font-size:.75rem;padding:7px 11px;border-radius:7px;cursor:pointer;font-family:inherit;">✕</button>
+    </div>
+    <div id="efed-sf-err" style="font-size:.7rem;color:#ff6b6b;margin-top:6px;display:none;"></div>
+  </div>
+  <div id="efed-sf-list"></div>
+  <div id="efed-sf-empty" style="display:none;font-size:.78rem;color:#5a5a6a;padding:4px 0;">No posts yet.</div>
+</div>
+
 </div><!-- /efed-panel-connect -->
 
 <!-- ── SCHEDULE: calendar of events ── -->
@@ -5087,6 +5110,8 @@ async function loadProfile() {
         if (typeof window.enableBookTab === 'function') window.enableBookTab();
         // Populate shows after events data is loaded (deferred)
         setTimeout(() => { if (typeof bkRenderShowList === 'function') bkRenderShowList(); }, 600);
+        // Load efed social feed (owner can edit)
+        loadEfedSocialFeed(true);
       }
       // Admin always sees chat
       if (!_isMember && session.username.toLowerCase() === ADMIN_USERNAME) {
@@ -5216,6 +5241,8 @@ async function loadProfile() {
   loadRoster();
   initEfedChatView(); // always load chat messages — input row shown separately for members/admin
   _efedFeed.load();  // always load community feed — visible to all, reply-enabled for logged-in users
+  // Only load efed social feed for non-owners here; owners loaded it above when EFED_OWNER was set
+  if (!_isOwnProfile) loadEfedSocialFeed(false);
 
   // First visit — show welcome modal tailored to whether videos exist
   const _urlParams = new URLSearchParams(window.location.search);
@@ -16449,9 +16476,166 @@ const _imgCrop = (() => {
   return { open, zoomBy, zoomFromBar, confirm, cancel };
 })();
 
-</script>
+// ── EFED SOCIAL FEED ─────────────────────────────────────────────────────────
+// Stored as efed_social_feed JSON column on the efed owner's users row.
+// One-time Supabase SQL (if column missing):
+//   alter table users add column if not exists efed_social_feed jsonb default '[]';
+const EFED_SF_MAX = 6;
+let _efedSfItems   = []; // [{id, url, type}]
+let _efedSfIsOwner = false;
 
-<!-- ── MY EFED PICKER POPUP ── -->
+function _efedSfDetectType(raw) {
+  if (!raw) return null;
+  if (/instagram\.com\/(p|reel|tv)\//i.test(raw)) return 'instagram';
+  if (/twitter\.com|x\.com/i.test(raw)) return 'twitter';
+  return null;
+}
+
+function _efedSfExtractUrl(raw) {
+  if (!raw) return null;
+  raw = raw.trim();
+  const type = _efedSfDetectType(raw);
+  if (type === 'twitter') {
+    const statusMatch = raw.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]*\/status\/\d+[^"]*)"/i);
+    if (statusMatch) return { url: statusMatch[1].split('?')[0], type };
+    const hrefMatch = raw.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]+)"/i);
+    if (hrefMatch) return { url: hrefMatch[1].split('?')[0], type };
+    const urlMatch = raw.match(/https?:\/\/(?:twitter\.com|x\.com)\/\S+/i);
+    if (urlMatch) return { url: urlMatch[0].split('?')[0].replace(/[)>\]'"]+$/, ''), type };
+  }
+  if (type === 'instagram') {
+    const igMatch = raw.match(/https?:\/\/(?:www\.)?instagram\.com\/(p|reel|tv)\/([\w-]+)/i);
+    if (igMatch) return { url: 'https://www.instagram.com/' + igMatch[1] + '/' + igMatch[2] + '/', type };
+  }
+  return null;
+}
+
+function _efedSfNormalize(url) {
+  return url.replace(/^https?:\/\/x\.com\//, 'https://twitter.com/');
+}
+
+function _efedSfGenId() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+function efedSfToggle() {
+  const form  = document.getElementById('efed-sf-inline-form');
+  const input = document.getElementById('efed-sf-input');
+  const err   = document.getElementById('efed-sf-err');
+  if (!form) return;
+  const open = form.style.display === 'none' || form.style.display === '';
+  form.style.display = open ? 'block' : 'none';
+  if (open) {
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    if (input) { input.value = ''; input.focus(); }
+  }
+}
+
+async function _efedSfPersist() {
+  const session = getSession();
+  if (!session) return false;
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(EFED_OWNER), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_social_feed: _efedSfItems })
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      if (txt.includes('efed_social_feed')) {
+        return 'Column missing. Run in Supabase SQL: alter table users add column if not exists efed_social_feed jsonb default \'[]\';';
+      }
+      return 'Save failed.';
+    }
+    return true;
+  } catch(e) { return 'Save failed.'; }
+}
+
+async function efedSfSave() {
+  const input = document.getElementById('efed-sf-input');
+  const err   = document.getElementById('efed-sf-err');
+  const raw   = input ? input.value.trim() : '';
+  const showErr = msg => { if(err){ err.textContent=msg; err.style.display='block'; } };
+
+  if (!raw) { showErr('Paste an X/Twitter or Instagram URL or embed code.'); return; }
+  const parsed = _efedSfExtractUrl(raw);
+  if (!parsed) { showErr('Could not find a valid X/Twitter or Instagram URL.'); return; }
+  if (_efedSfItems.length >= EFED_SF_MAX) { showErr('Max ' + EFED_SF_MAX + ' posts. Delete one first.'); return; }
+
+  const url = parsed.type === 'twitter' ? _efedSfNormalize(parsed.url) : parsed.url;
+  _efedSfItems = [{ id: _efedSfGenId(), url, type: parsed.type }, ..._efedSfItems];
+  const result = await _efedSfPersist();
+  if (result !== true) { _efedSfItems = _efedSfItems.slice(1); showErr(result); return; }
+  efedSfToggle();
+  _efedSfRender();
+}
+
+async function efedSfDelete(id) {
+  _efedSfItems = _efedSfItems.filter(i => i.id !== id);
+  const result = await _efedSfPersist();
+  if (result !== true) { console.warn('efedSF delete failed:', result); return; }
+  _efedSfRender();
+}
+
+function _efedSfLoadWidgets() {
+  if (window.twttr && window.twttr.widgets) {
+    window.twttr.widgets.load(document.getElementById('efed-sf-list'));
+  } else if (!document.getElementById('twitter-wjs')) {
+    const s = document.createElement('script');
+    s.id = 'twitter-wjs'; s.async = true;
+    s.src = 'https://platform.twitter.com/widgets.js';
+    s.charset = 'utf-8';
+    document.head.appendChild(s);
+  }
+  if (_efedSfItems.some(i => i.type === 'instagram')) {
+    if (window.instgrm && window.instgrm.Embeds) {
+      window.instgrm.Embeds.process();
+    } else if (!document.getElementById('instagram-wjs')) {
+      const s = document.createElement('script');
+      s.id = 'instagram-wjs'; s.async = true;
+      s.src = 'https://www.instagram.com/embed.js';
+      document.head.appendChild(s);
+    }
+  }
+}
+
+function _efedSfRender() {
+  const sec   = document.getElementById('efed-sf-section');
+  const list  = document.getElementById('efed-sf-list');
+  const empty = document.getElementById('efed-sf-empty');
+  if (!sec || !list) return;
+  if (!_efedSfItems.length) {
+    list.innerHTML = '';
+    if (_efedSfIsOwner) { sec.style.display = ''; if(empty) empty.style.display = 'block'; }
+    else sec.style.display = 'none';
+    return;
+  }
+  sec.style.display = '';
+  if (empty) empty.style.display = 'none';
+  list.innerHTML = _efedSfItems.map(item => {
+    const del = _efedSfIsOwner ? '<button class="sf-delete-btn" onclick="efedSfDelete(\'' + item.id + '\')" title="Remove">✕</button>' : '';
+    const type = item.type || (item.url.includes('instagram.com') ? 'instagram' : 'twitter');
+    let embed;
+    if (type === 'instagram') {
+      embed = '<blockquote class="instagram-media" data-instgrm-captioned data-instgrm-permalink="' + item.url.replace(/"/g,'&quot;') + '" data-instgrm-version="14" style="background:#FFF;border:0;border-radius:3px;box-shadow:0 0 1px 0 rgba(0,0,0,0.5),0 1px 10px 0 rgba(0,0,0,0.15);margin:0;max-width:540px;min-width:326px;padding:0;width:calc(100% - 2px);"></blockquote>';
+    } else {
+      embed = '<blockquote class="twitter-tweet" data-media-max-width="560"><a href="' + item.url.replace(/"/g,'&quot;') + '"></a></blockquote>';
+    }
+    return '<div class="efed-sf-card" id="efed-sf-card-' + item.id + '">' + del + embed + '</div>';
+  }).join('');
+  _efedSfLoadWidgets();
+}
+
+async function loadEfedSocialFeed(isOwner) {
+  _efedSfIsOwner = isOwner;
+  const addBtn = document.getElementById('efed-sf-add-btn');
+  if (addBtn) addBtn.style.display = isOwner ? 'flex' : 'none';
+  try {
+    const rows = await sbGet('users', 'username=eq.' + encodeURIComponent(EFED_OWNER) + '&select=efed_social_feed');
+    _efedSfItems = Array.isArray(rows[0]?.efed_social_feed) ? rows[0].efed_social_feed : [];
+  } catch(e) { _efedSfItems = []; }
+  _efedSfRender();
+}
+
+</script>
 <div id="myefed-popup-bg" onclick="if(event.target===this)closeMyEfedPopup()"></div>
 
 </body>
