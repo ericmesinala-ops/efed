@@ -6292,8 +6292,8 @@ function renderOngoingRivalries() {
     const hasPromo    = !!(r.promo_url   && _rm2ExtractYtId(r.promo_url));
     const hasYt       = !!(r.youtube_url && _rm2ExtractYtId(r.youtube_url));
     const _ytIcon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`;
-    const promoBtn = hasPromo ? `<button class="rec-yt-btn orv-yt-promo" data-orv-promo='${JSON.stringify({promo_url:r.promo_url,display_name:displayName})}' style="cursor:pointer;">${_ytIcon}<span>Notable Promo</span></button>` : '';
-    const matchBtn = hasYt    ? `<button class="rec-yt-btn orv-yt-match" data-orv-yt='${JSON.stringify({youtube_url:r.youtube_url,display_name:displayName})}' style="cursor:pointer;">${_ytIcon}<span>Notable Match</span></button>` : '';
+    const promoBtn = hasPromo ? `<button class="rec-yt-btn orv-yt-promo" data-orv-promo='${JSON.stringify({promo_url:r.promo_url,display_name:displayName,avatar_url:avatarUrl,efed:r.efed||''})}' style="cursor:pointer;">${_ytIcon}<span>Notable Promo</span></button>` : '';
+    const matchBtn = hasYt    ? `<button class="rec-yt-btn orv-yt-match" data-orv-yt='${JSON.stringify({youtube_url:r.youtube_url,display_name:displayName,avatar_url:avatarUrl,efed:r.efed||''})}' style="cursor:pointer;">${_ytIcon}<span>Notable Match</span></button>` : '';
     const ytRow    = (hasPromo || hasYt) ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:5px;">${promoBtn}${matchBtn}</div>` : '';
 
     const avatarInner = avatarUrl
@@ -6345,13 +6345,13 @@ function renderOngoingRivalries() {
   list.querySelectorAll('.orv-yt-promo').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      try { const d = JSON.parse(btn.dataset.orvPromo); openVideoPopup(_rm2YtEmbedSrc(d.promo_url), {type:'rivalry', label: d.display_name + ' — Notable Promo', status:'ongoing'}); } catch(_){}
+      try { const d = JSON.parse(btn.dataset.orvPromo); openVideoPopup(_rm2YtEmbedSrc(d.promo_url), {type:'rivalry', label: 'Notable Promo', selfAvatar: _rrOwnerAvatarUrl, selfName: _rrOwnerName, oppAvatar: d.avatar_url||'', oppName: d.display_name||'', status:'ongoing', efed: d.efed||''}); } catch(_){}
     });
   });
   list.querySelectorAll('.orv-yt-match').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      try { const d = JSON.parse(btn.dataset.orvYt); openVideoPopup(_rm2YtEmbedSrc(d.youtube_url), {type:'rivalry', label: d.display_name + ' — Notable Match', status:'ongoing'}); } catch(_){}
+      try { const d = JSON.parse(btn.dataset.orvYt); openVideoPopup(_rm2YtEmbedSrc(d.youtube_url), {type:'rivalry', label: 'Notable Match', selfAvatar: _rrOwnerAvatarUrl, selfName: _rrOwnerName, oppAvatar: d.avatar_url||'', oppName: d.display_name||'', status:'ongoing', efed: d.efed||''}); } catch(_){}
     });
   });
 
@@ -16444,23 +16444,28 @@ const _vp = (() => {
     // Mic granted — validate state then start
     const sel=$('vp-efed-sel');
     if(!sel||!sel.value||cdState().locked){stream.getTracks().forEach(t=>t.stop());return;}
+    // Guard against double-start (clears any stale timer/state)
+    clearInterval(_rtimer); _rtimer=null; _elapsed=0;
     try{
-      // Use stream directly for MediaRecorder — Web Audio gets a separate clone
-      // so the analyser never interferes with what the recorder captures.
       const mime=['audio/mp4','audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm'].find(t=>{try{return MediaRecorder.isTypeSupported(t);}catch(e){return false;}})||'';
-      _mr=new MediaRecorder(stream,mime?{mimeType:mime}:{});
-      const ctx=getCtx(), src=ctx.createMediaStreamSource(stream);
+      // Give MediaRecorder its OWN stream clone so Web Audio analyser
+      // doesn't consume the tracks the recorder needs.
+      const recStream = stream;
+      const vizStream = stream.clone();
+      _mr=new MediaRecorder(recStream, mime?{mimeType:mime}:{});
+      const ctx=getCtx(), src=ctx.createMediaStreamSource(vizStream);
       _analyser=ctx.createAnalyser(); _analyser.fftSize=64; src.connect(_analyser);
       _chunks=[];
-      // No timeslice — recorder buffers everything internally.
-      // On stop(), browser fires ONE ondataavailable with the full blob,
-      // then onstop. This is the most reliable cross-browser pattern.
       _mr.ondataavailable=e=>{
         console.log('[VP] ondataavailable size:', e.data&&e.data.size);
         if(e.data&&e.data.size>0)_chunks.push(e.data);
       };
-      _mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());onRecStop();};
-      _mr.start(); _elapsed=0;  // NO timeslice arg
+      _mr.onstop=()=>{
+        recStream.getTracks().forEach(t=>t.stop());
+        vizStream.getTracks().forEach(t=>t.stop());
+        onRecStop();
+      };
+      _mr.start(); _elapsed=0;
       showStep('record'); drawLive('vp-canvas'); updCD(MAX_S);
       _rtimer=setInterval(()=>{_elapsed++;const rem=MAX_S-_elapsed;updCD(rem);if(_elapsed>=MAX_S)stopRecord();},1000);
     }catch(e){
