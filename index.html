@@ -7708,6 +7708,64 @@ function handleFormSubmit(formId, successId) {
     const btn = form.querySelector('.cf-submit');
     if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
     const data = new FormData(form);
+
+    // ── BANNED LINK / SOCIAL CHECK (cf-add-form only) ──
+    if (formId === 'cf-add-form') {
+      const _cfYtVal    = (data.get('video_url') || '').trim().toLowerCase();
+      const _cfSocial   = (data.get('social') || '').trim();
+      const _cfName     = (data.get('name') || '').trim();
+      const _cfEfed     = (data.get('efed_name') || '').trim();
+      const _cfSession  = getSession();
+      const _cfUser     = _cfSession ? _cfSession.username : '(not logged in)';
+
+      // Check YouTube link
+      if (_cfYtVal) {
+        const _cfBanned = _bannedLinks.length ? _bannedLinks : await sbGet('banned_links', 'select=url,reason').catch(() => []);
+        const _cfBannedMatch = _cfBanned.find(r => {
+          const b = (r.url || '').trim().toLowerCase();
+          return b && (_cfYtVal === b || _cfYtVal.includes(b) || b.includes(_cfYtVal));
+        });
+        if (_cfBannedMatch) {
+          if (btn) { btn.disabled = false; btn.textContent = 'Submit →'; }
+          const _cfErr = document.getElementById('cf-date-error') || document.createElement('div');
+          _cfErr.textContent = '⚠ This channel is not permitted on the Hub.';
+          _cfErr.style.display = 'block';
+          // Notify admin
+          try {
+            await sendNotification(
+              ADMIN_USERNAME,
+              'flag',
+              `🚫 Banned YT link on submit form: @${_cfUser} — Name: ${_cfName}, Social: ${_cfSocial}, eFed: ${_cfEfed}, Link: ${_cfYtVal}`,
+              null
+            );
+          } catch(e) {}
+          return;
+        }
+      }
+
+      // Check social handle against banned_links (social entries)
+      if (_cfSocial) {
+        const _cfBanned2 = _bannedLinks.length ? _bannedLinks : await sbGet('banned_links', 'select=url,reason').catch(() => []);
+        const _socialLower = _cfSocial.replace('@', '').toLowerCase();
+        const _cfSocialBanned = _cfBanned2.find(r => {
+          const b = (r.url || '').replace('@', '').trim().toLowerCase();
+          return b && (b === _socialLower || _socialLower.includes(b) || b.includes(_socialLower));
+        });
+        if (_cfSocialBanned) {
+          if (btn) { btn.disabled = false; btn.textContent = 'Submit →'; }
+          // Notify admin but let it submit — we still want to know
+          try {
+            await sendNotification(
+              ADMIN_USERNAME,
+              'flag',
+              `🚩 Banned social on submit form: @${_cfUser} — Name: ${_cfName}, Social: ${_cfSocial}, eFed: ${_cfEfed}`,
+              null
+            );
+          } catch(e) {}
+        }
+      }
+    }
+
     try {
       const res = await fetch(form.action, { method: 'POST', body: data, headers: { 'Accept': 'application/json' } });
       if (res.ok) {
@@ -11841,13 +11899,13 @@ async function saveWatchTime(url, newSeconds) {
   const session = getSession();
   if (!session || newSeconds <= 0) return;
   try {
-    const rows = await sbGet('watch_time', `username=eq.${encodeURIComponent(session.username)}&video_url=eq.${encodeURIComponent(url)}`);
+    const rows = await sbGet('watch_time', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
     const existing = rows[0];
     const total = Math.max(existing?.total_seconds || 0, newSeconds);
     const unlocked = total >= WATCH_UNLOCK_SECS;
     if (existing) {
       await sbUpdate('watch_time', { total_seconds: total, rating_unlocked: unlocked },
-        `username=eq.${encodeURIComponent(session.username)}&video_url=eq.${encodeURIComponent(url)}`);
+        `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
     } else {
       await sbInsert('watch_time', { username: session.username, video_url: url, video_id: extractId(url), total_seconds: total, rating_unlocked: unlocked });
     }
@@ -11892,7 +11950,7 @@ function handleRateClick() {
 }
 
 function updateWatchProgress(url) {
-  const secs = (_watchTimers[url]?.seconds) || 0;
+  const secs = (_watchTimers[url]?.seconds) || _watchSessionSecs[url] || 0;
   const dbSecs = _watchSeeded[url] || 0;
   const total = Math.max(secs, dbSecs);
   const pct = Math.min(100, (total / WATCH_UNLOCK_SECS) * 100);
@@ -15201,6 +15259,18 @@ async function createEfedSubmit() {
         document.getElementById('create-efed-step2').style.display = '';
         ytErrEl.textContent = 'We were unable to create your eFed page. Please contact us if you believe this is a mistake.';
         ytErrEl.style.display = '';
+        // ── NOTIFY ADMIN of banned YouTube link attempt ──
+        try {
+          const _bSess = getSession();
+          const _bUser = _bSess ? _bSess.username : '(unknown)';
+          const _bName = _bSess ? (_bSess.displayName || _bSess.username) : '(unknown)';
+          await sendNotification(
+            ADMIN_USERNAME,
+            'flag',
+            `🚫 Banned link blocked: @${_bUser} (${_bName}) tried to create eFed "${_createEfedPendingName}" with banned YouTube link: ${ytVal}`,
+            null
+          );
+        } catch(e) {}
         return;
       }
     }
