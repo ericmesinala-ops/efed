@@ -11308,8 +11308,9 @@ document.addEventListener('keydown', e => {
       </div>
     </div>
 
-    <div id="rating-msg" style="font-size:.72rem;color:#ff6b6b;margin-bottom:12px;display:none;"></div>
-    <button onclick="submitRating()" style="width:100%;padding:14px;background:#c0000e;border:none;border-radius:12px;color:#fff;font-family:DM Sans,sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s;">Submit Rating</button>
+    <div id="rating-msg" style="font-size:.72rem;margin-bottom:12px;display:none;"></div>
+    <div id="rating-edit-note" style="display:none;font-size:.65rem;color:rgba(255,255,255,.28);text-align:center;margin-bottom:10px;letter-spacing:.2px;">You may only edit your rating once — after that it's permanently locked.</div>
+    <button onclick="submitRating()" style="width:100%;padding:14px;background:#c0000e;border:none;border-radius:12px;color:#fff;font-family:DM Sans,sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .2s,background .2s;">Submit Rating</button>
   </div>
 </div>
 
@@ -11398,21 +11399,68 @@ async function loadExistingRating(url) {
   if (!session) return;
   const msg = document.getElementById('rating-msg');
   const submitBtn = document.querySelector('#rating-modal-bg button[onclick="submitRating()"]');
+  const editNote = document.getElementById('rating-edit-note');
   try {
     const rows = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
     if (rows.length) {
       const r = rows[0];
-      const dbCols = { overall:'overall', production:'production', promo_storyline:'promo2', match_quality:'match', roster_talent:'roster' };
-      Object.entries(dbCols).forEach(([col, cat]) => {
+      const editCount = r.edit_count || 0;
+      const hasUsedEdit = editCount >= 1;
+
+      // Restore individual star values accurately
+      // DB: production col = UI overall stars, sound/promo/promo_storyline/match_quality/roster_talent = their UI cats
+      const starRestoreMap = [
+        ['production',      'overall'],
+        ['sound',           'sound'],
+        ['promo',           'promo'],
+        ['promo_storyline', 'promo2'],
+        ['match_quality',   'match'],
+        ['roster_talent',   'roster']
+      ];
+      starRestoreMap.forEach(([col, cat]) => {
         const val = Math.round(r[col] || 0);
         setStars(cat, val);
         _ratingValues[cat] = val;
       });
 
-      // Lock — no re-rating allowed
-      msg.innerHTML = '🔒 You\'ve already rated this show. Ratings are final to keep scores accurate.';
-      msg.style.display = 'block';
-      msg.style.color = '#c8a84b';
+      if (hasUsedEdit) {
+        // Fully locked after one edit
+        msg.innerHTML = '🔒 Rating locked. You may only edit once.';
+        msg.style.display = 'block';
+        msg.style.color = '#c8a84b';
+        if (editNote) editNote.style.display = 'none';
+
+        document.querySelectorAll('#rating-modal-bg .star-btn').forEach(btn => {
+          btn.disabled = true;
+          btn.style.cursor = 'default';
+          btn.style.pointerEvents = 'none';
+        });
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Rating Locked';
+          submitBtn.style.opacity = '.35';
+          submitBtn.style.cursor = 'not-allowed';
+        }
+      } else {
+        // First time rated — allow one edit
+        msg.innerHTML = '✅ You\'ve already rated this show. You may update your rating once.';
+        msg.style.display = 'block';
+        msg.style.color = 'rgba(74,222,128,.85)';
+        if (editNote) editNote.style.display = 'block';
+
+        document.querySelectorAll('#rating-modal-bg .star-btn').forEach(btn => {
+          btn.disabled = false;
+          btn.style.cursor = 'pointer';
+          btn.style.pointerEvents = '';
+        });
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Update Rating';
+          submitBtn.style.opacity = '';
+          submitBtn.style.cursor = '';
+          submitBtn.style.background = 'rgba(200,168,75,.85)';
+        }
+      }
 
       // Show score on rate button
       const rateBtn = document.getElementById('expand-rate-btn');
@@ -11429,29 +11477,16 @@ async function loadExistingRating(url) {
         const inner = document.getElementById('rate-btn-inner');
         if (inner) inner.style.display = 'flex';
       }
-
-      // Disable all star buttons
-      document.querySelectorAll('#rating-modal-bg .star-btn').forEach(btn => {
-        btn.disabled = true;
-        btn.style.cursor = 'default';
-        btn.style.pointerEvents = 'none';
-      });
-
-      // Disable and grey out submit button
-      if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Already Rated';
-        submitBtn.style.opacity = '.35';
-        submitBtn.style.cursor = 'not-allowed';
-      }
     } else {
       msg.style.display = 'none';
       msg.style.color = '#ff6b6b';
+      if (editNote) editNote.style.display = 'none';
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Submit Rating';
         submitBtn.style.opacity = '';
         submitBtn.style.cursor = '';
+        submitBtn.style.background = '#c0000e';
       }
     }
   } catch(e) {
@@ -11522,17 +11557,17 @@ async function submitRating() {
   const session = getSession();
   if (!session || !_expandVideo) return;
 
-  // Hard block — check DB before doing anything, no re-rating allowed
+  // Check if already rated — block only if edit_count >= 1 (one edit used up)
   const url = _expandVideo.url;
   try {
     const existing = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
-    if (existing.length) {
+    if (existing.length && (existing[0].edit_count || 0) >= 1) {
       const msg = document.getElementById('rating-msg');
-      msg.textContent = '🔒 You\'ve already rated this show. Ratings are final.';
+      msg.textContent = '🔒 Rating locked. You may only edit once.';
       msg.style.display = 'block';
       msg.style.color = '#c8a84b';
       const submitBtn = document.querySelector('#rating-modal-bg button[onclick="submitRating()"]');
-      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Already Rated'; submitBtn.style.opacity = '.35'; }
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Rating Locked'; submitBtn.style.opacity = '.35'; }
       return;
     }
   } catch(e) {}
@@ -11555,20 +11590,36 @@ async function submitRating() {
        _ratingValues.sound     * 10 +
        _ratingValues.promo     * 10) / 100
     ).toFixed(2));
+
+    // Check if this is an edit (existing row)
+    const _existingForSave = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
+    const _isEdit = _existingForSave.length > 0;
+    const _currentEditCount = _isEdit ? (_existingForSave[0].edit_count || 0) : 0;
+
     const data = {
       username: session.username,
       video_url: url,
       video_id: extractId(url),
-      // Stored as true 0-5 decimal score
+      // Weighted composite score
       overall: _weighted,
-      production: Math.round((_ratingValues.production + _ratingValues.sound + _ratingValues.promo) / 3 * 10) / 10,
+      // Store individual star values for accurate reload
+      // production col = UI "overall" (Production & Editing top row)
+      // sound col = UI sound stars, promo col = UI promo stars
+      production: _ratingValues.overall,
+      sound: _ratingValues.sound,
+      promo: _ratingValues.promo,
       promo_storyline: _ratingValues.promo2,
       match_quality: _ratingValues.match,
       roster_talent: _ratingValues.roster,
-      created_at: Date.now()
+      edit_count: _isEdit ? _currentEditCount + 1 : 0,
+      created_at: _isEdit ? _existingForSave[0].created_at : Date.now()
     };
 
-    await sbInsert('ratings', data);
+    if (_isEdit) {
+      await sbUpdate('ratings', data, `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
+    } else {
+      await sbInsert('ratings', data);
+    }
 
     // ── RATING +6 CR ──
     try {
@@ -11581,6 +11632,10 @@ async function submitRating() {
     } catch(e) { console.warn('[credits] rating award failed:', e); }
 
     closeRatingModal();
+
+    // Reset submit button color for next open
+    const _sb2 = document.querySelector('#rating-modal-bg button[onclick="submitRating()"]');
+    if (_sb2) _sb2.style.background = '#c0000e';
 
     // Update rate button to show rated state
     const rateBtn = document.getElementById('expand-rate-btn');
