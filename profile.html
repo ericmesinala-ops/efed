@@ -16445,21 +16445,24 @@ const _vp = (() => {
     const sel=$('vp-efed-sel');
     if(!sel||!sel.value||cdState().locked){stream.getTracks().forEach(t=>t.stop());return;}
     try{
-      const ctx=getCtx(), src=ctx.createMediaStreamSource(stream);
-      _analyser=ctx.createAnalyser(); _analyser.fftSize=64; src.connect(_analyser);
+      // Use stream directly for MediaRecorder — Web Audio gets a separate clone
+      // so the analyser never interferes with what the recorder captures.
       const mime=['audio/mp4','audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm'].find(t=>{try{return MediaRecorder.isTypeSupported(t);}catch(e){return false;}})||'';
       _mr=new MediaRecorder(stream,mime?{mimeType:mime}:{});
+      const ctx=getCtx(), src=ctx.createMediaStreamSource(stream);
+      _analyser=ctx.createAnalyser(); _analyser.fftSize=64; src.connect(_analyser);
       _chunks=[];
-      // Promise resolves only after onstop — spec guarantees onstop fires AFTER
-      // all ondataavailable events, so _chunks is 100% complete at that point.
-      const _stopped=new Promise(res=>{
-        _mr.ondataavailable=e=>{if(e.data&&e.data.size>0)_chunks.push(e.data);};
-        _mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());res();};
-      });
-      _mr.start(250); _elapsed=0;
+      // No timeslice — recorder buffers everything internally.
+      // On stop(), browser fires ONE ondataavailable with the full blob,
+      // then onstop. This is the most reliable cross-browser pattern.
+      _mr.ondataavailable=e=>{
+        console.log('[VP] ondataavailable size:', e.data&&e.data.size);
+        if(e.data&&e.data.size>0)_chunks.push(e.data);
+      };
+      _mr.onstop=()=>{stream.getTracks().forEach(t=>t.stop());onRecStop();};
+      _mr.start(); _elapsed=0;  // NO timeslice arg
       showStep('record'); drawLive('vp-canvas'); updCD(MAX_S);
       _rtimer=setInterval(()=>{_elapsed++;const rem=MAX_S-_elapsed;updCD(rem);if(_elapsed>=MAX_S)stopRecord();},1000);
-      _stopped.then(()=>onRecStop());
     }catch(e){
       stream.getTracks().forEach(t=>t.stop());
       const instr=$('vp-instr');
