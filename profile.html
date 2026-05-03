@@ -2139,6 +2139,32 @@ html.day-mode .ic-feed-post { background: #f0faf2; }
 html.day-mode .ic-feed-empty { background: #f0faf2; }
 html.day-mode .ic-feed-post-name { color: #1a4a2a; }
 html.day-mode .ic-feed-post-text { color: #1e3a1e; }
+
+/* ── Social Feed ── */
+.social-feed-card {
+  position: relative;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.social-feed-card .sf-delete-btn {
+  position: absolute;
+  top: 8px; right: 8px;
+  background: rgba(255,80,80,.12);
+  border: 1px solid rgba(255,80,80,.2);
+  color: rgba(255,100,100,.7);
+  border-radius: 5px;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: .75rem; line-height: 1;
+  z-index: 2;
+}
+.social-feed-card .sf-delete-btn:hover { background: rgba(255,80,80,.22); color: #ff6b6b; }
+.social-feed-card .twitter-tweet { margin: 0 !important; }
+html.day-mode .social-feed-card { background: #f5f5fa; border-color: rgba(0,0,0,.08); }
 </style>
 
 <!-- ── AUTO STREAM ON HUB ── -->
@@ -2903,6 +2929,33 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
   <div style="margin-top:10px;padding:8px 12px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid rgba(255,255,255,.06);">
     <div style="font-size:.65rem;color:rgba(255,255,255,.28);line-height:1.6;">
       <span style="color:rgba(200,168,75,.5);">ℹ</span> Create ongoing rivalries on the <strong style="color:rgba(255,255,255,.4);">Career</strong> tab. To edit or delete, go to <strong style="color:rgba(255,255,255,.4);">Career → Rivalries</strong>.
+    </div>
+  </div>
+</div>
+
+<!-- ── SOCIAL FEED ── -->
+<div class="section" id="social-feed-section" style="display:none;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <div class="sec-title" style="margin-bottom:0;">Social Feed</div>
+    <button id="social-feed-add-btn" onclick="openSocialFeedModal()" style="display:none;align-items:center;gap:5px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.55);font-size:.72rem;padding:5px 10px;border-radius:6px;cursor:pointer;font-family:inherit;">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add
+    </button>
+  </div>
+  <div id="social-feed-list"></div>
+  <div id="social-feed-empty" style="display:none;font-size:.75rem;color:rgba(255,255,255,.25);font-style:italic;padding:4px 0;">No posts yet.</div>
+</div>
+
+<!-- ── SOCIAL FEED MODAL ── -->
+<div id="social-feed-modal-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#13131a;border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:22px 20px;width:100%;max-width:460px;position:relative;">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.15rem;letter-spacing:1px;color:#e8e8e8;margin-bottom:14px;">Add to Social Feed</div>
+    <div style="font-size:.72rem;color:rgba(255,255,255,.4);margin-bottom:8px;">Paste a tweet URL or the full embed code</div>
+    <textarea id="social-feed-input" placeholder="https://x.com/... or paste full embed code" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#e8e8e8;font-size:.78rem;font-family:inherit;padding:10px 12px;resize:vertical;min-height:80px;outline:none;"></textarea>
+    <div id="social-feed-modal-err" style="font-size:.7rem;color:#ff6b6b;margin-top:6px;display:none;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
+      <button onclick="closeSocialFeedModal()" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.5);font-size:.78rem;padding:7px 16px;border-radius:7px;cursor:pointer;font-family:inherit;">Cancel</button>
+      <button onclick="saveSocialFeedEmbed()" style="background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);color:#c8a84b;font-size:.78rem;padding:7px 16px;border-radius:7px;cursor:pointer;font-family:inherit;font-weight:600;">Save</button>
     </div>
   </div>
 </div>
@@ -4045,7 +4098,6 @@ let _records = [];
 let _rivalries = [];
 let _rrIsOwn = false;
 let _rrOwnerName = '';
-let _rrOwnerUsername = '';
 let _rrOwnerAvatarUrl = '';
 
 // ── legacy stubs (kept so any existing calls don't throw) ──
@@ -6188,12 +6240,10 @@ async function loadRivalries(username, isOwn) {
     const rows = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=rivalries,display_name,avatar_url`);
     _rivalries = Array.isArray(rows[0]?.rivalries) ? rows[0].rivalries : [];
     _rrOwnerName = rows[0]?.display_name || username;
-    _rrOwnerUsername = username;
     _rrOwnerAvatarUrl = rows[0]?.avatar_url || '';
   } catch(e) {
     _rivalries = [];
     _rrOwnerName = username;
-    _rrOwnerUsername = username;
     _rrOwnerAvatarUrl = '';
   }
   await _fetchRivalryAvatars();
@@ -6239,7 +6289,7 @@ function renderOngoingRivalries() {
     const rivalUsername = r.name||'';
     const safeRivalKey = rivalUsername.replace(/[^a-z0-9_-]/gi,'_');
     // Use the profile owner's username (not the session/visitor) for the "self" IC panel
-    const profileOwnerUsername = _rrIsOwn ? ((getSession()&&getSession().username)||'') : (_rrOwnerUsername||'');
+    const profileOwnerUsername = _rrIsOwn ? ((getSession()&&getSession().username)||'') : (_rrOwnerName||'');
     const ownerIcLabel = _rrIsOwn ? 'Your Latest IC' : `${_esc(_rrOwnerName||'Their')}'s Latest IC`;
 
     return `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);">
@@ -6294,7 +6344,7 @@ function renderOngoingRivalries() {
     const rivalUsername = r.name||'';
     const safeRivalKey  = rivalUsername.replace(/[^a-z0-9_-]/gi,'_');
     // Use the profile owner's username — not the logged-in visitor — for the "self" IC panel
-    const profileOwnerUsername = _rrIsOwn ? ((getSession()&&getSession().username)||'') : (_rrOwnerUsername||'');
+    const profileOwnerUsername = _rrIsOwn ? ((getSession()&&getSession().username)||'') : (_rrOwnerName||'');
 
     function _icTimeAgo(ts){
       const s=Math.floor((Date.now()-new Date(ts))/1000);
@@ -11468,6 +11518,7 @@ async function _loadPublicProfile(username) {
     loadAppearances(username, false);
     loadCareerRecords(username, false);
     loadRivalries(username, false);
+    loadSocialFeed(username, false);
     loadTrophyCase(username);
     loadFeaturedVideos(username);
 
@@ -11884,6 +11935,7 @@ async function loadProfile() {
     loadAppearances(resolvedUser, _isOwnProfile);
     loadCareerRecords(resolvedUser, _isOwnProfile);
     loadRivalries(resolvedUser, _isOwnProfile);
+    loadSocialFeed(resolvedUser, _isOwnProfile);
     loadTrophyCase(resolvedUser);
     const bioEl = document.getElementById('profile-bio');
     const bioSec = document.getElementById('bio-section');
@@ -15885,6 +15937,163 @@ function openVideoPopup(src, data) {
   bg.style.display='flex'; bg.classList.add('open');
   document.body.style.overflow='hidden';
 }
+// ── SOCIAL FEED ──────────────────────────────────────────────────────────────
+const SOCIAL_FEED_MAX = 3;
+
+function _sfExtractTweetUrl(raw) {
+  if (!raw) return null;
+  raw = raw.trim();
+  // Full embed code — extract href from <a> tag with twitter/x.com URL
+  const hrefMatch = raw.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]+)"/i);
+  if (hrefMatch) {
+    // prefer the status URL (the one with /status/)
+    const statusMatch = raw.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]*\/status\/\d+[^"]*)"/i);
+    return statusMatch ? statusMatch[1].split('?')[0] : hrefMatch[1].split('?')[0];
+  }
+  // Plain URL
+  const urlMatch = raw.match(/https?:\/\/(?:twitter\.com|x\.com)\/\S+/i);
+  if (urlMatch) return urlMatch[0].split('?')[0];
+  return null;
+}
+
+function _sfNormalizeTweetUrl(url) {
+  // Normalize x.com → twitter.com for oEmbed compat
+  return url.replace(/^https?:\/\/x\.com\//, 'https://twitter.com/');
+}
+
+let _sfIsOwn = false;
+let _sfProfileUsername = '';
+
+async function loadSocialFeed(username, isOwn) {
+  _sfIsOwn = isOwn;
+  _sfProfileUsername = username;
+  const addBtn = document.getElementById('social-feed-add-btn');
+  if (addBtn) addBtn.style.display = isOwn ? 'flex' : 'none';
+
+  const sec   = document.getElementById('social-feed-section');
+  const list  = document.getElementById('social-feed-list');
+  const empty = document.getElementById('social-feed-empty');
+  if (!sec || !list) return;
+
+  try {
+    const rows = await sbGet('tweet_embeds',
+      `username=eq.${encodeURIComponent(username)}&order=created_at.desc&limit=${SOCIAL_FEED_MAX}`
+    );
+    if (!rows || !rows.length) {
+      if (isOwn) {
+        sec.style.display = '';
+        list.innerHTML = '';
+        if (empty) empty.style.display = 'block';
+      } else {
+        sec.style.display = 'none';
+      }
+      return;
+    }
+    sec.style.display = '';
+    if (empty) empty.style.display = 'none';
+    list.innerHTML = rows.map(row => {
+      const deleteBtn = isOwn
+        ? `<button class="sf-delete-btn" onclick="deleteSocialFeedEmbed('${row.id}')" title="Remove">✕</button>`
+        : '';
+      return `<div class="social-feed-card" id="sf-card-${row.id}">
+        ${deleteBtn}
+        <blockquote class="twitter-tweet" data-media-max-width="560">
+          <a href="${row.tweet_url.replace(/"/g,'&quot;')}"></a>
+        </blockquote>
+      </div>`;
+    }).join('');
+    // Load/reload Twitter widget
+    _sfLoadTwitterWidgets();
+  } catch(e) {
+    // Table may not exist yet — show section only for owner
+    if (isOwn) { sec.style.display = ''; if(empty) empty.style.display='block'; }
+    else { if(sec) sec.style.display='none'; }
+  }
+}
+
+function _sfLoadTwitterWidgets() {
+  if (window.twttr && window.twttr.widgets) {
+    window.twttr.widgets.load(document.getElementById('social-feed-list'));
+  } else {
+    // Inject script if not present
+    if (!document.getElementById('twitter-wjs')) {
+      const s = document.createElement('script');
+      s.id = 'twitter-wjs';
+      s.async = true;
+      s.src = 'https://platform.twitter.com/widgets.js';
+      s.charset = 'utf-8';
+      document.head.appendChild(s);
+    }
+  }
+}
+
+function openSocialFeedModal() {
+  const bg = document.getElementById('social-feed-modal-bg');
+  const inp = document.getElementById('social-feed-input');
+  const err = document.getElementById('social-feed-modal-err');
+  if (!bg) return;
+  if (inp) inp.value = '';
+  if (err) { err.style.display='none'; err.textContent=''; }
+  bg.style.display = 'flex';
+}
+
+function closeSocialFeedModal() {
+  const bg = document.getElementById('social-feed-modal-bg');
+  if (bg) bg.style.display = 'none';
+}
+
+async function saveSocialFeedEmbed() {
+  const session = getSession();
+  if (!session) return;
+  const inp = document.getElementById('social-feed-input');
+  const err = document.getElementById('social-feed-modal-err');
+  const raw = inp ? inp.value.trim() : '';
+
+  const showErr = msg => { if(err){err.textContent=msg;err.style.display='block';} };
+
+  if (!raw) { showErr('Please paste a tweet URL or embed code.'); return; }
+
+  const url = _sfExtractTweetUrl(raw);
+  if (!url) { showErr('Could not find a valid X/Twitter URL. Please paste a tweet link or the full embed code.'); return; }
+
+  // Check max
+  try {
+    const existing = await sbGet('tweet_embeds',
+      `username=eq.${encodeURIComponent(session.username)}&select=id`
+    );
+    if (existing && existing.length >= SOCIAL_FEED_MAX) {
+      showErr(`You can only have ${SOCIAL_FEED_MAX} posts. Delete one first.`);
+      return;
+    }
+  } catch(e) {}
+
+  try {
+    await sbPost('tweet_embeds', {
+      username: session.username,
+      tweet_url: _sfNormalizeTweetUrl(url)
+    });
+    closeSocialFeedModal();
+    loadSocialFeed(session.username, true);
+  } catch(e) {
+    showErr('Could not save. Make sure the tweet_embeds table exists in Supabase.');
+  }
+}
+
+async function deleteSocialFeedEmbed(id) {
+  const session = getSession();
+  if (!session) return;
+  try {
+    await sbDelete('tweet_embeds', `id=eq.${encodeURIComponent(id)}&username=eq.${encodeURIComponent(session.username)}`);
+    loadSocialFeed(session.username, true);
+  } catch(e) {}
+}
+
+// Close social feed modal on bg click
+document.addEventListener('click', function(e) {
+  const bg = document.getElementById('social-feed-modal-bg');
+  if (bg && bg.style.display !== 'none' && e.target === bg) closeSocialFeedModal();
+});
+
 function closeVideoPopup() {
   var bg=document.getElementById('vid-popup-bg'), frame=document.getElementById('vid-popup-frame');
   if(!bg) return;
