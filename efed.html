@@ -1804,8 +1804,8 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 <script>
 // ── EFED TAB BAR ──────────────────────────────────────────────────────────
 (function() {
-  const ETABS_FULL = ['info', 'connect', 'book', 'schedule', 'videos'];
-  let ETABS = ['info', 'connect', 'schedule', 'videos']; // book tab injected for owners
+  const ETABS_FULL = ['info', 'connect', 'schedule', 'videos'];
+  let ETABS = ['info', 'connect', 'schedule', 'videos'];
 
   // On first load, move sections into the correct panels
   function _moveSection(id, panelId) {
@@ -1853,11 +1853,10 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     ink.style.width = (100 / (visibleTabs || 4)) + '%';
   }
 
-  // Called by owner code after load to reveal the Book tab
+  // Called by owner code after load to reveal the booking + button on Calendar of Events
   window.enableBookTab = function() {
-    const btn = document.getElementById('efed-tab-book');
+    const btn = document.getElementById('book-add-btn');
     if (btn) btn.style.display = '';
-    ETABS = ETABS_FULL.slice();
     _updateInkWidth();
   };
 
@@ -1875,12 +1874,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     const panel = allPanels[panelIdx];
     if (btn) { btn.classList.add('active'); btn.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
     if (panel) panel.classList.add('active');
-    if (tabName === 'book') {
-      document.body.classList.add('bk-tab-active');
-      if (typeof bkRenderShowList === 'function') setTimeout(bkRenderShowList, 50);
-    } else {
-      document.body.classList.remove('bk-tab-active');
-    }
+    document.body.classList.remove('bk-tab-active');
     // Social row: only on Connect tab
     const _socialRow = document.getElementById('efed-social-action-row');
     if (_socialRow) _socialRow.style.display = tabName === 'connect' ? 'flex' : 'none';
@@ -2162,7 +2156,6 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 <div id="efed-tab-bar">
   <button class="efed-tab active" data-tab="info"     onclick="switchEfedTab('info')">Info</button>
   <button class="efed-tab"        data-tab="connect"  onclick="switchEfedTab('connect')">Connect</button>
-  <button class="efed-tab"        data-tab="book"     onclick="switchEfedTab('book')" id="efed-tab-book" style="display:none;">Book</button>
   <button class="efed-tab"        data-tab="schedule" onclick="switchEfedTab('schedule')">Schedule</button>
   <button class="efed-tab"        data-tab="videos"   onclick="switchEfedTab('videos')">Videos</button>
   <div id="efed-tab-ink"></div>
@@ -2576,8 +2569,132 @@ async function efedBioSave(){}
 
 <!-- ── UPCOMING EVENT DISPLAY ── -->
 <div id="upcoming-event-section" style="display:none;">
-  <div style="padding:22px 20px 0;">
-    <div class="sec-title">Calendar of Events</div>
+  <div style="padding:22px 20px 0;display:flex;align-items:center;gap:10px;">
+    <div class="sec-title" style="margin-bottom:0;flex:1;">Calendar of Events</div>
+    <button id="book-add-btn" onclick="toggleBookPanel()" class="tc-add-btn" style="display:none;" title="Book a match">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </div>
+  <!-- Inline booking panel (owner only, shown on + click) -->
+  <div id="book-inline-panel" style="display:none;margin:10px 20px 2px;padding:14px 20px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);border-radius:12px;">
+    <!-- Sticky live preview banner -->
+    <div id="bk-preview-bar" style="background:#07070a;border-bottom:1px solid rgba(255,255,255,.08);padding:11px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:48px;margin-bottom:12px;">
+      <span id="bk-preview-empty" style="font-size:.63rem;color:rgba(255,255,255,.18);font-family:'DM Sans',sans-serif;font-style:italic;">Select a show to begin</span>
+    </div>
+    <!-- Step indicators -->
+    <div style="display:flex;align-items:center;justify-content:center;gap:0;padding-bottom:14px;">
+      <div class="bk-step-dot active" id="bk-sdot-0">1</div>
+      <div class="bk-step-line" id="bk-sline-01"></div>
+      <div class="bk-step-dot" id="bk-sdot-1">2</div>
+      <div class="bk-step-line" id="bk-sline-12"></div>
+      <div class="bk-step-dot" id="bk-sdot-2">3</div>
+      <div class="bk-step-line" id="bk-sline-23"></div>
+      <div class="bk-step-dot" id="bk-sdot-3">4</div>
+    </div>
+    <!-- STEP 1 -->
+    <div id="bk-step-0" class="bk-step-panel active">
+      <div class="section" style="padding-bottom:0;">
+        <div class="sec-title" style="margin-bottom:14px;">Select Show</div>
+        <div id="bk-show-list" style="display:flex;flex-direction:column;gap:7px;margin-bottom:18px;"></div>
+        <div id="bk-new-show-toggle" style="margin-bottom:4px;">
+          <button onclick="bkToggleNewShowForm()" style="display:flex;align-items:center;gap:6px;padding:10px 14px;width:100%;background:rgba(200,168,75,.07);border:1px dashed rgba(200,168,75,.25);border-radius:10px;color:rgba(200,168,75,.65);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:all .15s;text-align:left;" onmouseover="this.style.background='rgba(200,168,75,.13)'" onmouseout="this.style.background='rgba(200,168,75,.07)'">
+            <span style="font-size:1rem;line-height:1;">+</span> Create a New Show
+          </button>
+        </div>
+        <div id="bk-new-show-form" style="display:none;padding:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:11px;margin-bottom:4px;">
+          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:10px;">New Show</div>
+          <div style="display:flex;flex-direction:column;gap:9px;">
+            <input id="bk-ns-name" type="text" maxlength="60" placeholder="Show name (e.g. Capitol Punishment)" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;">
+            <div style="display:flex;gap:8px;">
+              <input id="bk-ns-location" type="text" maxlength="80" placeholder="Location" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;">
+              <button id="bk-ns-loc-tba" onclick="bkNsToggle('loc')" style="padding:9px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;">TBA</button>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <input id="bk-ns-date" type="text" maxlength="30" placeholder="Date (e.g. June 12, 2026)" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;">
+              <button id="bk-ns-date-tba" onclick="bkNsToggle('date')" style="padding:9px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;">TBA</button>
+            </div>
+            <div id="bk-ns-err" style="font-size:.65rem;color:#ff6b6b;min-height:14px;"></div>
+            <button onclick="bkCreateNewShow()" style="padding:10px;background:#c0000e;border:none;border-radius:9px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'" id="bk-ns-save-btn">Add Show</button>
+          </div>
+        </div>
+      </div>
+      <div class="bk-step-nav">
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="bk-edit-show-btn" id="bk-edit-show-btn" onclick="bkEditShow()" style="display:none;">Edit Show ✎</button>
+          <button id="bk-archive-show-btn" onclick="bkConfirmArchiveShow()" style="display:none;padding:9px 13px;background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.35);border-radius:9px;color:rgba(59,130,246,.7);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:all .15s;opacity:.75;" onmouseover="this.style.opacity='1';this.style.background='rgba(59,130,246,.25)';" onmouseout="this.style.opacity='.75';this.style.background='rgba(59,130,246,.15)';">Archive 🗄</button>
+          <button id="bk-delete-show-btn" onclick="bkConfirmDeleteShow()" style="display:none;padding:9px 13px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);border-radius:9px;color:rgba(220,60,60,.7);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:all .15s;opacity:.75;" onmouseover="this.style.opacity='1';this.style.background='rgba(192,0,14,.25)';" onmouseout="this.style.opacity='.75';this.style.background='rgba(192,0,14,.12)';">Delete 🗑</button>
+        </div>
+        <button class="bk-next-btn" id="bk-next-0" onclick="bkNext()" disabled>Next →</button>
+      </div>
+    </div>
+    <!-- STEP 2 -->
+    <div id="bk-step-1" class="bk-step-panel">
+      <div class="section" style="padding-bottom:0;">
+        <div class="sec-title" style="margin-bottom:4px;">Booked Matches</div>
+        <div style="font-size:.62rem;color:rgba(255,255,255,.25);margin-bottom:14px;line-height:1.5;font-family:'DM Sans',sans-serif;">Tap a match to edit it, or create a new one.</div>
+        <button onclick="bkStartNewMatch()" style="display:flex;align-items:center;gap:6px;padding:11px 14px;width:100%;background:rgba(200,168,75,.08);border:1px dashed rgba(200,168,75,.4);border-radius:10px;color:rgba(200,168,75,.9);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:all .15s;text-align:left;box-sizing:border-box;margin-bottom:14px;" onmouseover="this.style.background='rgba(200,168,75,.16)';this.style.borderColor='rgba(200,168,75,.65)';" onmouseout="this.style.background='rgba(200,168,75,.08)';this.style.borderColor='rgba(200,168,75,.4)';">
+          <span style="font-size:1.05rem;line-height:1;">+</span> Create New Match
+        </button>
+        <div id="bk-match-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+          <div style="font-size:.72rem;color:rgba(255,255,255,.2);padding:16px 0;text-align:center;font-family:'DM Sans',sans-serif;">Loading matches…</div>
+        </div>
+      </div>
+      <div class="bk-step-nav">
+        <button class="bk-back-btn" onclick="bkBack()">← Back</button>
+      </div>
+    </div>
+    <!-- STEP 3 -->
+    <div id="bk-step-2" class="bk-step-panel">
+      <div class="section" style="padding-bottom:0;">
+        <div class="sec-title" style="margin-bottom:4px;">Competitors</div>
+        <div style="font-size:.62rem;color:rgba(255,255,255,.25);margin-bottom:12px;line-height:1.5;font-family:'DM Sans',sans-serif;">Click avatars to add. Use VS for match separators. Max 8 (will prompt for Battle Royale).</div>
+        <div id="bk-comp-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px;"></div>
+        <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(255,255,255,.07);padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,.07);">
+          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:3px;">Ghost Competitor</div>
+          <div style="font-size:.6rem;color:rgba(255,255,255,.2);margin-bottom:10px;line-height:1.5;">(optional — only if competitor is not in the list)</div>
+          <div id="bk-ghost-err" style="font-size:.65rem;color:#ff6b6b;min-height:14px;margin-bottom:4px;"></div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input id="bk-ghost-name" type="text" maxlength="50" placeholder="e.g. John Cena" style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;" onkeydown="if(event.key==='Enter'){event.preventDefault();bkAddGhost();}">
+            <button id="bk-ghost-btn" onclick="bkAddGhost()" style="padding:8px 13px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;" onmouseover="this.style.background='rgba(200,168,75,.15)';this.style.color='#c8a84b';this.style.borderColor='rgba(200,168,75,.3)';" onmouseout="this.style.background='rgba(255,255,255,.07)';this.style.color='rgba(255,255,255,.55)';this.style.borderColor='rgba(255,255,255,.12)';">+ Add</button>
+          </div>
+        </div>
+      </div>
+      <div class="bk-step-nav">
+        <button class="bk-back-btn" onclick="bkBack()">← Back</button>
+        <button class="bk-next-btn" id="bk-next-2" onclick="bkNext()" disabled>Next →</button>
+      </div>
+    </div>
+    <!-- STEP 4 -->
+    <div id="bk-step-3" class="bk-step-panel">
+      <div class="section" style="padding-bottom:0;">
+        <div class="sec-title" style="margin-bottom:14px;">Match Details</div>
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div>
+            <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:7px;">Match Type</div>
+            <input id="bk-match-type" type="text" maxlength="60" placeholder="e.g. Singles, Tag Team, Triple Threat…" oninput="bkSyncPreview()" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+          </div>
+          <div style="padding:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:11px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;" id="bk-champ-row">
+              <div>
+                <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:3px;">Championship Match</div>
+                <div style="font-size:.6rem;color:rgba(255,255,255,.2);font-family:'DM Sans',sans-serif;">Toggle if title is on the line</div>
+              </div>
+              <button id="bk-champ-toggle" onclick="bkToggleChamp()" style="width:44px;height:24px;border-radius:12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);cursor:pointer;position:relative;transition:all .2s;flex-shrink:0;">
+                <div id="bk-champ-knob" style="position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.4);transition:all .2s;"></div>
+              </button>
+            </div>
+            <div id="bk-champ-input-wrap" style="display:none;margin-top:12px;">
+              <input id="bk-champ-name" type="text" maxlength="80" placeholder="e.g. XCW Cruiserweight Championship" oninput="bkSyncPreview()" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;">
+            </div>
+          </div>
+        </div>
+        <div id="bk-save-err" style="font-size:.68rem;color:#ff6b6b;min-height:16px;margin-top:12px;"></div>
+      </div>
+      <div class="bk-step-nav">
+        <button class="bk-back-btn" onclick="bkBack()">← Back</button>
+        <button class="bk-next-btn" id="bk-submit-btn" onclick="bkSubmitBooking()">Book It ✓</button>
+      </div>
+    </div>
   </div>
   <!-- hidden reference elements used by JS to track Event 1 state -->
   <span id="ev-display-title"    style="display:none;"></span>
@@ -2951,141 +3068,6 @@ html.day-mode .tc-add-btn{border-color:rgba(168,130,10,.3);color:rgba(168,130,10
 
 </div><!-- /efed-panel-connect -->
 
-<!-- ── BOOK TAB (owner only) ── -->
-<div class="efed-tab-panel" id="efed-panel-book">
-
-  <!-- ── Sticky live preview banner ── -->
-  <div id="bk-preview-bar" style="position:sticky;top:0;z-index:50;background:#07070a;border-bottom:1px solid rgba(255,255,255,.08);padding:11px 20px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:48px;transition:background .2s;">
-    <span id="bk-preview-empty" style="font-size:.63rem;color:rgba(255,255,255,.18);font-family:"DM Sans",sans-serif;font-style:italic;">Select a show to begin</span>
-  </div>
-
-  <!-- ── Step indicators ── -->
-  <div style="display:flex;align-items:center;justify-content:center;gap:0;padding:14px 20px 0;">
-    <div class="bk-step-dot active" id="bk-sdot-0">1</div>
-    <div class="bk-step-line" id="bk-sline-01"></div>
-    <div class="bk-step-dot" id="bk-sdot-1">2</div>
-    <div class="bk-step-line" id="bk-sline-12"></div>
-    <div class="bk-step-dot" id="bk-sdot-2">3</div>
-    <div class="bk-step-line" id="bk-sline-23"></div>
-    <div class="bk-step-dot" id="bk-sdot-3">4</div>
-  </div>
-
-  <!-- ════════ STEP 1: SELECT OR CREATE SHOW ════════ -->
-  <div id="bk-step-0" class="bk-step-panel active">
-    <div class="section" style="padding-bottom:0;">
-      <div class="sec-title" style="margin-bottom:14px;">Select Show</div>
-      <div id="bk-show-list" style="display:flex;flex-direction:column;gap:7px;margin-bottom:18px;"></div>
-
-      <!-- Create new show inline form -->
-      <div id="bk-new-show-toggle" style="margin-bottom:4px;">
-        <button onclick="bkToggleNewShowForm()" style="display:flex;align-items:center;gap:6px;padding:10px 14px;width:100%;background:rgba(200,168,75,.07);border:1px dashed rgba(200,168,75,.25);border-radius:10px;color:rgba(200,168,75,.65);font-family:"DM Sans",sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:all .15s;text-align:left;" onmouseover="this.style.background='rgba(200,168,75,.13)'" onmouseout="this.style.background='rgba(200,168,75,.07)'">
-          <span style="font-size:1rem;line-height:1;">+</span> Create a New Show
-        </button>
-      </div>
-      <div id="bk-new-show-form" style="display:none;padding:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:11px;margin-bottom:4px;">
-        <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:10px;">New Show</div>
-        <div style="display:flex;flex-direction:column;gap:9px;">
-          <input id="bk-ns-name" type="text" maxlength="60" placeholder="Show name (e.g. Capitol Punishment)" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;">
-          <div style="display:flex;gap:8px;">
-            <input id="bk-ns-location" type="text" maxlength="80" placeholder="Location" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;">
-            <button id="bk-ns-loc-tba" onclick="bkNsToggle('loc')" style="padding:9px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.45);font-family:"DM Sans",sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;">TBA</button>
-          </div>
-          <div style="display:flex;gap:8px;">
-            <input id="bk-ns-date" type="text" maxlength="30" placeholder="Date (e.g. June 12, 2026)" style="flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;">
-            <button id="bk-ns-date-tba" onclick="bkNsToggle('date')" style="padding:9px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.45);font-family:"DM Sans",sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;">TBA</button>
-          </div>
-          <div id="bk-ns-err" style="font-size:.65rem;color:#ff6b6b;min-height:14px;"></div>
-          <button onclick="bkCreateNewShow()" style="padding:10px;background:#c0000e;border:none;border-radius:9px;color:#fff;font-family:"DM Sans",sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'" id="bk-ns-save-btn">Add Show</button>
-        </div>
-      </div>
-    </div>
-    <div class="bk-step-nav">
-      <div style="display:flex;gap:6px;align-items:center;">
-        <button class="bk-edit-show-btn" id="bk-edit-show-btn" onclick="bkEditShow()" style="display:none;">Edit Show ✎</button>
-        <button id="bk-archive-show-btn" onclick="bkConfirmArchiveShow()" style="display:none;padding:9px 13px;background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.35);border-radius:9px;color:rgba(59,130,246,.7);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:all .15s;opacity:.75;" onmouseover="this.style.opacity='1';this.style.background='rgba(59,130,246,.25)';" onmouseout="this.style.opacity='.75';this.style.background='rgba(59,130,246,.15)';">Archive 🗄</button>
-        <button id="bk-delete-show-btn" onclick="bkConfirmDeleteShow()" style="display:none;padding:9px 13px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);border-radius:9px;color:rgba(220,60,60,.7);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:all .15s;opacity:.75;" onmouseover="this.style.opacity='1';this.style.background='rgba(192,0,14,.25)';" onmouseout="this.style.opacity='.75';this.style.background='rgba(192,0,14,.12)';">Delete 🗑</button>
-      </div>
-      <button class="bk-next-btn" id="bk-next-0" onclick="bkNext()" disabled>Next →</button>
-    </div>
-  </div>
-
-  <!-- ════════ STEP 2: EXISTING MATCHES + CREATE NEW ════════ -->
-  <div id="bk-step-1" class="bk-step-panel">
-    <div class="section" style="padding-bottom:0;">
-      <div class="sec-title" style="margin-bottom:4px;">Booked Matches</div>
-      <div style="font-size:.62rem;color:rgba(255,255,255,.25);margin-bottom:14px;line-height:1.5;font-family:'DM Sans',sans-serif;">Tap a match to edit it, or create a new one.</div>
-      <!-- Create New Match button -->
-      <button onclick="bkStartNewMatch()" style="display:flex;align-items:center;gap:6px;padding:11px 14px;width:100%;background:rgba(200,168,75,.08);border:1px dashed rgba(200,168,75,.4);border-radius:10px;color:rgba(200,168,75,.9);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:all .15s;text-align:left;box-sizing:border-box;margin-bottom:14px;" onmouseover="this.style.background='rgba(200,168,75,.16)';this.style.borderColor='rgba(200,168,75,.65)';" onmouseout="this.style.background='rgba(200,168,75,.08)';this.style.borderColor='rgba(200,168,75,.4)';">
-        <span style="font-size:1.05rem;line-height:1;">+</span> Create New Match
-      </button>
-      <div id="bk-match-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
-        <div style="font-size:.72rem;color:rgba(255,255,255,.2);padding:16px 0;text-align:center;font-family:'DM Sans',sans-serif;">Loading matches…</div>
-      </div>
-    </div>
-    <div class="bk-step-nav">
-      <button class="bk-back-btn" onclick="bkBack()">← Back</button>
-    </div>
-  </div>
-
-  <!-- ════════ STEP 3: SELECT COMPETITORS ════════ -->
-  <div id="bk-step-2" class="bk-step-panel">
-    <div class="section" style="padding-bottom:0;">
-      <div class="sec-title" style="margin-bottom:4px;">Competitors</div>
-      <div style="font-size:.62rem;color:rgba(255,255,255,.25);margin-bottom:12px;line-height:1.5;font-family:"DM Sans",sans-serif;">Click avatars to add. Use VS for match separators. Max 8 (will prompt for Battle Royale).</div>
-      <div id="bk-comp-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px;"></div>
-
-      <!-- Ghost competitor section -->
-      <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(255,255,255,.07);padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,.07);">
-        <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:3px;">Ghost Competitor</div>
-        <div style="font-size:.6rem;color:rgba(255,255,255,.2);margin-bottom:10px;line-height:1.5;">(optional — only if competitor is not in the list)</div>
-        <div id="bk-ghost-err" style="font-size:.65rem;color:#ff6b6b;min-height:14px;margin-bottom:4px;"></div>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <input id="bk-ghost-name" type="text" maxlength="50" placeholder="e.g. John Cena" style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 10px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;" onkeydown="if(event.key==='Enter'){event.preventDefault();bkAddGhost();}">
-          <button id="bk-ghost-btn" onclick="bkAddGhost()" style="padding:8px 13px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.55);font-family:"DM Sans",sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;" onmouseover="this.style.background='rgba(200,168,75,.15)';this.style.color='#c8a84b';this.style.borderColor='rgba(200,168,75,.3)';" onmouseout="this.style.background='rgba(255,255,255,.07)';this.style.color='rgba(255,255,255,.55)';this.style.borderColor='rgba(255,255,255,.12)';">+ Add</button>
-        </div>
-      </div>
-    </div>
-    <div class="bk-step-nav">
-      <button class="bk-back-btn" onclick="bkBack()">← Back</button>
-      <button class="bk-next-btn" id="bk-next-2" onclick="bkNext()" disabled>Next →</button>
-    </div>
-  </div>
-
-  <!-- ════════ STEP 4: MATCH DETAILS ════════ -->
-  <div id="bk-step-3" class="bk-step-panel">
-    <div class="section" style="padding-bottom:0;">
-      <div class="sec-title" style="margin-bottom:14px;">Match Details</div>
-      <div style="display:flex;flex-direction:column;gap:14px;">
-        <div>
-          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:7px;">Match Type</div>
-          <input id="bk-match-type" type="text" maxlength="60" placeholder="e.g. Singles, Tag Team, Triple Threat…" oninput="bkSyncPreview()" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
-        </div>
-        <!-- Championship toggle -->
-        <div style="padding:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:11px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0;" id="bk-champ-row">
-            <div>
-              <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:3px;">Championship Match</div>
-              <div style="font-size:.6rem;color:rgba(255,255,255,.2);font-family:"DM Sans",sans-serif;">Toggle if title is on the line</div>
-            </div>
-            <button id="bk-champ-toggle" onclick="bkToggleChamp()" style="width:44px;height:24px;border-radius:12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);cursor:pointer;position:relative;transition:all .2s;flex-shrink:0;">
-              <div id="bk-champ-knob" style="position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.4);transition:all .2s;"></div>
-            </button>
-          </div>
-          <div id="bk-champ-input-wrap" style="display:none;margin-top:12px;">
-            <input id="bk-champ-name" type="text" maxlength="80" placeholder="e.g. XCW Cruiserweight Championship" oninput="bkSyncPreview()" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;">
-          </div>
-        </div>
-      </div>
-      <div id="bk-save-err" style="font-size:.68rem;color:#ff6b6b;min-height:16px;margin-top:12px;"></div>
-    </div>
-    <div class="bk-step-nav">
-      <button class="bk-back-btn" onclick="bkBack()">← Back</button>
-      <button class="bk-next-btn" id="bk-submit-btn" onclick="bkSubmitBooking()">Book It ✓</button>
-    </div>
-  </div>
-
-</div><!-- /efed-panel-book -->
-
 <!-- ── SCHEDULE: hype video + calendar of events ── -->
 <div class="efed-tab-panel" id="efed-panel-schedule">
   <!-- ── HERO VIDEO SECTION ── -->
@@ -3110,6 +3092,14 @@ html.day-mode .tc-add-btn{border-color:rgba(168,130,10,.3);color:rgba(168,130,10
   </div>
 </div><!-- /efed-panel-schedule (sections below are moved here by JS) -->
 <script>
+function toggleBookPanel() {
+  const panel = document.getElementById('book-inline-panel');
+  const btn = document.getElementById('book-add-btn');
+  if (!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen && typeof bkRenderShowList === 'function') setTimeout(bkRenderShowList, 50);
+}
 function openHeroPanel() {
   var inp = document.getElementById('ev-hype-input');
   var cur = document.getElementById('ev-hype-iframe')?.dataset.srcUrl || '';
@@ -4477,9 +4467,11 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
         editBtn.onclick = async (e) => {
           e.stopPropagation();
           if (_isOwnProfile) {
-            // Go to Book tab, pre-select this show and show the match list (step 1)
+            // Open inline booking panel on Schedule tab, pre-select this show
             const showName = bk.show || '';
-            switchEfedTab('book');
+            switchEfedTab('schedule');
+            const panel = document.getElementById('book-inline-panel');
+            if (panel) panel.style.display = 'block';
             setTimeout(async () => {
               if (showName) {
                 _bkTab.show = showName;
