@@ -15930,17 +15930,23 @@ function openVideoPopup(src, data) {
   document.body.style.overflow='hidden';
 }
 // ── SOCIAL FEED ──────────────────────────────────────────────────────────────
+// Stored as social_feed JSON column on users row — same pattern as rivalries.
+// One-time Supabase SQL (if column missing):
+//   alter table users add column if not exists social_feed jsonb default '[]';
 const SOCIAL_FEED_MAX = 3;
 let _sfIsOwn = false;
 let _sfProfileUsername = '';
+let _sfItems = []; // [{id, url}]
 
 function _sfExtractTweetUrl(raw) {
   if (!raw) return null;
   raw = raw.trim();
+  // Full embed code: prefer /status/ URL from href
   const statusMatch = raw.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]*\/status\/\d+[^"]*)"/i);
   if (statusMatch) return statusMatch[1].split('?')[0];
   const hrefMatch = raw.match(/href="(https?:\/\/(?:twitter\.com|x\.com)\/[^"]+)"/i);
   if (hrefMatch) return hrefMatch[1].split('?')[0];
+  // Plain URL
   const urlMatch = raw.match(/https?:\/\/(?:twitter\.com|x\.com)\/\S+/i);
   if (urlMatch) return urlMatch[0].split('?')[0].replace(/[)>\]'"]+$/, '');
   return null;
@@ -15948,6 +15954,10 @@ function _sfExtractTweetUrl(raw) {
 
 function _sfNormalize(url) {
   return url.replace(/^https?:\/\/x\.com\//, 'https://twitter.com/');
+}
+
+function _sfGenId() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
 function sfToggleInline() {
@@ -15963,6 +15973,24 @@ function sfToggleInline() {
   }
 }
 
+async function _sfSave() {
+  const session = getSession();
+  if (!session) return false;
+  try {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ social_feed: _sfItems })
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      if (txt.includes('social_feed')) {
+        return 'Column missing. Run in Supabase SQL: alter table users add column if not exists social_feed jsonb default \'[]\';';
+      }
+      return 'Save failed.';
+    }
+    return true;
+  } catch(e) { return 'Save failed.'; }
+}
+
 async function sfSaveInline() {
   const session = getSession();
   if (!session) return;
@@ -15974,30 +16002,23 @@ async function sfSaveInline() {
   if (!raw) { showErr('Paste a tweet URL or embed code.'); return; }
   const url = _sfExtractTweetUrl(raw);
   if (!url) { showErr('Could not find a valid X/Twitter URL.'); return; }
+  if (_sfItems.length >= SOCIAL_FEED_MAX) { showErr('Max ' + SOCIAL_FEED_MAX + ' posts. Delete one first.'); return; }
 
-  try {
-    const existing = await sbGet('tweet_embeds', `username=eq.${encodeURIComponent(session.username)}&select=id`);
-    if (existing && existing.length >= SOCIAL_FEED_MAX) {
-      showErr(`Max ${SOCIAL_FEED_MAX} posts. Delete one first.`); return;
-    }
-  } catch(e) {}
-
-  try {
-    await sbPost('tweet_embeds', { username: session.username, tweet_url: _sfNormalize(url) });
-    sfToggleInline();
-    loadSocialFeed(session.username, true);
-  } catch(e) {
-    showErr('Could not save. Check the tweet_embeds table exists in Supabase.');
+  _sfItems = [{ id: _sfGenId(), url: _sfNormalize(url) }, ..._sfItems];
+  const result = await _sfSave();
+  if (result !== true) {
+    _sfItems = _sfItems.slice(1); // revert
+    showErr(result); return;
   }
+  sfToggleInline();
+  _sfRender(true);
 }
 
 async function deleteSocialFeedEmbed(id) {
-  const session = getSession();
-  if (!session) return;
-  try {
-    await sbDelete('tweet_embeds', `id=eq.${encodeURIComponent(id)}&username=eq.${encodeURIComponent(session.username)}`);
-    loadSocialFeed(session.username, true);
-  } catch(e) {}
+  _sfItems = _sfItems.filter(i => i.id !== id);
+  const result = await _sfSave();
+  if (result !== true) { console.warn('SF delete failed:', result); return; }
+  _sfRender(true);
 }
 
 function _sfLoadWidgets() {
@@ -16012,36 +16033,38 @@ function _sfLoadWidgets() {
   }
 }
 
+function _sfRender(isOwn) {
+  const sec   = document.getElementById('social-feed-section');
+  const list  = document.getElementById('social-feed-list');
+  const empty = document.getElementById('social-feed-empty');
+  if (!sec || !list) return;
+  if (!_sfItems.length) {
+    list.innerHTML = '';
+    if (isOwn) { sec.style.display = ''; if(empty) empty.style.display = 'block'; }
+    else sec.style.display = 'none';
+    return;
+  }
+  sec.style.display = '';
+  if (empty) empty.style.display = 'none';
+  list.innerHTML = _sfItems.map(item => {
+    const del = isOwn ? '<button class="sf-delete-btn" onclick="deleteSocialFeedEmbed(\'' + item.id + '\')" title="Remove">✕</button>' : '';
+    return '<div class="social-feed-card" id="sf-card-' + item.id + '">' + del + '<blockquote class="twitter-tweet" data-media-max-width="560"><a href="' + item.url.replace(/"/g,'&quot;') + '"></a></blockquote></div>';
+  }).join('');
+  _sfLoadWidgets();
+}
+
 async function loadSocialFeed(username, isOwn) {
   _sfIsOwn = isOwn;
   _sfProfileUsername = username;
   const addBtn = document.getElementById('social-feed-add-btn');
   if (addBtn) addBtn.style.display = isOwn ? 'flex' : 'none';
-  const sec   = document.getElementById('social-feed-section');
-  const list  = document.getElementById('social-feed-list');
-  const empty = document.getElementById('social-feed-empty');
-  if (!sec || !list) return;
   try {
-    const rows = await sbGet('tweet_embeds',
-      `username=eq.${encodeURIComponent(username)}&order=created_at.desc&limit=${SOCIAL_FEED_MAX}`
-    );
-    if (!rows || !rows.length) {
-      list.innerHTML = '';
-      if (isOwn) { sec.style.display = ''; if(empty) empty.style.display = 'block'; }
-      else sec.style.display = 'none';
-      return;
-    }
-    sec.style.display = '';
-    if (empty) empty.style.display = 'none';
-    list.innerHTML = rows.map(row => {
-      const del = isOwn ? `<button class="sf-delete-btn" onclick="deleteSocialFeedEmbed('${row.id}')" title="Remove">✕</button>` : '';
-      return `<div class="social-feed-card" id="sf-card-${row.id}">${del}<blockquote class="twitter-tweet" data-media-max-width="560"><a href="${row.tweet_url.replace(/"/g,'&quot;')}"></a></blockquote></div>`;
-    }).join('');
-    _sfLoadWidgets();
+    const rows = await sbGet('users', 'username=eq.' + encodeURIComponent(username) + '&select=social_feed');
+    _sfItems = Array.isArray(rows[0]?.social_feed) ? rows[0].social_feed : [];
   } catch(e) {
-    if (isOwn) { sec.style.display = ''; if(empty) empty.style.display = 'block'; }
-    else if(sec) sec.style.display = 'none';
+    _sfItems = [];
   }
+  _sfRender(isOwn);
 }
 
 function closeVideoPopup() {

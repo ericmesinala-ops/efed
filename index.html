@@ -11404,21 +11404,27 @@ async function loadExistingRating(url) {
     const rows = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
     if (rows.length) {
       const r = rows[0];
-      const editCount = r.edit_count || 0;
-      const hasUsedEdit = editCount >= 1;
+      const hasUsedEdit = (r.created_at || 0) < 0; // negative = edit was used, now locked
 
-      // Restore individual star values accurately
-      // DB: production col = UI overall stars, sound/promo/promo_storyline/match_quality/roster_talent = their UI cats
-      const starRestoreMap = [
-        ['production',      'overall'],
-        ['sound',           'sound'],
-        ['promo',           'promo'],
-        ['promo_storyline', 'promo2'],
-        ['match_quality',   'match'],
-        ['roster_talent',   'roster']
+      // Restore individual star values from existing columns
+      // production col = UI overall stars
+      // promo_storyline = packed: visual*1000 + promo*100 + sound*10 + promo2
+      const _packed = Math.round(Math.abs(r.promo_storyline || 0));
+      const _rPromo2   = _packed % 10;
+      const _rSound    = Math.floor((_packed % 100) / 10);
+      const _rPromo    = Math.floor((_packed % 1000) / 100);
+      const _rVisual   = Math.floor(_packed / 1000);
+
+      const _restoreMap = [
+        ['overall',     Math.round(r.production || 0)],
+        ['production',  _rVisual],
+        ['sound',       _rSound],
+        ['promo',       _rPromo],
+        ['match',       Math.round(r.match_quality || 0)],
+        ['promo2',      _rPromo2],
+        ['roster',      Math.round(r.roster_talent || 0)]
       ];
-      starRestoreMap.forEach(([col, cat]) => {
-        const val = Math.round(r[col] || 0);
+      _restoreMap.forEach(([cat, val]) => {
         setStars(cat, val);
         _ratingValues[cat] = val;
       });
@@ -11557,11 +11563,11 @@ async function submitRating() {
   const session = getSession();
   if (!session || !_expandVideo) return;
 
-  // Check if already rated — block only if edit_count >= 1 (one edit used up)
+  // Check if already rated — locked when created_at is negative (edit was used)
   const url = _expandVideo.url;
   try {
     const existing = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
-    if (existing.length && (existing[0].edit_count || 0) >= 1) {
+    if (existing.length && (existing[0].created_at || 0) < 0) {
       const msg = document.getElementById('rating-msg');
       msg.textContent = '🔒 Rating locked. You may only edit once.';
       msg.style.display = 'block';
@@ -11594,25 +11600,22 @@ async function submitRating() {
     // Check if this is an edit (existing row)
     const _existingForSave = await sbGet('ratings', `username=eq.${encodeURIComponent(session.username)}&video_id=eq.${encodeURIComponent(extractId(url))}`);
     const _isEdit = _existingForSave.length > 0;
-    const _currentEditCount = _isEdit ? (_existingForSave[0].edit_count || 0) : 0;
+    const _wasEdited = _isEdit && (_existingForSave[0].created_at || 0) < 0;
+
+    // Pack visual+promo+sound+promo2 into promo_storyline: visual*1000 + promo*100 + sound*10 + promo2
+    const _packedPromo = _ratingValues.production * 1000 + _ratingValues.promo * 100 + _ratingValues.sound * 10 + _ratingValues.promo2;
 
     const data = {
       username: session.username,
       video_url: url,
       video_id: extractId(url),
-      // Weighted composite score
       overall: _weighted,
-      // Store individual star values for accurate reload
-      // production col = UI "overall" (Production & Editing top row)
-      // sound col = UI sound stars, promo col = UI promo stars
-      production: _ratingValues.overall,
-      sound: _ratingValues.sound,
-      promo: _ratingValues.promo,
-      promo_storyline: _ratingValues.promo2,
+      production: _ratingValues.overall,   // UI "Production & Editing" top row stars
+      promo_storyline: _packedPromo,        // packed: visual*1000 + promo*100 + sound*10 + promo2
       match_quality: _ratingValues.match,
       roster_talent: _ratingValues.roster,
-      edit_count: _isEdit ? _currentEditCount + 1 : 0,
-      created_at: _isEdit ? _existingForSave[0].created_at : Date.now()
+      // Negate created_at after first edit to flag as locked
+      created_at: _isEdit ? -Math.abs(_existingForSave[0].created_at || Date.now()) : Date.now()
     };
 
     if (_isEdit) {
