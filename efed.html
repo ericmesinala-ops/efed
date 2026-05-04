@@ -2573,6 +2573,222 @@ function efedBioCancelEdit(){}
 async function efedBioSave(){}
 </script>
 
+<!-- ── RULES ── -->
+<div id="efed-rules-section" style="display:none;" class="section">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <div class="sec-title" style="margin-bottom:0;">Rules</div>
+    <span id="efed-rules-status" style="font-size:.6rem;color:#4caf64;opacity:0;transition:opacity .4s;letter-spacing:1px;text-transform:uppercase;font-weight:700;">Saved</span>
+  </div>
+  <div id="efed-rules-list"></div>
+  <div id="efed-rules-add-wrap" style="display:none;margin-top:8px;padding-left:2px;">
+    <div class="efed-rule-add-btn" id="efed-rules-add-btn" onclick="_efedRules.addRule()" title="Add rule">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </div>
+  </div>
+</div>
+<style>
+.efed-rule-row {
+  display:flex; align-items:flex-start; gap:10px; padding:5px 0;
+  border-bottom:1px solid rgba(255,255,255,.04);
+}
+.efed-rule-row:last-child { border-bottom:none; }
+.efed-rule-num {
+  flex-shrink:0; width:18px; font-size:.78rem; color:rgba(200,168,75,.5);
+  font-weight:700; padding-top:2px; text-align:right; font-family:'DM Sans',sans-serif;
+}
+.efed-rule-dot {
+  flex-shrink:0; width:4px; height:4px; border-radius:50%;
+  background:rgba(200,168,75,.4); margin-top:8px;
+}
+.efed-rule-text {
+  flex:1; font-size:.88rem; color:rgba(255,255,255,.6); line-height:1.65;
+  outline:none; word-break:break-word; min-height:1.2em;
+  background:transparent; border:none; resize:none; font-family:'DM Sans',sans-serif;
+}
+.efed-rule-text[contenteditable="true"] { cursor:text; }
+.efed-rule-text[contenteditable="true"]:empty:before {
+  content:'Add a rule…'; color:rgba(255,255,255,.18); pointer-events:none; font-style:italic;
+}
+.efed-rule-text[contenteditable="true"]:focus { color:rgba(255,255,255,.85); }
+.efed-rule-del {
+  flex-shrink:0; width:16px; height:16px; border-radius:50%;
+  background:transparent; border:none; color:rgba(255,255,255,.15);
+  font-size:.75rem; cursor:pointer; display:flex; align-items:center;
+  justify-content:center; opacity:0; transition:opacity .15s,color .15s;
+  padding:0; margin-top:3px;
+}
+.efed-rule-row:hover .efed-rule-del { opacity:1; }
+.efed-rule-del:hover { color:#ff6b6b; }
+.efed-rule-add-btn {
+  width:22px; height:22px; border-radius:50%;
+  background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12);
+  color:rgba(255,255,255,.35); display:flex; align-items:center;
+  justify-content:center; cursor:pointer; opacity:.5;
+  transition:opacity .2s,border-color .15s,color .15s,background .15s;
+}
+.efed-rule-add-btn:hover { opacity:1; background:rgba(200,168,75,.15); border-color:rgba(200,168,75,.35); color:#c8a84b; }
+@media (hover:none) { .efed-rule-add-btn { opacity:.4; } .efed-rule-del { opacity:.5; } }
+html.day-mode .efed-rule-num { color:rgba(140,100,0,.45); }
+html.day-mode .efed-rule-dot { background:rgba(140,100,0,.35); }
+html.day-mode .efed-rule-text { color:rgba(0,0,0,.55); }
+html.day-mode .efed-rule-text[contenteditable="true"]:focus { color:rgba(0,0,0,.8); }
+html.day-mode .efed-rule-text[contenteditable="true"]:empty:before { color:rgba(0,0,0,.18); }
+html.day-mode .efed-rule-row { border-bottom-color:rgba(0,0,0,.05); }
+html.day-mode .efed-rule-add-btn { background:rgba(0,0,0,.06); border-color:rgba(0,0,0,.12); color:rgba(0,0,0,.3); }
+html.day-mode .efed-rule-add-btn:hover { background:rgba(168,130,10,.1); border-color:rgba(168,130,10,.35); color:var(--gold); }
+</style>
+<script>
+window._efedRules = (function(){
+  var _isOwner = false;
+  var _rules = [];
+  var _saveTimer = null;
+  var _lastSaved = '';
+
+  function _status(ok) {
+    var s = document.getElementById('efed-rules-status');
+    if (!s) return;
+    s.textContent = ok ? 'Saved' : 'Error';
+    s.style.color = ok ? '#4caf64' : '#ff6b6b';
+    s.style.opacity = '1';
+    clearTimeout(s._t);
+    s._t = setTimeout(function(){ s.style.opacity = '0'; }, 2000);
+  }
+
+  async function _save() {
+    if (!_isOwner) return;
+    var session = typeof getSession === 'function' ? getSession() : null;
+    if (!session) return;
+    var data = JSON.stringify(_rules.filter(function(r){ return r.trim(); }));
+    if (data === _lastSaved) return;
+    try {
+      await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+        method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_rules: data || null })
+      });
+      _lastSaved = data;
+      _status(true);
+    } catch(e) { _status(false); }
+  }
+
+  function _scheduleSave() {
+    clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(_save, 1200);
+  }
+
+  function _render() {
+    var list = document.getElementById('efed-rules-list');
+    var addWrap = document.getElementById('efed-rules-add-wrap');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!_rules.length && !_isOwner) { list.innerHTML = ''; return; }
+    if (!_rules.length && _isOwner) _rules = [''];
+
+    _rules.forEach(function(text, i) {
+      var row = document.createElement('div');
+      row.className = 'efed-rule-row';
+
+      var num = document.createElement('div');
+      num.className = 'efed-rule-num';
+      num.textContent = (i + 1) + '.';
+
+      var dot = document.createElement('div');
+      dot.className = 'efed-rule-dot';
+
+      var txt = document.createElement('div');
+      txt.className = 'efed-rule-text';
+      txt.textContent = text;
+      if (_isOwner) {
+        txt.contentEditable = 'true';
+        txt.addEventListener('input', function() {
+          _rules[i] = txt.innerText.trim();
+          _scheduleSave();
+        });
+        txt.addEventListener('blur', function() {
+          _rules[i] = txt.innerText.trim();
+          clearTimeout(_saveTimer);
+          _save();
+        });
+        txt.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            _rules[i] = txt.innerText.trim();
+            _rules.splice(i + 1, 0, '');
+            _render();
+            // focus new row
+            setTimeout(function() {
+              var rows = document.querySelectorAll('.efed-rule-text');
+              if (rows[i + 1]) rows[i + 1].focus();
+            }, 0);
+          }
+          if (e.key === 'Backspace' && txt.innerText.trim() === '' && _rules.length > 1) {
+            e.preventDefault();
+            _rules.splice(i, 1);
+            _render();
+            setTimeout(function() {
+              var rows = document.querySelectorAll('.efed-rule-text');
+              var prev = rows[Math.max(0, i - 1)];
+              if (prev) { prev.focus(); var r = document.createRange(); r.selectNodeContents(prev); r.collapse(false); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+            }, 0);
+          }
+        });
+      }
+
+      row.appendChild(num);
+      row.appendChild(dot);
+      row.appendChild(txt);
+
+      if (_isOwner) {
+        var del = document.createElement('button');
+        del.className = 'efed-rule-del';
+        del.title = 'Remove';
+        del.innerHTML = '✕';
+        del.onclick = function() {
+          if (_rules.length === 1) { _rules[0] = ''; _render(); return; }
+          _rules.splice(i, 1);
+          _render();
+          _scheduleSave();
+        };
+        row.appendChild(del);
+      }
+
+      list.appendChild(row);
+    });
+
+    if (addWrap) addWrap.style.display = _isOwner ? 'block' : 'none';
+  }
+
+  function addRule() {
+    _rules.push('');
+    _render();
+    setTimeout(function() {
+      var rows = document.querySelectorAll('.efed-rule-text');
+      if (rows.length) rows[rows.length - 1].focus();
+    }, 0);
+  }
+
+  function setOwner(isOwner) {
+    _isOwner = isOwner;
+    _render();
+  }
+
+  function setText(raw) {
+    // Support both JSON array (new) and plain text (legacy)
+    try {
+      var parsed = JSON.parse(raw);
+      _rules = Array.isArray(parsed) ? parsed : (raw ? raw.split('\n').filter(Boolean) : []);
+    } catch(e) {
+      _rules = raw ? raw.split('\n').filter(function(l){ return l.trim(); }) : [];
+    }
+    _lastSaved = JSON.stringify(_rules.filter(function(r){ return r.trim(); }));
+    _render();
+  }
+
+  window._efedRulesSetOwner = setOwner;
+  window._efedRulesSetText = setText;
+
+  return { addRule: addRule, setOwner: setOwner, setText: setText };
+})();
+</script>
+
 <!-- ── UPCOMING EVENT DISPLAY ── -->
 <div id="upcoming-event-section" style="display:none;">
   <div style="padding:22px 20px 0;display:flex;align-items:center;gap:10px;">
@@ -5052,6 +5268,9 @@ async function initNav() {
       // Enable inline bio editing for owner
       if (typeof window._efedBioSetOwner === 'function') window._efedBioSetOwner(true);
       else window._efedBioPendingOwner = true;
+      // Enable inline rules editing for owner
+      if (typeof window._efedRulesSetOwner === 'function') window._efedRulesSetOwner(true);
+      else window._efedRulesPendingOwner = true;
 
     } else {
       if (ddEmail) { ddEmail.textContent = '@' + session.username; ddEmail.style.color = ''; }
@@ -5209,7 +5428,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_gallery_5,efed_gallery_6,efed_gallery_7,efed_gallery_8,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_event_banner,efed_events_json,efed_champions_json,efed_roster_order,efed_match_order&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_gallery_5,efed_gallery_6,efed_gallery_7,efed_gallery_8,efed_bio,efed_rules,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_event_banner,efed_events_json,efed_champions_json,efed_roster_order,efed_match_order&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
@@ -5342,6 +5561,13 @@ async function loadProfile() {
     if (typeof window._efedBioSetText === 'function') window._efedBioSetText(user.efed_bio || '');
     else { const bioEl = document.getElementById('efed-bio'); if (bioEl) bioEl.innerText = user.efed_bio || ''; }
     if (window._efedBioPendingOwner && typeof window._efedBioSetOwner === 'function') { window._efedBioSetOwner(true); window._efedBioPendingOwner = false; }
+
+    // Rules
+    const rulesSec = document.getElementById('efed-rules-section');
+    if (rulesSec) rulesSec.style.display = user.efed_rules ? 'block' : (_isOwner ? 'block' : 'none');
+    if (typeof window._efedRulesSetText === 'function') window._efedRulesSetText(user.efed_rules || '');
+    else { const rulesEl = document.getElementById('efed-rules'); if (rulesEl) rulesEl.innerText = user.efed_rules || ''; }
+    if (window._efedRulesPendingOwner && typeof window._efedRulesSetOwner === 'function') { window._efedRulesSetOwner(true); window._efedRulesPendingOwner = false; }
 
     // Banner
     if (user.efed_banner) {
