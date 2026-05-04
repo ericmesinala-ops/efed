@@ -10961,6 +10961,8 @@ function renderChampions() {
   const hint = document.getElementById('champions-owner-hint');
   if (!sec || !grid) return;
 
+  const _isEditorAllowed = _isOwnProfile || !!(getSession() && getSession().username.toLowerCase() === ADMIN_USERNAME);
+
   // Build display list — one slot per active vault belt for owners/admin, otherwise just current champs
   let displayList = [];
   if (_isEditorAllowed && typeof _vault !== 'undefined') {
@@ -10976,8 +10978,6 @@ function renderChampions() {
     displayList = _champData.filter(c => c.username && !c._vacant);
     displayList.forEach(c => c._liveImg = c.beltImageUrl);
   }
-
-  const _isEditorAllowed = _isOwnProfile || !!(getSession() && getSession().username.toLowerCase() === ADMIN_USERNAME);
   if (!displayList.length) {
     sec.style.display = _isEditorAllowed ? 'block' : 'none';
     const addBtn = document.getElementById('champ-add-btn');
@@ -12414,135 +12414,6 @@ const _cvTrophyPanel = (() => {
   return { toggle, load, render, markDirty, togglePresent, saveRow, confirmDelete, deleteRow, setTab, goPage, close };
 })();
 
-function renderChampions() {
-  const sec = document.getElementById('champions-section');
-  const grid = document.getElementById('champions-grid');
-  const hint = document.getElementById('champions-owner-hint');
-  const addBtn = document.getElementById('champ-add-btn');
-  if (!sec || !grid) return;
-
-  const _isEditorAllowed = _isOwnProfile || !!(getSession() && getSession().username.toLowerCase() === ADMIN_USERNAME);
-  if (addBtn) addBtn.style.display = _isEditorAllowed ? 'inline-flex' : 'none';
-  sec.style.display = 'block';
-  if (!_champData.length) { return; }
-  if (hint) hint.style.display = _isEditorAllowed ? '' : 'none';
-
-  grid.innerHTML = '';
-  _champData.forEach((champ, idx) => {
-    const card = document.createElement('div');
-    card.style.cssText = 'flex-shrink:0;width:148px;border:1px solid rgba(200,168,75,.22);border-radius:12px;padding:0;text-align:center;position:relative;user-select:none;cursor:pointer;transition:border-color .2s,box-shadow .2s;display:flex;flex-direction:column;align-items:center;overflow:hidden;background:var(--surface);';
-    card.dataset.idx = idx;
-
-    // Gold glow top bar
-    const topBar = document.createElement('div');
-    topBar.style.cssText = 'position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,rgba(200,168,75,.0),rgba(200,168,75,.7),rgba(200,168,75,.0));border-radius:12px 12px 0 0;z-index:2;';
-    card.appendChild(topBar);
-
-    // Body (avatar + name — now on top)
-    const avInner = champ.avatarUrl
-      ? `<img loading="lazy" src="${champ.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
-      : `<span style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:#c8a84b;">${(champ.displayName||'?')[0].toUpperCase()}</span>`;
-
-    const content = document.createElement('div');
-    content.style.cssText = 'position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;width:100%;padding:10px 10px 8px;';
-    content.innerHTML = `
-      <div style="width:38px;height:38px;border-radius:50%;background:rgba(200,168,75,.08);border:2px solid rgba(200,168,75,.4);display:flex;align-items:center;justify-content:center;margin:0 auto 6px;overflow:hidden;">${avInner}</div>
-      <div style="font-size:.75rem;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:128px;">${withVerified(champ.displayName||'', champ.username, false)}</div>
-      <div style="font-size:.57rem;color:rgba(200,168,75,.85);margin-top:3px;line-height:1.35;text-align:center;word-break:break-word;max-width:128px;">${(champ.beltName||champ.title||'').replace(/</g,'&lt;')}</div>`;
-    card.appendChild(content);
-
-    // Belt image strip (bottom of card)
-    const beltStrip = document.createElement('div');
-    beltStrip.style.cssText = 'width:100%;height:72px;background:rgba(200,168,75,.04);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;border-top:1px solid rgba(200,168,75,.1);';
-    if (champ.beltImageUrl) {
-      beltStrip.innerHTML = `<img loading="lazy" src="${champ.beltImageUrl}" style="width:100%;height:100%;object-fit:contain;padding:6px;">`;
-    } else {
-      beltStrip.innerHTML = `<span style="font-size:2rem;opacity:.5;">🏆</span>`;
-    }
-    card.appendChild(beltStrip);
-
-    card.onclick = () => window.location.href = 'profile.html?u=' + encodeURIComponent(champ.username);
-    card.onmouseenter = () => { card.style.borderColor='rgba(200,168,75,.55)'; card.style.boxShadow='0 4px 20px rgba(200,168,75,.12)'; };
-    card.onmouseleave = () => { card.style.borderColor='rgba(200,168,75,.22)'; card.style.boxShadow=''; };
-
-    if (_isOwnProfile) {
-      card.style.userSelect = 'none';
-      card.onclick = e => {
-        if (card._wasDragged) { card._wasDragged = false; return; }
-        openEditChampModal(idx);
-      };
-
-      // ── MOUSE drag ──
-      card.addEventListener('mousedown', e => {
-        if (e.button !== 0) return;
-        if (e.target.closest('button,a')) return;
-        const srcIdx = parseInt(card.dataset.idx);
-        const rect = card.getBoundingClientRect();
-        const offX = e.clientX - rect.left;
-        let clone = null, dragStarted = false, lastToIdx = srcIdx;
-        function onMove(ev) {
-          if (!dragStarted) {
-            if (Math.abs(ev.clientX - e.clientX) < 4) return;
-            dragStarted = true; card._wasDragged = true;
-            clone = card.cloneNode(true);
-            clone.style.cssText = `position:fixed;width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px;opacity:.88;pointer-events:none;z-index:99999;border-radius:12px;border:1px solid rgba(200,168,75,.6);box-shadow:0 10px 30px rgba(0,0,0,.7);`;
-            document.body.appendChild(clone); card.style.opacity = '.25';
-          }
-          if (!clone) return;
-          clone.style.left = (ev.clientX - offX) + 'px'; clone.style.top = rect.top + 'px';
-          clone.style.visibility='hidden'; const el=document.elementFromPoint(ev.clientX,ev.clientY); clone.style.visibility='visible';
-          grid.querySelectorAll('[data-idx]').forEach(c2=>c2.style.outline='');
-          const tgt = el?el.closest('[data-idx]'):null;
-          if (tgt&&tgt!==card&&tgt.parentNode===grid) { tgt.style.outline='2px solid rgba(200,168,75,.55)'; lastToIdx=parseInt(tgt.dataset.idx); } else lastToIdx=srcIdx;
-        }
-        function onUp() {
-          document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp);
-          if(clone){clone.remove();clone=null;}
-          grid.querySelectorAll('[data-idx]').forEach(c2=>{c2.style.outline='';c2.style.opacity='';});
-          card.style.opacity='';
-          if(dragStarted&&!isNaN(lastToIdx)&&lastToIdx!==srcIdx){const[m]=_champData.splice(srcIdx,1);_champData.splice(lastToIdx,0,m);_saveChampions();renderChampions();}
-        }
-        document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
-      });
-
-      // ── TOUCH drag (tap = edit, hold+move = reorder) ──
-      let tActive=false,tClone=null,tSrcIdx=null,tLastToIdx=null,tDragStarted=false,tStartX=0,tStartY=0;
-      card.addEventListener('touchstart',e=>{
-        tSrcIdx=parseInt(card.dataset.idx);tLastToIdx=tSrcIdx;tDragStarted=false;
-        const t=e.touches[0];tStartX=t.clientX;tStartY=t.clientY;tActive=true;
-      },{passive:true});
-      card.addEventListener('touchmove',e=>{
-        if(!tActive)return;const t=e.touches[0];
-        const dx=t.clientX-tStartX,dy=t.clientY-tStartY;
-        if(!tDragStarted){
-          if(Math.sqrt(dx*dx+dy*dy)<6)return; // not moved enough yet
-          tDragStarted=true;card._wasDragged=true;
-          const rect2=card.getBoundingClientRect();
-          tClone=card.cloneNode(true);
-          tClone.style.cssText=`position:fixed;width:${rect2.width}px;height:${rect2.height}px;left:${rect2.left}px;top:${rect2.top}px;opacity:.85;pointer-events:none;z-index:9999;border-radius:12px;border:1px solid rgba(200,168,75,.5);`;
-          document.body.appendChild(tClone);card.style.opacity='.3';
-        }
-        if(!tClone)return;
-        tClone.style.left=(t.clientX-tClone.offsetWidth/2)+'px';tClone.style.top=(t.clientY-tClone.offsetHeight/2)+'px';
-        tClone.style.visibility='hidden';const el=document.elementFromPoint(t.clientX,t.clientY);tClone.style.visibility='visible';
-        grid.querySelectorAll('[data-idx]').forEach(c2=>c2.style.outline='');
-        const tgt=el?.closest('[data-idx]');
-        if(tgt&&tgt!==card){tgt.style.outline='2px solid rgba(200,168,75,.5)';tLastToIdx=parseInt(tgt.dataset.idx);}else tLastToIdx=tSrcIdx;
-      },{passive:true});
-      card.addEventListener('touchend',()=>{
-        if(!tActive)return;tActive=false;
-        if(tClone){tClone.remove();tClone=null;}card.style.opacity='1';
-        grid.querySelectorAll('[data-idx]').forEach(c2=>c2.style.outline='');
-        if(tDragStarted&&!isNaN(tLastToIdx)&&tSrcIdx!==null&&tLastToIdx!==tSrcIdx){const[m]=_champData.splice(tSrcIdx,1);_champData.splice(tLastToIdx,0,m);_saveChampions();renderChampions();}
-        // if no drag happened, touchend fires onclick naturally — no extra call needed
-      });
-    }
-
-    grid.appendChild(card);
-  });
-
-  setTimeout(updateChampArrows, 50);
-}
 
 function scrollChampRow(dir) {
   const row = document.getElementById('champions-grid'); if (!row) return;
