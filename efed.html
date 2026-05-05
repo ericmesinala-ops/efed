@@ -1844,7 +1844,11 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
   function _initSections() {
     // Schedule tab: hype video + upcoming events
     _moveSection('upcoming-event-section','efed-panel-schedule');
-    _moveSection('owner-banner','efed-panel-info');
+    (function(){
+      const _ob = document.getElementById('owner-banner');
+      const _ip = document.getElementById('efed-panel-info');
+      if(_ob && _ip) _ip.insertBefore(_ob, _ip.firstChild);
+    })();
     // Videos tab: episodes + best matches
     _moveSection('episodes-section',      'efed-panel-videos');
     _moveSection('best-matches-section',  'efed-panel-videos');
@@ -2889,13 +2893,30 @@ window._efedRules = (function(){
             <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:6px;">Show Banner <span style="opacity:.5;font-weight:400;letter-spacing:0;text-transform:none;">(optional)</span></div>
             <div id="bk-ns-banner-preview" style="display:none;position:relative;border-radius:8px;overflow:hidden;margin-bottom:6px;max-height:70px;">
               <img id="bk-ns-banner-img" src="" alt="" style="width:100%;height:70px;object-fit:cover;display:block;">
-              <button onclick="bkNsClearBanner()" style="position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.7);border:none;color:#fff;font-size:.6rem;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;">✕</button>
+              <div id="bk-ns-dim-overlay" style="position:absolute;inset:0;background:rgba(0,0,0,0);pointer-events:none;transition:background .2s;"></div>
+              <button onclick="bkNsClearBanner()" style="position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.7);border:none;color:#fff;font-size:.6rem;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;z-index:2;">✕</button>
             </div>
             <label id="bk-ns-banner-label" style="display:flex;align-items:center;gap:6px;padding:8px 12px;background:rgba(255,255,255,.04);border:1px dashed rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;transition:all .15s;user-select:none;" onmouseover="this.style.background='rgba(200,168,75,.06)';this.style.borderColor='rgba(200,168,75,.25)';this.style.color='rgba(200,168,75,.7)'" onmouseout="this.style.background='rgba(255,255,255,.04)';this.style.borderColor='rgba(255,255,255,.12)';this.style.color='rgba(255,255,255,.4)'">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
               Upload Banner
               <input type="file" accept="image/*" style="display:none;" onchange="bkNsHandleBanner(event)">
             </label>
+            <!-- Dim/blur — shown after banner uploaded -->
+            <div id="bk-ns-dimblur" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;">
+              <div style="font-size:.47rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.2);font-weight:700;margin-bottom:7px;">Banner Adjustments</div>
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:.58rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;min-width:26px;">Dim</span>
+                  <input id="bk-ns-dim" type="range" min="0" max="80" step="5" value="0" oninput="bkNsLiveAdjust()" style="flex:1;accent-color:#c0000e;cursor:pointer;">
+                  <span id="bk-ns-dim-label" style="font-size:.6rem;color:rgba(255,255,255,.28);min-width:28px;text-align:right;font-family:'DM Sans',sans-serif;">0%</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:.58rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;min-width:26px;">Blur</span>
+                  <input id="bk-ns-blur" type="range" min="0" max="10" step="1" value="0" oninput="bkNsLiveAdjust()" style="flex:1;accent-color:#c0000e;cursor:pointer;">
+                  <span id="bk-ns-blur-label" style="font-size:.6rem;color:rgba(255,255,255,.28);min-width:28px;text-align:right;font-family:'DM Sans',sans-serif;">0px</span>
+                </div>
+              </div>
+            </div>
           </div>
           <div id="bk-ns-err" style="font-size:.65rem;color:#ff6b6b;min-height:14px;"></div>
           <button id="bk-ns-save-btn" onclick="bkCreateShow()" style="padding:10px;background:#c0000e;border:none;border-radius:9px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">Add Show</button>
@@ -4562,10 +4583,33 @@ async function saveEvent() {
 async function clearEvent() {
   const session = getSession(); if (!session) return;
   try {
+    // Collect all show titles being cleared so we can wipe matching plan_notes
+    const allTitles = [];
+    if (window._efedPrimaryEvent?.title) allTitles.push(window._efedPrimaryEvent.title.toLowerCase());
+    (window._efedExtraEvents||[]).forEach(ev => { if(ev?.title) allTitles.push(ev.title.toLowerCase()); });
+
     await fetch(
       SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username),
-      { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_event_title:null, efed_event_date:null, efed_event_location:null, efed_event_main:null, efed_event_hype:null, efed_event_banner:null, efed_events_json:[] }) }
+      { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_event_title:null, efed_event_date:null, efed_event_location:null, efed_event_main:null, efed_event_hype:null, efed_event_banner:null, efed_event_banner_dim:0, efed_event_banner_blur:0, efed_events_json:[] }) }
     );
+
+    // Clear plan_notes for all roster members booked on these shows
+    if (allTitles.length && EFED_NAME) {
+      try {
+        const rosterRows = await sbGet('roster', 'efed=eq.'+encodeURIComponent(EFED_NAME)+'&status=eq.approved&select=id,plan_note');
+        for (const row of rosterRows) {
+          if (!row.plan_note) continue;
+          try {
+            const bk = typeof row.plan_note==='string' ? JSON.parse(row.plan_note) : row.plan_note;
+            if (bk && allTitles.includes((bk.show||'').toLowerCase())) {
+              await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+encodeURIComponent(row.id),
+                {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({plan_note:null})});
+            }
+          } catch(e2) {}
+        }
+      } catch(e3) {}
+    }
+
     window._efedExtraEvents = [];
     window._efedPrimaryEvent = {};
     renderEvent(null, []);
@@ -5132,17 +5176,7 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
     });
 
     if (!matched) {
-      const card = document.getElementById('event-card') || document.querySelector('.ev-primary-card');
-      if (card) {
-        const banner = _makeBanner();
-        banner.dataset.evKey = 'fallback';
-        const _fbAnchor = _insertAnchors.get(card) || card;
-        _fbAnchor.insertAdjacentElement('afterend', banner);
-        _insertAnchors.set(card, banner);
-        card.style.borderBottomLeftRadius = '0';
-        card.style.borderBottomRightRadius = '0';
-        card.style.borderBottom = 'none';
-      }
+      // No matching show — skip. Old bookings from deleted shows won't bleed onto new events.
     }
   });
 
@@ -7237,22 +7271,51 @@ function bkNsHandleBanner(e) {
     const prev = document.getElementById('bk-ns-banner-preview');
     const img  = document.getElementById('bk-ns-banner-img');
     const label = document.getElementById('bk-ns-banner-label');
+    const db   = document.getElementById('bk-ns-dimblur');
     if(img) img.src = dataUrl;
     if(prev) prev.style.display = '';
     if(label) label.style.display = 'none';
+    if(db) db.style.display = '';
   });
   reader.readAsDataURL(file);
   e.target.value = '';
 }
 
 function bkNsClearBanner() {
-  _bkTab.showBanner = null;
+  _bkTab.showBanner = null; _bkTab.showDim = 0; _bkTab.showBlur = 0;
   const prev = document.getElementById('bk-ns-banner-preview');
   const img  = document.getElementById('bk-ns-banner-img');
   const label = document.getElementById('bk-ns-banner-label');
+  const db   = document.getElementById('bk-ns-dimblur');
+  const dimS = document.getElementById('bk-ns-dim');
+  const blrS = document.getElementById('bk-ns-blur');
+  const dimL = document.getElementById('bk-ns-dim-label');
+  const blrL = document.getElementById('bk-ns-blur-label');
+  const ov   = document.getElementById('bk-ns-dim-overlay');
   if(prev) prev.style.display = 'none';
   if(img)  img.src = '';
   if(label) label.style.display = '';
+  if(db)   db.style.display = 'none';
+  if(dimS) dimS.value = 0;
+  if(blrS) blrS.value = 0;
+  if(dimL) dimL.textContent = '0%';
+  if(blrL) blrL.textContent = '0px';
+  if(ov)   ov.style.background = 'rgba(0,0,0,0)';
+}
+
+function bkNsLiveAdjust() {
+  const dim  = parseInt(document.getElementById('bk-ns-dim')?.value  || 0);
+  const blur = parseInt(document.getElementById('bk-ns-blur')?.value || 0);
+  const img  = document.getElementById('bk-ns-banner-img');
+  const ov   = document.getElementById('bk-ns-dim-overlay');
+  const dimL = document.getElementById('bk-ns-dim-label');
+  const blrL = document.getElementById('bk-ns-blur-label');
+  if(dimL) dimL.textContent = dim  + '%';
+  if(blrL) blrL.textContent = blur + 'px';
+  if(img)  { img.style.filter = blur ? 'blur('+blur+'px)' : ''; img.style.transform = blur ? 'scale(1.05)' : ''; }
+  if(ov)   ov.style.background = dim ? 'rgba(0,0,0,'+(dim/100)+')' : 'rgba(0,0,0,0)';
+  _bkTab.showDim  = dim;
+  _bkTab.showBlur = blur;
 }
 
 async function bkCreateShow() {
@@ -7274,12 +7337,16 @@ async function bkCreateShow() {
   try {
     const extras = window._efedExtraEvents||[];
     if(!window._efedPrimaryEvent?.title){
+      const dim  = _bkTab.showDim  || 0;
+      const blur = _bkTab.showBlur || 0;
       await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),
-        {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_title:title,efed_event_location:location,efed_event_date:date,efed_event_banner:banner})});
+        {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_title:title,efed_event_location:location,efed_event_date:date,efed_event_banner:banner,efed_event_banner_dim:dim,efed_event_banner_blur:blur})});
       if(!window._efedPrimaryEvent) window._efedPrimaryEvent={};
-      Object.assign(window._efedPrimaryEvent,{title,location,date,banner});
+      Object.assign(window._efedPrimaryEvent,{title,location,date,banner,dim,blur});
     } else {
-      const newExtras=[...extras,{title,location,date,banner}];
+      const dim  = _bkTab.showDim  || 0;
+      const blur = _bkTab.showBlur || 0;
+      const newExtras=[...extras,{title,location,date,banner,dim,blur}];
       await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),
         {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:newExtras})});
       window._efedExtraEvents=newExtras;
