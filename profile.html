@@ -16626,7 +16626,7 @@ const _vp = (() => {
       showStep('done');
       renderPromosSection();
       updateOpenBtn();
-    }catch(e){console.error(e);alert('Upload failed. Please try again.');if(pb)pb.disabled=false;showStep('review');}
+    }catch(e){console.error('[VP] post error:',e);alert('Upload failed: '+(e.message||e));if(pb)pb.disabled=false;showStep('review');}
   }
 
   function fakeProgress(){
@@ -16635,9 +16635,14 @@ const _vp = (() => {
   }
 
   async function uploadBlob(blob, ext, path){
+    // FIX: iOS often gives blob.type as empty string — derive Content-Type from
+    // extension so Supabase does not reject the upload with a 400.
+    const ctMap={m4a:'audio/mp4',mp4:'audio/mp4',aac:'audio/aac',ogg:'audio/ogg',webm:'audio/webm'};
+    const ct=blob.type||ctMap[ext]||'audio/mp4';
+    const safeBlob=blob.type?blob:new Blob([blob],{type:ct});
     try{await fetch(`${SUPABASE_URL}/storage/v1/object/voice-promos/${path}`,{method:'DELETE',headers:SB_HEADERS});}catch(e){}
-    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/voice-promos/${path}`,{method:'POST',headers:{...SB_HEADERS,'Content-Type':blob.type,'x-upsert':'true'},body:blob});
-    if(!r.ok)throw new Error(await r.text());
+    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/voice-promos/${path}`,{method:'POST',headers:{...SB_HEADERS,'Content-Type':ct,'x-upsert':'true'},body:safeBlob});
+    if(!r.ok){const msg=await r.text();console.error('[VP] upload failed:',r.status,msg);throw new Error(msg);}
     return `${SUPABASE_URL}/storage/v1/object/public/voice-promos/${path}`;
   }
 
