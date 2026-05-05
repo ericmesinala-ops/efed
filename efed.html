@@ -4259,7 +4259,7 @@ function evAddExtraEvent(prefill) {
   // prefill: optional {title,date,location,slogan,banner,isTba}
   if (_evRows.length >= 5) { if (typeof showToast==='function') showToast('Maximum of 5 events reached.'); return; }
   const uid = _evUid();
-  _evRows.push({ uid, banner: prefill?.banner || null });
+  _evRows.push({ uid, banner: prefill?.banner || null, dim: prefill?.dim || 0, blur: prefill?.blur || 0 });
 
   const container = _evGetContainer();
   const div = document.createElement('div');
@@ -4294,14 +4294,30 @@ function evAddExtraEvent(prefill) {
     </div>
     <div>
       <div style="font-size:.5rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:6px;">Show Banner <span style="font-weight:400;color:rgba(255,255,255,.2);letter-spacing:0;text-transform:none;font-size:.48rem;">(optional · 4:1 wide)</span></div>
-      <div data-ev-banner-preview style="display:${prefill?.banner ? 'block' : 'none'};width:100%;aspect-ratio:4/1;border-radius:7px;overflow:hidden;margin-bottom:7px;background:#0a0a0e;border:1px solid rgba(255,255,255,.08);">
-        <img data-ev-banner-img src="${prefill?.banner || ''}" style="width:100%;height:100%;object-fit:cover;display:block;" alt="">
+      <div data-ev-banner-preview style="display:${prefill?.banner ? 'block' : 'none'};width:100%;aspect-ratio:4/1;border-radius:7px;overflow:hidden;margin-bottom:7px;background:#0a0a0e;border:1px solid rgba(255,255,255,.08);position:relative;">
+        <img data-ev-banner-img src="${prefill?.banner || ''}" style="width:100%;height:100%;object-fit:cover;display:block;transition:filter .2s;" alt="">
+        <div data-ev-dim-overlay style="position:absolute;inset:0;background:rgba(0,0,0,${(prefill?.dim||0)/100});pointer-events:none;transition:background .2s;"></div>
       </div>
       <div style="display:flex;gap:6px;">
         <button onclick="evRowUploadBanner('${uid}')" style="flex:1;padding:6px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:7px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.68rem;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(255,255,255,.11)'" onmouseout="this.style.background='rgba(255,255,255,.06)'">📷 Upload Banner</button>
         <button data-ev-banner-rm onclick="evRowRemoveBanner('${uid}')" style="display:${prefill?.banner ? '' : 'none'};padding:6px 10px;background:none;border:1px solid rgba(255,80,80,.2);border-radius:7px;color:rgba(255,100,100,.6);font-family:'DM Sans',sans-serif;font-size:.68rem;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(255,80,80,.08)'" onmouseout="this.style.background='none'">Remove</button>
       </div>
       <input type="file" data-ev-file accept="image/*" style="display:none;" onchange="evRowHandleFile(event,'${uid}')">
+      <div data-ev-dimblur style="display:${prefill?.banner?'block':'none'};margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06);">
+        <div style="font-size:.48rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.2);font-weight:700;margin-bottom:8px;">Banner Adjustments</div>
+        <div style="display:flex;flex-direction:column;gap:7px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:.58rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;min-width:28px;">Dim</span>
+            <input data-ev-dim type="range" min="0" max="80" step="5" value="${prefill?.dim||0}" oninput="evRowLiveAdjust('${uid}')" style="flex:1;accent-color:#c0000e;cursor:pointer;">
+            <span data-ev-dim-label style="font-size:.6rem;color:rgba(255,255,255,.28);min-width:30px;text-align:right;font-family:'DM Sans',sans-serif;">${prefill?.dim||0}%</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:.58rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;min-width:28px;">Blur</span>
+            <input data-ev-blur type="range" min="0" max="10" step="1" value="${prefill?.blur||0}" oninput="evRowLiveAdjust('${uid}')" style="flex:1;accent-color:#c0000e;cursor:pointer;">
+            <span data-ev-blur-label style="font-size:.6rem;color:rgba(255,255,255,.28);min-width:30px;text-align:right;font-family:'DM Sans',sans-serif;">${prefill?.blur||0}px</span>
+          </div>
+        </div>
+      </div>
     </div>`;
 
   container.appendChild(div);
@@ -4374,20 +4390,41 @@ function _evRowSetBanner(uid, dataUrl) {
   const preview = el.querySelector('[data-ev-banner-preview]');
   const img     = el.querySelector('[data-ev-banner-img]');
   const rmBtn   = el.querySelector('[data-ev-banner-rm]');
+  const dbSec   = el.querySelector('[data-ev-dimblur]');
   if (preview) preview.style.display = 'block';
   if (img)     img.src = dataUrl;
   if (rmBtn)   rmBtn.style.display = '';
+  if (dbSec)   dbSec.style.display = 'block';
 }
 
 function evRowRemoveBanner(uid) {
-  const row = _evFindRow(uid); if (row) row.banner = null;
+  const row = _evFindRow(uid); if (row) { row.banner = null; row.dim = 0; row.blur = 0; }
   const el = _evFindEl(uid); if (!el) return;
-  const preview = el.querySelector('[data-ev-banner-preview]');
-  const img     = el.querySelector('[data-ev-banner-img]');
-  const rmBtn   = el.querySelector('[data-ev-banner-rm]');
-  if (preview) preview.style.display = 'none';
-  if (img)     img.src = '';
-  if (rmBtn)   rmBtn.style.display = 'none';
+  const preview  = el.querySelector('[data-ev-banner-preview]');
+  const img      = el.querySelector('[data-ev-banner-img]');
+  const rmBtn    = el.querySelector('[data-ev-banner-rm]');
+  const dbSec    = el.querySelector('[data-ev-dimblur]');
+  if (preview)   preview.style.display = 'none';
+  if (img)       img.src = '';
+  if (rmBtn)     rmBtn.style.display = 'none';
+  if (dbSec)     dbSec.style.display = 'none';
+}
+
+function evRowLiveAdjust(uid) {
+  const el = _evFindEl(uid); if (!el) return;
+  const dimSlider  = el.querySelector('[data-ev-dim]');
+  const blurSlider = el.querySelector('[data-ev-blur]');
+  const dimLabel   = el.querySelector('[data-ev-dim-label]');
+  const blurLabel  = el.querySelector('[data-ev-blur-label]');
+  const img        = el.querySelector('[data-ev-banner-img]');
+  const overlay    = el.querySelector('[data-ev-dim-overlay]');
+  const dim  = parseInt(dimSlider?.value  || 0);
+  const blur = parseInt(blurSlider?.value || 0);
+  if (dimLabel)  dimLabel.textContent  = dim  + '%';
+  if (blurLabel) blurLabel.textContent = blur + 'px';
+  if (img)     { img.style.filter    = blur ? 'blur('+blur+'px)' : ''; img.style.transform = blur ? 'scale(1.05)' : ''; }
+  if (overlay)   overlay.style.background = dim ? 'rgba(0,0,0,'+(dim/100)+')' : 'rgba(0,0,0,0)';
+  const row = _evFindRow(uid); if (row) { row.dim = dim; row.blur = blur; }
 }
 
 // ── Collect all event data from DOM rows ──────────────────────────────────────
@@ -4407,7 +4444,9 @@ function _evCollectAll() {
       date:     dateVal,
       location: (el.querySelector('[data-ev-location]')?.value || '').trim() || null,
       slogan:   (el.querySelector('[data-ev-slogan]')?.value || '').trim() || null,
-      banner:   row?.banner || null
+      banner:   row?.banner || null,
+      dim:      parseInt(el.querySelector('[data-ev-dim]')?.value  || 0) || 0,
+      blur:     parseInt(el.querySelector('[data-ev-blur]')?.value || 0) || 0
     });
   });
   return results;
@@ -4431,6 +4470,8 @@ function _emPrefillEvents() {
       location: primary.location|| null,
       slogan:   primary.main    || null,
       banner:   primary.banner  || null,
+      dim:      primary.dim     || 0,
+      blur:     primary.blur    || 0,
       isTba:    primary.date === 'TBA'
     });
   }
@@ -4441,6 +4482,8 @@ function _emPrefillEvents() {
       location: ev.location|| null,
       slogan:   ev.slogan  || null,
       banner:   ev.banner  || null,
+      dim:      ev.dim     || 0,
+      blur:     ev.blur    || 0,
       isTba:    ev.date === 'TBA'
     });
   });
@@ -4480,13 +4523,15 @@ async function saveEvent() {
         method: 'PATCH',
         headers: SB_HEADERS,
         body: JSON.stringify({
-          efed_event_title:    primary.title,
-          efed_event_date:     primary.date     || null,
-          efed_event_location: primary.location || null,
-          efed_event_main:     primary.slogan   || null,
-          efed_event_hype:     null,
-          efed_event_banner:   primary.banner   || null,
-          efed_events_json:    extraEvents
+          efed_event_title:       primary.title,
+          efed_event_date:        primary.date     || null,
+          efed_event_location:    primary.location || null,
+          efed_event_main:        primary.slogan   || null,
+          efed_event_hype:        null,
+          efed_event_banner:      primary.banner   || null,
+          efed_event_banner_dim:  primary.dim      || 0,
+          efed_event_banner_blur: primary.blur     || 0,
+          efed_events_json:       extraEvents
         })
       }
     );
@@ -4499,7 +4544,9 @@ async function saveEvent() {
       location: primary.location || null,
       main:     primary.slogan   || null,
       hype:     null,
-      banner:   primary.banner   || null
+      banner:   primary.banner   || null,
+      dim:      primary.dim      || 0,
+      blur:     primary.blur     || 0
     };
     window._efedExtraEvents = extraEvents;
     renderEvent(window._efedPrimaryEvent, extraEvents);
@@ -4534,17 +4581,17 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
   const acronym = (document.getElementById('stat-acronym')?.textContent || '').trim();
 
   const card = document.createElement('div');
-  card.style.cssText = 'position:relative;border:1px solid rgba(255,255,255,.12);border-radius:14px;overflow:hidden;margin-top:14px;box-shadow:0 6px 28px rgba(0,0,0,.55);display:flex;height:130px;';
+  card.style.cssText = 'position:relative;border:1px solid rgba(255,255,255,.13);border-radius:12px;overflow:hidden;margin-top:12px;box-shadow:0 4px 20px rgba(0,0,0,.5);display:flex;height:110px;';
 
   // LEFT COLUMN
   const leftCol = document.createElement('div');
-  leftCol.style.cssText = 'flex-shrink:0;width:160px;background:#07070a;display:flex;flex-direction:column;justify-content:center;padding:16px;gap:3px;border-right:1px solid rgba(255,255,255,.07);position:relative;z-index:1;';
+  leftCol.style.cssText = 'flex-shrink:0;width:120px;background:#07070a;display:flex;flex-direction:column;justify-content:center;padding:14px 12px;gap:4px;border-right:1px solid rgba(255,255,255,.07);position:relative;z-index:1;';
   leftCol.innerHTML = `
-    ${acronym ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:.72rem;letter-spacing:4px;color:#c8a84b;line-height:1;margin-bottom:1px;">${acronym.replace(/</g,'&lt;')}</div>` : ''}
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:2px;color:#fff;line-height:1.1;word-break:break-word;">${(ev.title||'').replace(/</g,'&lt;')}</div>
-    ${(ev.main||ev.slogan) ? `<div style="font-size:.6rem;color:rgba(255,255,255,.3);font-style:italic;margin-top:3px;line-height:1.4;">${((ev.main||ev.slogan)||'').replace(/</g,'&lt;')}</div>` : ''}
-    ${ev.date ? `<div style="font-size:.65rem;color:rgba(200,168,75,.75);font-family:'DM Sans',sans-serif;font-weight:700;margin-top:7px;letter-spacing:.3px;">${(ev.date||'').replace(/</g,'&lt;')}</div>` : ''}
-    ${ev.location ? `<div style="font-size:.6rem;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;margin-top:1px;">${(ev.location||'').replace(/</g,'&lt;')}</div>` : ''}`;
+    ${acronym ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:3px;color:#c8a84b;line-height:1;">${acronym.replace(/</g,'&lt;')}</div>` : ''}
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.05rem;letter-spacing:1.5px;color:#fff;line-height:1.15;word-break:break-word;">${(ev.title||'').replace(/</g,'&lt;')}</div>
+    ${(ev.main||ev.slogan) ? `<div style="font-size:.6rem;color:rgba(255,255,255,.35);font-style:italic;letter-spacing:.2px;margin-top:2px;line-height:1.3;">${((ev.main||ev.slogan)||'').replace(/</g,'&lt;')}</div>` : ''}
+    ${ev.date ? `<div style="font-size:.6rem;color:rgba(200,168,75,.55);font-family:'DM Sans',sans-serif;font-weight:600;margin-top:4px;letter-spacing:.3px;">${(ev.date||'').replace(/</g,'&lt;')}</div>` : ''}
+    ${ev.location ? `<div style="font-size:.58rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;margin-top:1px;letter-spacing:.2px;">${(ev.location||'').replace(/</g,'&lt;')}</div>` : ''}`;
 
   // RIGHT SIDE — banner
   const rightSide = document.createElement('div');
@@ -4553,11 +4600,18 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
     const bannerImg = document.createElement('img');
     bannerImg.src = ev.banner;
     bannerImg.loading = 'lazy';
-    bannerImg.style.cssText = 'width:100%;height:100%;object-fit:cover;object-position:center;display:block;';
+    const _blur = ev.blur || 0;
+    const _dim  = ev.dim  || 0;
+    bannerImg.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;' + (_blur ? 'filter:blur('+_blur+'px);transform:scale(1.05);' : '');
     const fade = document.createElement('div');
     fade.style.cssText = 'position:absolute;inset:0;background:linear-gradient(to right,rgba(7,7,10,.45) 0%,transparent 30%);pointer-events:none;z-index:1;';
     rightSide.appendChild(bannerImg);
     rightSide.appendChild(fade);
+    if (_dim > 0) {
+      const dimLayer = document.createElement('div');
+      dimLayer.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,'+(_dim/100)+');pointer-events:none;z-index:2;';
+      rightSide.appendChild(dimLayer);
+    }
   } else {
     rightSide.style.background = 'linear-gradient(135deg,#0d0d10 0%,#111118 100%)';
     const hint = document.createElement('div');
@@ -5591,7 +5645,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_gallery_5,efed_gallery_6,efed_gallery_7,efed_gallery_8,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_event_banner,efed_events_json,efed_champions_json,efed_roster_order,efed_match_order&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_gallery_5,efed_gallery_6,efed_gallery_7,efed_gallery_8,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_event_banner,efed_event_banner_dim,efed_event_banner_blur,efed_events_json,efed_champions_json,efed_roster_order,efed_match_order&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
@@ -5776,7 +5830,7 @@ async function loadProfile() {
 
     // Upcoming event — pass extra events from DB column
     const _extraEventsFromDB = window._efedExtraEvents;
-    window._efedPrimaryEvent = { title: user.efed_event_title, date: user.efed_event_date, location: user.efed_event_location, main: user.efed_event_main, hype: user.efed_event_hype, banner: user.efed_event_banner || null };
+    window._efedPrimaryEvent = { title: user.efed_event_title, date: user.efed_event_date, location: user.efed_event_location, main: user.efed_event_main, hype: user.efed_event_hype, banner: user.efed_event_banner || null, dim: user.efed_event_banner_dim || 0, blur: user.efed_event_banner_blur || 0 };
     renderEvent(window._efedPrimaryEvent, _extraEventsFromDB);
 
     // Signings toggle state
