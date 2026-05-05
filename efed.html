@@ -2281,7 +2281,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
   window.obSwitchTab = function(tab) {
     if (tab === 'champions') tab = 'profile'; // removed tab
     _obTab = tab;
-    var tabs    = ['profile','links','events'];
+    var tabs    = ['profile','links'];
     var active  = 'border-bottom:2px solid #c8a84b;color:#c8a84b;';
     var inactive = 'border-bottom:2px solid transparent;color:rgba(255,255,255,.32);';
     tabs.forEach(function(t) {
@@ -2292,10 +2292,8 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     });
     var footer = document.getElementById('ob-save-footer');
     if (footer) footer.style.display = 'flex';
-    var clearBtn = document.getElementById('em-clear-btn');
-    if (clearBtn) clearBtn.style.display = (tab === 'events') ? 'block' : 'none';
     var saveBtn = document.getElementById('em-save-btn');
-    if (saveBtn) saveBtn.textContent = (tab === 'events') ? 'Save Events' : 'Save Changes';
+    if (saveBtn) saveBtn.textContent = 'Save Changes';
     if (typeof emSwitchTab === 'function') emSwitchTab(tab);
   };
 })();
@@ -2725,7 +2723,8 @@ window._efedRules = (function(){
     <div style="display:flex;border-bottom:1px solid rgba(255,255,255,.06);">
       <button id="ob-tab-profile"   onclick="obSwitchTab('profile')"   style="flex:1;padding:11px 0;background:none;border:none;border-bottom:2px solid #c8a84b;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;">Profile</button>
       <button id="ob-tab-links"     onclick="obSwitchTab('links')"     style="flex:1;padding:11px 0;background:none;border:none;border-bottom:2px solid transparent;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;">Links</button>
-      <button id="ob-tab-events"    onclick="obSwitchTab('events')"    style="flex:1;padding:11px 0;background:none;border:none;border-bottom:2px solid transparent;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;">Events</button>
+
+
     </div>
 
     <!-- PROFILE PANEL -->
@@ -2833,17 +2832,6 @@ window._efedRules = (function(){
     </div>
 
 
-
-    <!-- EVENTS PANEL -->
-    <div id="ob-events-panel" style="display:none;padding:16px 20px;">
-      <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.6);font-weight:700;">Calendar of Events</div>
-      <div style="font-size:.6rem;color:rgba(255,255,255,.22);line-height:1.5;">First entry = primary event shown on the card. Add up to 5 total. Each can have an optional show banner.</div>
-      <div id="ev-extra-events" style="display:flex;flex-direction:column;gap:12px;"></div>
-      <button id="ev-add-btn" onclick="evAddExtraEvent()" style="padding:8px 14px;background:rgba(200,168,75,.07);border:1px dashed rgba(200,168,75,.25);border-radius:8px;color:rgba(200,168,75,.65);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;width:100%;transition:background .15s;" onmouseover="this.style.background='rgba(200,168,75,.14)'" onmouseout="this.style.background='rgba(200,168,75,.07)'">+ Add Event</button>
-      <input type="hidden" id="ev-hype-input" value="">
-      <div id="ev-msg" style="font-size:.62rem;min-height:12px;"></div>
-    </div>
-
     <!-- Save footer -->
     <div id="ob-save-footer" style="padding:0 20px 14px;display:flex;gap:8px;align-items:center;">
       <button id="em-clear-btn" onclick="clearEvent()" style="display:none;padding:8px 16px;background:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.74rem;cursor:pointer;white-space:nowrap;">Clear</button>
@@ -2858,6 +2846,19 @@ window._efedRules = (function(){
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </button>
   </div>
+  <!-- hidden reference elements used by JS to track Event 1 state -->
+  <span id="ev-display-title"    style="display:none;"></span>
+  <span id="ev-display-mainevent" style="display:none;"></span>
+  <span id="ev-display-date"     style="display:none;"><span id="ev-display-date-text"></span></span>
+  <span id="ev-display-location" style="display:none;"><span id="ev-display-location-text"></span></span>
+  <div style="padding:0 20px;">
+    <!-- Event 1 card (same box style as extra events, rendered by JS) -->
+    <div id="ev-primary-card-wrap"></div>
+    <!-- Additional event cards rendered here -->
+    <div id="ev-extra-cards-display"></div>
+  </div>
+  <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
+
   <!-- Inline booking panel (owner only, shown on + click) -->
   <div id="book-inline-panel" style="display:none;margin:10px 20px 2px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);border-radius:12px;overflow:hidden;">
 
@@ -2872,11 +2873,25 @@ window._efedRules = (function(){
       <div class="bk-step-dot" id="bk-sdot-3">4</div>
     </div>
 
-    <!-- ── STEP 0: Create Show ── -->
+    <!-- ── STEP 0: Select / Create Show ── -->
     <div id="bk-step-0" class="bk-step-panel active">
-      <!-- Form substate -->
-      <div id="bk-show-form" style="padding:16px 20px 0;">
-        <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:12px;">New Show</div>
+
+      <!-- ── PICKER substate: choose existing event ── -->
+      <div id="bk-show-picker" style="padding:16px 20px 0;">
+        <div style="font-size:.48rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;margin-bottom:10px;">Book for Show</div>
+        <div id="bk-show-list" style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px;"></div>
+        <button onclick="bkGoNewShowForm()" style="display:flex;align-items:center;gap:7px;padding:10px 14px;width:100%;background:rgba(255,255,255,.03);border:1px dashed rgba(255,255,255,.12);border-radius:10px;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;text-align:left;box-sizing:border-box;transition:all .15s;" onmouseover="this.style.background='rgba(255,255,255,.07)';this.style.color='rgba(255,255,255,.55)'" onmouseout="this.style.background='rgba(255,255,255,.03)';this.style.color='rgba(255,255,255,.3)'">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New Show
+        </button>
+      </div>
+
+      <!-- ── FORM substate: create new show ── -->
+      <div id="bk-show-form" style="display:none;padding:16px 20px 0;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+          <button onclick="bkGoShowPicker()" style="background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:.78rem;font-family:'DM Sans',sans-serif;padding:0;transition:color .15s;" onmouseover="this.style.color='rgba(255,255,255,.7)'" onmouseout="this.style.color='rgba(255,255,255,.3)'">← Back</button>
+          <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#c8a84b;font-weight:700;">New Show</div>
+        </div>
         <div style="display:flex;flex-direction:column;gap:9px;">
           <input id="bk-ns-name" type="text" maxlength="60" placeholder="Show name (required)" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:9px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;box-sizing:border-box;" oninput="document.getElementById('bk-ns-err').textContent=''">
           <div style="display:flex;gap:8px;">
@@ -2904,12 +2919,17 @@ window._efedRules = (function(){
           <button id="bk-ns-save-btn" onclick="bkCreateShow()" style="padding:10px;background:#c0000e;border:none;border-radius:9px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:opacity .15s;" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">Add Show</button>
         </div>
       </div>
-      <!-- Manage substate: shown after show is created -->
+
+      <!-- ── MANAGE substate: shown after show is selected/created ── -->
       <div id="bk-show-manage" style="display:none;padding:16px 20px 0;">
-        <div id="bk-manage-header" style="padding:10px 14px;background:rgba(200,168,75,.05);border:1px solid rgba(200,168,75,.15);border-radius:10px;margin-bottom:12px;"></div>
-        <button onclick="bkStartNewMatch()" style="display:flex;align-items:center;gap:6px;padding:11px 14px;width:100%;background:rgba(200,168,75,.08);border:1px dashed rgba(200,168,75,.4);border-radius:10px;color:rgba(200,168,75,.9);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:all .15s;text-align:left;box-sizing:border-box;margin-bottom:12px;" onmouseover="this.style.background='rgba(200,168,75,.16)';this.style.borderColor='rgba(200,168,75,.65)';" onmouseout="this.style.background='rgba(200,168,75,.08)';this.style.borderColor='rgba(200,168,75,.4)';"><span style="font-size:1.05rem;line-height:1;">+</span> Create New Match</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div id="bk-manage-header" style="flex:1;padding:10px 14px;background:rgba(200,168,75,.05);border:1px solid rgba(200,168,75,.15);border-radius:10px;"></div>
+          <button onclick="bkGoShowPicker()" title="Change show" style="margin-left:8px;flex-shrink:0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;cursor:pointer;padding:7px 10px;white-space:nowrap;transition:all .15s;" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='rgba(255,255,255,.7)'" onmouseout="this.style.background='rgba(255,255,255,.05)';this.style.color='rgba(255,255,255,.35)'">⇄ Show</button>
+        </div>
+        <button onclick="bkStartNewMatch()" style="display:flex;align-items:center;gap:6px;padding:11px 14px;width:100%;background:rgba(200,168,75,.08);border:1px dashed rgba(200,168,75,.4);border-radius:10px;color:rgba(200,168,75,.9);font-family:'DM Sans',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;transition:all .15s;text-align:left;box-sizing:border-box;margin-bottom:12px;" onmouseover="this.style.background='rgba(200,168,75,.16)';this.style.borderColor='rgba(200,168,75,.65)';" onmouseout="this.style.background='rgba(200,168,75,.08)';this.style.borderColor='rgba(200,168,75,.4)';"><span style="font-size:1.05rem;line-height:1;">+</span> Book New Match</button>
         <div id="bk-match-list" style="display:flex;flex-direction:column;gap:7px;margin-bottom:12px;"></div>
       </div>
+
       <div class="bk-step-nav" style="border-top:none;padding-top:4px;justify-content:flex-end;">
         <button onclick="bkClosePanel()" style="padding:9px 14px;background:none;border:1px solid rgba(255,255,255,.08);border-radius:9px;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;">Close ✕</button>
       </div>
@@ -3012,18 +3032,6 @@ window._efedRules = (function(){
     </div>
 
   </div>
-  <!-- hidden reference elements used by JS to track Event 1 state -->
-  <span id="ev-display-title"    style="display:none;"></span>
-  <span id="ev-display-mainevent" style="display:none;"></span>
-  <span id="ev-display-date"     style="display:none;"><span id="ev-display-date-text"></span></span>
-  <span id="ev-display-location" style="display:none;"><span id="ev-display-location-text"></span></span>
-  <div style="padding:0 20px;">
-    <!-- Event 1 card (same box style as extra events, rendered by JS) -->
-    <div id="ev-primary-card-wrap"></div>
-    <!-- Additional event cards rendered here -->
-    <div id="ev-extra-cards-display"></div>
-  </div>
-  <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
 </div>
 
 <!-- ── WATCHLIST POPUP ── -->
@@ -3420,22 +3428,34 @@ html.day-mode .tc-add-btn{border-color:rgba(168,130,10,.3);color:rgba(168,130,10
 <div class="efed-tab-panel" id="efed-panel-schedule">
 </div><!-- /efed-panel-schedule (sections below are moved here by JS) -->
 <script>
-function toggleBookPanel() {
+function toggleBookPanel(showName) {
   const panel = document.getElementById('book-inline-panel');
   if (!panel) return;
   const isOpen = panel.style.display !== 'none';
+
+  if (showName) {
+    // Always open/stay open and select this show
+    panel.style.display = 'block';
+    const showObj = _bkGetAllShows().find(s => s.title.toLowerCase() === (showName||'').toLowerCase());
+    _bkTab.show    = showName;
+    _bkTab.showObj = showObj || { title: showName };
+    bkGoStep(0);
+    bkShowManage();
+    setTimeout(() => panel.scrollIntoView({ behavior:'smooth', block:'nearest' }), 60);
+    return;
+  }
+
   if (isOpen) { panel.style.display = 'none'; return; }
   panel.style.display = 'block';
-  // If no show in progress, always show the form; if show exists show manage
+
   if (!_bkTab.show) {
     bkGoStep(0);
-    document.getElementById('bk-show-form').style.display = '';
-    document.getElementById('bk-show-manage').style.display = 'none';
+    bkRenderShowList();
   } else {
     bkGoStep(0);
     bkShowManage();
   }
-  setTimeout(() => panel.scrollIntoView({behavior:'smooth',block:'start'}), 60);
+  setTimeout(() => panel.scrollIntoView({ behavior:'smooth', block:'nearest' }), 60);
 }
 function bkClosePanel() {
   const panel = document.getElementById('book-inline-panel');
@@ -3945,28 +3965,20 @@ function closeEditModal() {
 }
 
 function emSwitchTab(tab) {
-  const isEvents   = tab === 'events';
-  const isLinks    = tab === 'links';
-  const isProfile  = tab === 'profile';
-  // Inline panel elements (ob-*); modal elements are removed so use optional chaining
-  const pProfile = document.getElementById('ob-profile-panel');
-  const pLinks   = document.getElementById('ob-links-panel');
-  const pEvents  = document.getElementById('ob-events-panel');
+  const isLinks   = tab === 'links';
+  const isProfile = tab === 'profile';
+  const pProfile  = document.getElementById('ob-profile-panel');
+  const pLinks    = document.getElementById('ob-links-panel');
   if (pProfile) { pProfile.style.display = isProfile ? 'flex' : 'none'; pProfile.style.flexDirection = 'column'; }
   if (pLinks)   { pLinks.style.display   = isLinks   ? 'flex' : 'none'; pLinks.style.flexDirection   = 'column'; }
-  if (pEvents)  { pEvents.style.display  = isEvents  ? 'flex' : 'none'; pEvents.style.flexDirection  = 'column'; }
   const saveBtn  = document.getElementById('em-save-btn');
   const clearBtn = document.getElementById('em-clear-btn');
-  if (saveBtn)  { saveBtn.style.display  = ''; saveBtn.textContent = isEvents ? 'Save Events' : 'Save Changes'; }
-  if (clearBtn) clearBtn.style.display = isEvents ? 'block' : 'none';
-  if (isEvents) _emPrefillEvents();
+  if (saveBtn)  { saveBtn.style.display = ''; saveBtn.textContent = 'Save Changes'; }
+  if (clearBtn) clearBtn.style.display = 'none';
   if (isLinks)  setTimeout(_checkSocialLimit, 50);
 }
 
-function emTabSave() {
-  const isEvents = document.getElementById('ob-events-panel')?.style.display !== 'none';
-  if (isEvents) saveEvent(); else saveEditProfile();
-}
+function emTabSave() { saveEditProfile(); }
 
 
 
@@ -4497,11 +4509,14 @@ function _emPrefillEvents() {
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 function openEventModal() {
-  // Panel lives in the Schedule tab now
-  if (typeof switchEfedTab === 'function') switchEfedTab('schedule');
-  setTimeout(() => openEditModal('events'), 80);
+  _emPrefillEvents();
+  const bg = document.getElementById('ev-standalone-modal-bg');
+  if (bg) { bg.style.display = 'flex'; }
 }
-function closeEventModal() { closeEditModal(); }
+function closeEventModal() {
+  const bg = document.getElementById('ev-standalone-modal-bg');
+  if (bg) bg.style.display = 'none';
+}
 // Legacy TBA stubs (kept so any surviving references don't throw)
 function evToggleTba() {}
 function evAddExtraEvent_legacy() {}
@@ -4565,19 +4580,16 @@ async function saveEvent() {
 async function clearEvent() {
   const session = getSession(); if (!session) return;
   try {
-    // 1. Wipe event data from users table
     await fetch(
       SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username),
       { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_event_title:null, efed_event_date:null, efed_event_location:null, efed_event_main:null, efed_event_hype:null, efed_event_banner:null, efed_events_json:[] }) }
     );
-    // 2. Bulk-clear all bookings (plan_note) for every approved roster member of this eFed
     try {
       await fetch(
         SUPABASE_URL + '/rest/v1/roster?efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved',
         { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: null }) }
       );
-    } catch(e2) { console.error('clearEvent: could not clear plan_notes', e2); }
-    // 3. Remove booking banner DOM elements immediately
+    } catch(e2) { console.error('clearEvent: plan_notes', e2); }
     document.querySelectorAll('.sched-booking-banner').forEach(b => b.remove());
     window._efedExtraEvents = [];
     window._efedPrimaryEvent = {};
@@ -4655,6 +4667,13 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
     evEditBtn.onclick = (e) => { e.stopPropagation(); openEventModal(); };
     actionRow.appendChild(evEditBtn);
 
+    // Book Match button — opens booking panel pre-selecting this event's show
+    const evBookBtn = _mkBtn('<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>', 'Book a match');
+    evBookBtn.onmouseenter = () => { evBookBtn.style.background='rgba(192,0,14,.25)'; evBookBtn.style.borderColor='rgba(192,0,14,.5)'; evBookBtn.style.color='#ff6b6b'; };
+    evBookBtn.onmouseleave = () => { evBookBtn.style.background='rgba(10,10,14,.85)'; evBookBtn.style.borderColor='rgba(255,255,255,.15)'; evBookBtn.style.color='rgba(255,255,255,.5)'; };
+    evBookBtn.onclick = (e) => { e.stopPropagation(); toggleBookPanel(ev.title || ''); };
+    actionRow.appendChild(evBookBtn);
+
     const _deleteConfirm = (title, body, onConfirm) => {
       const bg = document.createElement('div');
       bg.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:20px;';
@@ -4685,7 +4704,6 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
           try {
             await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_events_json: extras }) });
             window._efedExtraEvents = extras;
-            // Clear plan_notes for roster rows whose booking show matches this event's title
             try {
               const evTitleLower = (ev.title || '').trim().toLowerCase();
               const allRoster = await sbGet('roster', 'efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=id,plan_note');
@@ -4693,13 +4711,11 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
                 if (!r.plan_note) continue;
                 try {
                   const bk = typeof r.plan_note === 'string' ? JSON.parse(r.plan_note) : r.plan_note;
-                  if ((bk.show || '').trim().toLowerCase() === evTitleLower) {
+                  if ((bk.show || '').trim().toLowerCase() === evTitleLower)
                     await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(r.id), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: null }) });
-                  }
                 } catch(pe) {}
               }
-            } catch(e2) { console.error('Delete event: could not clear plan_notes', e2); }
-            // Remove booking banner DOM elements for this event
+            } catch(e2) {}
             document.querySelectorAll('.sched-booking-banner').forEach(b => b.remove());
             renderEvent(window._efedPrimaryEvent || {}, extras);
           } catch(err) { console.error('Delete event error:', err); }
@@ -4707,48 +4723,20 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
       };
       actionRow.appendChild(evDelBtn);
     } else {
-      // Primary card: no delete button (clear events via edit modal's Clear button)
-
-      // Banner upload directly on card
-      const bannerUploadBtn = document.createElement('button');
-      bannerUploadBtn.title = 'Upload banner';
-      bannerUploadBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><span style="font-size:.58rem;font-family:'DM Sans',sans-serif;font-weight:700;margin-left:3px;">Banner</span>`;
-      bannerUploadBtn.style.cssText = 'position:absolute;bottom:8px;right:8px;display:flex;align-items:center;background:rgba(10,10,14,.85);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:rgba(255,255,255,.5);padding:5px 8px;cursor:pointer;opacity:0;transition:opacity .18s,background .15s;pointer-events:none;z-index:10;backdrop-filter:blur(6px);line-height:1;';
-      bannerUploadBtn.onmouseenter = () => { bannerUploadBtn.style.background='rgba(200,168,75,.25)'; bannerUploadBtn.style.borderColor='rgba(200,168,75,.5)'; bannerUploadBtn.style.color='#c8a84b'; };
-      bannerUploadBtn.onmouseleave = () => { bannerUploadBtn.style.background='rgba(10,10,14,.85)'; bannerUploadBtn.style.borderColor='rgba(255,255,255,.15)'; bannerUploadBtn.style.color='rgba(255,255,255,.5)'; };
-      const bannerFileInput = document.createElement('input');
-      bannerFileInput.type = 'file'; bannerFileInput.accept = 'image/*'; bannerFileInput.style.display = 'none';
-      bannerFileInput.onchange = async (fe) => {
-        const file = fe.target.files[0]; if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (re) => {
-          const dataUrl = re.target.result;
-          const session = getSession(); if (!session) return;
-          try {
-            await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_event_banner: dataUrl }) });
-            if (window._efedPrimaryEvent) window._efedPrimaryEvent.banner = dataUrl;
-            renderEvent(window._efedPrimaryEvent || {}, window._efedExtraEvents || []);
-            if (typeof showToast === 'function') showToast('Banner saved!');
-          } catch(err) { console.error('Banner save error:', err); }
-        };
-        reader.readAsDataURL(file);
+      // Primary card delete
+      const evDelBtn = _mkBtn('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>', 'Clear all events');
+      evDelBtn.onmouseenter = () => { evDelBtn.style.background='rgba(192,0,14,.35)'; evDelBtn.style.borderColor='rgba(192,0,14,.5)'; evDelBtn.style.color='#ff6b6b'; };
+      evDelBtn.onmouseleave = () => { evDelBtn.style.background='rgba(10,10,14,.85)'; evDelBtn.style.borderColor='rgba(255,255,255,.15)'; evDelBtn.style.color='rgba(255,255,255,.5)'; };
+      evDelBtn.onclick = (e) => {
+        e.stopPropagation();
+        _deleteConfirm('Clear All Events?', `${(ev.title||'').replace(/</g,'&lt;')}<br><span style="font-size:.68rem;opacity:.6;">This will remove all events from the calendar.</span>`, () => clearEvent());
       };
-      rightSide.appendChild(bannerFileInput);
-      bannerUploadBtn.onclick = (e) => { e.stopPropagation(); bannerFileInput.click(); };
-      rightSide.appendChild(bannerUploadBtn);
+      actionRow.appendChild(evDelBtn);
     }
 
     card.appendChild(actionRow);
-    card.addEventListener('mouseenter', () => {
-      actionRow.style.opacity='1'; actionRow.style.pointerEvents='auto';
-      const bu = rightSide.querySelector('button[title="Upload banner"]');
-      if (bu) { bu.style.opacity='1'; bu.style.pointerEvents='auto'; }
-    });
-    card.addEventListener('mouseleave', () => {
-      actionRow.style.opacity='0'; actionRow.style.pointerEvents='none';
-      const bu = rightSide.querySelector('button[title="Upload banner"]');
-      if (bu) { bu.style.opacity='0'; bu.style.pointerEvents='none'; }
-    });
+    card.addEventListener('mouseenter', () => { actionRow.style.opacity='1'; actionRow.style.pointerEvents='auto'; });
+    card.addEventListener('mouseleave', () => { actionRow.style.opacity='0'; actionRow.style.pointerEvents='none'; });
   }
 
   if (extraEls) extraEls.push(card);
@@ -4833,7 +4821,7 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
   (extraEvents || window._efedExtraEvents || []).forEach((xev, i) => {
     if (xev && xev.title) allEvents.push({ title: xev.title, cardId: null, isExtra: true, idx: i });
   });
-  // Always clear stale booking banners before re-injecting (or bailing out)
+  document.querySelectorAll('.sched-booking-banner').forEach(b => b.remove());
   document.querySelectorAll('.sched-booking-banner').forEach(b => b.remove());
   if (!allEvents.length) return;
 
@@ -5018,8 +5006,7 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
             if (panel) panel.style.display = 'block';
             setTimeout(async () => {
               if (showName) {
-                _bkTab.show = showName;
-                bkRenderShowList();
+                toggleBookPanel(showName);
                 const nb0 = document.getElementById('bk-next-0'); if (nb0) nb0.disabled = false;
                 bkGoStep(1);
                 bkRenderMatchList();
@@ -7872,7 +7859,67 @@ function bkTabClearForm()       { bkTabReset(); }
 function bkTabSaveBooking()     { return bkSubmitBooking(); }
 function bkTabAddGhost()        { return bkAddGhost(); }
 function bkTabRenderStickyPreview() {}
-function bkRenderShowList()     {}
+function bkRenderShowList() {
+  const listEl  = document.getElementById('bk-show-list');
+  const picker  = document.getElementById('bk-show-picker');
+  const form    = document.getElementById('bk-show-form');
+  const manage  = document.getElementById('bk-show-manage');
+  if (!listEl) return;
+
+  const shows = _bkGetAllShows();
+
+  if (!shows.length) {
+    // No events at all — go straight to create form
+    bkGoNewShowForm(); return;
+  }
+
+  if (picker) picker.style.display = '';
+  if (form)   form.style.display   = 'none';
+  if (manage) manage.style.display = 'none';
+
+  listEl.innerHTML = shows.map(s => {
+    const safeTitle = s.title.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/</g,'&lt;');
+    const safeObj   = JSON.stringify(s).replace(/'/g,"\\'");
+    const meta      = [s.date,s.location].filter(Boolean).join(' · ').replace(/</g,'&lt;');
+    return `<div onclick="bkSelectShow('${safeTitle}',JSON.parse('${safeObj}'))"
+      style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;cursor:pointer;transition:all .15s;gap:10px;"
+      onmouseover="this.style.background='rgba(200,168,75,.1)';this.style.borderColor='rgba(200,168,75,.3)'"
+      onmouseout="this.style.background='rgba(255,255,255,.04)';this.style.borderColor='rgba(255,255,255,.08)'">
+      <div style="min-width:0;">
+        <div style="font-size:.82rem;font-weight:700;color:#fff;font-family:'DM Sans',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${s.title.replace(/</g,'&lt;')}</div>
+        ${meta ? `<div style="font-size:.6rem;color:rgba(255,255,255,.3);margin-top:2px;font-family:'DM Sans',sans-serif;">${meta}</div>` : ''}
+      </div>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(200,168,75,.7)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>`;
+  }).join('');
+}
+
+function bkSelectShow(title, showObj) {
+  _bkTab.show    = title;
+  _bkTab.showObj = showObj || { title };
+  bkGoStep(0);
+  bkShowManage();
+  // Scroll panel into view
+  const p = document.getElementById('book-inline-panel');
+  if (p) setTimeout(() => p.scrollIntoView({ behavior:'smooth', block:'nearest' }), 60);
+}
+
+function bkGoShowPicker() {
+  const picker = document.getElementById('bk-show-picker');
+  const form   = document.getElementById('bk-show-form');
+  const manage = document.getElementById('bk-show-manage');
+  if (picker) picker.style.display = '';
+  if (form)   form.style.display   = 'none';
+  if (manage) manage.style.display = 'none';
+  bkRenderShowList();
+}
+
+function bkGoNewShowForm() {
+  const picker = document.getElementById('bk-show-picker');
+  const form   = document.getElementById('bk-show-form');
+  if (picker) picker.style.display = 'none';
+  if (form)   form.style.display   = '';
+}
 function bkSyncPreview()        { bkRenderPreviewEl('bk-preview1-slots',true); }
 function _showBookingConfirm(l, s) { _bkShowConfirm(l, s); }
 
@@ -17147,5 +17194,27 @@ function _rosterInjectEditBtns() {
 
 <div id="myefed-popup-bg" onclick="if(event.target===this)closeMyEfedPopup()"></div>
 
+
+<!-- ── STANDALONE EVENT EDIT MODAL ── -->
+<div id="ev-standalone-modal-bg" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.78);backdrop-filter:blur(10px);align-items:flex-start;justify-content:center;padding:60px 20px 40px;overflow-y:auto;" onclick="if(event.target===this)closeEventModal()">
+  <div style="background:#13131a;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:100%;max-width:580px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.9);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.06);">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:3px;color:#fff;">Calendar of Events</div>
+      <button onclick="closeEventModal()" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.45);width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:.82rem;display:flex;align-items:center;justify-content:center;">✕</button>
+    </div>
+    <div id="ob-events-panel" style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;">
+      <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.6);font-weight:700;">Events</div>
+      <div style="font-size:.6rem;color:rgba(255,255,255,.22);line-height:1.5;">First entry = primary event shown on the card. Add up to 5 total. Each can have an optional show banner.</div>
+      <div id="ev-extra-events" style="display:flex;flex-direction:column;gap:12px;"></div>
+      <button id="ev-add-btn" onclick="evAddExtraEvent()" style="padding:8px 14px;background:rgba(200,168,75,.07);border:1px dashed rgba(200,168,75,.25);border-radius:8px;color:rgba(200,168,75,.65);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;width:100%;transition:background .15s;" onmouseover="this.style.background='rgba(200,168,75,.14)'" onmouseout="this.style.background='rgba(200,168,75,.07)'">+ Add Event</button>
+      <input type="hidden" id="ev-hype-input" value="">
+      <div id="ev-msg" style="font-size:.62rem;min-height:12px;"></div>
+    </div>
+    <div style="padding:0 20px 16px;display:flex;gap:8px;align-items:center;">
+      <button onclick="clearEvent()" style="padding:8px 16px;background:none;border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.74rem;cursor:pointer;white-space:nowrap;" onmouseover="this.style.borderColor='rgba(255,80,80,.4)';this.style.color='#ff6b6b'" onmouseout="this.style.borderColor='rgba(255,255,255,.1)';this.style.color='rgba(255,255,255,.35)'">Clear All</button>
+      <button onclick="saveEvent()" style="flex:1;padding:8px 20px;background:#c0000e;border:none;border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.74rem;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:background .2s;" onmouseover="this.style.background='#e0000e'" onmouseout="this.style.background='#c0000e'">Save Events</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
