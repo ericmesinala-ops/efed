@@ -11822,7 +11822,7 @@ const _vault = (() => {
     if (empty)    empty.style.display   = (!_items.length && _isOwner) ? 'block' : 'none';
     if (recBanner) recBanner.style.display = (_isOwner && _items.length) ? 'flex' : 'none';
     if (badge) {
-      if (_items.length) { badge.textContent = _items.length + ' ' + (_items.length === 1 ? 'title' : 'titles'); badge.style.display = 'block'; }
+      if (_items.length) { badge.textContent = _items.length + '/20 ' + (_items.length === 1 ? 'title' : 'titles'); badge.style.display = 'block'; }
       else { badge.style.display = 'none'; }
     }
 
@@ -12008,11 +12008,37 @@ const _vault = (() => {
     reader.onload = async e => {
       const result = await _imgCrop.open(e.target.result);
       if (!result) return;
+      // Show preview immediately (base64 for display only)
       _imgData = result;
       const preview = document.getElementById('cv-img-preview');
       const hint    = document.getElementById('cv-img-hint');
       if (preview) { preview.src = _imgData; preview.style.display = 'block'; }
       if (hint) hint.style.display = 'none';
+      // Upload to Supabase Storage in background
+      try {
+        const session = getSession();
+        if (!session) return;
+        // Convert base64 dataURL to Blob
+        const res = await fetch(result);
+        const blob = await res.blob();
+        const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+        const fileName = 'belts/' + session.username.toLowerCase().replace(/[^a-z0-9]/g,'-') + '-' + Date.now() + '.' + ext;
+        const uploadRes = await fetch(
+          SUPABASE_URL + '/storage/v1/object/' + fileName,
+          { method: 'POST', headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': blob.type, 'x-upsert': 'true' },
+            body: blob }
+        );
+        if (uploadRes.ok) {
+          const publicUrl = SUPABASE_URL + '/storage/v1/object/public/' + fileName;
+          _imgData = publicUrl; // store URL instead of base64
+          if (preview) preview.src = publicUrl;
+          console.log('[vault] Belt image uploaded to storage:', publicUrl);
+        } else {
+          console.warn('[vault] Storage upload failed, falling back to base64');
+        }
+      } catch(uploadErr) {
+        console.warn('[vault] Storage upload error, using base64 fallback:', uploadErr);
+      }
     };
     reader.readAsDataURL(file);
   }
@@ -12022,6 +12048,10 @@ const _vault = (() => {
     const err  = document.getElementById('cv-modal-err');
     const btn  = document.getElementById('cv-save-btn');
     if (!name) { if(err){err.textContent='Enter the title name.';err.style.display='block';} return; }
+    // 20-title cap (only on new additions, not edits)
+    if (!_editing && _items.length >= 20) {
+      if(err){err.textContent='Title limit reached (20 max).';err.style.display='block';} return;
+    }
     // Block making a currently-assigned belt inactive
     if (_editing && !_newStatus && _isBeltAssigned(_editing)) {
       _showAssignedError(); return;
