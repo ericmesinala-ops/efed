@@ -2725,8 +2725,7 @@ window._efedRules = (function(){
     <div style="display:flex;border-bottom:1px solid rgba(255,255,255,.06);">
       <button id="ob-tab-profile"   onclick="obSwitchTab('profile')"   style="flex:1;padding:11px 0;background:none;border:none;border-bottom:2px solid #c8a84b;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;">Profile</button>
       <button id="ob-tab-links"     onclick="obSwitchTab('links')"     style="flex:1;padding:11px 0;background:none;border:none;border-bottom:2px solid transparent;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;">Links</button>
-
-
+      <button id="ob-tab-events"    onclick="obSwitchTab('events')"    style="flex:1;padding:11px 0;background:none;border:none;border-bottom:2px solid transparent;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:.5px;cursor:pointer;">Events</button>
     </div>
 
     <!-- PROFILE PANEL -->
@@ -2836,7 +2835,7 @@ window._efedRules = (function(){
 
 
     <!-- EVENTS PANEL -->
-    <div id="ob-events-panel" style="display:none;">
+    <div id="ob-events-panel" style="display:none;padding:16px 20px;">
       <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:rgba(200,168,75,.6);font-weight:700;">Calendar of Events</div>
       <div style="font-size:.6rem;color:rgba(255,255,255,.22);line-height:1.5;">First entry = primary event shown on the card. Add up to 5 total. Each can have an optional show banner.</div>
       <div id="ev-extra-events" style="display:flex;flex-direction:column;gap:12px;"></div>
@@ -4566,10 +4565,20 @@ async function saveEvent() {
 async function clearEvent() {
   const session = getSession(); if (!session) return;
   try {
+    // 1. Wipe event data from users table
     await fetch(
       SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username),
       { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_event_title:null, efed_event_date:null, efed_event_location:null, efed_event_main:null, efed_event_hype:null, efed_event_banner:null, efed_events_json:[] }) }
     );
+    // 2. Bulk-clear all bookings (plan_note) for every approved roster member of this eFed
+    try {
+      await fetch(
+        SUPABASE_URL + '/rest/v1/roster?efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved',
+        { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: null }) }
+      );
+    } catch(e2) { console.error('clearEvent: could not clear plan_notes', e2); }
+    // 3. Remove booking banner DOM elements immediately
+    document.querySelectorAll('.sched-booking-banner').forEach(b => b.remove());
     window._efedExtraEvents = [];
     window._efedPrimaryEvent = {};
     renderEvent(null, []);
@@ -4676,21 +4685,29 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
           try {
             await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_events_json: extras }) });
             window._efedExtraEvents = extras;
+            // Clear plan_notes for roster rows whose booking show matches this event's title
+            try {
+              const evTitleLower = (ev.title || '').trim().toLowerCase();
+              const allRoster = await sbGet('roster', 'efed=eq.' + encodeURIComponent(EFED_NAME) + '&status=eq.approved&select=id,plan_note');
+              for (const r of allRoster) {
+                if (!r.plan_note) continue;
+                try {
+                  const bk = typeof r.plan_note === 'string' ? JSON.parse(r.plan_note) : r.plan_note;
+                  if ((bk.show || '').trim().toLowerCase() === evTitleLower) {
+                    await fetch(SUPABASE_URL + '/rest/v1/roster?id=eq.' + encodeURIComponent(r.id), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ plan_note: null }) });
+                  }
+                } catch(pe) {}
+              }
+            } catch(e2) { console.error('Delete event: could not clear plan_notes', e2); }
+            // Remove booking banner DOM elements for this event
+            document.querySelectorAll('.sched-booking-banner').forEach(b => b.remove());
             renderEvent(window._efedPrimaryEvent || {}, extras);
           } catch(err) { console.error('Delete event error:', err); }
         });
       };
       actionRow.appendChild(evDelBtn);
     } else {
-      // Primary card delete
-      const evDelBtn = _mkBtn('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>', 'Clear all events');
-      evDelBtn.onmouseenter = () => { evDelBtn.style.background='rgba(192,0,14,.35)'; evDelBtn.style.borderColor='rgba(192,0,14,.5)'; evDelBtn.style.color='#ff6b6b'; };
-      evDelBtn.onmouseleave = () => { evDelBtn.style.background='rgba(10,10,14,.85)'; evDelBtn.style.borderColor='rgba(255,255,255,.15)'; evDelBtn.style.color='rgba(255,255,255,.5)'; };
-      evDelBtn.onclick = (e) => {
-        e.stopPropagation();
-        _deleteConfirm('Clear All Events?', `${(ev.title||'').replace(/</g,'&lt;')}<br><span style="font-size:.68rem;opacity:.6;">This will remove all events from the calendar.</span>`, () => clearEvent());
-      };
-      actionRow.appendChild(evDelBtn);
+      // Primary card: no delete button (clear events via edit modal's Clear button)
 
       // Banner upload directly on card
       const bannerUploadBtn = document.createElement('button');
@@ -4816,6 +4833,8 @@ async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
   (extraEvents || window._efedExtraEvents || []).forEach((xev, i) => {
     if (xev && xev.title) allEvents.push({ title: xev.title, cardId: null, isExtra: true, idx: i });
   });
+  // Always clear stale booking banners before re-injecting (or bailing out)
+  document.querySelectorAll('.sched-booking-banner').forEach(b => b.remove());
   if (!allEvents.length) return;
 
   const isAdmin = session.username.toLowerCase() === ADMIN_USERNAME;
