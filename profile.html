@@ -16506,26 +16506,42 @@ const _vp = (() => {
     // Guard against double-start (clears any stale timer/state)
     clearInterval(_rtimer); _rtimer=null; _elapsed=0;
     try{
-      const mime=['audio/mp4','audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm'].find(t=>{try{return MediaRecorder.isTypeSupported(t);}catch(e){return false;}})||'';
-      // Give MediaRecorder its OWN stream clone so Web Audio analyser
-      // doesn't consume the tracks the recorder needs.
-      const recStream = stream;
-      const vizStream = stream.clone();
-      _mr=new MediaRecorder(recStream, mime?{mimeType:mime}:{});
-      const ctx=getCtx(), src=ctx.createMediaStreamSource(vizStream);
-      _analyser=ctx.createAnalyser(); _analyser.fftSize=64; src.connect(_analyser);
+      const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+      // FIX: iOS-aware MIME preference — webm doesn't exist on Safari
+      const mimePrefs=isIOS
+        ?['audio/mp4','audio/aac','']
+        :['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/webm','audio/mp4',''];
+      const mime=mimePrefs.find(t=>{if(!t)return true;try{return MediaRecorder.isTypeSupported(t);}catch(e){return false;}})||'';
+      // FIX: Do NOT clone the stream — stream.clone() is broken on iOS Safari.
+      // Use the same stream for both recorder and analyser.
+      const recStream=stream;
+      _mr=new MediaRecorder(recStream,mime?{mimeType:mime}:{});
+      // FIX: await AudioContext resume — on iOS it's async and must be settled
+      // before createMediaStreamSource is called, or it silently fails.
+      const ctx=getCtx();
+      if(ctx.state==='suspended') await ctx.resume();
+      // FIX: Skip live analyser on iOS — no clone means attaching the analyser
+      // node to the same stream can interfere with MediaRecorder on WebKit.
+      // Fall back to a pulsing static animation instead.
+      if(!isIOS){
+        try{
+          const src=ctx.createMediaStreamSource(recStream);
+          _analyser=ctx.createAnalyser(); _analyser.fftSize=64; src.connect(_analyser);
+        }catch(e){ _analyser=null; }
+      }
       _chunks=[];
       _mr.ondataavailable=e=>{
-        console.log('[VP] ondataavailable size:', e.data&&e.data.size);
+        console.log('[VP] ondataavailable size:',e.data&&e.data.size);
         if(e.data&&e.data.size>0)_chunks.push(e.data);
       };
       _mr.onstop=()=>{
         recStream.getTracks().forEach(t=>t.stop());
-        vizStream.getTracks().forEach(t=>t.stop());
         onRecStop();
       };
       _mr.start(); _elapsed=0;
-      showStep('record'); drawLive('vp-canvas'); updCD(MAX_S);
+      showStep('record');
+      if(_analyser) drawLive('vp-canvas'); else drawStatic('vp-canvas',0);
+      updCD(MAX_S);
       _rtimer=setInterval(()=>{_elapsed++;const rem=MAX_S-_elapsed;updCD(rem);if(_elapsed>=MAX_S)stopRecord();},1000);
     }catch(e){
       stream.getTracks().forEach(t=>t.stop());
@@ -16543,7 +16559,9 @@ const _vp = (() => {
     // _chunks is complete — Promise resolved after all ondataavailable events fired
     console.log('[VP] onRecStop fired, chunks:', _chunks.length);
     if(!_chunks.length){console.warn('[VP] No chunks — going back to select');showStep('select');return;}
-    _revBlob=new Blob(_chunks,{type:_chunks[0].type||'audio/webm'});
+    // FIX: Use actual recorded type; fall back to mp4 (plays on iOS+desktop), not webm
+    const _recordedType=_chunks[0]?.type||'';
+    _revBlob=new Blob(_chunks,{type:_recordedType||'audio/mp4'});
     _revUrl=URL.createObjectURL(_revBlob);
     const audio=$('vp-rev-audio');
     if(audio){
@@ -16592,7 +16610,8 @@ const _vp = (() => {
     const pb=$('vp-post-btn'); if(pb)pb.disabled=true;
     showStep('uploading'); fakeProgress();
     try{
-      const ext=_revBlob.type.includes('ogg')?'ogg':'webm';
+      // FIX: Derive extension from actual blob type — iOS records mp4/aac, not webm
+      const ext=_revBlob.type.includes('ogg')?'ogg':(_revBlob.type.includes('mp4')||_revBlob.type.includes('aac'))?'m4a':'webm';
       const path=`${_user}_${efedName.replace(/\s+/g,'_')}.${ext}`;
       const audioUrl=await uploadBlob(_revBlob, ext, path);
       let expires_at=null;
