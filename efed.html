@@ -1887,6 +1887,8 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
   window.enableBookTab = function() {
     const btn = document.getElementById('book-add-btn');
     if (btn) btn.style.display = '';
+    const evBtn = document.getElementById('ev-inline-add-btn');
+    if (evBtn) evBtn.style.display = '';
     _updateInkWidth();
   };
 
@@ -2856,6 +2858,9 @@ window._efedRules = (function(){
 <div id="upcoming-event-section" style="display:none;">
   <div style="padding:22px 20px 0;display:flex;align-items:center;gap:10px;">
     <div class="sec-title" style="margin-bottom:0;flex:1;">Calendar of Events</div>
+    <button id="ev-inline-add-btn" onclick="evInlineAdd()" class="tc-add-btn" style="display:none;" title="Create an Event Card">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
     <button id="book-add-btn" onclick="toggleBookPanel()" class="tc-add-btn" style="display:none;" title="Book a match">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </button>
@@ -4613,6 +4618,145 @@ function renderEvent(ev, extraEvents) {
 }
 
 // Build and inject a booking banner below each event card that matches the CAW's booking
+// ── Inline event banner creation ─────────────────────────────────────────────
+function evInlineAdd() {
+  const session = getSession(); if (!session) return;
+  const acronym = (document.getElementById('stat-acronym')?.textContent || '').trim();
+
+  // Build a new editable banner card
+  const card = document.createElement('div');
+  card.style.cssText = 'position:relative;border:1px solid rgba(255,255,255,.13);border-radius:12px;overflow:hidden;margin-top:12px;box-shadow:0 4px 20px rgba(0,0,0,.5);display:flex;height:110px;';
+
+  // LEFT column — editable fields
+  const leftCol = document.createElement('div');
+  leftCol.style.cssText = 'flex-shrink:0;width:260px;background:#07070a;display:flex;flex-direction:column;justify-content:center;padding:14px 20px;gap:4px;border-right:1px solid rgba(255,255,255,.07);position:relative;z-index:1;';
+
+  // Acronym (fixed)
+  const acronymEl = document.createElement('div');
+  acronymEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.78rem;letter-spacing:4px;color:#c8a84b;line-height:1;margin-bottom:2px;";
+  acronymEl.textContent = acronym;
+  leftCol.appendChild(acronymEl);
+
+  // Show name — click to edit
+  const nameEl = document.createElement('div');
+  nameEl.contentEditable = 'true';
+  nameEl.spellcheck = false;
+  nameEl.dataset.placeholder = 'Show Name';
+  nameEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:1.35rem;letter-spacing:2px;color:#fff;line-height:1.05;outline:none;min-width:40px;cursor:text;border-bottom:1px dashed rgba(255,255,255,.15);padding-bottom:2px;";
+  nameEl.setAttribute('data-empty', 'true');
+  nameEl.innerHTML = '<span style="color:rgba(255,255,255,.2);font-size:1rem;">Show Name</span>';
+  leftCol.appendChild(nameEl);
+
+  // Date — click to edit
+  const dateEl = document.createElement('div');
+  dateEl.contentEditable = 'true';
+  dateEl.spellcheck = false;
+  dateEl.style.cssText = "font-size:.67rem;color:rgba(200,168,75,.7);font-family:'DM Sans',sans-serif;font-weight:700;margin-top:6px;letter-spacing:.3px;outline:none;cursor:text;border-bottom:1px dashed rgba(200,168,75,.2);padding-bottom:1px;min-width:30px;";
+  dateEl.setAttribute('data-empty', 'true');
+  dateEl.innerHTML = '<span style="color:rgba(255,255,255,.18);font-weight:400;">Date</span>';
+  leftCol.appendChild(dateEl);
+
+  // Location — click to edit
+  const locEl = document.createElement('div');
+  locEl.contentEditable = 'true';
+  locEl.spellcheck = false;
+  locEl.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;margin-top:2px;outline:none;cursor:text;border-bottom:1px dashed rgba(255,255,255,.1);padding-bottom:1px;min-width:30px;";
+  locEl.setAttribute('data-empty', 'true');
+  locEl.innerHTML = '<span style="color:rgba(255,255,255,.15);">Location</span>';
+  leftCol.appendChild(locEl);
+
+  // RIGHT side — watermark mirrors show name live
+  const rightSide = document.createElement('div');
+  rightSide.style.cssText = 'flex:1;min-width:0;position:relative;overflow:hidden;background:linear-gradient(135deg,#0d0d10 0%,#111118 100%);';
+  const watermark = document.createElement('div');
+  watermark.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:6px;color:rgba(255,255,255,.06);user-select:none;pointer-events:none;overflow:hidden;text-align:center;padding:0 12px;";
+  watermark.textContent = 'SHOW NAME';
+  rightSide.appendChild(watermark);
+
+  card.appendChild(leftCol);
+  card.appendChild(rightSide);
+
+  // ── X delete button ──
+  const xBtn = document.createElement('button');
+  xBtn.textContent = '✕';
+  xBtn.title = 'Delete event';
+  xBtn.style.cssText = 'position:absolute;top:8px;right:8px;z-index:10;background:rgba(10,10,14,.85);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:rgba(255,255,255,.3);font-size:.7rem;padding:4px 7px;cursor:pointer;opacity:0;transition:opacity .18s,color .15s;backdrop-filter:blur(6px);line-height:1;';
+  xBtn.onmouseenter = () => { xBtn.style.color='#ff6b6b'; xBtn.style.borderColor='rgba(192,0,14,.4)'; };
+  xBtn.onmouseleave = () => { xBtn.style.color='rgba(255,255,255,.3)'; xBtn.style.borderColor='rgba(255,255,255,.12)'; };
+  xBtn.onclick = (e) => { e.stopPropagation(); card.remove(); };
+  card.appendChild(xBtn);
+  card.addEventListener('mouseenter', () => { xBtn.style.opacity='1'; });
+  card.addEventListener('mouseleave', () => { xBtn.style.opacity='0'; });
+
+  // ── Helpers: clear placeholder on focus, restore on empty blur ──
+  function _makeEditable(el, onSave) {
+    el.addEventListener('focus', () => {
+      if (el.getAttribute('data-empty') === 'true') {
+        el.innerHTML = '';
+        el.removeAttribute('data-empty');
+        el.style.color = el === dateEl ? 'rgba(200,168,75,.9)' : el === locEl ? 'rgba(255,255,255,.55)' : '#fff';
+      }
+    });
+    el.addEventListener('input', () => {
+      if (el === nameEl) watermark.textContent = el.textContent.trim().toUpperCase() || 'SHOW NAME';
+    });
+    el.addEventListener('blur', () => {
+      const val = el.textContent.trim();
+      if (!val) {
+        el.setAttribute('data-empty', 'true');
+        if (el === nameEl) { el.innerHTML = '<span style="color:rgba(255,255,255,.2);font-size:1rem;">Show Name</span>'; watermark.textContent = 'SHOW NAME'; }
+        else if (el === dateEl) el.innerHTML = '<span style="color:rgba(255,255,255,.18);font-weight:400;">Date</span>';
+        else if (el === locEl) el.innerHTML = '<span style="color:rgba(255,255,255,.15);">Location</span>';
+      } else {
+        onSave();
+      }
+    });
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
+  }
+
+  async function _saveCard() {
+    const title = nameEl.getAttribute('data-empty') === 'true' ? '' : nameEl.textContent.trim();
+    if (!title) return; // don't save until at least a name exists
+    const date = dateEl.getAttribute('data-empty') === 'true' ? null : dateEl.textContent.trim() || null;
+    const location = locEl.getAttribute('data-empty') === 'true' ? null : locEl.textContent.trim() || null;
+
+    const primary = window._efedPrimaryEvent;
+    if (!primary?.title) {
+      // This becomes the primary event
+      try {
+        await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+          method: 'PATCH', headers: SB_HEADERS,
+          body: JSON.stringify({ efed_event_title: title, efed_event_date: date, efed_event_location: location, efed_event_main: null, efed_event_banner: null })
+        });
+        window._efedPrimaryEvent = { title, date, location, main: null, banner: null };
+        renderEvent(window._efedPrimaryEvent, window._efedExtraEvents || []);
+        // card is now replaced by renderEvent — no need to keep the editable one
+      } catch(e) { console.error('evInlineAdd save error', e); }
+    } else {
+      // Add as extra event
+      const extras = [...(window._efedExtraEvents || []), { title, date, location, slogan: null, banner: null }];
+      try {
+        await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+          method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_events_json: extras })
+        });
+        window._efedExtraEvents = extras;
+        renderEvent(window._efedPrimaryEvent, extras);
+      } catch(e) { console.error('evInlineAdd save error', e); }
+    }
+  }
+
+  _makeEditable(nameEl, _saveCard);
+  _makeEditable(dateEl, _saveCard);
+  _makeEditable(locEl, _saveCard);
+
+  // Append into the cards container
+  const container = document.getElementById('ev-extra-cards-display') || document.getElementById('ev-primary-card-wrap');
+  if (container) container.appendChild(card);
+
+  // Focus the show name immediately
+  setTimeout(() => nameEl.focus(), 50);
+}
+
 async function _injectScheduleBookingBanners(primaryEv, extraEvents) {
   const session = getSession();
   if (!session) return;
