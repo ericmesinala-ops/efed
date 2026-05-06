@@ -2514,7 +2514,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
         if (!style) {
           style = document.createElement('style');
           style.id = 'efed-bio-ph-style';
-          style.textContent = '#efed-bio:empty:before{content:attr(data-placeholder);color:rgba(255,255,255,.2);pointer-events:none;}#efed-bio-wrap:focus-within{border-left-color:rgba(200,168,75,.4);background:rgba(255,255,255,.04);}';
+          style.textContent = '#efed-bio:empty:before{content:attr(data-placeholder);color:rgba(255,255,255,.2);pointer-events:none;}[data-placeholder]:empty:before{content:attr(data-placeholder);pointer-events:none;opacity:.5;}#efed-bio-wrap:focus-within{border-left-color:rgba(200,168,75,.4);background:rgba(255,255,255,.04);}';
           document.head.appendChild(style);
         }
       } else {
@@ -4483,13 +4483,99 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
 
   // LEFT COLUMN
   const leftCol = document.createElement('div');
-  leftCol.style.cssText = 'flex-shrink:0;width:260px;background:#07070a;display:flex;flex-direction:column;justify-content:center;padding:18px 20px;gap:3px;border-right:1px solid rgba(255,255,255,.07);position:relative;z-index:1;';
-  leftCol.innerHTML = `
-    ${acronym ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:.78rem;letter-spacing:4px;color:#c8a84b;line-height:1;margin-bottom:2px;">${acronym.replace(/</g,'&lt;')}</div>` : ''}
-    <div data-ev-title-click style="font-family:'Bebas Neue',sans-serif;font-size:1.55rem;letter-spacing:2px;color:#fff;line-height:1.05;word-break:break-word;${isOwnerOrAdmin ? 'cursor:pointer;' : ''}">${(ev.title||'').replace(/</g,'&lt;')}${isOwnerOrAdmin ? ' <span data-ev-edit-hint style="font-size:.55rem;letter-spacing:1.5px;vertical-align:middle;opacity:0;transition:opacity .18s;color:#c8a84b;">✎</span>' : ''}</div>
-    ${(ev.main||ev.slogan) ? `<div style="font-size:.6rem;color:rgba(255,255,255,.3);font-style:italic;margin-top:3px;line-height:1.4;">${((ev.main||ev.slogan)||'').replace(/</g,'&lt;')}</div>` : ''}
-    ${ev.date ? `<div style="font-size:.67rem;color:rgba(200,168,75,.8);font-family:'DM Sans',sans-serif;font-weight:700;margin-top:8px;letter-spacing:.3px;">${(ev.date||'').replace(/</g,'&lt;')}</div>` : ''}
-    ${ev.location ? `<div style="font-size:.6rem;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;margin-top:2px;">${(ev.location||'').replace(/</g,'&lt;')}</div>` : ''}`;
+  leftCol.style.cssText = 'flex-shrink:0;width:220px;background:#07070a;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:0 20px;gap:2px;border-right:1px solid rgba(255,255,255,.07);position:relative;z-index:1;box-sizing:border-box;';
+
+  // Acronym (static)
+  if (acronym) {
+    const acEl = document.createElement('div');
+    acEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.72rem;letter-spacing:4px;color:#c8a84b;line-height:1;margin-bottom:1px;";
+    acEl.textContent = acronym;
+    leftCol.appendChild(acEl);
+  }
+
+  // Title — contenteditable for owner
+  const titleEl = document.createElement('div');
+  titleEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:1.35rem;letter-spacing:2px;color:#fff;line-height:1.05;word-break:break-word;outline:none;max-width:100%;";
+  titleEl.textContent = ev.title || '';
+  if (isOwnerOrAdmin) {
+    titleEl.contentEditable = 'true';
+    titleEl.title = 'Click to edit';
+    titleEl.style.cursor = 'text';
+    titleEl.dataset.field = 'title';
+  }
+  leftCol.appendChild(titleEl);
+
+  // Date — contenteditable for owner
+  const dateEl = document.createElement('div');
+  dateEl.style.cssText = "font-size:.63rem;color:rgba(200,168,75,.85);font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:.3px;outline:none;margin-top:4px;";
+  dateEl.textContent = ev.date || '';
+  if (isOwnerOrAdmin) {
+    dateEl.contentEditable = 'true';
+    dateEl.title = 'Click to edit date';
+    dateEl.style.cursor = 'text';
+    dateEl.dataset.field = 'date';
+    if (!ev.date) { dateEl.dataset.placeholder = 'Date / TBA'; dateEl.style.color = 'rgba(200,168,75,.3)'; }
+  } else if (!ev.date) {
+    dateEl.style.display = 'none';
+  }
+  leftCol.appendChild(dateEl);
+
+  // Location — contenteditable for owner
+  const locEl = document.createElement('div');
+  locEl.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;outline:none;";
+  locEl.textContent = ev.location || '';
+  if (isOwnerOrAdmin) {
+    locEl.contentEditable = 'true';
+    locEl.title = 'Click to edit location';
+    locEl.style.cursor = 'text';
+    locEl.dataset.field = 'location';
+    if (!ev.location) { locEl.dataset.placeholder = 'Location'; locEl.style.color = 'rgba(255,255,255,.15)'; }
+  } else if (!ev.location) {
+    locEl.style.display = 'none';
+  }
+  leftCol.appendChild(locEl);
+
+  // Inline save for owner fields
+  if (isOwnerOrAdmin) {
+    let _evSaveTimer = null;
+    const _evSaveCard = async () => {
+      const session = typeof getSession === 'function' ? getSession() : null;
+      if (!session) return;
+      const newTitle    = titleEl.innerText.trim();
+      const newDate     = dateEl.innerText.trim();
+      const newLocation = locEl.innerText.trim();
+      // Update watermark
+      if (hint) hint.textContent = newTitle.toUpperCase();
+      try {
+        if (isExtraCard) {
+          const extras = window._efedExtraEvents ? [...window._efedExtraEvents] : [];
+          if (extras[extraIndex]) {
+            extras[extraIndex] = { ...extras[extraIndex], title: newTitle, date: newDate||null, location: newLocation||null };
+            await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username),
+              { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({ efed_events_json: extras }) });
+            window._efedExtraEvents = extras;
+          }
+        } else {
+          await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username),
+            { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({ efed_event_title: newTitle||null, efed_event_date: newDate||null, efed_event_location: newLocation||null }) });
+          if (window._efedPrimaryEvent) { window._efedPrimaryEvent.title = newTitle; window._efedPrimaryEvent.date = newDate||null; window._efedPrimaryEvent.location = newLocation||null; }
+        }
+      } catch(e) {}
+    };
+    const _evQueueSave = () => { clearTimeout(_evSaveTimer); _evSaveTimer = setTimeout(_evSaveCard, 900); };
+
+    [titleEl, dateEl, locEl].forEach(el => {
+      // Placeholder behaviour
+      const ph = el.dataset.placeholder;
+      if (ph) {
+        el.addEventListener('focus', () => { if (!el.innerText.trim()) { el.style.color = ''; el.style.color = el.dataset.field==='date' ? 'rgba(200,168,75,.85)' : 'rgba(255,255,255,.32)'; } });
+        el.addEventListener('blur',  () => { if (!el.innerText.trim()) { el.style.color = el.dataset.field==='date' ? 'rgba(200,168,75,.3)' : 'rgba(255,255,255,.15)'; } });
+      }
+      el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
+      el.addEventListener('input', _evQueueSave);
+      el.addEventListener('blur',  () => { clearTimeout(_evSaveTimer); _evSaveCard(); });
+    });
+  }
 
   // RIGHT SIDE — show title watermark
   const rightSide = document.createElement('div');
@@ -4501,34 +4587,6 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
 
   card.appendChild(leftCol);
   card.appendChild(rightSide);
-
-  // Owner: clicking the event title opens the owner board inline panel → events section
-  if (isOwnerOrAdmin) {
-    const titleEl = leftCol.querySelector('[data-ev-title-click]');
-    const hintEl  = leftCol.querySelector('[data-ev-edit-hint]');
-    if (titleEl) {
-      titleEl.addEventListener('mouseenter', () => { if (hintEl) hintEl.style.opacity = '1'; });
-      titleEl.addEventListener('mouseleave', () => { if (hintEl) hintEl.style.opacity = '0'; });
-      titleEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const panel     = document.getElementById('ob-inline-panel');
-        const chevron   = document.getElementById('ob-chevron');
-        const avatarWrap = document.querySelector('#ob-avatar-link > div');
-        if (panel)      { panel.style.display = 'block'; }
-        if (chevron)    { chevron.style.transform = 'rotate(-180deg)'; }
-        if (avatarWrap) { avatarWrap.style.borderColor = 'rgba(200,168,75,.8)'; }
-        if (typeof openEditModal === 'function') openEditModal('profile', true);
-        // Switch to the events sub-panel inside the owner board
-        const pEvents  = document.getElementById('ob-events-panel');
-        const pProfile = document.getElementById('ob-profile-panel');
-        const pLinks   = document.getElementById('ob-links-panel');
-        if (pEvents)  { pEvents.style.display  = 'flex'; pEvents.style.flexDirection = 'column'; }
-        if (pProfile) { pProfile.style.display = 'none'; }
-        if (pLinks)   { pLinks.style.display   = 'none'; }
-        panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-    }
-  }
 
   if (isOwnerOrAdmin) {
     const xBtn = document.createElement('button');
