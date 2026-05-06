@@ -4244,7 +4244,19 @@ function evAddExtraEvent(prefill) {
   div.style.cssText = 'display:flex;flex-direction:column;gap:12px;padding:14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;position:relative;';
 
   const isTba = prefill?.isTba || (prefill?.date === 'TBA');
-  const dateVal = isTba ? '' : (prefill?.date || '');
+  // Convert "Month D, YYYY" display string back to YYYY-MM-DD for the date input
+  function _evDateToInput(str) {
+    if (!str || str === 'TBA') return '';
+    // Try native parse first (handles ISO and many formats)
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      // Avoid timezone offset shifting the date
+      const [y, m, day] = [d.getFullYear(), String(d.getMonth()+1).padStart(2,'0'), String(d.getDate()).padStart(2,'0')];
+      return `${y}-${m}-${day}`;
+    }
+    return '';
+  }
+  const dateVal = isTba ? '' : _evDateToInput(prefill?.date || '');
 
   div.innerHTML = `
     <button onclick="evRemoveRow('${uid}')" style="position:absolute;top:8px;right:8px;background:none;border:none;color:rgba(255,255,255,.25);cursor:pointer;font-size:.8rem;line-height:1;padding:2px;" onmouseover="this.style.color='#ff6b6b'" onmouseout="this.style.color='rgba(255,255,255,.25)'">✕</button>
@@ -4256,7 +4268,7 @@ function evAddExtraEvent(prefill) {
     <div>
       <div style="font-size:.5rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:4px;">Date</div>
       <div style="display:flex;align-items:center;gap:6px;">
-        <input data-ev-date type="text" maxlength="40" placeholder="e.g. March 30, 2026" value="${_evEsc(dateVal)}" ${isTba ? 'disabled style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:7px;padding:8px 10px;color:#e8e8e8;font-family:\'DM Sans\',sans-serif;font-size:.78rem;outline:none;box-sizing:border-box;opacity:.4;"' : 'style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:7px;padding:8px 10px;color:#e8e8e8;font-family:\'DM Sans\',sans-serif;font-size:.78rem;outline:none;box-sizing:border-box;"'}>
+        <input data-ev-date type="date" value="${_evEsc(dateVal)}" ${isTba ? 'disabled style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:7px;padding:8px 10px;color:#e8e8e8;font-family:\'DM Sans\',sans-serif;font-size:.78rem;outline:none;box-sizing:border-box;opacity:.4;color-scheme:dark;"' : 'style="flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:7px;padding:8px 10px;color:#e8e8e8;font-family:\'DM Sans\',sans-serif;font-size:.78rem;outline:none;box-sizing:border-box;color-scheme:dark;"'}>
         <button onclick="evToggleRowTba('${uid}')" data-ev-tba-btn style="padding:6px 10px;border-radius:7px;border:1px solid ${isTba ? 'rgba(192,0,14,.4)' : 'rgba(255,255,255,.1)'};background:${isTba ? 'rgba(192,0,14,.2)' : 'rgba(255,255,255,.06)'};color:${isTba ? '#fff' : 'rgba(255,255,255,.5)'};font-family:'DM Sans',sans-serif;font-size:.68rem;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s;flex-shrink:0;">TBA</button>
       </div>
     </div>
@@ -4303,13 +4315,12 @@ function evToggleRowTba(uid) {
   if (isTba) {
     // turn OFF tba
     dateInput.disabled = false; dateInput.style.opacity = '1';
-    if (dateInput.value === 'TBA') dateInput.value = '';
     tbaBtn.style.background = 'rgba(255,255,255,.06)';
     tbaBtn.style.borderColor = 'rgba(255,255,255,.1)';
     tbaBtn.style.color = 'rgba(255,255,255,.5)';
   } else {
-    // turn ON tba
-    dateInput.value = 'TBA'; dateInput.disabled = true; dateInput.style.opacity = '.4';
+    // turn ON tba — clear the date value and disable
+    dateInput.value = ''; dateInput.disabled = true; dateInput.style.opacity = '.4';
     tbaBtn.style.background = 'rgba(192,0,14,.2)';
     tbaBtn.style.borderColor = 'rgba(192,0,14,.4)';
     tbaBtn.style.color = '#fff';
@@ -4331,7 +4342,14 @@ function _evCollectAll() {
     const title = (el.querySelector('[data-ev-title]')?.value || '').trim();
     if (!title) return; // skip empty rows
     const dateInp = el.querySelector('[data-ev-date]');
-    const dateVal = dateInp?.disabled ? 'TBA' : (dateInp?.value || '').trim() || null;
+    const _rawDate = dateInp?.disabled ? 'TBA' : (dateInp?.value || '').trim() || null;
+    // Format YYYY-MM-DD → "Month D, YYYY" for display/storage
+    let dateVal = _rawDate;
+    if (_rawDate && _rawDate !== 'TBA' && /^\d{4}-\d{2}-\d{2}$/.test(_rawDate)) {
+      const [yr, mo, dy] = _rawDate.split('-').map(Number);
+      const _months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      dateVal = `${_months[mo-1]} ${dy}, ${yr}`;
+    }
     const row = _evFindRow(uid);
     results.push({
       title,
@@ -4468,7 +4486,7 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
   leftCol.style.cssText = 'flex-shrink:0;width:260px;background:#07070a;display:flex;flex-direction:column;justify-content:center;padding:18px 20px;gap:3px;border-right:1px solid rgba(255,255,255,.07);position:relative;z-index:1;';
   leftCol.innerHTML = `
     ${acronym ? `<div style="font-family:'Bebas Neue',sans-serif;font-size:.78rem;letter-spacing:4px;color:#c8a84b;line-height:1;margin-bottom:2px;">${acronym.replace(/</g,'&lt;')}</div>` : ''}
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.55rem;letter-spacing:2px;color:#fff;line-height:1.05;word-break:break-word;">${(ev.title||'').replace(/</g,'&lt;')}</div>
+    <div data-ev-title-click style="font-family:'Bebas Neue',sans-serif;font-size:1.55rem;letter-spacing:2px;color:#fff;line-height:1.05;word-break:break-word;${isOwnerOrAdmin ? 'cursor:pointer;' : ''}">${(ev.title||'').replace(/</g,'&lt;')}${isOwnerOrAdmin ? ' <span data-ev-edit-hint style="font-size:.55rem;letter-spacing:1.5px;vertical-align:middle;opacity:0;transition:opacity .18s;color:#c8a84b;">✎</span>' : ''}</div>
     ${(ev.main||ev.slogan) ? `<div style="font-size:.6rem;color:rgba(255,255,255,.3);font-style:italic;margin-top:3px;line-height:1.4;">${((ev.main||ev.slogan)||'').replace(/</g,'&lt;')}</div>` : ''}
     ${ev.date ? `<div style="font-size:.67rem;color:rgba(200,168,75,.8);font-family:'DM Sans',sans-serif;font-weight:700;margin-top:8px;letter-spacing:.3px;">${(ev.date||'').replace(/</g,'&lt;')}</div>` : ''}
     ${ev.location ? `<div style="font-size:.6rem;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;margin-top:2px;">${(ev.location||'').replace(/</g,'&lt;')}</div>` : ''}`;
@@ -4483,6 +4501,34 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
 
   card.appendChild(leftCol);
   card.appendChild(rightSide);
+
+  // Owner: clicking the event title opens the owner board inline panel → events section
+  if (isOwnerOrAdmin) {
+    const titleEl = leftCol.querySelector('[data-ev-title-click]');
+    const hintEl  = leftCol.querySelector('[data-ev-edit-hint]');
+    if (titleEl) {
+      titleEl.addEventListener('mouseenter', () => { if (hintEl) hintEl.style.opacity = '1'; });
+      titleEl.addEventListener('mouseleave', () => { if (hintEl) hintEl.style.opacity = '0'; });
+      titleEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const panel     = document.getElementById('ob-inline-panel');
+        const chevron   = document.getElementById('ob-chevron');
+        const avatarWrap = document.querySelector('#ob-avatar-link > div');
+        if (panel)      { panel.style.display = 'block'; }
+        if (chevron)    { chevron.style.transform = 'rotate(-180deg)'; }
+        if (avatarWrap) { avatarWrap.style.borderColor = 'rgba(200,168,75,.8)'; }
+        if (typeof openEditModal === 'function') openEditModal('profile', true);
+        // Switch to the events sub-panel inside the owner board
+        const pEvents  = document.getElementById('ob-events-panel');
+        const pProfile = document.getElementById('ob-profile-panel');
+        const pLinks   = document.getElementById('ob-links-panel');
+        if (pEvents)  { pEvents.style.display  = 'flex'; pEvents.style.flexDirection = 'column'; }
+        if (pProfile) { pProfile.style.display = 'none'; }
+        if (pLinks)   { pLinks.style.display   = 'none'; }
+        panel?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+  }
 
   if (isOwnerOrAdmin) {
     const xBtn = document.createElement('button');
