@@ -9494,21 +9494,39 @@ async function loadAppearances(targetUser, isOwn) {
     const rows = await sbGet('roster', `username=eq.${encodeURIComponent(targetUser)}&status=eq.approved&select=id,efed,plan_note`);
 
     // ── NEW system: plan_note.matches array ───────────────────────────────
-    const newMatches = []; // flat list of match objects with efed context
+    const newMatches = [];
+    const efedSet = new Set();
     rows.forEach(r => {
       if (!r.plan_note) return;
       try {
         const pn = typeof r.plan_note === 'string' ? JSON.parse(r.plan_note) : r.plan_note;
         if (!pn || !Array.isArray(pn.matches)) return;
         pn.matches.forEach(m => {
-          if (m && m.uid && Array.isArray(m.tokens) && m.tokens.some(t=>t.type==='vs')) {
+          if (m && m.uid && Array.isArray(m.tokens) && m.tokens.length >= 1) {
             newMatches.push({ ...m, _efed: r.efed });
+            if (r.efed) efedSet.add(r.efed);
           }
         });
       } catch(e) {}
     });
 
-    // Collect all real wrestler usernames for avatar fetch
+    // Fetch eFed owner data for live likes
+    const ownerMatchMap = {};
+    if (efedSet.size) {
+      try {
+        const ownerRows = await Promise.all([...efedSet].map(efed =>
+          sbGet('users', `promo_name=ilike.${encodeURIComponent(efed)}&select=username,efed_event_matches_json,efed_events_json&limit=1`).catch(() => [])
+        ));
+        ownerRows.forEach(rows => {
+          const o = rows[0]; if (!o) return;
+          const primary = Array.isArray(o.efed_event_matches_json) ? o.efed_event_matches_json : [];
+          const extras = (Array.isArray(o.efed_events_json) ? o.efed_events_json : []).flatMap(ev => ev.matches || []);
+          [...primary, ...extras].forEach(m => { if (m?.uid) ownerMatchMap[m.uid] = { ...m, _ownerUsername: o.username }; });
+        });
+      } catch(e) {}
+    }
+
+    // Collect all wrestler usernames for avatar fetch
     const allUsernames = [...new Set(newMatches.flatMap(m => (m.tokens||[]).filter(t=>t.type==='wrestler'&&t.username).map(t=>t.username)))];
     const avatarMap = {};
     if (allUsernames.length) {
@@ -9518,10 +9536,53 @@ async function loadAppearances(targetUser, isOwn) {
       } catch(e) {}
     }
 
+    // Heart SVG helper
+    const _heartSvg = (filled) => `<svg width="15" height="15" viewBox="0 0 24 24" fill="${filled?'currentColor':'none'}" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+
+    // Toggle like — writes to eFed owner's data
+    const _profileToggleLike = async (matchUid, ownerUsername, btnEl, countEl) => {
+      const session = getSession(); if (!session) return;
+      const me = session.username.toLowerCase();
+      try {
+        const oRows = await sbGet('users', `username=eq.${encodeURIComponent(ownerUsername)}&select=efed_event_matches_json,efed_events_json`);
+        const oRow = oRows[0]; if (!oRow) return;
+        let match = null, isPrimary = false, extrasArr = null;
+        const primaryMatches = Array.isArray(oRow.efed_event_matches_json) ? oRow.efed_event_matches_json : [];
+        const pi = primaryMatches.findIndex(m => m.uid === matchUid);
+        if (pi > -1) { match = primaryMatches[pi]; isPrimary = true; }
+        else {
+          extrasArr = Array.isArray(oRow.efed_events_json) ? oRow.efed_events_json : [];
+          for (const ev of extrasArr) {
+            const mi = (ev.matches || []).findIndex(m => m.uid === matchUid);
+            if (mi > -1) { match = ev.matches[mi]; break; }
+          }
+        }
+        if (!match) return;
+        if (!match.likes) match.likes = { count: 0, users: [] };
+        const liked = match.likes.users.map(u=>u.toLowerCase()).includes(me);
+        if (liked) match.likes.users = match.likes.users.filter(u=>u.toLowerCase()!==me);
+        else match.likes.users.push(session.username);
+        match.likes.count = match.likes.users.length;
+        const nowLiked = !liked;
+        btnEl.innerHTML = _heartSvg(nowLiked);
+        btnEl.style.color = nowLiked ? '#c0000e' : 'rgba(255,255,255,.25)';
+        countEl.textContent = match.likes.count || '';
+        const patch = isPrimary ? { efed_event_matches_json: primaryMatches } : { efed_events_json: extrasArr };
+        await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(ownerUsername), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify(patch)});
+      } catch(e) {}
+    };
+
     sec.style.display = newMatches.length ? '' : 'none';
     list.innerHTML = '';
 
     newMatches.forEach(match => {
+      const liveMatch = ownerMatchMap[match.uid] || match;
+      const session = getSession();
+      const me = session?.username?.toLowerCase() || '';
+      const likedByMe = me && (liveMatch.likes?.users||[]).map(u=>u.toLowerCase()).includes(me);
+      const likeCount = liveMatch.likes?.count || 0;
+      const ownerUsername = ownerMatchMap[match.uid]?._ownerUsername || '';
+
       const card = document.createElement('div');
       card.style.cssText = 'border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:#0d0d12;margin-bottom:10px;';
 
@@ -9529,7 +9590,6 @@ async function loadAppearances(targetUser, isOwn) {
       const topBar = document.createElement('div');
       topBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#07070a;border-bottom:1px solid rgba(255,255,255,.06);gap:8px;cursor:pointer;';
       topBar.onclick = () => { if (match._efed) window.location.href='efed.html?e='+encodeURIComponent(match._efed); };
-
       const leftM = document.createElement('div');
       leftM.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;';
       const efedSpan = document.createElement('span');
@@ -9577,7 +9637,7 @@ async function loadAppearances(targetUser, isOwn) {
           const chip = document.createElement('div');
           chip.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;';
           if (!isUnknown && tok.username && !tok.username.startsWith('__ghost__')) {
-            chip.onclick = () => window.location.href='profile.html?u='+encodeURIComponent(tok.username);
+            chip.onclick = (e) => { e.stopPropagation(); window.location.href='profile.html?u='+encodeURIComponent(tok.username); };
           }
           const avEl = document.createElement('div');
           if (avatarUrl) {
@@ -9600,42 +9660,65 @@ async function loadAppearances(targetUser, isOwn) {
       });
       card.appendChild(partRow);
 
-      // Bottom strip — stip + champ + promo
+      // Bottom strip — always rendered: like left | champ center | promo right
       const hasStip = !!match.stipulation;
       const hasChamp = !!(match.champ?.beltName);
-      const hasPromo = !!(match.promoUrl);
-      if (hasStip || hasChamp || hasPromo) {
+      const hasPromo = !!match.promoUrl;
+      {
         const btm = document.createElement('div');
-        btm.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 14px;border-top:1px solid rgba(255,255,255,.05);flex-wrap:wrap;';
+        btm.style.cssText = 'display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:8px 14px;border-top:1px solid rgba(255,255,255,.05);gap:8px;';
+
+        // LEFT — bare like heart + count, stip below
+        const leftSlot = document.createElement('div');
+        leftSlot.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:3px;';
+        const likeRow = document.createElement('div');
+        likeRow.style.cssText = 'display:flex;align-items:center;gap:4px;';
+        const likeBtn = document.createElement('button');
+        likeBtn.style.cssText = 'background:none;border:none;padding:0;cursor:pointer;color:' + (likedByMe ? '#c0000e' : 'rgba(255,255,255,.25)') + ';display:flex;align-items:center;line-height:1;transition:color .15s,transform .15s;';
+        likeBtn.innerHTML = _heartSvg(likedByMe);
+        likeBtn.onmouseenter = () => { likeBtn.style.transform='scale(1.15)'; };
+        likeBtn.onmouseleave = () => { likeBtn.style.transform=''; };
+        const countSpan = document.createElement('span');
+        countSpan.style.cssText = "font-size:.65rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);";
+        countSpan.textContent = likeCount || '';
+        likeBtn.onclick = (e) => { e.stopPropagation(); _profileToggleLike(match.uid, ownerUsername, likeBtn, countSpan); };
+        likeRow.appendChild(likeBtn);
+        likeRow.appendChild(countSpan);
+        leftSlot.appendChild(likeRow);
         if (hasStip) {
           const st = document.createElement('span');
-          st.style.cssText = "font-size:.65rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.35);font-style:italic;";
+          st.style.cssText = "font-size:.6rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.28);font-style:italic;";
           st.textContent = match.stipulation;
-          btm.appendChild(st);
+          leftSlot.appendChild(st);
         }
+        btm.appendChild(leftSlot);
+
+        // CENTER — championship
+        const centerSlot = document.createElement('div');
+        centerSlot.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;';
         if (hasChamp) {
-          const cp = document.createElement('div');
-          cp.style.cssText = 'display:flex;align-items:center;gap:6px;';
-          cp.innerHTML = match.champ.beltImageUrl
-            ? `<img src="${match.champ.beltImageUrl}" style="height:22px;max-width:36px;object-fit:contain;"><span style="font-size:.62rem;color:rgba(200,168,75,.8);font-family:'DM Sans',sans-serif;font-weight:700;">${_esc(match.champ.beltName)}</span>`
-            : `<span style="font-size:.7rem;">🏆</span><span style="font-size:.62rem;color:rgba(200,168,75,.8);font-family:'DM Sans',sans-serif;font-weight:700;">${_esc(match.champ.beltName)}</span>`;
-          btm.appendChild(cp);
+          centerSlot.innerHTML = match.champ.beltImageUrl
+            ? `<img src="${match.champ.beltImageUrl}" style="height:26px;max-width:44px;object-fit:contain;"><span style="font-size:.62rem;color:rgba(200,168,75,.85);font-family:'DM Sans',sans-serif;font-weight:700;">${_esc(match.champ.beltName)}</span>`
+            : `<span style="font-size:.75rem;">🏆</span><span style="font-size:.62rem;color:rgba(200,168,75,.85);font-family:'DM Sans',sans-serif;font-weight:700;">${_esc(match.champ.beltName)}</span>`;
         }
+        btm.appendChild(centerSlot);
+
+        // RIGHT — notable promo
+        const rightSlot = document.createElement('div');
+        rightSlot.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;';
         if (hasPromo) {
           const pl = document.createElement('button');
           pl.style.cssText = "background:rgba(192,0,14,.1);border:1px solid rgba(192,0,14,.3);border-radius:7px;padding:4px 10px;font-size:.63rem;color:rgba(255,100,100,.85);font-family:'DM Sans',sans-serif;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap;";
           pl.textContent = '▶ Notable Promo';
           pl.onmouseenter = () => { pl.style.background='rgba(192,0,14,.2)'; pl.style.borderColor='rgba(192,0,14,.55)'; };
           pl.onmouseleave = () => { pl.style.background='rgba(192,0,14,.1)'; pl.style.borderColor='rgba(192,0,14,.3)'; };
-          pl.onclick = () => {
-            const pills = [];
-            if (match._efed) pills.push({t:match._efed, bg:'rgba(255,255,255,.05)', bd:'rgba(255,255,255,.1)', c:'rgba(255,255,255,.45)'});
-            if (match.eventTitle) pills.push({t:match.eventTitle, bg:'rgba(255,255,255,.04)', bd:'rgba(255,255,255,.08)', c:'rgba(255,255,255,.35)'});
-            if (match.matchType) pills.push({t:match.matchType, bg:'rgba(255,255,255,.04)', bd:'rgba(255,255,255,.08)', c:'rgba(255,255,255,.3)'});
-            if (typeof openVideoPopup === 'function') openVideoPopup(_rm2YtEmbedSrc(match.promoUrl), {label: 'Notable Promo', efed: match._efed||'', efedShow: match.eventTitle||'', type:'rivalry', status:'ongoing'});
+          pl.onclick = (e) => {
+            e.stopPropagation();
+            if (typeof openVideoPopup === 'function') openVideoPopup(_rm2YtEmbedSrc(match.promoUrl), {label:'Notable Promo', efed:match._efed||'', efedShow:match.eventTitle||'', type:'rivalry', status:'ongoing'});
           };
-          btm.appendChild(pl);
+          rightSlot.appendChild(pl);
         }
+        btm.appendChild(rightSlot);
         card.appendChild(btm);
       }
 
