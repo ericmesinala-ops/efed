@@ -16675,8 +16675,10 @@ const _vp = (() => {
     const pb=$('vp-post-btn'); if(pb)pb.disabled=true;
     showStep('uploading'); fakeProgress();
     try{
-      // FIX: Derive extension from actual blob type — iOS records mp4/aac, not webm
-      const ext=_revBlob.type.includes('ogg')?'ogg':(_revBlob.type.includes('mp4')||_revBlob.type.includes('aac'))?'m4a':'webm';
+      // FIX: Derive extension from actual blob type — iOS records mp4/aac, not webm.
+      // Also guard against empty blob.type (iOS sometimes returns ''); default to m4a (mp4).
+      const blobType=_revBlob.type||'';
+      const ext=blobType.includes('ogg')?'ogg':(blobType.includes('mp4')||blobType.includes('aac')||blobType==='')?'m4a':'webm';
       const path=`${_user}_${efedName.replace(/\s+/g,'_')}.${ext}`;
       const audioUrl=await uploadBlob(_revBlob, ext, path);
       let expires_at=null;
@@ -16685,7 +16687,15 @@ const _vp = (() => {
       // delete existing first then insert (handles UNIQUE constraint)
       await fetch(`${SUPABASE_URL}/rest/v1/voice_promos?username=eq.${encodeURIComponent(_user)}&efed_name=eq.${encodeURIComponent(efedName)}`,{method:'DELETE',headers:SB_HEADERS});
       const inserted=await sbInsert('voice_promos',payload);
-      if(inserted&&inserted[0])payload.id=inserted[0].id;
+      if(inserted&&inserted[0]){
+        payload.id=inserted[0].id;
+      } else {
+        // FIX: return=representation sometimes returns empty — fetch the row back to get its id
+        try{
+          const fetched=await sbGet('voice_promos',`username=eq.${encodeURIComponent(_user)}&efed_name=eq.${encodeURIComponent(efedName)}&select=id&order=created_at.desc&limit=1`);
+          if(fetched&&fetched[0])payload.id=fetched[0].id;
+        }catch(e){}
+      }
       await bumpAtt();
       _promos[efedName]=payload;
       // Broadcast as an IC post so it surfaces in efed feed, dashboard, and profile IC window.
@@ -16713,8 +16723,10 @@ const _vp = (() => {
     const ctMap={m4a:'audio/mp4',mp4:'audio/mp4',aac:'audio/aac',ogg:'audio/ogg',webm:'audio/webm'};
     const ct=blob.type||ctMap[ext]||'audio/mp4';
     const safeBlob=blob.type?blob:new Blob([blob],{type:ct});
-    try{await fetch(`${SUPABASE_URL}/storage/v1/object/voice-promos/${path}`,{method:'DELETE',headers:SB_HEADERS});}catch(e){}
-    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/voice-promos/${path}`,{method:'POST',headers:{...SB_HEADERS,'Content-Type':ct,'x-upsert':'true'},body:safeBlob});
+    // FIX: Strip JSON/Prefer headers from storage requests — Supabase Storage ignores/rejects them.
+    const storageAuth={apikey:SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY};
+    try{await fetch(`${SUPABASE_URL}/storage/v1/object/voice-promos/${path}`,{method:'DELETE',headers:storageAuth});}catch(e){}
+    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/voice-promos/${path}`,{method:'POST',headers:{...storageAuth,'Content-Type':ct,'x-upsert':'true'},body:safeBlob});
     if(!r.ok){const msg=await r.text();console.error('[VP] upload failed:',r.status,msg);throw new Error(msg);}
     return `${SUPABASE_URL}/storage/v1/object/public/voice-promos/${path}`;
   }
