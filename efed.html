@@ -4735,7 +4735,7 @@ function _getEvUid(ev, isExtraCard, extraIndex) {
 }
 
 // ── Build a single match banner element ─────────────────────────────────────
-function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel) {
+function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard, extraIndex) {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden;background:#0d0d12;' + (forPanel ? 'margin-bottom:10px;' : '');
 
@@ -4770,6 +4770,24 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel) {
     mt.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;letter-spacing:.3px;";
     mt.textContent = match.matchType;
     rightMeta.appendChild(mt);
+  }
+  // Like button — shown on panel/profile banners
+  if (forPanel) {
+    const session = typeof getSession === 'function' ? getSession() : null;
+    const likedByMe = session && (match.likes?.users||[]).map(u=>u.toLowerCase()).includes(session.username.toLowerCase());
+    const likeCount = match.likes?.count || 0;
+    const likeBtn = document.createElement('button');
+    likeBtn.style.cssText = 'display:flex;align-items:center;gap:5px;padding:5px 11px;border-radius:40px;background:' + (likedByMe ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.06)') + ';border:1px solid ' + (likedByMe ? 'rgba(200,168,75,.4)' : 'rgba(255,255,255,.1)') + ';color:' + (likedByMe ? '#c8a84b' : '#e8e8e8') + ";font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;transition:background .2s,border-color .2s,color .2s;flex-shrink:0;";
+    const heartSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="' + (likedByMe ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+    const countSpan = document.createElement('span');
+    countSpan.textContent = likeCount || '';
+    likeBtn.innerHTML = heartSvg;
+    likeBtn.appendChild(countSpan);
+    likeBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (typeof _mcToggleLike === 'function') _mcToggleLike(match.uid, isExtraCard, extraIndex, likeBtn, countSpan);
+    };
+    topBar.appendChild(likeBtn);
   }
   topBar.appendChild(rightMeta);
   wrap.appendChild(topBar);
@@ -4891,8 +4909,13 @@ async function _mcToggleLike(matchUid, isExtraCard, extraIndex, btnEl, countEl) 
   match.likes.count = match.likes.users.length;
   // Update UI immediately
   const nowLiked = !liked;
-  btnEl.textContent = nowLiked ? '❤️' : '🤍';
-  btnEl.style.color = nowLiked ? '#ff6b6b' : 'rgba(255,255,255,.3)';
+  const newHeartSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="' + (nowLiked ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+  // Remove old SVG child and re-set
+  Array.from(btnEl.childNodes).forEach(n => { if (n.nodeName === 'svg' || (n.nodeName === '#text' && !n.textContent.trim())) n.remove(); });
+  btnEl.insertAdjacentHTML('afterbegin', newHeartSvg);
+  btnEl.style.background = nowLiked ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.06)';
+  btnEl.style.borderColor = nowLiked ? 'rgba(200,168,75,.4)' : 'rgba(255,255,255,.1)';
+  btnEl.style.color = nowLiked ? '#c8a84b' : '#e8e8e8';
   countEl.textContent = match.likes.count || '';
   // Save
   try {
@@ -4939,33 +4962,13 @@ function _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, ext
     item.dataset.matchUid = match.uid;
     if (isOwnerOrAdmin) item.draggable = true;
 
-    const banner = _buildMatchBanner(match, avatarMap, acronym, true);
+    const banner = _buildMatchBanner(match, avatarMap, acronym, true, isExtraCard, extraIndex);
     item.appendChild(banner);
 
     if (isOwnerOrAdmin) {
       // Controls row
       const ctrl = document.createElement('div');
       ctrl.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 6px 8px;';
-
-      // Like button (left side — visible to all logged-in users)
-      const likeWrap = document.createElement('div');
-      likeWrap.style.cssText = 'display:flex;align-items:center;gap:5px;';
-      const likeBtn = document.createElement('button');
-      const session = typeof getSession === 'function' ? getSession() : null;
-      const likedByMe = session && (match.likes?.users||[]).map(u=>u.toLowerCase()).includes(session.username.toLowerCase());
-      likeBtn.textContent = likedByMe ? '❤️' : '🤍';
-      likeBtn.style.cssText = 'background:none;border:none;font-size:.95rem;cursor:pointer;padding:2px;line-height:1;transition:transform .15s;';
-      likeBtn.style.color = likedByMe ? '#ff6b6b' : 'rgba(255,255,255,.3)';
-      likeBtn.title = 'Like this match';
-      likeBtn.onmouseenter = () => { likeBtn.style.transform='scale(1.2)'; };
-      likeBtn.onmouseleave = () => { likeBtn.style.transform=''; };
-      const likeCount = document.createElement('span');
-      likeCount.style.cssText = "font-size:.65rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);min-width:12px;";
-      likeCount.textContent = match.likes?.count || '';
-      likeBtn.onclick = () => _mcToggleLike(match.uid, isExtraCard, extraIndex, likeBtn, likeCount);
-      likeWrap.appendChild(likeBtn);
-      likeWrap.appendChild(likeCount);
-      ctrl.appendChild(likeWrap);
 
       const editHint = document.createElement('span');
       editHint.style.cssText = "font-size:.58rem;color:rgba(255,255,255,.18);font-family:'DM Sans',sans-serif;font-style:italic;";

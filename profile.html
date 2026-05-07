@@ -9070,6 +9070,9 @@ function loadCawImages(user) {
   const sec = document.getElementById('caw-images-section');
   let hasAny = false;
 
+  const galLikes = (typeof user.gallery_likes === 'object' && user.gallery_likes) ? user.gallery_likes : {};
+  const targetUsername = targetUser || session?.username || '';
+
   [1, 2, 3, 4].forEach(slot => {
     const val = user['caw_image_' + slot];
     const imgEl = document.getElementById('caw-img-' + slot);
@@ -9081,6 +9084,55 @@ function loadCawImages(user) {
       if (plusEl) plusEl.style.display = 'none';
       setCawSlotFilled(slot, true);
       hasAny = true;
+
+      // ── Gallery like button ──────────────────────────────────────────────
+      const likeData = galLikes[slot] || { count: 0, users: [] };
+      const me = session?.username?.toLowerCase() || '';
+      const likedByMe = me && likeData.users.map(u=>u.toLowerCase()).includes(me);
+      // Remove any existing like btn for this slot
+      const existingLikeBtn = slotEl?.querySelector('.gal-like-btn');
+      if (existingLikeBtn) existingLikeBtn.remove();
+      if (slotEl) {
+        const likeBtn = document.createElement('button');
+        likeBtn.className = 'gal-like-btn';
+        likeBtn.style.cssText = `position:absolute;bottom:8px;right:8px;z-index:10;display:flex;align-items:center;gap:4px;padding:4px 9px;border-radius:40px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);border:1px solid ${likedByMe?'rgba(200,168,75,.5)':'rgba(255,255,255,.18)'};color:${likedByMe?'#c8a84b':'rgba(255,255,255,.8)'};font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:600;cursor:pointer;transition:all .18s;`;
+        const heartSvg = () => `<svg width="11" height="11" viewBox="0 0 24 24" fill="${likeBtn.dataset.liked==='1'?'currentColor':'none'}" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+        likeBtn.dataset.liked = likedByMe ? '1' : '0';
+        const countSpan = document.createElement('span');
+        countSpan.textContent = likeData.count || '';
+        likeBtn.innerHTML = heartSvg();
+        likeBtn.appendChild(countSpan);
+        likeBtn.onclick = async (e) => {
+          e.stopPropagation();
+          if (!session) return;
+          const curLiked = likeBtn.dataset.liked === '1';
+          // Optimistic update
+          const newLiked = !curLiked;
+          likeBtn.dataset.liked = newLiked ? '1' : '0';
+          likeBtn.innerHTML = heartSvg();
+          likeBtn.appendChild(countSpan);
+          likeBtn.style.borderColor = newLiked ? 'rgba(200,168,75,.5)' : 'rgba(255,255,255,.18)';
+          likeBtn.style.color = newLiked ? '#c8a84b' : 'rgba(255,255,255,.8)';
+          // Update data
+          try {
+            const freshRows = await sbGet('users', `username=eq.${encodeURIComponent(targetUsername)}&select=gallery_likes`);
+            const freshLikes = (freshRows[0]?.gallery_likes) || {};
+            const slotData = freshLikes[slot] || { count: 0, users: [] };
+            const myU = session.username;
+            if (curLiked) {
+              slotData.users = slotData.users.filter(u=>u.toLowerCase()!==myU.toLowerCase());
+            } else {
+              if (!slotData.users.map(u=>u.toLowerCase()).includes(myU.toLowerCase())) slotData.users.push(myU);
+            }
+            slotData.count = slotData.users.length;
+            countSpan.textContent = slotData.count || '';
+            freshLikes[slot] = slotData;
+            await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(targetUsername), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({gallery_likes:freshLikes})});
+          } catch(err) { likeBtn.dataset.liked = curLiked ? '1' : '0'; likeBtn.innerHTML = heartSvg(); likeBtn.appendChild(countSpan); }
+        };
+        slotEl.appendChild(likeBtn);
+      }
+      // ── end gallery like button ──────────────────────────────────────────
     } else {
       setCawSlotFilled(slot, false);
       // Hide empty slots from visitors — nothing to see
@@ -11583,7 +11635,7 @@ async function _loadPublicProfile(username) {
     const user = users[0];
     // Fetch images
     try {
-      const imgRow = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=caw_image_1,caw_image_2,caw_image_3,caw_image_4`);
+      const imgRow = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=caw_image_1,caw_image_2,caw_image_3,caw_image_4,gallery_likes`);
       if (imgRow[0]) { user.caw_image_1=imgRow[0].caw_image_1; user.caw_image_2=imgRow[0].caw_image_2; user.caw_image_3=imgRow[0].caw_image_3; user.caw_image_4=imgRow[0].caw_image_4; }
     } catch(e) {}
     try {
@@ -11976,7 +12028,7 @@ async function loadProfile() {
     user = users[0];
     // Fetch gallery images in a separate query to avoid response size issues with large base64
     try {
-      const imgRow = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=caw_image_1,caw_image_2,caw_image_3,caw_image_4`);
+      const imgRow = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=caw_image_1,caw_image_2,caw_image_3,caw_image_4,gallery_likes`);
       if (imgRow[0]) { user.caw_image_1 = imgRow[0].caw_image_1; user.caw_image_2 = imgRow[0].caw_image_2; user.caw_image_3 = imgRow[0].caw_image_3; user.caw_image_4 = imgRow[0].caw_image_4; }
     } catch(e) {}
     // Fetch hashtags separately (columns may not exist yet — graceful fallback)

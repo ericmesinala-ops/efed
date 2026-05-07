@@ -5755,38 +5755,34 @@ async function _loadDashEfedFeed(session) {
   } catch(e) { body.innerHTML = '<div class="dash-empty">Could not load feed.</div>'; }
 }
 
-// ── TAB 3: My Schedule — ONLY the current user's own match booking ──
+// ── TAB 3: My Schedule — new matchcard system ──
 async function _loadDashMySchedule(session) {
   const body = document.getElementById('dash-schedule-body');
   if (!body) return;
   if (!session) { body.innerHTML = '<div class="dash-empty">Sign in to see your schedule.</div>'; return; }
   body.innerHTML = '<div class="dash-empty">Loading…</div>';
   try {
-    // Get all efeds the user belongs to
-    const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`);
+    const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed,plan_note`);
     const myEfeds = new Set(rosterRows.map(r => r.efed).filter(Boolean));
     if (session.promo_name || session.promoName) myEfeds.add(session.promo_name || session.promoName);
     if (!myEfeds.size) { body.innerHTML = '<div class="dash-empty">Join an eFed to see your schedule.</div>'; return; }
 
-    const efedList = [...myEfeds];
-
-    // For each efed: fetch event header data + the user's OWN roster row only
-    const efedData = await Promise.all(efedList.map(async efed => {
-      const [ownerRows, myRow] = await Promise.all([
-        sbGet('users', `promo_name=ilike.${encodeURIComponent(efed)}&select=username,promo_name,promo_logo,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_events_json&limit=1`).catch(() => []),
-        sbGet('roster', `efed=eq.${encodeURIComponent(efed)}&username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=id,username,plan_note&limit=1`).catch(() => [])
-      ]);
-      return { efed, owner: ownerRows[0] || null, myRow: myRow[0] || null };
+    // Fetch owner data for each eFed (includes matches + event data)
+    const efedData = await Promise.all([...myEfeds].map(async efed => {
+      const rows = await sbGet('users', `promo_name=ilike.${encodeURIComponent(efed)}&select=username,promo_name,promo_logo,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_events_json,efed_event_matches_json&limit=1`).catch(() => []);
+      const myPlanRows = rosterRows.filter(r => r.efed === efed);
+      return { efed, owner: rows[0] || null, planNote: myPlanRows[0]?.plan_note || null };
     }));
 
-    // Collect usernames for avatar lookup
+    // Collect all wrestler usernames from matches for avatar lookup
     const allUsernames = new Set([session.username]);
-    efedData.forEach(({ myRow }) => {
-      if (!myRow?.plan_note) return;
+    efedData.forEach(({ owner, planNote }) => {
+      if (!planNote) return;
       try {
-        const bk = typeof myRow.plan_note === 'string' ? JSON.parse(myRow.plan_note) : myRow.plan_note;
-        const opps = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
-        opps.forEach(u => { if (u && !u.startsWith('__')) allUsernames.add(u); });
+        const pn = typeof planNote === 'string' ? JSON.parse(planNote) : planNote;
+        (pn.matches || []).forEach(m => {
+          (m.tokens || []).filter(t => t.type === 'wrestler' && t.username).forEach(t => allUsernames.add(t.username));
+        });
       } catch(e) {}
     });
 
@@ -5796,9 +5792,54 @@ async function _loadDashMySchedule(session) {
       uRows.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
     } catch(e) {}
 
-    const _avCircle = (username, fallbackLabel, size = 46) => {
+    // SVG heart
+    const _heartSvg = (filled) => `<svg width="13" height="13" viewBox="0 0 24 24" fill="${filled?'currentColor':'none'}" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
+
+    // Toggle like from dashboard
+    const _dashToggleLike = async (matchUid, eventUid, ownerUsername, btnEl, countEl) => {
+      if (!session) return;
+      const me = session.username.toLowerCase();
+      try {
+        // Fetch owner's current match data
+        const oRows = await sbGet('users', `username=eq.${encodeURIComponent(ownerUsername)}&select=efed_event_matches_json,efed_events_json`);
+        const oRow = oRows[0]; if (!oRow) return;
+        let match = null, isPrimary = false, extrasArr = null;
+        // Check primary
+        const primaryMatches = Array.isArray(oRow.efed_event_matches_json) ? oRow.efed_event_matches_json : [];
+        const pi = primaryMatches.findIndex(m => m.uid === matchUid);
+        if (pi > -1) { match = primaryMatches[pi]; isPrimary = true; }
+        else {
+          extrasArr = Array.isArray(oRow.efed_events_json) ? oRow.efed_events_json : [];
+          for (const ev of extrasArr) {
+            const mi = (ev.matches || []).findIndex(m => m.uid === matchUid);
+            if (mi > -1) { match = ev.matches[mi]; break; }
+          }
+        }
+        if (!match) return;
+        if (!match.likes) match.likes = { count: 0, users: [] };
+        const liked = match.likes.users.map(u=>u.toLowerCase()).includes(me);
+        if (liked) match.likes.users = match.likes.users.filter(u=>u.toLowerCase()!==me);
+        else match.likes.users.push(session.username);
+        match.likes.count = match.likes.users.length;
+        const nowLiked = !liked;
+        // Update UI
+        btnEl.innerHTML = _heartSvg(nowLiked);
+        const cSpan = btnEl.nextElementSibling; if (cSpan) cSpan.textContent = match.likes.count || '';
+        btnEl.style.background = nowLiked ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.06)';
+        btnEl.style.borderColor = nowLiked ? 'rgba(200,168,75,.4)' : 'rgba(255,255,255,.1)';
+        btnEl.style.color = nowLiked ? '#c8a84b' : '#e8e8e8';
+        // Save
+        const patch = isPrimary
+          ? { efed_event_matches_json: primaryMatches }
+          : { efed_events_json: extrasArr };
+        await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(ownerUsername), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify(patch)});
+      } catch(e) {}
+    };
+
+    // Build avatar circle
+    const _avCircle = (username, fallbackLabel, size=44) => {
       const info = avatarMap[username] || {};
-      const initial = (fallbackLabel || '?')[0].toUpperCase();
+      const initial = (fallbackLabel||'?')[0].toUpperCase();
       return info.avatar
         ? `<img loading="lazy" src="${_dEsc(info.avatar)}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.18);flex-shrink:0;">`
         : `<div style="width:${size}px;height:${size}px;border-radius:50%;background:rgba(192,0,14,.15);border:2px solid rgba(192,0,14,.3);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:${Math.round(size*.42)}px;color:#c0000e;flex-shrink:0;">${initial}</div>`;
@@ -5807,140 +5848,154 @@ async function _loadDashMySchedule(session) {
     body.innerHTML = '';
     let hasAnyContent = false;
 
-    efedData.forEach(({ efed, owner, myRow }) => {
-      if (!myRow?.plan_note) return; // user has no booking in this efed
+    for (const { efed, owner, planNote } of efedData) {
+      if (!planNote) continue;
+      let pn = {};
+      try { pn = typeof planNote === 'string' ? JSON.parse(planNote) : planNote; } catch(e) { continue; }
+      if (!pn) continue;
 
-      let bk = null;
-      try { bk = typeof myRow.plan_note === 'string' ? JSON.parse(myRow.plan_note) : myRow.plan_note; } catch(e) { return; }
-      if (!bk || bk.ghost) return;
+      // ── NEW system: plan_note.matches array ──────────────────────────────
+      const newMatches = Array.isArray(pn.matches) ? pn.matches.filter(m => m.uid && Array.isArray(m.tokens)) : [];
 
-      const opps = Array.isArray(bk.opponents) ? bk.opponents : (bk.opponent ? [bk.opponent] : []);
-      const oppNames = Array.isArray(bk.opponentNames) ? bk.opponentNames : (bk.opponentName ? [bk.opponentName] : []);
-      const hasGhosts = Array.isArray(bk.ghostOpponents) && bk.ghostOpponents.length > 0;
-      if (!opps.length && !hasGhosts) return;
+      // ── Cross-ref likes from owner's live data ───────────────────────────
+      const ownerPrimaryMatches = Array.isArray(owner?.efed_event_matches_json) ? owner.efed_event_matches_json : [];
+      const ownerExtrasMatches = (Array.isArray(owner?.efed_events_json) ? owner.efed_events_json : []).flatMap(ev => ev.matches || []);
+      const ownerMatchMap = {};
+      [...ownerPrimaryMatches, ...ownerExtrasMatches].forEach(m => { if (m?.uid) ownerMatchMap[m.uid] = m; });
 
+      if (!newMatches.length) continue;
       hasAnyContent = true;
 
-      // Find which event this booking is for
-      const primaryEv = owner?.efed_event_title ? { title: owner.efed_event_title, date: owner.efed_event_date, location: owner.efed_event_location, main: owner.efed_event_main } : null;
-      const extraEvs = Array.isArray(owner?.efed_events_json) ? owner.efed_events_json : [];
-      const allEvents = [];
-      if (primaryEv?.title) allEvents.push(primaryEv);
-      extraEvs.forEach(ev => { if (ev?.title) allEvents.push(ev); });
-
-      const bkShow = (bk.show || '').trim().toLowerCase();
-      const matchedEv = allEvents.find(ev => {
-        const t = ev.title.trim().toLowerCase();
-        return bkShow && (t === bkShow || t.includes(bkShow) || bkShow.includes(t));
-      });
-
-      // ── Efed label ──
+      // eFed label
       const logo = owner?.promo_logo;
       const efedHead = document.createElement('div');
       efedHead.style.cssText = 'display:flex;align-items:center;gap:7px;padding:14px 18px 10px;';
-      efedHead.innerHTML = `
-        ${logo ? `<img src="${_dEsc(logo)}" style="width:22px;height:22px;border-radius:5px;object-fit:cover;border:1px solid rgba(255,255,255,.12);" loading="lazy" onerror="this.style.display='none'">` : ''}
-        <span style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:2.5px;color:#c8a84b;">${_dEsc(efed)}</span>`;
+      efedHead.innerHTML = `${logo ? `<img src="${_dEsc(logo)}" style="width:22px;height:22px;border-radius:5px;object-fit:cover;border:1px solid rgba(255,255,255,.12);" loading="lazy" onerror="this.style.display='none'">` : ''}<span style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:2.5px;color:#c8a84b;">${_dEsc(efed)}</span>`;
       body.appendChild(efedHead);
 
-      // ── Event card (the show this match is booked for) ──
-      const evToShow = matchedEv || (bk.show ? { title: bk.show, date: bk.date || '', location: '', main: '' } : null);
-      if (evToShow) {
-        const evCard = document.createElement('div');
-        evCard.style.cssText = 'margin:0 14px 0;border-radius:10px 10px 0 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.13);border-bottom:none;padding:12px 14px;';
-        evCard.innerHTML = `
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
-            <div style="min-width:0;">
-              <div style="font-family:'Bebas Neue',sans-serif;font-size:1.25rem;letter-spacing:2px;color:#fff;line-height:1.1;">${_dEsc(evToShow.title)}</div>
-              ${evToShow.main ? `<div style="font-size:.72rem;color:rgba(255,255,255,.35);font-style:italic;margin-top:3px;">${_dEsc(evToShow.main)}</div>` : ''}
-            </div>
-            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
-              ${evToShow.date ? `<div style="display:flex;align-items:center;gap:4px;font-size:.72rem;color:rgba(255,255,255,.55);">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                ${_dEsc(evToShow.date)}
-              </div>` : ''}
-              ${evToShow.location ? `<div style="display:flex;align-items:center;gap:4px;font-size:.7rem;color:rgba(255,255,255,.32);">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                ${_dEsc(evToShow.location)}
-              </div>` : ''}
-            </div>
-          </div>`;
-        body.appendChild(evCard);
-      }
+      for (const match of newMatches) {
+        // Merge live like data
+        const liveMatch = ownerMatchMap[match.uid] || match;
 
-      // ── Match card — user's booking ──
-      const matchType = bk.matchType || '';
-      const nameA = avatarMap[session.username]?.name || session.displayName || session.username;
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'margin:0 14px 14px;border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden;background:#0d0d12;';
 
-      // Build participant chips
-      const _vsChip = () => `<span style="font-size:.72rem;font-weight:800;color:rgba(200,168,75,.55);letter-spacing:1.5px;padding:0 6px;align-self:center;">VS</span>`;
-      const _chip = (avHtml, name, italic) => `
-        <div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex-shrink:0;min-width:56px;max-width:80px;">
-          ${avHtml}
-          <span style="font-size:.7rem;font-weight:600;color:${italic?'rgba(255,255,255,.45)':'rgba(255,255,255,.88)'};${italic?'font-style:italic;':''}text-align:center;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;">${name}</span>
-        </div>`;
+        // Top bar
+        const topBar = document.createElement('div');
+        topBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#07070a;border-bottom:1px solid rgba(255,255,255,.06);gap:8px;';
+        const leftM = document.createElement('div');
+        leftM.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;';
+        if (match.eventTitle) {
+          const evSpan = document.createElement('span');
+          evSpan.style.cssText = "font-size:.65rem;color:rgba(255,255,255,.4);font-family:'DM Sans',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+          evSpan.textContent = match.eventTitle;
+          leftM.appendChild(evSpan);
+        }
+        if (match.matchType) {
+          const mt = document.createElement('span');
+          mt.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.25);font-family:'DM Sans',sans-serif;white-space:nowrap;flex-shrink:0;";
+          mt.textContent = '· ' + match.matchType;
+          leftM.appendChild(mt);
+        }
+        topBar.appendChild(leftM);
 
-      let participantsHtml = '';
-      let ghostCount = 0;
+        // Like button (same style as video page)
+        const me = session.username.toLowerCase();
+        const likedByMe = (liveMatch.likes?.users||[]).map(u=>u.toLowerCase()).includes(me);
+        const likeCount = liveMatch.likes?.count || 0;
+        const likeBtnWrap = document.createElement('div');
+        likeBtnWrap.style.cssText = 'display:flex;align-items:center;gap:5px;flex-shrink:0;';
+        const likeBtn = document.createElement('button');
+        likeBtn.style.cssText = `display:flex;align-items:center;gap:5px;padding:5px 11px;border-radius:40px;background:${likedByMe?'rgba(200,168,75,.1)':'rgba(255,255,255,.06)'};border:1px solid ${likedByMe?'rgba(200,168,75,.4)':'rgba(255,255,255,.1)'};color:${likedByMe?'#c8a84b':'#e8e8e8'};font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;transition:background .2s,border-color .2s,color .2s;`;
+        likeBtn.innerHTML = _heartSvg(likedByMe);
+        const likeCountSpan = document.createElement('span');
+        likeCountSpan.textContent = likeCount || '';
+        likeBtn.appendChild(likeCountSpan);
+        likeBtn.onclick = () => _dashToggleLike(match.uid, match.eventUid, owner?.username || '', likeBtn, likeCountSpan);
+        likeBtnWrap.appendChild(likeBtn);
+        topBar.appendChild(likeBtnWrap);
+        wrap.appendChild(topBar);
 
-      if (Array.isArray(bk.slots) && bk.slots.length) {
-        bk.slots.forEach(s => {
-          if (s === 'vs') {
-            participantsHtml += _vsChip();
-          } else if (s === session.username) {
-            participantsHtml += _chip(_avCircle(session.username, nameA), nameA.replace(/</g,'&lt;'), false);
-          } else if (s.startsWith('__mystery__')) {
-            const ghost = (bk.ghostOpponents||[])[ghostCount++];
-            const gName = (ghost?.name || '???').replace(/</g,'&lt;');
-            const isMystery = gName === '???';
-            const gAv = isMystery
-              ? `<div style="width:38px;height:38px;border-radius:50%;background:rgba(80,60,120,.25);border:2px dashed rgba(180,140,255,.35);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;">❓</div>`
-              : `<div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.06);border:2px dashed rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.72rem;color:rgba(255,255,255,.4);flex-shrink:0;">${gName[0].toUpperCase()}</div>`;
-            participantsHtml += _chip(gAv, gName, true);
-          } else {
-            const isExt = s.startsWith('__ext__');
-            const idx = opps.indexOf(s);
-            const oppN = (idx >= 0 && oppNames[idx] ? oppNames[idx] : avatarMap[s]?.name || s).replace(/</g,'&lt;');
-            const avHtml = isExt
-              ? `<div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.72rem;color:rgba(255,255,255,.45);flex-shrink:0;">${(oppN||'?')[0].toUpperCase()}</div>`
-              : _avCircle(s, oppN);
-            participantsHtml += _chip(avHtml, oppN, false);
+        // Participants
+        const partRow = document.createElement('div');
+        partRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 16px;flex-wrap:wrap;';
+        (match.tokens || []).forEach(tok => {
+          if (tok.type === 'vs') {
+            const vs = document.createElement('span');
+            vs.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:3px;color:rgba(192,0,14,.7);flex-shrink:0;";
+            vs.textContent = 'VS';
+            partRow.appendChild(vs);
+          } else if (tok.type === 'ally') {
+            const amp = document.createElement('span');
+            amp.style.cssText = 'font-size:.75rem;color:rgba(255,255,255,.25);flex-shrink:0;';
+            amp.textContent = '&';
+            partRow.appendChild(amp);
+          } else if (tok.type === 'wrestler' || tok.type === 'unknown') {
+            const isUnknown = tok.type === 'unknown';
+            const info = avatarMap[tok.username] || {};
+            const label = isUnknown ? '???' : (info.name || tok.display_name || tok.username || '');
+            const avatarUrl = isUnknown ? null : (info.avatar || tok.avatar_url || null);
+            const isMe = tok.username === session.username;
+            const chip = document.createElement('div');
+            chip.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:5px;';
+            const avEl = document.createElement('div');
+            if (avatarUrl) {
+              avEl.innerHTML = `<img src="${avatarUrl}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid ${isMe?'rgba(200,168,75,.6)':'rgba(255,255,255,.15)'};">`;
+            } else if (isUnknown) {
+              avEl.style.cssText = 'width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.05);border:2px dashed rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:1.1rem;';
+              avEl.textContent = '?';
+            } else {
+              avEl.innerHTML = _avCircle(tok.username, label);
+            }
+            chip.appendChild(avEl);
+            const nameEl = document.createElement('div');
+            nameEl.style.cssText = `font-family:'Bebas Neue',sans-serif;font-size:.72rem;letter-spacing:1.5px;color:${isMe?'#c8a84b':'#fff'};text-align:center;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;`;
+            nameEl.textContent = label.toUpperCase();
+            chip.appendChild(nameEl);
+            partRow.appendChild(chip);
           }
         });
-      } else {
-        // Fallback: no slots saved
-        participantsHtml = _chip(_avCircle(session.username, nameA), nameA.replace(/</g,'&lt;'), false);
-        opps.forEach((oppU, i) => {
-          const oppN = (oppNames[i] || avatarMap[oppU]?.name || oppU || '').replace(/</g,'&lt;');
-          const isExt = oppU.startsWith('__ext__');
-          const avHtml = isExt
-            ? `<div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.06);border:2px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.72rem;color:rgba(255,255,255,.45);flex-shrink:0;">${(oppN||'?')[0].toUpperCase()}</div>`
-            : _avCircle(oppU, oppN);
-          participantsHtml += _vsChip() + _chip(avHtml, oppN, false);
-        });
-        (bk.ghostOpponents||[]).forEach(ghost => {
-          const gName = (ghost.name || '???').replace(/</g,'&lt;');
-          const isMystery = gName === '???';
-          const gAv = isMystery
-            ? `<div style="width:38px;height:38px;border-radius:50%;background:rgba(80,60,120,.25);border:2px dashed rgba(180,140,255,.35);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;">❓</div>`
-            : `<div style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.06);border:2px dashed rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.72rem;color:rgba(255,255,255,.4);flex-shrink:0;">${gName[0].toUpperCase()}</div>`;
-          participantsHtml += _vsChip() + _chip(gAv, gName, true);
-        });
-      }
+        wrap.appendChild(partRow);
 
-      const hasEventCard = !!evToShow;
-      const matchWrap = document.createElement('div');
-      matchWrap.style.cssText = `margin:0 14px 16px;padding:14px 16px 16px;background:rgba(200,168,75,.07);border:1px solid rgba(200,168,75,.3);border-top:${hasEventCard?'none':'1px solid rgba(200,168,75,.3)'};border-radius:${hasEventCard?'0 0 10px 10px':'10px'};`;
-      matchWrap.innerHTML = `
-        <div style="font-size:.62rem;letter-spacing:2px;text-transform:uppercase;font-weight:700;color:#c8a84b;margin-bottom:12px;">⚡ Your Match${matchType ? ` · ${_dEsc(matchType)}` : ''}</div>
-        <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">${participantsHtml}</div>`;
-      body.appendChild(matchWrap);
-    });
+        // Bottom strip: stip | champ | promo
+        const hasStip = !!match.stipulation;
+        const hasChamp = !!(match.champ?.beltName);
+        const hasPromo = !!match.promoUrl;
+        if (hasStip || hasChamp || hasPromo) {
+          const btm = document.createElement('div');
+          btm.style.cssText = 'display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:8px 14px;border-top:1px solid rgba(255,255,255,.05);gap:8px;';
+          const leftSlot = document.createElement('div');
+          leftSlot.style.cssText = 'display:flex;align-items:center;';
+          if (hasStip) { leftSlot.innerHTML = `<span style="font-size:.63rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);font-style:italic;">${_dEsc(match.stipulation)}</span>`; }
+          btm.appendChild(leftSlot);
+          const centerSlot = document.createElement('div');
+          centerSlot.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;';
+          if (hasChamp) {
+            centerSlot.innerHTML = match.champ.beltImageUrl
+              ? `<img src="${_dEsc(match.champ.beltImageUrl)}" style="height:26px;max-width:44px;object-fit:contain;"><span style="font-size:.62rem;color:rgba(200,168,75,.85);font-family:'DM Sans',sans-serif;font-weight:700;">${_dEsc(match.champ.beltName)}</span>`
+              : `<span style="font-size:.75rem;">🏆</span><span style="font-size:.62rem;color:rgba(200,168,75,.85);font-family:'DM Sans',sans-serif;font-weight:700;">${_dEsc(match.champ.beltName)}</span>`;
+          }
+          btm.appendChild(centerSlot);
+          const rightSlot = document.createElement('div');
+          rightSlot.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;';
+          if (hasPromo) {
+            const pl = document.createElement('button');
+            pl.style.cssText = "background:rgba(192,0,14,.1);border:1px solid rgba(192,0,14,.3);border-radius:7px;padding:4px 10px;font-size:.63rem;color:rgba(255,100,100,.85);font-family:'DM Sans',sans-serif;font-weight:700;cursor:pointer;white-space:nowrap;";
+            pl.textContent = '▶ Notable Promo';
+            pl.onclick = () => { if (typeof openVideoPopup === 'function') openVideoPopup(match.promoUrl.replace(/.*v=/,'https://www.youtube.com/embed/'+(match.promoUrl.match(/[?&]v=([^&]+)/)||['',''])[1])+'?autoplay=1', {label:'Notable Promo',efedShow:match.eventTitle||''}); };
+            rightSlot.appendChild(pl);
+          }
+          btm.appendChild(rightSlot);
+          wrap.appendChild(btm);
+        }
+
+        body.appendChild(wrap);
+      }
+    }
 
     if (!hasAnyContent) {
       body.innerHTML = '<div class="dash-empty">You\'re not booked in any matches yet.</div>';
     }
-
   } catch(e) { console.error(e); body.innerHTML = '<div class="dash-empty">Could not load schedule.</div>'; }
 }
 // ──────────────────────────────────────────────────────────────
