@@ -2959,7 +2959,12 @@ window._efedRules = (function(){
         <div style="display:flex;flex-direction:column;gap:14px;">
           <div>
             <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:7px;">Match Type</div>
-            <input id="bk-match-type" type="text" maxlength="60" placeholder="e.g. Singles, Tag Team, Triple Threat…" oninput="bkSyncPreview()" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
+            <div id="bk-match-type-display" style="width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;box-sizing:border-box;letter-spacing:.5px;min-height:40px;display:flex;align-items:center;gap:8px;">
+              <span id="bk-match-type-icon" style="font-size:1rem;flex-shrink:0;"></span>
+              <span id="bk-match-type-label" style="flex:1;">—</span>
+            </div>
+            <!-- hidden input keeps the value for all existing code that reads bk-match-type -->
+            <input id="bk-match-type" type="hidden" value="">
           </div>
         </div>
         <div id="bk-save-err" style="font-size:.68rem;color:#ff6b6b;min-height:16px;margin-top:12px;"></div>
@@ -8284,8 +8289,96 @@ function bkGoStep(n) {
   const panel = document.getElementById('book-inline-panel');
   if (panel) setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   _bkTab.step = n;
-  if (n === 3) bkSyncStepPreview('step3');
+  if (n === 3) { bkSyncStepPreview('step3'); bkApplyAutoMatchType(); }
   if (n === 4) { bkSyncStepPreview('step4'); bkRenderChampGrid(); }
+  bkSyncPreview();
+}
+
+// ── Auto-detect Match Type from slot structure ────────────────────────────
+function bkDetectMatchType() {
+  const slots = _bkTab.slots;
+
+  // Battle royale overrides everything
+  if (_bkTab.isBattleRoyale && _bkTab.battleRoyaleSize) {
+    const size = _bkTab.battleRoyaleSize;
+    let label, icon;
+    if (size >= 30)      { label = '30-Man Royal Rumble'; icon = '🏆'; }
+    else if (size >= 20) { label = '20-Man Battle Royal'; icon = '🏟️'; }
+    else                 { label = '10-Man Battle Royal'; icon = '🏟️'; }
+    return { label, icon };
+  }
+
+  // No 'vs' at all = promo segment (solo or group, no match)
+  const hasVs = slots.some(s => s.type === 'vs');
+  if (!hasVs) return { label: 'Promo', icon: '🎤' };
+
+  // Parse slots into sides (split on 'vs') and team sizes (split on 'amp')
+  const sides = [];
+  let currentTeam = [];
+  slots.forEach(s => {
+    if (s.type === 'wrestler') {
+      currentTeam.push(s);
+    } else if (s.type === 'vs') {
+      if (currentTeam.length) sides.push(currentTeam);
+      currentTeam = [];
+    } else if (s.type === 'amp') {
+      // same team, just keep going
+    }
+  });
+  if (currentTeam.length) sides.push(currentTeam);
+
+  const numSides  = sides.length;
+  const teamSizes = sides.map(t => t.length);
+  const totalWrestlers = teamSizes.reduce((a,b)=>a+b, 0);
+  const allSolo = teamSizes.every(n => n === 1);
+  const allSameSize = teamSizes.every(n => n === teamSizes[0]);
+  const maxTeamSize = Math.max(...teamSizes);
+
+  // FFA (all solo, 2+ sides)
+  if (allSolo) {
+    if (numSides === 2) return { label: 'Singles Match',    icon: '🥊' };
+    if (numSides === 3) return { label: 'Triple Threat',    icon: '⚡' };
+    if (numSides === 4) return { label: 'Fatal 4-Way',      icon: '💥' };
+    if (numSides === 5) return { label: 'Five-Way Match',   icon: '⭐' };
+    if (numSides === 6) return { label: '6-Man Match',      icon: '🔥' };
+    if (numSides >= 7)  return { label: numSides + '-Man Match', icon: '🔥' };
+  }
+
+  // Tag matches (everyone on a team)
+  if (allSameSize && maxTeamSize >= 2) {
+    if (numSides === 2 && maxTeamSize === 2) return { label: 'Tag Team Match',         icon: '🤝' };
+    if (numSides === 2 && maxTeamSize === 3) return { label: '6-Man Tag Match',        icon: '🤝' };
+    if (numSides === 2 && maxTeamSize === 4) return { label: '8-Man Tag Match',        icon: '🤝' };
+    if (numSides === 2 && maxTeamSize === 5) return { label: '10-Man Tag Match',       icon: '🤝' };
+    if (numSides === 2 && maxTeamSize >= 2)  return { label: maxTeamSize + 'v' + maxTeamSize + ' Tag Match', icon: '🤝' };
+    if (numSides === 3 && maxTeamSize === 2) return { label: 'Triple Threat Tag Match',icon: '⚡' };
+    if (numSides === 3 && maxTeamSize >= 2)  return { label: 'Triple Tag Team Match',  icon: '⚡' };
+    if (numSides >= 4  && maxTeamSize >= 2)  return { label: numSides + '-Team Tag Match', icon: '🤝' };
+  }
+
+  // Mixed FFA with teams (multi-person sides, not all same size)
+  if (numSides === 3 && maxTeamSize >= 2) return { label: 'Triple Threat Tag Match', icon: '⚡' };
+
+  // Handicap: uneven sides (2 sides, different sizes)
+  if (numSides === 2 && !allSameSize) {
+    const a = teamSizes[0], b = teamSizes[1];
+    return { label: `Handicap Match (${a}v${b})`, icon: '⚠️' };
+  }
+
+  // Gauntlet / catch-all
+  if (totalWrestlers >= 4) return { label: 'Gauntlet Match', icon: '🏟️' };
+
+  return { label: 'Match', icon: '🥊' };
+}
+
+function bkApplyAutoMatchType() {
+  const { label, icon } = bkDetectMatchType();
+  const hiddenInput = document.getElementById('bk-match-type');
+  const displayLabel = document.getElementById('bk-match-type-label');
+  const displayIcon  = document.getElementById('bk-match-type-icon');
+  if (hiddenInput) hiddenInput.value = label;
+  if (displayLabel) displayLabel.textContent = label;
+  if (displayIcon)  displayIcon.textContent  = icon;
   bkSyncPreview();
 }
 
@@ -9293,8 +9386,7 @@ function _bkHandleMaxCheck(currentCount, proceed) {
 
 function _bkSetBattleRoyale(size, popup) {
   _bkTab.isBattleRoyale = true; _bkTab.battleRoyaleSize = size;
-  const mt = document.getElementById('bk-match-type');
-  if (mt) { mt.value = size + '-Man Battle Royale'; }
+  bkApplyAutoMatchType();
   if (popup) popup.remove();
   bkSyncComposer();
 }
