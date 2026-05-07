@@ -9482,11 +9482,53 @@ function closeMyEfedPopup() {
 let _linksData = null; // { count, byEfed: { efedName: [{ username, display_name, avatar_url }] } }
 
 // ── APPEARANCES ──
+
+// ── Match Watchlist helpers (profile.html) ───────────────────────────────────
+window._matchWatchlistUids = window._matchWatchlistUids || new Set();
+
+async function _initMatchWatchlistUids() {
+  const session = typeof getSession === 'function' ? getSession() : null;
+  if (!session) return;
+  try {
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`);
+    const wl = rows[0]?.match_watchlist_json;
+    window._matchWatchlistUids = new Set(Array.isArray(wl) ? wl.map(m => m.matchUid).filter(Boolean) : []);
+  } catch(e) {}
+}
+
+async function _profileToggleWatchlist(match, btnEl) {
+  const session = typeof getSession === 'function' ? getSession() : null;
+  if (!session) return;
+  if (!window._matchWatchlistUids) window._matchWatchlistUids = new Set();
+  const uid = match.uid;
+  const wasWl = window._matchWatchlistUids.has(uid);
+  const _wSvg = (f) => `<svg width="13" height="13" viewBox="0 0 24 24" fill="${f?'currentColor':'none'}" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>`;
+  try {
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`);
+    let wl = Array.isArray(rows[0]?.match_watchlist_json) ? rows[0].match_watchlist_json : [];
+    if (wasWl) { wl = wl.filter(m => m.matchUid !== uid); window._matchWatchlistUids.delete(uid); }
+    else {
+      wl = wl.filter(m => m.matchUid !== uid);
+      wl.push({ matchUid: uid, efed: match.efed||match._efed||'', ownerUsername: match.ownerUsername||'', eventTitle: match.eventTitle||'', eventDate: match.eventDate||'', matchType: match.matchType||'', stipulation: match.stipulation||'', tokens: match.tokens||[], champ: match.champ||null, promoUrl: match.promoUrl||'', addedAt: Date.now() });
+      window._matchWatchlistUids.add(uid);
+    }
+    await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({match_watchlist_json:wl})});
+    const nowWl = !wasWl;
+    btnEl._wlActive = nowWl;
+    btnEl.innerHTML = _wSvg(nowWl);
+    btnEl.title = nowWl ? 'Remove from watchlist' : 'Add to watchlist';
+    btnEl.style.color = nowWl ? '#c8a84b' : 'rgba(255,255,255,.2)';
+    btnEl.onmouseenter = () => { btnEl.style.transform='scale(1.15)'; btnEl.style.color=btnEl._wlActive?'#fff':'rgba(200,168,75,.7)'; };
+    btnEl.onmouseleave = () => { btnEl.style.transform=''; btnEl.style.color=btnEl._wlActive?'#c8a84b':'rgba(255,255,255,.2)'; };
+  } catch(e) { console.error('Watchlist toggle:', e); }
+}
+
 async function loadAppearances(targetUser, isOwn) {
   const sec = document.getElementById('appearances-section');
   const list = document.getElementById('appearances-list');
   if (!sec || !list) return;
 
+  await _initMatchWatchlistUids();
   const _hiddenKey = 'hidden_appearances_' + targetUser;
   const hidden = (() => { try { return JSON.parse(localStorage.getItem(_hiddenKey) || '[]'); } catch(e) { return []; } })();
 
@@ -9586,33 +9628,25 @@ async function loadAppearances(targetUser, isOwn) {
       const card = document.createElement('div');
       card.style.cssText = 'border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:#0d0d12;margin-bottom:10px;';
 
-      // Top bar
+      // Top bar — 3-col: [efed·event·date] | [stip] | [matchType]
       const topBar = document.createElement('div');
-      topBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#07070a;border-bottom:1px solid rgba(255,255,255,.06);gap:8px;cursor:pointer;';
+      topBar.style.cssText = 'display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:7px 14px;background:#07070a;border-bottom:1px solid rgba(255,255,255,.06);gap:6px;cursor:pointer;';
       topBar.onclick = () => { if (match._efed) window.location.href='efed.html?e='+encodeURIComponent(match._efed); };
       const leftM = document.createElement('div');
-      leftM.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;';
-      const efedSpan = document.createElement('span');
-      efedSpan.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.65rem;letter-spacing:3px;color:#c8a84b;white-space:nowrap;";
-      efedSpan.textContent = match._efed || '';
-      leftM.appendChild(efedSpan);
+      leftM.style.cssText = 'display:flex;align-items:center;gap:5px;min-width:0;overflow:hidden;';
+      if (match._efed) { const as=document.createElement('span'); as.style.cssText="font-family:'Bebas Neue',sans-serif;font-size:.65rem;letter-spacing:3px;color:#c8a84b;flex-shrink:0;"; as.textContent=match._efed; leftM.appendChild(as); }
       if (match.eventTitle) {
-        const dot = document.createElement('span');
-        dot.style.cssText = 'color:rgba(255,255,255,.15);font-size:.6rem;';
-        dot.textContent = '·';
-        leftM.appendChild(dot);
-        const evSpan = document.createElement('span');
-        evSpan.style.cssText = "font-size:.65rem;color:rgba(255,255,255,.38);font-family:'DM Sans',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
-        evSpan.textContent = match.eventTitle;
-        leftM.appendChild(evSpan);
+        if (match._efed) { const d=document.createElement('span'); d.style.cssText='color:rgba(255,255,255,.15);font-size:.58rem;flex-shrink:0;'; d.textContent='·'; leftM.appendChild(d); }
+        const evSpan=document.createElement('span'); evSpan.style.cssText="font-size:.63rem;color:rgba(255,255,255,.38);font-family:'DM Sans',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"; evSpan.textContent=match.eventTitle; leftM.appendChild(evSpan);
       }
+      if (match.eventDate) { const d2=document.createElement('span'); d2.style.cssText='color:rgba(255,255,255,.12);font-size:.58rem;flex-shrink:0;'; d2.textContent='·'; leftM.appendChild(d2); const de=document.createElement('span'); de.style.cssText="font-family:'DM Sans',sans-serif;font-size:.6rem;color:rgba(255,255,255,.25);white-space:nowrap;flex-shrink:0;"; de.textContent=match.eventDate; leftM.appendChild(de); }
       topBar.appendChild(leftM);
-      if (match.matchType) {
-        const mt = document.createElement('span');
-        mt.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;white-space:nowrap;flex-shrink:0;";
-        mt.textContent = match.matchType;
-        topBar.appendChild(mt);
-      }
+      const centM=document.createElement('div'); centM.style.cssText='display:flex;align-items:center;justify-content:center;';
+      if (match.stipulation) { const st=document.createElement('span'); st.style.cssText="font-family:'DM Sans',sans-serif;font-size:.58rem;color:rgba(255,255,255,.35);font-style:italic;white-space:nowrap;"; st.textContent=match.stipulation; centM.appendChild(st); }
+      topBar.appendChild(centM);
+      const rightM=document.createElement('div'); rightM.style.cssText='display:flex;align-items:center;justify-content:flex-end;';
+      if (match.matchType) { const mt=document.createElement('span'); mt.style.cssText="font-size:.6rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;white-space:nowrap;"; mt.textContent=match.matchType; rightM.appendChild(mt); }
+      topBar.appendChild(rightM);
       card.appendChild(topBar);
 
       // Participant row
@@ -9685,12 +9719,6 @@ async function loadAppearances(targetUser, isOwn) {
         likeRow.appendChild(likeBtn);
         likeRow.appendChild(countSpan);
         leftSlot.appendChild(likeRow);
-        if (hasStip) {
-          const st = document.createElement('span');
-          st.style.cssText = "font-size:.6rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.28);font-style:italic;";
-          st.textContent = match.stipulation;
-          leftSlot.appendChild(st);
-        }
         btm.appendChild(leftSlot);
 
         // CENTER — championship
@@ -9703,9 +9731,24 @@ async function loadAppearances(targetUser, isOwn) {
         }
         btm.appendChild(centerSlot);
 
-        // RIGHT — notable promo
+        // RIGHT — watchlist + notable promo
         const rightSlot = document.createElement('div');
-        rightSlot.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;';
+        rightSlot.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;gap:6px;';
+        const _wlViewer = session?.username?.toLowerCase() || '';
+        const _wlIsParticipant = _wlViewer && (match.tokens||[]).some(t => t.type==='wrestler' && t.username && t.username.toLowerCase() === _wlViewer);
+        if (_wlViewer && !_wlIsParticipant) {
+          const _wBtn = document.createElement('button');
+          const _alrWl = window._matchWatchlistUids && window._matchWatchlistUids.has(match.uid);
+          const _wSvg = (f) => `<svg width="13" height="13" viewBox="0 0 24 24" fill="${f?'currentColor':'none'}" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>`;
+          _wBtn.innerHTML = _wSvg(_alrWl);
+          _wBtn.title = _alrWl ? 'Remove from watchlist' : 'Add to watchlist';
+          _wBtn.style.cssText = 'background:none;border:none;padding:2px 4px;cursor:pointer;color:'+(_alrWl?'#c8a84b':'rgba(255,255,255,.2)')+';display:flex;align-items:center;transition:color .15s,transform .15s;';
+          _wBtn._wlActive = _alrWl;
+          _wBtn.onmouseenter = () => { _wBtn.style.transform='scale(1.15)'; _wBtn.style.color=_wBtn._wlActive?'#fff':'rgba(200,168,75,.7)'; };
+          _wBtn.onmouseleave = () => { _wBtn.style.transform=''; _wBtn.style.color=_wBtn._wlActive?'#c8a84b':'rgba(255,255,255,.2)'; };
+          _wBtn.onclick = (e) => { e.stopPropagation(); _profileToggleWatchlist({...match, efed: match._efed||'', ownerUsername}, _wBtn); };
+          rightSlot.appendChild(_wBtn);
+        }
         if (hasPromo) {
           const pl = document.createElement('button');
           pl.style.cssText = "background:rgba(192,0,14,.1);border:1px solid rgba(192,0,14,.3);border-radius:7px;padding:4px 10px;font-size:.63rem;color:rgba(255,100,100,.85);font-family:'DM Sans',sans-serif;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap;";
