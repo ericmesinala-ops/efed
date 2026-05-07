@@ -4771,24 +4771,6 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
     mt.textContent = match.matchType;
     rightMeta.appendChild(mt);
   }
-  // Like button — shown on panel/profile banners
-  if (forPanel) {
-    const session = typeof getSession === 'function' ? getSession() : null;
-    const likedByMe = session && (match.likes?.users||[]).map(u=>u.toLowerCase()).includes(session.username.toLowerCase());
-    const likeCount = match.likes?.count || 0;
-    const likeBtn = document.createElement('button');
-    likeBtn.style.cssText = 'display:flex;align-items:center;gap:5px;padding:5px 11px;border-radius:40px;background:' + (likedByMe ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.06)') + ';border:1px solid ' + (likedByMe ? 'rgba(200,168,75,.4)' : 'rgba(255,255,255,.1)') + ';color:' + (likedByMe ? '#c8a84b' : '#e8e8e8') + ";font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;transition:background .2s,border-color .2s,color .2s;flex-shrink:0;";
-    const heartSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="' + (likedByMe ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
-    const countSpan = document.createElement('span');
-    countSpan.textContent = likeCount || '';
-    likeBtn.innerHTML = heartSvg;
-    likeBtn.appendChild(countSpan);
-    likeBtn.onclick = (e) => {
-      e.stopPropagation();
-      if (typeof _mcToggleLike === 'function') _mcToggleLike(match.uid, isExtraCard, extraIndex, likeBtn, countSpan);
-    };
-    topBar.appendChild(likeBtn);
-  }
   topBar.appendChild(rightMeta);
   wrap.appendChild(topBar);
 
@@ -4838,17 +4820,38 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
   const hasStip = !!match.stipulation;
   const hasChamp = !!(match.champ?.beltName);
   const hasPromo = !!match.promoUrl;
-  if (hasStip || hasChamp || hasPromo) {
+  if (forPanel || hasStip || hasChamp || hasPromo) {
     const btm = document.createElement('div');
-    // 3-col grid: stip left | champ center | promo right
     btm.style.cssText = 'display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:8px 14px;border-top:1px solid rgba(255,255,255,.05);gap:8px;';
 
-    // LEFT — stipulation
+    // LEFT — bare like heart + count (panel only), stip below if set
     const leftSlot = document.createElement('div');
-    leftSlot.style.cssText = 'display:flex;align-items:center;';
+    leftSlot.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:3px;';
+    if (forPanel) {
+      const session = typeof getSession === 'function' ? getSession() : null;
+      const likedByMe = session && (match.likes?.users||[]).map(u=>u.toLowerCase()).includes(session.username.toLowerCase());
+      const likeCount = match.likes?.count || 0;
+      const likeRow = document.createElement('div');
+      likeRow.style.cssText = 'display:flex;align-items:center;gap:4px;';
+      const likeBtn = document.createElement('button');
+      likeBtn.style.cssText = 'background:none;border:none;padding:0;cursor:pointer;color:' + (likedByMe ? '#c0000e' : 'rgba(255,255,255,.25)') + ';display:flex;align-items:center;line-height:1;transition:color .15s,transform .15s;';
+      likeBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="' + (likedByMe ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+      likeBtn.onmouseenter = () => { likeBtn.style.transform = 'scale(1.15)'; };
+      likeBtn.onmouseleave = () => { likeBtn.style.transform = ''; };
+      const countSpan = document.createElement('span');
+      countSpan.style.cssText = "font-size:.65rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);";
+      countSpan.textContent = likeCount || '';
+      likeBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (typeof _mcToggleLike === 'function') _mcToggleLike(match.uid, isExtraCard, extraIndex, likeBtn, countSpan);
+      };
+      likeRow.appendChild(likeBtn);
+      likeRow.appendChild(countSpan);
+      leftSlot.appendChild(likeRow);
+    }
     if (hasStip) {
       const st = document.createElement('span');
-      st.style.cssText = "font-size:.63rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);font-style:italic;";
+      st.style.cssText = "font-size:.6rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.28);font-style:italic;";
       st.textContent = match.stipulation;
       leftSlot.appendChild(st);
     }
@@ -4909,13 +4912,9 @@ async function _mcToggleLike(matchUid, isExtraCard, extraIndex, btnEl, countEl) 
   match.likes.count = match.likes.users.length;
   // Update UI immediately
   const nowLiked = !liked;
-  const newHeartSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="' + (nowLiked ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
-  // Remove old SVG child and re-set
-  Array.from(btnEl.childNodes).forEach(n => { if (n.nodeName === 'svg' || (n.nodeName === '#text' && !n.textContent.trim())) n.remove(); });
-  btnEl.insertAdjacentHTML('afterbegin', newHeartSvg);
-  btnEl.style.background = nowLiked ? 'rgba(200,168,75,.1)' : 'rgba(255,255,255,.06)';
-  btnEl.style.borderColor = nowLiked ? 'rgba(200,168,75,.4)' : 'rgba(255,255,255,.1)';
-  btnEl.style.color = nowLiked ? '#c8a84b' : '#e8e8e8';
+  const newHeartSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="' + (nowLiked ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+  btnEl.innerHTML = newHeartSvg;
+  btnEl.style.color = nowLiked ? '#c0000e' : 'rgba(255,255,255,.25)';
   countEl.textContent = match.likes.count || '';
   // Save
   try {
