@@ -5148,14 +5148,17 @@ function _openEditMatchDetailsModal(match, ev, isExtraCard, extraIndex, onSave) 
 function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
   // Token chain state: array of {type:'wrestler'|'vs'|'ally'|'unknown', username?, display_name?, avatar_url?}
   let tokens = [];
+  let matchFormat = 'standard'; // 'standard' | 'ffa'
+  const isFFA = () => matchFormat === 'ffa';
+  const formatLocked = () => tokens.length > 0;
   // Derived state
   const lastType = () => tokens.length ? tokens[tokens.length-1].type : null;
   const hasVs = () => tokens.some(t=>t.type==='vs');
-  const canAddWrestler = () => !tokens.length || lastType()==='vs' || lastType()==='ally';
-  const canAddAlly = () => lastType()==='wrestler' || lastType()==='unknown';
-  const canAddVs = () => (lastType()==='wrestler'||lastType()==='unknown') && !hasVs();
-  const canAddUnknown = () => hasVs() && (lastType()==='vs'||lastType()==='ally');
-  const canSave = () => tokens.length >= 3 && hasVs() && (lastType()==='wrestler'||lastType()==='unknown');
+  const canAddWrestler = () => !tokens.length || lastType()==='vs' || lastType()==='ally' || isFFA();
+  const canAddAlly = () => !isFFA() && (lastType()==='wrestler' || lastType()==='unknown');
+  const canAddVs = () => !isFFA() && (lastType()==='wrestler'||lastType()==='unknown') && !hasVs();
+  const canAddUnknown = () => isFFA() ? (lastType()==='wrestler'||lastType()==='unknown'||!tokens.length) : (hasVs() && (lastType()==='vs'||lastType()==='ally'));
+  const canSave = () => isFFA() ? tokens.length >= 2 && (lastType()==='wrestler'||lastType()==='unknown') : tokens.length >= 3 && hasVs() && (lastType()==='wrestler'||lastType()==='unknown');
 
   let selectedChamp = null;
   let activeSubPanel = null; // 'roster' | 'champ' | null
@@ -5201,6 +5204,44 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
   bannerWrap.innerHTML = `<div style="font-family:'Bebas Neue',sans-serif;font-size:.8rem;letter-spacing:3px;color:rgba(255,255,255,.15);">ADD A WRESTLER TO START BUILDING</div>`;
   body.appendChild(bannerWrap);
 
+  // ── Format picker ──────────────────────────────────────────────────────────
+  const fmtWrap = document.createElement('div');
+  fmtWrap.style.cssText = 'display:flex;gap:8px;';
+
+  const mkFmtBtn = (label, val, flavor) => {
+    const btn = document.createElement('button');
+    btn.style.cssText = 'flex:1;padding:9px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);cursor:pointer;text-align:left;transition:all .15s;';
+    btn.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.73rem;font-weight:700;color:rgba(255,255,255,.5);margin-bottom:2px;">${label}</div><div style="font-family:'DM Sans',sans-serif;font-size:.6rem;color:rgba(255,255,255,.22);line-height:1.4;">${flavor}</div>`;
+    btn.dataset.fmt = val;
+    btn.onclick = () => {
+      if (formatLocked()) return;
+      matchFormat = val;
+      fmtWrap.querySelectorAll('button').forEach(b => {
+        const active = b.dataset.fmt === val;
+        b.style.background = active ? 'rgba(192,0,14,.12)' : 'rgba(255,255,255,.03)';
+        b.style.borderColor = active ? 'rgba(192,0,14,.35)' : 'rgba(255,255,255,.1)';
+        b.querySelector('div').style.color = active ? '#fff' : 'rgba(255,255,255,.5)';
+      });
+      updateAll();
+    };
+    return btn;
+  };
+
+  const fmtStd = mkFmtBtn('Standard', 'standard', 'Singles, tag team, triple threat — any match with clear sides.');
+  const fmtFFA = mkFmtBtn('Free-For-All', 'ffa', 'Battle Royal, Royal Rumble, Gauntlet — everyone for themselves, no sides.');
+  // Default: standard active
+  fmtStd.style.background = 'rgba(192,0,14,.12)';
+  fmtStd.style.borderColor = 'rgba(192,0,14,.35)';
+  fmtStd.querySelector('div').style.color = '#fff';
+  fmtWrap.append(fmtStd, fmtFFA);
+  body.appendChild(fmtWrap);
+
+  // Format lock hint (hidden until first wrestler placed)
+  const fmtLockHint = document.createElement('div');
+  fmtLockHint.style.cssText = "display:none;font-family:'DM Sans',sans-serif;font-size:.6rem;color:rgba(255,255,255,.18);text-align:center;font-style:italic;margin-top:-6px;";
+  fmtLockHint.textContent = 'Format locked — undo all wrestlers to change.';
+  body.appendChild(fmtLockHint);
+
   // Token action buttons
   const tokBtnRow = document.createElement('div');
   tokBtnRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;justify-content:center;';
@@ -5245,7 +5286,7 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
 
   // Stipulation input
   const stipWrap = document.createElement('div');
-  stipWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Stipulation <span style="color:rgba(255,255,255,.18);font-weight:400;text-transform:none;">(optional)</span></div><input class="_am-input" id="_am_stip" placeholder="e.g. No Disqualification, First Blood…">`;
+  stipWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Stipulation <span style="color:rgba(255,255,255,.18);font-weight:400;text-transform:none;">(optional)</span></div><input class="_am-input" id="_am_stip" placeholder="e.g. Loser Leaves Faction, No Disqualification, Last Man Standing…">`;
   body.appendChild(stipWrap);
 
   // Championship picker
@@ -5500,11 +5541,19 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
   }
 
   function updateButtons() {
+    // Show/hide VS and & based on format
+    btnVs.style.display = isFFA() ? 'none' : '';
+    btnAlly.style.display = isFFA() ? 'none' : '';
     btnWrestler.disabled = !canAddWrestler();
     btnVs.disabled = !canAddVs();
     btnAlly.disabled = !canAddAlly();
     btnUnknown.disabled = !canAddUnknown();
     btnUndo.disabled = !tokens.length;
+    // Format lock hint
+    fmtLockHint.style.display = formatLocked() ? 'block' : 'none';
+    // Dim format buttons when locked
+    fmtWrap.style.opacity = formatLocked() ? '.45' : '1';
+    fmtWrap.style.pointerEvents = formatLocked() ? 'none' : '';
     const ok = canSave();
     saveBtn.disabled = !ok;
     saveBtn.style.opacity = ok ? '1' : '.35';
@@ -5525,6 +5574,7 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
     const matchObj = {
       uid: 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2,5),
       tokens,
+      matchFormat,
       matchType: document.getElementById('_am_matchtype')?.value?.trim()||'',
       stipulation: document.getElementById('_am_stip')?.value?.trim()||'',
       champ: selectedChamp,
