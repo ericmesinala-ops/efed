@@ -4352,11 +4352,13 @@ function _evCollectAll() {
     }
     const row = _evFindRow(uid);
     results.push({
+      uid:      uid,
       title,
       date:     dateVal,
       location: (el.querySelector('[data-ev-location]')?.value || '').trim() || null,
       slogan:   (el.querySelector('[data-ev-slogan]')?.value || '').trim() || null,
-      banner:   row?.banner || null
+      banner:   row?.banner || null,
+      matches:  row?.matches || []
     });
   });
   return results;
@@ -4604,26 +4606,33 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
 
   // ── Expandable matchcard panel ────────────────────────────────────────
   const expandPanel = document.createElement('div');
-  expandPanel.style.cssText = 'display:none;border-top:1px solid rgba(255,255,255,.07);background:#07070a;padding:20px 24px;';
+  expandPanel.style.cssText = 'display:none;border-top:1px solid rgba(255,255,255,.07);background:#07070a;padding:16px 20px;';
+  expandPanel.dataset.matchPanel = ev.title || '';
+  expandPanel.setAttribute('data-match-panel', ev.title || '');
 
-  // "Matchcard not set yet" state (placeholder — wired up later)
-  const emptyState = document.createElement('div');
-  emptyState.style.cssText = 'text-align:center;padding:18px 0 8px;';
-  emptyState.innerHTML = `
-    <div style="font-size:1.6rem;margin-bottom:8px;opacity:.35;">📋</div>
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:.9rem;letter-spacing:3px;color:rgba(255,255,255,.3);">Matchcard Not Set Yet</div>
-    <div style="font-size:.68rem;color:rgba(255,255,255,.18);font-family:'DM Sans',sans-serif;margin-top:5px;">Matches will appear here once the card is booked.</div>
-  `;
-  expandPanel.appendChild(emptyState);
+  // Match list container
+  const _mcList = document.createElement('div');
+  _mcList.className = '_mc-list';
+  expandPanel.appendChild(_mcList);
+
+  // Empty state (replaces hardcoded emptyState below)
+  const _mcEmpty = document.createElement('div');
+  _mcEmpty.className = '_mc-empty';
+  _mcEmpty.style.cssText = 'text-align:center;padding:18px 0 8px;';
+  _mcEmpty.innerHTML = `<div style="font-size:1.6rem;margin-bottom:8px;opacity:.35;">📋</div><div style="font-family:'Bebas Neue',sans-serif;font-size:.9rem;letter-spacing:3px;color:rgba(255,255,255,.3);">Matchcard Not Set Yet</div><div style="font-size:.68rem;color:rgba(255,255,255,.18);font-family:'DM Sans',sans-serif;margin-top:5px;">Matches will appear here once the card is booked.</div>`;
+  expandPanel.appendChild(_mcEmpty);
+
+
 
   // Owner-only "+ Add a Match" button
   if (isOwnerOrAdmin) {
     const addMatchBtn = document.createElement('button');
     addMatchBtn.textContent = '+ Add a Match';
+    addMatchBtn.className = '_mc-add-btn';
     addMatchBtn.style.cssText = 'display:block;margin:14px auto 4px;padding:9px 24px;background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);border-radius:9px;color:#c0000e;font-family:\'DM Sans\',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:1px;cursor:pointer;transition:background .15s,border-color .15s;';
     addMatchBtn.onmouseenter = () => { addMatchBtn.style.background='rgba(192,0,14,.22)'; addMatchBtn.style.borderColor='rgba(192,0,14,.55)'; };
     addMatchBtn.onmouseleave = () => { addMatchBtn.style.background='rgba(192,0,14,.12)'; addMatchBtn.style.borderColor='rgba(192,0,14,.3)'; };
-    addMatchBtn.onclick = (e) => { e.stopPropagation(); /* TODO: open add-match flow */ };
+    addMatchBtn.onclick = (e) => { e.stopPropagation(); _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin); };
     expandPanel.appendChild(addMatchBtn);
   }
 
@@ -4637,6 +4646,9 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
     expandPanel.style.display = _expanded ? 'block' : 'none';
     chevron.style.transform = _expanded ? 'rotate(180deg)' : '';
     chevron.style.color = _expanded ? 'rgba(200,168,75,.55)' : 'rgba(255,255,255,.18)';
+    if (_expanded && typeof _renderMatchesInPanel === 'function') {
+      _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, extraIndex);
+    }
   });
 
   if (isOwnerOrAdmin) {
@@ -4697,6 +4709,838 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
   }
 
   return card;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MATCHCARD SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Owner one-time migration notice ─────────────────────────────────────────
+function _showMatchcardMigrationNotice() {
+  const session = getSession(); if (!session) return;
+  const key = 'mc_v2_notice_' + (EFED_NAME||'').toLowerCase().replace(/\s+/g,'_');
+  if (localStorage.getItem(key)) return;
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99990;background:#1a1008;border-top:2px solid rgba(200,168,75,.4);padding:13px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;';
+  bar.innerHTML = `<span style="font-size:.78rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.7);flex:1;min-width:200px;">🏷️ <strong style="color:#c8a84b;">New Matchcard System is live.</strong> Old bookings have been reset — use the Schedule tab to build your matchcards with the new builder.</span><button onclick="this.parentElement.remove();localStorage.setItem('${key}','1');" style="padding:7px 16px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:8px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.73rem;font-weight:700;cursor:pointer;white-space:nowrap;">Got it</button>`;
+  document.body.appendChild(bar);
+}
+
+// ── Stable event uid ────────────────────────────────────────────────────────
+function _getEvUid(ev, isExtraCard, extraIndex) {
+  if (!isExtraCard) return 'ev_primary';
+  const extras = window._efedExtraEvents || [];
+  return extras[extraIndex]?.uid || ('ev_x_' + extraIndex);
+}
+
+// ── Build a single match banner element ─────────────────────────────────────
+function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden;background:#0d0d12;' + (forPanel ? 'margin-bottom:10px;' : '');
+
+  // Top bar — eFed acronym + event title
+  const topBar = document.createElement('div');
+  topBar.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#07070a;border-bottom:1px solid rgba(255,255,255,.06);gap:8px;";
+
+  const leftMeta = document.createElement('div');
+  leftMeta.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;';
+  if (efedAcronym) {
+    const acEl = document.createElement('span');
+    acEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.65rem;letter-spacing:3px;color:#c8a84b;";
+    acEl.textContent = efedAcronym;
+    leftMeta.appendChild(acEl);
+    const dot = document.createElement('span');
+    dot.style.cssText = 'color:rgba(255,255,255,.15);font-size:.6rem;';
+    dot.textContent = '·';
+    leftMeta.appendChild(dot);
+  }
+  if (match.eventTitle) {
+    const evEl = document.createElement('span');
+    evEl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.65rem;color:rgba(255,255,255,.4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+    evEl.textContent = match.eventTitle;
+    leftMeta.appendChild(evEl);
+  }
+  topBar.appendChild(leftMeta);
+
+  const rightMeta = document.createElement('div');
+  rightMeta.style.cssText = 'display:flex;align-items:center;gap:6px;flex-shrink:0;';
+  if (match.matchType) {
+    const mt = document.createElement('span');
+    mt.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;letter-spacing:.3px;";
+    mt.textContent = match.matchType;
+    rightMeta.appendChild(mt);
+  }
+  topBar.appendChild(rightMeta);
+  wrap.appendChild(topBar);
+
+  // Participant row
+  const partRow = document.createElement('div');
+  partRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 16px;flex-wrap:wrap;';
+
+  (match.tokens || []).forEach(tok => {
+    if (tok.type === 'vs') {
+      const vs = document.createElement('span');
+      vs.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:3px;color:rgba(192,0,14,.7);flex-shrink:0;";
+      vs.textContent = 'VS';
+      partRow.appendChild(vs);
+    } else if (tok.type === 'ally') {
+      const amp = document.createElement('span');
+      amp.style.cssText = "font-size:.75rem;color:rgba(255,255,255,.25);flex-shrink:0;";
+      amp.textContent = '&';
+      partRow.appendChild(amp);
+    } else if (tok.type === 'wrestler' || tok.type === 'unknown') {
+      const chip = document.createElement('div');
+      chip.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:5px;';
+      const isUnknown = tok.type === 'unknown';
+      const avatarUrl = isUnknown ? null : (avatarMap?.[tok.username] || tok.avatar_url || null);
+      const label = isUnknown ? '???' : (tok.display_name || tok.username || '');
+      const avEl = document.createElement('div');
+      if (avatarUrl) {
+        avEl.innerHTML = `<img src="${avatarUrl}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.15);">`;
+      } else if (isUnknown) {
+        avEl.style.cssText = 'width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.05);border:2px dashed rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:1.1rem;';
+        avEl.textContent = '?';
+      } else {
+        const initials = label.split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+        avEl.style.cssText = 'width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.15);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:\'Bebas Neue\',sans-serif;font-size:.9rem;color:#c0000e;';
+        avEl.textContent = initials || '?';
+      }
+      chip.appendChild(avEl);
+      const nameEl = document.createElement('div');
+      nameEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.75rem;letter-spacing:1.5px;color:#fff;text-align:center;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+      nameEl.textContent = label.toUpperCase();
+      chip.appendChild(nameEl);
+      partRow.appendChild(chip);
+    }
+  });
+  wrap.appendChild(partRow);
+
+  // Bottom strip — stip + champ
+  const hasStip = !!match.stipulation;
+  const hasChamp = !!(match.champ?.beltName);
+  if (hasStip || hasChamp) {
+    const btm = document.createElement('div');
+    btm.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 14px;border-top:1px solid rgba(255,255,255,.05);flex-wrap:wrap;';
+    if (hasStip) {
+      const st = document.createElement('span');
+      st.style.cssText = "font-size:.65rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.35);font-style:italic;";
+      st.textContent = match.stipulation;
+      btm.appendChild(st);
+    }
+    if (hasChamp) {
+      const cp = document.createElement('div');
+      cp.style.cssText = 'display:flex;align-items:center;gap:6px;';
+      if (match.champ.beltImageUrl) {
+        cp.innerHTML = `<img src="${match.champ.beltImageUrl}" style="height:24px;max-width:40px;object-fit:contain;"><span style="font-size:.62rem;color:rgba(200,168,75,.8);font-family:'DM Sans',sans-serif;font-weight:700;">${match.champ.beltName}</span>`;
+      } else {
+        cp.innerHTML = `<span style="font-size:.7rem;">🏆</span><span style="font-size:.62rem;color:rgba(200,168,75,.8);font-family:'DM Sans',sans-serif;font-weight:700;">${match.champ.beltName}</span>`;
+      }
+      btm.appendChild(cp);
+    }
+    wrap.appendChild(btm);
+  }
+
+  return wrap;
+}
+
+// ── Render saved matches in the expand panel ─────────────────────────────────
+function _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, extraIndex) {
+  if (!expandPanel) return;
+  const matches = (isExtraCard
+    ? (window._efedExtraEvents || [])[extraIndex]?.matches
+    : window._efedPrimaryEvent?.matches) || [];
+  const addBtn = expandPanel.querySelector('._mc-add-btn');
+  const listEl = expandPanel.querySelector('._mc-list');
+  const emptyEl = expandPanel.querySelector('._mc-empty');
+  if (!listEl || !emptyEl) return;
+
+  listEl.innerHTML = '';
+  const acronym = document.getElementById('stat-acronym')?.textContent?.trim() || '';
+
+  if (!matches.length) {
+    emptyEl.style.display = 'block';
+    if (addBtn) addBtn.style.marginTop = '14px';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  // Collect avatar urls from tokens
+  const allUsernames = [...new Set(matches.flatMap(m => (m.tokens||[]).filter(t=>t.type==='wrestler'&&t.username).map(t=>t.username)))];
+  const avatarMap = {};
+  allUsernames.forEach(u => {
+    const member = (window._efedRosterMembers||[]).find(m=>m.username===u);
+    if (member?.avatar_url) avatarMap[u] = member.avatar_url;
+  });
+
+  matches.forEach((match, idx) => {
+    const item = document.createElement('div');
+    item.style.cssText = 'position:relative;' + (isOwnerOrAdmin ? 'cursor:grab;' : '');
+    item.dataset.matchUid = match.uid;
+    if (isOwnerOrAdmin) item.draggable = true;
+
+    const banner = _buildMatchBanner(match, avatarMap, acronym, true);
+    item.appendChild(banner);
+
+    if (isOwnerOrAdmin) {
+      // Controls row
+      const ctrl = document.createElement('div');
+      ctrl.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 6px 8px;';
+
+      const editHint = document.createElement('span');
+      editHint.style.cssText = "font-size:.58rem;color:rgba(255,255,255,.18);font-family:'DM Sans',sans-serif;font-style:italic;";
+      editHint.textContent = 'To change wrestlers, delete and recreate.';
+      ctrl.appendChild(editHint);
+
+      const btnGroup = document.createElement('div');
+      btnGroup.style.cssText = 'display:flex;gap:6px;';
+
+      // Edit details button (match type / stip / champ / promo)
+      const editBtn = document.createElement('button');
+      editBtn.textContent = '✏️ Edit';
+      editBtn.style.cssText = 'padding:4px 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:7px;color:rgba(255,255,255,.5);font-family:\'DM Sans\',sans-serif;font-size:.65rem;cursor:pointer;transition:all .15s;';
+      editBtn.onmouseenter = () => { editBtn.style.background='rgba(255,255,255,.1)'; editBtn.style.color='#fff'; };
+      editBtn.onmouseleave = () => { editBtn.style.background='rgba(255,255,255,.05)'; editBtn.style.color='rgba(255,255,255,.5)'; };
+      editBtn.onclick = () => _openEditMatchDetailsModal(match, ev, isExtraCard, extraIndex, () => _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, extraIndex));
+
+      // Delete button
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '🗑️';
+      delBtn.title = 'Delete match';
+      delBtn.style.cssText = 'padding:4px 8px;background:rgba(192,0,14,.08);border:1px solid rgba(192,0,14,.2);border-radius:7px;color:rgba(255,100,100,.5);font-size:.65rem;cursor:pointer;transition:all .15s;';
+      delBtn.onmouseenter = () => { delBtn.style.background='rgba(192,0,14,.18)'; delBtn.style.color='#ff6b6b'; };
+      delBtn.onmouseleave = () => { delBtn.style.background='rgba(192,0,14,.08)'; delBtn.style.color='rgba(255,100,100,.5)'; };
+      delBtn.onclick = () => _confirmDeleteMatch(match, ev, isExtraCard, extraIndex, expandPanel, isOwnerOrAdmin);
+
+      btnGroup.appendChild(editBtn);
+      btnGroup.appendChild(delBtn);
+      ctrl.appendChild(btnGroup);
+      item.appendChild(ctrl);
+
+      // Drag-to-reorder
+      item.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', String(idx)); item.style.opacity='.4'; });
+      item.addEventListener('dragend', () => { item.style.opacity='1'; });
+      item.addEventListener('dragover', e => { e.preventDefault(); item.style.borderTop='2px solid #c8a84b'; });
+      item.addEventListener('dragleave', () => { item.style.borderTop=''; });
+      item.addEventListener('drop', e => {
+        e.preventDefault(); item.style.borderTop='';
+        const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
+        if (isNaN(fromIdx) || fromIdx === idx) return;
+        _reorderMatches(fromIdx, idx, ev, isExtraCard, extraIndex, expandPanel, isOwnerOrAdmin);
+      });
+    }
+    listEl.appendChild(item);
+  });
+}
+
+// ── Reorder matches ──────────────────────────────────────────────────────────
+async function _reorderMatches(fromIdx, toIdx, ev, isExtraCard, extraIndex, expandPanel, isOwnerOrAdmin) {
+  const session = getSession(); if (!session) return;
+  const matchesRef = isExtraCard ? (window._efedExtraEvents||[])[extraIndex] : window._efedPrimaryEvent;
+  if (!matchesRef) return;
+  const arr = [...(matchesRef.matches||[])];
+  const [moved] = arr.splice(fromIdx, 1);
+  arr.splice(toIdx, 0, moved);
+  matchesRef.matches = arr;
+  _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, extraIndex);
+  try {
+    if (isExtraCard) {
+      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:window._efedExtraEvents})});
+    } else {
+      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_matches_json:arr})});
+    }
+  } catch(e) {}
+}
+
+// ── Delete match ─────────────────────────────────────────────────────────────
+function _confirmDeleteMatch(match, ev, isExtraCard, extraIndex, expandPanel, isOwnerOrAdmin) {
+  const bg = document.createElement('div');
+  bg.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:20px;';
+  const box = document.createElement('div');
+  box.style.cssText = "background:#13131a;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:28px 24px;max-width:320px;width:100%;text-align:center;";
+  const wrestlers = (match.tokens||[]).filter(t=>t.type==='wrestler'||t.type==='unknown').map(t=>t.display_name||'???').join(', ');
+  box.innerHTML = `<div style="font-size:1.4rem;margin-bottom:8px;">🗑️</div><div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:2px;color:#fff;margin-bottom:8px;">Delete Match?</div><div style="font-size:.72rem;color:rgba(255,255,255,.4);line-height:1.6;margin-bottom:6px;">${wrestlers}</div><div style="font-size:.68rem;color:rgba(255,100,100,.5);margin-bottom:20px;">This will remove the matchcard from all involved wrestlers' profiles.</div><div style="display:flex;gap:8px;"><button id="_dmc_c" style="flex:1;padding:10px 0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:9px;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;font-size:.8rem;cursor:pointer;">Cancel</button><button id="_dmc_ok" style="flex:1;padding:10px 0;background:rgba(192,0,14,.2);border:1px solid rgba(192,0,14,.4);border-radius:9px;color:#ff6b6b;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;">Delete</button></div>`;
+  bg.appendChild(box); document.body.appendChild(bg);
+  box.querySelector('#_dmc_c').onclick = () => bg.remove();
+  box.querySelector('#_dmc_ok').onclick = async () => {
+    bg.remove();
+    await _deleteMatch(match, ev, isExtraCard, extraIndex);
+    _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, extraIndex);
+  };
+}
+
+async function _deleteMatch(match, ev, isExtraCard, extraIndex) {
+  const session = getSession(); if (!session) return;
+  // Remove from event
+  const matchesRef = isExtraCard ? (window._efedExtraEvents||[])[extraIndex] : window._efedPrimaryEvent;
+  if (!matchesRef) return;
+  matchesRef.matches = (matchesRef.matches||[]).filter(m => m.uid !== match.uid);
+  try {
+    if (isExtraCard) {
+      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:window._efedExtraEvents})});
+    } else {
+      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_matches_json:matchesRef.matches})});
+    }
+  } catch(e) {}
+  // Remove from each wrestler's plan_note.matches
+  const wrestlers = (match.tokens||[]).filter(t=>t.type==='wrestler'&&t.username&&!t.username.startsWith('__ghost__'));
+  for (const w of wrestlers) {
+    try {
+      const rows = await sbGet('roster', `username=eq.${encodeURIComponent(w.username)}&efed=ilike.${encodeURIComponent(EFED_NAME)}&select=id,plan_note`);
+      if (!rows.length) continue;
+      const row = rows[0];
+      const pn = typeof row.plan_note === 'string' ? JSON.parse(row.plan_note||'{}') : (row.plan_note||{});
+      pn.matches = (Array.isArray(pn.matches) ? pn.matches : []).filter(m => m.uid !== match.uid);
+      await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+row.id,{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({plan_note:JSON.stringify(pn)})});
+    } catch(e) {}
+  }
+}
+
+// ── Save match ───────────────────────────────────────────────────────────────
+async function _saveMatch(match, ev, isExtraCard, extraIndex) {
+  const session = getSession(); if (!session) return;
+  const matchesRef = isExtraCard ? (window._efedExtraEvents||[])[extraIndex] : window._efedPrimaryEvent;
+  if (!matchesRef) return;
+  if (!Array.isArray(matchesRef.matches)) matchesRef.matches = [];
+  matchesRef.matches.push(match);
+  try {
+    if (isExtraCard) {
+      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:window._efedExtraEvents})});
+    } else {
+      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_matches_json:matchesRef.matches})});
+    }
+  } catch(e) {}
+  // Write to each wrestler's plan_note
+  const eventUid = _getEvUid(ev, isExtraCard, extraIndex);
+  const eventTitle = ev.title || '';
+  const wrestlers = (match.tokens||[]).filter(t=>t.type==='wrestler'&&t.username);
+  for (const w of wrestlers) {
+    try {
+      const rows = await sbGet('roster', `username=eq.${encodeURIComponent(w.username)}&efed=ilike.${encodeURIComponent(EFED_NAME)}&select=id,plan_note`);
+      if (!rows.length) continue;
+      const row = rows[0];
+      let pn = {};
+      try { pn = typeof row.plan_note==='string' ? JSON.parse(row.plan_note||'{}') : (row.plan_note||{}); } catch(e) {}
+      if (!Array.isArray(pn.matches)) pn.matches = [];
+      // Remove old entry with same uid if exists
+      pn.matches = pn.matches.filter(m => m.uid !== match.uid);
+      pn.matches.push({ uid: match.uid, eventUid, eventTitle, efed: EFED_NAME, tokens: match.tokens, matchType: match.matchType, stipulation: match.stipulation||'', champ: match.champ||null, promoUrl: match.promoUrl||'' });
+      await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+row.id,{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({plan_note:JSON.stringify(pn)})});
+    } catch(e) {}
+  }
+  _showMatchcardMigrationNotice();
+}
+
+// ── Edit match details (non-wrestler fields only) ────────────────────────────
+function _openEditMatchDetailsModal(match, ev, isExtraCard, extraIndex, onSave) {
+  const bg = document.createElement('div');
+  bg.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.78);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  const box = document.createElement('div');
+  box.style.cssText = "background:#13131a;border:1px solid rgba(255,255,255,.1);border-radius:20px;width:100%;max-width:420px;box-shadow:0 32px 80px rgba(0,0,0,.95);overflow:hidden;";
+
+  // Header
+  box.innerHTML = `
+    <div style="padding:18px 20px 14px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Edit Match Details</span>
+      <button id="_emd_close" style="background:none;border:none;color:rgba(255,255,255,.35);font-size:1.1rem;cursor:pointer;padding:2px 6px;">✕</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+      <div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Match Type</div>
+        <input id="_emd_type" class="_am-input" placeholder="e.g. Singles Match, Street Fight…" value="${(match.matchType||'').replace(/"/g,'&quot;')}" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:10px 13px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;">
+      </div>
+      <div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Stipulation <span style="color:rgba(255,255,255,.18);font-weight:400;">(optional)</span></div>
+        <input id="_emd_stip" class="_am-input" placeholder="e.g. No Disqualification, Last Man Standing…" value="${(match.stipulation||'').replace(/"/g,'&quot;')}" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:10px 13px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;">
+      </div>
+      <div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Notable Promo <span style="color:rgba(255,255,255,.18);font-weight:400;">(YouTube, optional)</span></div>
+        <input id="_emd_promo" class="_am-input" placeholder="https://youtube.com/…" value="${(match.promoUrl||'').replace(/"/g,'&quot;')}" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:10px 13px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;">
+      </div>
+      <div id="_emd_champ_section">
+        <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:8px;">Championship on the Line</div>
+        <div id="_emd_champ_pills" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button id="_emd_cancel" style="flex:1;padding:11px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.8rem;cursor:pointer;">Cancel</button>
+        <button id="_emd_save" style="flex:1;padding:11px 0;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;">Save Changes</button>
+      </div>
+    </div>`;
+
+  bg.appendChild(box); document.body.appendChild(bg);
+  box.querySelector('#_emd_close').onclick = () => bg.remove();
+  box.querySelector('#_emd_cancel').onclick = () => bg.remove();
+
+  // Championship pills
+  let selectedChamp = match.champ || null;
+  const pillsEl = box.querySelector('#_emd_champ_pills');
+  const noneBtn = document.createElement('button');
+  noneBtn.textContent = 'None';
+  noneBtn.style.cssText = 'padding:6px 14px;border-radius:20px;font-family:\'DM Sans\',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:rgba(255,255,255,.45);transition:all .15s;';
+  if (!selectedChamp) { noneBtn.style.background='rgba(200,168,75,.15)'; noneBtn.style.borderColor='rgba(200,168,75,.4)'; noneBtn.style.color='#c8a84b'; }
+  noneBtn.onclick = () => { selectedChamp=null; _updateChampPills(); };
+  pillsEl.appendChild(noneBtn);
+
+  const activeVault = typeof _vault!=='undefined' ? _vault.getActiveItems() : [];
+  activeVault.forEach(belt => {
+    const btn = document.createElement('button');
+    btn.style.cssText = 'padding:6px 14px;border-radius:20px;font-family:\'DM Sans\',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:rgba(255,255,255,.45);transition:all .15s;display:flex;align-items:center;gap:6px;';
+    btn.innerHTML = belt.image_url ? `<img src="${belt.image_url}" style="height:16px;max-width:24px;object-fit:contain;">${belt.name}` : `🏆 ${belt.name}`;
+    if (selectedChamp?.beltId === belt.id) { btn.style.background='rgba(200,168,75,.15)'; btn.style.borderColor='rgba(200,168,75,.4)'; btn.style.color='#c8a84b'; }
+    btn.onclick = () => { selectedChamp={beltId:belt.id,beltName:belt.name,beltImageUrl:belt.image_url||null}; _updateChampPills(); };
+    pillsEl.appendChild(btn);
+  });
+
+  if (!activeVault.length) { box.querySelector('#_emd_champ_section').style.display='none'; }
+
+  function _updateChampPills() {
+    pillsEl.querySelectorAll('button').forEach((b,i) => {
+      const isNone = i===0;
+      const active = isNone ? !selectedChamp : (selectedChamp?.beltId === activeVault[i-1]?.id);
+      b.style.background = active ? 'rgba(200,168,75,.15)' : 'rgba(255,255,255,.04)';
+      b.style.borderColor = active ? 'rgba(200,168,75,.4)' : 'rgba(255,255,255,.12)';
+      b.style.color = active ? '#c8a84b' : 'rgba(255,255,255,.45)';
+    });
+  }
+
+  box.querySelector('#_emd_save').onclick = async () => {
+    match.matchType = box.querySelector('#_emd_type').value.trim();
+    match.stipulation = box.querySelector('#_emd_stip').value.trim();
+    match.promoUrl = box.querySelector('#_emd_promo').value.trim();
+    match.champ = selectedChamp;
+    // Save to event
+    const session = getSession(); if (!session) return;
+    const matchesRef = isExtraCard ? (window._efedExtraEvents||[])[extraIndex] : window._efedPrimaryEvent;
+    if (matchesRef) {
+      const arr = matchesRef.matches || [];
+      const i = arr.findIndex(m=>m.uid===match.uid);
+      if (i>-1) arr[i] = match;
+      matchesRef.matches = arr;
+      try {
+        if (isExtraCard) {
+          await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:window._efedExtraEvents})});
+        } else {
+          await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_matches_json:arr})});
+        }
+      } catch(e) {}
+    }
+    // Update wrestler plan_notes for non-wrestler fields
+    const wrestlers = (match.tokens||[]).filter(t=>t.type==='wrestler'&&t.username);
+    for (const w of wrestlers) {
+      try {
+        const rows = await sbGet('roster',`username=eq.${encodeURIComponent(w.username)}&efed=ilike.${encodeURIComponent(EFED_NAME)}&select=id,plan_note`);
+        if (!rows.length) continue;
+        const row = rows[0];
+        let pn = {}; try { pn = typeof row.plan_note==='string'?JSON.parse(row.plan_note||'{}'):(row.plan_note||{}); } catch(e) {}
+        if (!Array.isArray(pn.matches)) pn.matches = [];
+        const mi = pn.matches.findIndex(m=>m.uid===match.uid);
+        if (mi>-1) { pn.matches[mi] = {...pn.matches[mi], matchType:match.matchType, stipulation:match.stipulation, champ:match.champ, promoUrl:match.promoUrl}; }
+        await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+row.id,{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({plan_note:JSON.stringify(pn)})});
+      } catch(e) {}
+    }
+    bg.remove();
+    if (onSave) onSave();
+  };
+}
+
+// ── Main Add Match Modal ─────────────────────────────────────────────────────
+function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
+  // Token chain state: array of {type:'wrestler'|'vs'|'ally'|'unknown', username?, display_name?, avatar_url?}
+  let tokens = [];
+  // Derived state
+  const lastType = () => tokens.length ? tokens[tokens.length-1].type : null;
+  const hasVs = () => tokens.some(t=>t.type==='vs');
+  const canAddWrestler = () => !tokens.length || lastType()==='vs' || lastType()==='ally';
+  const canAddAlly = () => lastType()==='wrestler' || lastType()==='unknown';
+  const canAddVs = () => (lastType()==='wrestler'||lastType()==='unknown') && !hasVs();
+  const canAddUnknown = () => hasVs() && (lastType()==='vs'||lastType()==='ally');
+  const canSave = () => tokens.length >= 3 && hasVs() && (lastType()==='wrestler'||lastType()==='unknown');
+
+  let selectedChamp = null;
+  let activeSubPanel = null; // 'roster' | 'champ' | null
+
+  // Inject styles once
+  if (!document.getElementById('_am_styles')) {
+    const s = document.createElement('style');
+    s.id = '_am_styles';
+    s.textContent = `
+      @keyframes _amFadeIn{from{opacity:0}to{opacity:1}}
+      @keyframes _amSlideUp{from{transform:translateY(36px);opacity:0}to{transform:translateY(0);opacity:1}}
+      ._am-input{width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:10px 13px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;transition:border-color .15s;}
+      ._am-input::placeholder{color:rgba(255,255,255,.22);}
+      ._am-input:focus{border-color:rgba(200,168,75,.45);}
+      ._am-tok-btn{padding:8px 16px;border-radius:24px;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;border:1px solid;transition:all .15s;white-space:nowrap;}
+      ._am-tok-btn:disabled{opacity:.25;cursor:not-allowed;}
+      ._am-roster-card{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;cursor:pointer;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02);transition:all .15s;}
+      ._am-roster-card:hover,._am-roster-card.selected{background:rgba(200,168,75,.1);border-color:rgba(200,168,75,.35);}
+    `;
+    document.head.appendChild(s);
+  }
+
+  const bg = document.createElement('div');
+  bg.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.82);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;padding:16px;animation:_amFadeIn .18s ease;';
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#13131a;border:1px solid rgba(255,255,255,.1);border-radius:20px;width:100%;max-width:520px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 32px 80px rgba(0,0,0,.95);animation:_amSlideUp .22s cubic-bezier(.32,.72,0,1);overflow:hidden;';
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'padding:16px 20px 14px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;';
+  hdr.innerHTML = `<span style="font-family:'Bebas Neue',sans-serif;font-size:1.15rem;letter-spacing:3px;color:#fff;">Build a Match</span><button id="_am_x" style="background:none;border:none;color:rgba(255,255,255,.35);font-size:1.1rem;cursor:pointer;padding:2px 6px;transition:color .15s;">✕</button>`;
+  box.appendChild(hdr);
+
+  // ── Scrollable body ────────────────────────────────────────────────────────
+  const body = document.createElement('div');
+  body.style.cssText = 'flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:14px;';
+
+  // Live banner area
+  const bannerWrap = document.createElement('div');
+  bannerWrap.id = '_am_banner_wrap';
+  bannerWrap.style.cssText = 'min-height:80px;display:flex;align-items:center;justify-content:center;';
+  bannerWrap.innerHTML = `<div style="font-family:'Bebas Neue',sans-serif;font-size:.8rem;letter-spacing:3px;color:rgba(255,255,255,.15);">ADD A WRESTLER TO START BUILDING</div>`;
+  body.appendChild(bannerWrap);
+
+  // Token action buttons
+  const tokBtnRow = document.createElement('div');
+  tokBtnRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;justify-content:center;';
+
+  const btnWrestler = document.createElement('button');
+  btnWrestler.className = '_am-tok-btn';
+  btnWrestler.style.cssText += 'background:rgba(192,0,14,.12);border-color:rgba(192,0,14,.35);color:#ff8888;';
+  btnWrestler.innerHTML = '🤼 Wrestler';
+
+  const btnVs = document.createElement('button');
+  btnVs.className = '_am-tok-btn';
+  btnVs.style.cssText += 'background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.15);color:rgba(255,255,255,.5);';
+  btnVs.textContent = 'VS';
+
+  const btnAlly = document.createElement('button');
+  btnAlly.className = '_am-tok-btn';
+  btnAlly.style.cssText += 'background:rgba(200,168,75,.08);border-color:rgba(200,168,75,.25);color:rgba(200,168,75,.7);';
+  btnAlly.textContent = '& (Tag Partner)';
+
+  const btnUnknown = document.createElement('button');
+  btnUnknown.className = '_am-tok-btn';
+  btnUnknown.style.cssText += 'background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.12);color:rgba(255,255,255,.4);';
+  btnUnknown.textContent = '??? Unknown';
+
+  const btnUndo = document.createElement('button');
+  btnUndo.className = '_am-tok-btn';
+  btnUndo.style.cssText += 'background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.08);color:rgba(255,255,255,.3);';
+  btnUndo.textContent = '↩ Undo';
+
+  tokBtnRow.append(btnWrestler, btnVs, btnAlly, btnUnknown, btnUndo);
+  body.appendChild(tokBtnRow);
+
+  // Divider
+  const div1 = document.createElement('div');
+  div1.style.cssText = 'height:1px;background:rgba(255,255,255,.06);';
+  body.appendChild(div1);
+
+  // Match type input
+  const mtWrap = document.createElement('div');
+  mtWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Match Type</div><input class="_am-input" id="_am_matchtype" placeholder="e.g. Singles Match, Street Fight, Ladder Match…">`;
+  body.appendChild(mtWrap);
+
+  // Stipulation input
+  const stipWrap = document.createElement('div');
+  stipWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Stipulation <span style="color:rgba(255,255,255,.18);font-weight:400;text-transform:none;">(optional)</span></div><input class="_am-input" id="_am_stip" placeholder="e.g. No Disqualification, First Blood…">`;
+  body.appendChild(stipWrap);
+
+  // Championship picker
+  const activeVault = typeof _vault!=='undefined' ? _vault.getActiveItems() : [];
+  const champWrap = document.createElement('div');
+  champWrap.id = '_am_champ_wrap';
+  if (activeVault.length) {
+    const champLbl = document.createElement('div');
+    champLbl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:8px;";
+    champLbl.textContent = 'Championship on the Line';
+    champWrap.appendChild(champLbl);
+    const champPills = document.createElement('div');
+    champPills.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
+
+    const noneBtn = document.createElement('button');
+    noneBtn.textContent = 'None';
+    noneBtn.style.cssText = 'padding:6px 14px;border-radius:20px;font-family:\'DM Sans\',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;border:1px solid rgba(200,168,75,.4);background:rgba(200,168,75,.15);color:#c8a84b;transition:all .15s;';
+    noneBtn.onclick = () => { selectedChamp=null; updateChampPills(); updateBanner(); };
+    champPills.appendChild(noneBtn);
+
+    activeVault.forEach(belt => {
+      const b = document.createElement('button');
+      b.style.cssText = 'padding:6px 14px;border-radius:20px;font-family:\'DM Sans\',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:rgba(255,255,255,.45);transition:all .15s;display:flex;align-items:center;gap:5px;';
+      b.innerHTML = belt.image_url ? `<img src="${belt.image_url}" style="height:16px;max-width:24px;object-fit:contain;">${belt.name}` : `🏆 ${belt.name}`;
+      b.onclick = () => { selectedChamp={beltId:belt.id,beltName:belt.name,beltImageUrl:belt.image_url||null}; updateChampPills(); updateBanner(); };
+      champPills.appendChild(b);
+    });
+
+    function updateChampPills() {
+      champPills.querySelectorAll('button').forEach((b,i) => {
+        const active = i===0 ? !selectedChamp : (selectedChamp?.beltId===activeVault[i-1]?.id);
+        b.style.background = active ? 'rgba(200,168,75,.15)' : 'rgba(255,255,255,.04)';
+        b.style.borderColor = active ? 'rgba(200,168,75,.4)' : 'rgba(255,255,255,.12)';
+        b.style.color = active ? '#c8a84b' : 'rgba(255,255,255,.45)';
+      });
+    }
+    champWrap.appendChild(champPills);
+  }
+  body.appendChild(champWrap);
+
+  // Notable Promo input
+  const promoWrap = document.createElement('div');
+  promoWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Notable Promo <span style="color:rgba(255,255,255,.18);font-weight:400;text-transform:none;">(YouTube, optional)</span></div><input class="_am-input" id="_am_promo" placeholder="https://youtube.com/…">`;
+  body.appendChild(promoWrap);
+
+  // ── Sub-panel container (roster picker) ───────────────────────────────────
+  const subPanel = document.createElement('div');
+  subPanel.id = '_am_subpanel';
+  subPanel.style.cssText = 'display:none;background:#0d0d12;border:1px solid rgba(255,255,255,.08);border-radius:14px;overflow:hidden;flex-shrink:0;max-height:360px;display:none;flex-direction:column;';
+  box.appendChild(subPanel);
+
+  // ── Footer ────────────────────────────────────────────────────────────────
+  const ftr = document.createElement('div');
+  ftr.style.cssText = 'padding:14px 20px;border-top:1px solid rgba(255,255,255,.07);display:flex;gap:8px;flex-shrink:0;';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'flex:1;padding:12px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:11px;color:rgba(255,255,255,.55);font-family:\'DM Sans\',sans-serif;font-size:.82rem;cursor:pointer;';
+  cancelBtn.onclick = () => bg.remove();
+
+  const saveBtn = document.createElement('button');
+  saveBtn.textContent = 'Save Match';
+  saveBtn.disabled = true;
+  saveBtn.style.cssText = 'flex:2;padding:12px 0;background:#c0000e;border:none;border-radius:11px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;transition:opacity .15s;opacity:.35;';
+
+  ftr.append(cancelBtn, saveBtn);
+  box.appendChild(body);
+  box.appendChild(ftr);
+  bg.appendChild(box);
+  document.body.appendChild(bg);
+
+  hdr.querySelector('#_am_x').onclick = () => bg.remove();
+
+  // ── Roster picker sub-panel builder ──────────────────────────────────────
+  let _selectedRosterUser = null;
+
+  function openRosterPicker() {
+    activeSubPanel = 'roster';
+    subPanel.style.display = 'flex';
+    subPanel.innerHTML = '';
+
+    // Header
+    const ph = document.createElement('div');
+    ph.style.cssText = 'padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;';
+    ph.innerHTML = `<span style="font-family:'Bebas Neue',sans-serif;font-size:.9rem;letter-spacing:2px;color:#fff;">Select Wrestler</span><input id="_am_search" placeholder="Search…" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:5px 10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.73rem;outline:none;width:140px;">`;
+    subPanel.appendChild(ph);
+
+    // List
+    const listWrap = document.createElement('div');
+    listWrap.style.cssText = 'flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:6px;';
+
+    const members = window._efedRosterMembers || [];
+    const real = members.filter(m=>!m.username.startsWith('__ghost__'));
+    const ghosts = members.filter(m=>m.username.startsWith('__ghost__'));
+
+    function renderList(query) {
+      listWrap.innerHTML = '';
+      const q = query.toLowerCase();
+      const makeCard = (m) => {
+        if (q && !m.display_name.toLowerCase().includes(q)) return;
+        const card = document.createElement('div');
+        card.className = '_am-roster-card' + (_selectedRosterUser?.username===m.username ? ' selected' : '');
+        const av = m.avatar_url
+          ? `<img src="${m.avatar_url}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(255,255,255,.15);flex-shrink:0;">`
+          : `<div style="width:34px;height:34px;border-radius:50%;background:rgba(192,0,14,.15);border:1.5px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.8rem;color:#c0000e;flex-shrink:0;">${(m.display_name||'?')[0].toUpperCase()}</div>`;
+        card.innerHTML = `${av}<span style="font-family:'DM Sans',sans-serif;font-size:.8rem;color:#fff;">${m.display_name}</span>`;
+        card.onclick = () => {
+          _selectedRosterUser = m;
+          renderList(ph.querySelector('#_am_search').value);
+        };
+        listWrap.appendChild(card);
+      };
+
+      if (real.length) {
+        const secHdr = document.createElement('div');
+        secHdr.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.58rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.2);padding:4px 2px;";
+        secHdr.textContent = 'ROSTER';
+        listWrap.appendChild(secHdr);
+        real.forEach(makeCard);
+      }
+
+      // Ghost section
+      const ghostSecHdr = document.createElement('div');
+      ghostSecHdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:6px 2px 4px;";
+      ghostSecHdr.innerHTML = `<span style="font-family:'DM Sans',sans-serif;font-size:.58rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.2);">GHOST CHARACTERS</span>`;
+
+      const addGhostBtn = document.createElement('button');
+      addGhostBtn.textContent = '+ Add Ghost';
+      addGhostBtn.style.cssText = "padding:3px 9px;background:rgba(200,168,75,.08);border:1px solid rgba(200,168,75,.2);border-radius:6px;color:rgba(200,168,75,.6);font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;cursor:pointer;";
+      addGhostBtn.onclick = () => showGhostInput(q);
+      ghostSecHdr.appendChild(addGhostBtn);
+      listWrap.appendChild(ghostSecHdr);
+
+      if (ghosts.length) ghosts.forEach(makeCard);
+      else {
+        const empty = document.createElement('div');
+        empty.style.cssText = "font-size:.7rem;color:rgba(255,255,255,.18);font-family:'DM Sans',sans-serif;padding:4px 4px 8px;";
+        empty.textContent = 'No ghost characters yet.';
+        listWrap.appendChild(empty);
+      }
+    }
+
+    function showGhostInput(q) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:6px;padding:2px 0 6px;';
+      const inp = document.createElement('input');
+      inp.placeholder = 'Ghost character name…';
+      inp.style.cssText = 'flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(200,168,75,.25);border-radius:8px;padding:7px 10px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.75rem;outline:none;';
+      const addBtn = document.createElement('button');
+      addBtn.textContent = 'Add';
+      addBtn.style.cssText = 'padding:7px 13px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:8px;color:#c8a84b;font-family:\'DM Sans\',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;';
+      addBtn.onclick = async () => {
+        const name = inp.value.trim(); if (!name) return;
+        addBtn.textContent = '…'; addBtn.disabled = true;
+        const session = getSession(); if (!session) return;
+        const ghostUsername = '__ghost__' + Date.now();
+        try {
+          await fetch(SUPABASE_URL+'/rest/v1/roster',{method:'POST',headers:{...SB_HEADERS,'Prefer':'return=minimal'},body:JSON.stringify({username:ghostUsername,efed:EFED_NAME,status:'approved',plan_note:JSON.stringify({ghost:true,ghostName:name})})});
+          const newGhost = { username: ghostUsername, display_name: name + ' 👻', avatar_url: null };
+          if (!window._efedRosterMembers) window._efedRosterMembers = [];
+          window._efedRosterMembers.push(newGhost);
+          ghosts.push(newGhost);
+          _selectedRosterUser = newGhost;
+          row.remove();
+          renderList(q);
+        } catch(e) { addBtn.textContent = 'Add'; addBtn.disabled=false; }
+      };
+      inp.addEventListener('keydown', e => { if (e.key==='Enter') addBtn.click(); });
+      row.append(inp, addBtn);
+      listWrap.appendChild(row);
+      inp.focus();
+    }
+
+    renderList('');
+    ph.querySelector('#_am_search').addEventListener('input', e => renderList(e.target.value));
+    subPanel.appendChild(listWrap);
+
+    // Footer: Select button
+    const pf = document.createElement('div');
+    pf.style.cssText = 'padding:10px 14px;border-top:1px solid rgba(255,255,255,.07);flex-shrink:0;';
+    const selBtn = document.createElement('button');
+    selBtn.textContent = 'Select';
+    selBtn.style.cssText = 'width:100%;padding:10px 0;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;';
+    selBtn.onclick = () => {
+      if (!_selectedRosterUser) return;
+      const m = _selectedRosterUser;
+      tokens.push({ type:'wrestler', username:m.username, display_name:m.display_name.replace(' 👻',''), avatar_url:m.avatar_url||null });
+      _selectedRosterUser = null;
+      closeSubPanel();
+      updateAll();
+    };
+    pf.appendChild(selBtn);
+    subPanel.appendChild(pf);
+  }
+
+  function closeSubPanel() {
+    activeSubPanel = null;
+    subPanel.style.display = 'none';
+    subPanel.innerHTML = '';
+  }
+
+  // ── Token button logic ────────────────────────────────────────────────────
+  btnWrestler.onclick = () => {
+    if (!canAddWrestler()) return;
+    if (activeSubPanel==='roster') { closeSubPanel(); return; }
+    _selectedRosterUser = null;
+    openRosterPicker();
+  };
+  btnVs.onclick = () => {
+    if (!canAddVs()) return;
+    tokens.push({ type:'vs' });
+    closeSubPanel();
+    updateAll();
+  };
+  btnAlly.onclick = () => {
+    if (!canAddAlly()) return;
+    tokens.push({ type:'ally' });
+    closeSubPanel();
+    updateAll();
+  };
+  btnUnknown.onclick = () => {
+    if (!canAddUnknown()) return;
+    tokens.push({ type:'unknown' });
+    closeSubPanel();
+    updateAll();
+  };
+  btnUndo.onclick = () => {
+    if (!tokens.length) return;
+    tokens.pop();
+    closeSubPanel();
+    updateAll();
+  };
+
+  // ── Update banner + button states ─────────────────────────────────────────
+  function updateBanner() {
+    if (!tokens.length) {
+      bannerWrap.innerHTML = `<div style="font-family:'Bebas Neue',sans-serif;font-size:.8rem;letter-spacing:3px;color:rgba(255,255,255,.15);">ADD A WRESTLER TO START BUILDING</div>`;
+      return;
+    }
+    const acronym = document.getElementById('stat-acronym')?.textContent?.trim()||'';
+    const matchType = document.getElementById('_am_matchtype')?.value?.trim()||'';
+    const stip = document.getElementById('_am_stip')?.value?.trim()||'';
+    const fakeMatch = { tokens, matchType, stipulation:stip, champ:selectedChamp, eventTitle: ev.title||'' };
+    const avatarMap = {};
+    (window._efedRosterMembers||[]).forEach(m => { if (m.avatar_url) avatarMap[m.username]=m.avatar_url; });
+    const existing = bannerWrap.querySelector('div[data-mc-banner]');
+    if (existing) existing.remove();
+    const banner = _buildMatchBanner(fakeMatch, avatarMap, acronym, false);
+    banner.dataset.mcBanner = '1';
+    banner.style.width = '100%';
+    bannerWrap.innerHTML = '';
+    bannerWrap.appendChild(banner);
+  }
+
+  function updateButtons() {
+    btnWrestler.disabled = !canAddWrestler();
+    btnVs.disabled = !canAddVs();
+    btnAlly.disabled = !canAddAlly();
+    btnUnknown.disabled = !canAddUnknown();
+    btnUndo.disabled = !tokens.length;
+    const ok = canSave();
+    saveBtn.disabled = !ok;
+    saveBtn.style.opacity = ok ? '1' : '.35';
+    saveBtn.style.cursor = ok ? 'pointer' : 'not-allowed';
+  }
+
+  function updateAll() { updateBanner(); updateButtons(); }
+  updateAll();
+
+  // Live banner update on typing
+  document.getElementById('_am_matchtype')?.addEventListener('input', updateBanner);
+  document.getElementById('_am_stip')?.addEventListener('input', updateBanner);
+
+  // ── Save ──────────────────────────────────────────────────────────────────
+  saveBtn.onclick = async () => {
+    if (!canSave()) return;
+    saveBtn.textContent = 'Saving…'; saveBtn.disabled = true;
+    const matchObj = {
+      uid: 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2,5),
+      tokens,
+      matchType: document.getElementById('_am_matchtype')?.value?.trim()||'',
+      stipulation: document.getElementById('_am_stip')?.value?.trim()||'',
+      champ: selectedChamp,
+      promoUrl: document.getElementById('_am_promo')?.value?.trim()||'',
+      eventTitle: ev.title||''
+    };
+    await _saveMatch(matchObj, ev, isExtraCard, extraIndex);
+
+    bg.remove();
+    // Re-render all expanded panels for this event
+    document.querySelectorAll('[data-match-panel]').forEach(p => {
+      if (p.style.display !== 'none' && p.dataset.matchPanel === (ev.title||'')) {
+        _renderMatchesInPanel(p, ev, isOwnerOrAdmin, isExtraCard, extraIndex);
+      }
+    });
+  };
 }
 
 function renderEvent(ev, extraEvents) {
@@ -5749,7 +6593,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_gallery_5,efed_gallery_6,efed_gallery_7,efed_gallery_8,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_event_banner,efed_events_json,efed_champions_json,efed_roster_order,efed_match_order&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_gallery_5,efed_gallery_6,efed_gallery_7,efed_gallery_8,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_event_banner,efed_events_json,efed_event_matches_json,efed_champions_json,efed_roster_order,efed_match_order&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
@@ -5912,7 +6756,7 @@ async function loadProfile() {
 
     // Upcoming event
     // Store extra events globally so renderEvent and openEventModal can use them
-    window._efedExtraEvents = Array.isArray(user.efed_events_json) ? user.efed_events_json : [];
+    window._efedExtraEvents = (Array.isArray(user.efed_events_json) ? user.efed_events_json : []).map(ev => ({ ...ev, uid: ev.uid || _evUid(), matches: Array.isArray(ev.matches) ? ev.matches : [] }));
     // Prefer Supabase match order (cross-device), fall back to localStorage
     window._efedMatchOrder = (Array.isArray(user.efed_match_order) && user.efed_match_order.length
       ? user.efed_match_order
@@ -5934,7 +6778,7 @@ async function loadProfile() {
 
     // Upcoming event — pass extra events from DB column
     const _extraEventsFromDB = window._efedExtraEvents;
-    window._efedPrimaryEvent = { title: user.efed_event_title, date: user.efed_event_date, location: user.efed_event_location, main: user.efed_event_main, hype: user.efed_event_hype, banner: user.efed_event_banner || null };
+    window._efedPrimaryEvent = { title: user.efed_event_title, date: user.efed_event_date, location: user.efed_event_location, main: user.efed_event_main, hype: user.efed_event_hype, banner: user.efed_event_banner || null, matches: Array.isArray(user.efed_event_matches_json) ? user.efed_event_matches_json : [] };
     renderEvent(window._efedPrimaryEvent, _extraEventsFromDB);
 
     // Signings toggle state

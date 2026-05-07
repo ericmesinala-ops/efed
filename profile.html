@@ -9440,168 +9440,153 @@ async function loadAppearances(targetUser, isOwn) {
 
   try {
     const rows = await sbGet('roster', `username=eq.${encodeURIComponent(targetUser)}&status=eq.approved&select=id,efed,plan_note`);
-    const now = Date.now();
-    const oneDayMs = 24 * 60 * 60 * 1000;
 
-    const bookings = [];
+    // ── NEW system: plan_note.matches array ───────────────────────────────
+    const newMatches = []; // flat list of match objects with efed context
     rows.forEach(r => {
       if (!r.plan_note) return;
       try {
-        const bk = typeof r.plan_note === 'string' ? JSON.parse(r.plan_note) : r.plan_note;
-        if (!bk) return;
-
-        // Normalise both old (opponent) and new (opponents[]) formats into a unified structure
-        const isMulti = Array.isArray(bk.opponents) && bk.opponents.length > 0;
-        const hasSingle = !isMulti && bk.opponent;
-        if (!isMulti && !hasSingle) return; // no participants — skip
-
-        // Build a flat opponents list: [{ username, name, isExternal }]
-        let opponentList = [];
-        if (isMulti) {
-          opponentList = bk.opponents.map((u, i) => ({
-            username: u,
-            name: (bk.opponentNames || [])[i] || u,
-            isExternal: u.startsWith('__ext__')
-          }));
-        } else {
-          opponentList = [{
-            username: bk.opponent,
-            name: bk.opponentName || bk.opponent,
-            isExternal: !!(bk.external || (bk.opponent && bk.opponent.startsWith('__ext__')))
-          }];
-        }
-
-        // Filter out expired matches (past by > 1 day)
-        if (bk.date && !bk.tba && bk.date !== 'TBA') {
-          const d = new Date(bk.date);
-          if (!isNaN(d) && (now - d.getTime()) > oneDayMs) return;
-        }
-
-        bookings.push({
-          id: r.id,
-          efed: r.efed,
-          opponentList,
-          slots: bk.slots || null, // vs/participant ordering for multi-man
-          show: bk.show || '',
-          matchType: bk.matchType || '',
-          date: bk.date || '',
-          tba: bk.tba || false
+        const pn = typeof r.plan_note === 'string' ? JSON.parse(r.plan_note) : r.plan_note;
+        if (!pn || !Array.isArray(pn.matches)) return;
+        pn.matches.forEach(m => {
+          if (m && m.uid && Array.isArray(m.tokens) && m.tokens.some(t=>t.type==='vs')) {
+            newMatches.push({ ...m, _efed: r.efed });
+          }
         });
       } catch(e) {}
     });
 
-    // Sort: soonest first, TBA near end, no-date last
-    bookings.sort((a, b) => {
-      const parse = bk => {
-        if (bk.tba || bk.date === 'TBA') return Infinity - 1;
-        if (!bk.date) return Infinity;
-        const d = new Date(bk.date);
-        return isNaN(d) ? Infinity : d.getTime();
-      };
-      return parse(a) - parse(b);
-    });
+    // Collect all real wrestler usernames for avatar fetch
+    const allUsernames = [...new Set(newMatches.flatMap(m => (m.tokens||[]).filter(t=>t.type==='wrestler'&&t.username).map(t=>t.username)))];
+    const avatarMap = {};
+    if (allUsernames.length) {
+      try {
+        const uRows = await sbGet('users', `username=in.(${allUsernames.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
+        uRows.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
+      } catch(e) {}
+    }
 
-    // Collect all real (non-external) usernames for bulk avatar fetch
-    const allRealOpponents = [...new Set(
-      bookings.flatMap(b => b.opponentList.map(o => o.username).filter(u => !u.startsWith('__ext__')))
-    )];
-    let avatarMap = {};
-    try {
-      const allUsers = [targetUser, ...allRealOpponents];
-      const uRows = await sbGet('users', `username=in.(${allUsers.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
-      uRows.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
-    } catch(e) {}
-
-    // Render a single participant chip (avatar + name)
-    const avChip = (username, label, isExternal, clickable) => {
-      let av;
-      if (isExternal) {
-        // External opponents get initials only, no link
-        const initials = label.split(/\s+/).map(w => w[0]?.toUpperCase()||'').slice(0,2).join('');
-        av = `<div style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.72rem;color:rgba(255,255,255,.55);flex-shrink:0;">${initials||'?'}</div>`;
-      } else {
-        const info = avatarMap[username] || {};
-        const resolvedName = info.name || label;
-        av = info.avatar
-          ? `<img loading="lazy" src="${_esc(info.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(255,255,255,.15);">`
-          : `<div style="width:28px;height:28px;border-radius:50%;background:rgba(192,0,14,.15);border:1.5px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.75rem;color:#c0000e;flex-shrink:0;">${(resolvedName||'?')[0].toUpperCase()}</div>`;
-        label = resolvedName;
-      }
-      const nameSpan = `<span style="font-size:.88rem;font-weight:600;color:#fff;">${_esc(label)}</span>`;
-      if (!isExternal && clickable) {
-        return `<div onclick="window.location.href='profile.html?u=${encodeURIComponent(username)}'" style="cursor:pointer;display:flex;align-items:center;gap:7px;">${av}${nameSpan}</div>`;
-      }
-      return `<div style="display:flex;align-items:center;gap:7px;">${av}${nameSpan}</div>`;
-    };
-
-    const vsSep = `<span style="font-size:.7rem;font-weight:700;color:rgba(255,255,255,.3);letter-spacing:1px;text-transform:uppercase;flex-shrink:0;">vs</span>`;
-
-    sec.style.display = '';
+    sec.style.display = newMatches.length ? '' : 'none';
     list.innerHTML = '';
 
-    bookings.forEach(bk => {
-      const isHidden = hidden.includes(String(bk.id));
-      if (isHidden && !isOwn) return;
-
-      const myName = avatarMap[targetUser]?.name || targetUser;
-      const dateTxt = (bk.tba || bk.date === 'TBA') ? 'TBA' : (bk.date || '');
-
-      // Build participant row using bk.slots (respects VS placement) — matches efed calendar logic exactly
-      let participantHtml = '';
-      if (Array.isArray(bk.slots) && bk.slots.length) {
-        // slots = ['username_a', 'username_b', 'vs', 'username_c', 'username_d']
-        // VS only where explicitly placed — consecutive usernames = same team (no separator)
-        const slotNameMap = {};
-        slotNameMap[targetUser] = myName;
-        bk.opponentList.forEach(o => { slotNameMap[o.username] = o.name; });
-        bk.slots.forEach(s => {
-          if (s === 'vs') {
-            participantHtml += vsSep;
-          } else {
-            const isMe = s === targetUser;
-            const opp = bk.opponentList.find(o => o.username === s);
-            const label = slotNameMap[s] || s;
-            const isExt = typeof s === 'string' && s.startsWith('__ext__');
-            participantHtml += avChip(s, label, isExt || (!isMe && !opp), !isMe);
-          }
-        });
-        // Safety: if the profile user wasn't in slots at all, prepend them
-        if (!bk.slots.includes(targetUser)) {
-          participantHtml = avChip(targetUser, myName, false, false) + (participantHtml ? vsSep + participantHtml : '');
-        }
-      } else {
-        // Fallback: no slots — VS between every participant
-        participantHtml = avChip(targetUser, myName, false, false);
-        bk.opponentList.forEach(opp => {
-          participantHtml += vsSep + avChip(opp.username, opp.name, opp.isExternal, true);
-        });
-      }
-
+    newMatches.forEach(match => {
       const card = document.createElement('div');
-      card.style.cssText = `position:relative;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:14px 16px;transition:opacity .2s;${isHidden ? 'opacity:.3;' : ''}`;
+      card.style.cssText = 'border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:#0d0d12;margin-bottom:10px;';
 
-      card.innerHTML = `
-        <div style="font-size:.68rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:10px;cursor:pointer;" onclick="window.location.href='efed.html?e=${encodeURIComponent(bk.efed||'')}';">${_esc(bk.efed || '')}</div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">${participantHtml}</div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          ${bk.show ? `<span style="font-size:.72rem;color:rgba(255,255,255,.45);">📺 ${_esc(bk.show)}</span>` : ''}
-          ${bk.matchType ? `<span style="font-size:.72rem;color:rgba(255,255,255,.4);">🔔 ${_esc(bk.matchType)}</span>` : ''}
-          ${dateTxt ? `<span style="font-size:.72rem;color:rgba(255,255,255,.35);">📅 ${_esc(dateTxt)}</span>` : ''}
-        </div>`;
+      // Top bar
+      const topBar = document.createElement('div');
+      topBar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#07070a;border-bottom:1px solid rgba(255,255,255,.06);gap:8px;cursor:pointer;';
+      topBar.onclick = () => { if (match._efed) window.location.href='efed.html?e='+encodeURIComponent(match._efed); };
+
+      const leftM = document.createElement('div');
+      leftM.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;';
+      const efedSpan = document.createElement('span');
+      efedSpan.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.65rem;letter-spacing:3px;color:#c8a84b;white-space:nowrap;";
+      efedSpan.textContent = match._efed || '';
+      leftM.appendChild(efedSpan);
+      if (match.eventTitle) {
+        const dot = document.createElement('span');
+        dot.style.cssText = 'color:rgba(255,255,255,.15);font-size:.6rem;';
+        dot.textContent = '·';
+        leftM.appendChild(dot);
+        const evSpan = document.createElement('span');
+        evSpan.style.cssText = "font-size:.65rem;color:rgba(255,255,255,.38);font-family:'DM Sans',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+        evSpan.textContent = match.eventTitle;
+        leftM.appendChild(evSpan);
+      }
+      topBar.appendChild(leftM);
+      if (match.matchType) {
+        const mt = document.createElement('span');
+        mt.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;white-space:nowrap;flex-shrink:0;";
+        mt.textContent = match.matchType;
+        topBar.appendChild(mt);
+      }
+      card.appendChild(topBar);
+
+      // Participant row
+      const partRow = document.createElement('div');
+      partRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 16px;flex-wrap:wrap;';
+      (match.tokens||[]).forEach(tok => {
+        if (tok.type === 'vs') {
+          const vs = document.createElement('span');
+          vs.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:3px;color:rgba(192,0,14,.7);flex-shrink:0;";
+          vs.textContent = 'VS';
+          partRow.appendChild(vs);
+        } else if (tok.type === 'ally') {
+          const amp = document.createElement('span');
+          amp.style.cssText = 'font-size:.75rem;color:rgba(255,255,255,.25);flex-shrink:0;';
+          amp.textContent = '&';
+          partRow.appendChild(amp);
+        } else if (tok.type === 'wrestler' || tok.type === 'unknown') {
+          const isUnknown = tok.type === 'unknown';
+          const info = avatarMap[tok.username] || {};
+          const label = isUnknown ? '???' : (info.name || tok.display_name || tok.username || '');
+          const avatarUrl = isUnknown ? null : (info.avatar || tok.avatar_url || null);
+          const chip = document.createElement('div');
+          chip.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;';
+          if (!isUnknown && tok.username && !tok.username.startsWith('__ghost__')) {
+            chip.onclick = () => window.location.href='profile.html?u='+encodeURIComponent(tok.username);
+          }
+          const avEl = document.createElement('div');
+          if (avatarUrl) {
+            avEl.innerHTML = `<img src="${avatarUrl}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.15);">`;
+          } else if (isUnknown) {
+            avEl.style.cssText = 'width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.05);border:2px dashed rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:1.1rem;';
+            avEl.textContent = '?';
+          } else {
+            const init = label.split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+            avEl.style.cssText = 'width:44px;height:44px;border-radius:50%;background:rgba(192,0,14,.15);border:2px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:\'Bebas Neue\',sans-serif;font-size:.9rem;color:#c0000e;';
+            avEl.textContent = init || '?';
+          }
+          chip.appendChild(avEl);
+          const nameEl = document.createElement('div');
+          nameEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.75rem;letter-spacing:1.5px;color:#fff;text-align:center;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+          nameEl.textContent = label.toUpperCase();
+          chip.appendChild(nameEl);
+          partRow.appendChild(chip);
+        }
+      });
+      card.appendChild(partRow);
+
+      // Bottom strip — stip + champ + promo
+      const hasStip = !!match.stipulation;
+      const hasChamp = !!(match.champ?.beltName);
+      const hasPromo = !!(match.promoUrl);
+      if (hasStip || hasChamp || hasPromo) {
+        const btm = document.createElement('div');
+        btm.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 14px;border-top:1px solid rgba(255,255,255,.05);flex-wrap:wrap;';
+        if (hasStip) {
+          const st = document.createElement('span');
+          st.style.cssText = "font-size:.65rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.35);font-style:italic;";
+          st.textContent = match.stipulation;
+          btm.appendChild(st);
+        }
+        if (hasChamp) {
+          const cp = document.createElement('div');
+          cp.style.cssText = 'display:flex;align-items:center;gap:6px;';
+          cp.innerHTML = match.champ.beltImageUrl
+            ? `<img src="${match.champ.beltImageUrl}" style="height:22px;max-width:36px;object-fit:contain;"><span style="font-size:.62rem;color:rgba(200,168,75,.8);font-family:'DM Sans',sans-serif;font-weight:700;">${_esc(match.champ.beltName)}</span>`
+            : `<span style="font-size:.7rem;">🏆</span><span style="font-size:.62rem;color:rgba(200,168,75,.8);font-family:'DM Sans',sans-serif;font-weight:700;">${_esc(match.champ.beltName)}</span>`;
+          btm.appendChild(cp);
+        }
+        if (hasPromo) {
+          const pl = document.createElement('a');
+          pl.href = match.promoUrl; pl.target = '_blank'; pl.rel = 'noopener noreferrer';
+          pl.style.cssText = "font-size:.65rem;color:rgba(192,0,14,.7);font-family:'DM Sans',sans-serif;font-weight:700;text-decoration:none;";
+          pl.textContent = '▶ Notable Promo';
+          btm.appendChild(pl);
+        }
+        card.appendChild(btm);
+      }
 
       if (isOwn) {
         const hideBtn = document.createElement('button');
         hideBtn.style.cssText = 'position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:.95rem;padding:2px 4px;opacity:.3;transition:opacity .15s;line-height:1;';
-        hideBtn.textContent = isHidden ? '👁️' : '🙈';
-        hideBtn.title = isHidden ? 'Show on profile' : 'Hide from profile';
-        hideBtn.onmouseover = () => hideBtn.style.opacity = '.7';
-        hideBtn.onmouseout = () => hideBtn.style.opacity = '.3';
-        hideBtn.onclick = () => {
-          const idx = hidden.indexOf(String(bk.id));
-          if (idx > -1) { hidden.splice(idx, 1); card.style.opacity = '1'; hideBtn.textContent = '🙈'; }
-          else { hidden.push(String(bk.id)); card.style.opacity = '.3'; hideBtn.textContent = '👁️'; }
-          localStorage.setItem(_hiddenKey, JSON.stringify(hidden));
-        };
+        hideBtn.textContent = '🙈';
+        hideBtn.title = 'Hide from profile';
+        hideBtn.onmouseover = () => hideBtn.style.opacity='.7';
+        hideBtn.onmouseout = () => hideBtn.style.opacity='.3';
+        card.style.position = 'relative';
         card.appendChild(hideBtn);
       }
 
