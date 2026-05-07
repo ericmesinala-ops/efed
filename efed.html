@@ -2959,12 +2959,7 @@ window._efedRules = (function(){
         <div style="display:flex;flex-direction:column;gap:14px;">
           <div>
             <div style="font-size:.5rem;letter-spacing:2px;text-transform:uppercase;color:#5a5a7a;font-weight:700;margin-bottom:7px;">Match Type</div>
-            <div id="bk-match-type-display" style="width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;box-sizing:border-box;letter-spacing:.5px;min-height:40px;display:flex;align-items:center;gap:8px;">
-              <span id="bk-match-type-icon" style="font-size:1rem;flex-shrink:0;"></span>
-              <span id="bk-match-type-label" style="flex:1;">—</span>
-            </div>
-            <!-- hidden input keeps the value for all existing code that reads bk-match-type -->
-            <input id="bk-match-type" type="hidden" value="">
+            <input id="bk-match-type" type="text" maxlength="60" placeholder="e.g. Singles, Tag Team, Triple Threat…" oninput="bkSyncPreview()" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;">
           </div>
         </div>
         <div id="bk-save-err" style="font-size:.68rem;color:#ff6b6b;min-height:16px;margin-top:12px;"></div>
@@ -5125,6 +5120,63 @@ async function _saveMatch(match, ev, isExtraCard, extraIndex) {
   _showMatchcardMigrationNotice();
 }
 
+
+// ── Auto-detect match type from token chain ─────────────────────────────────
+function _detectMatchType(tokens, matchFormat) {
+  if (!tokens || !tokens.length) return '';
+  const hasVs = tokens.some(t => t.type === 'vs');
+  const wrestlers = tokens.filter(t => t.type === 'wrestler' || t.type === 'unknown');
+
+  // FFA format: Battle Royal / Rumble / Gauntlet
+  if (matchFormat === 'ffa') {
+    const n = wrestlers.length;
+    if (n === 10) return 'Battle Royal (10-Man)';
+    if (n === 20) return 'Battle Royal (20-Man)';
+    if (n === 30) return 'Royal Rumble (30-Man)';
+    if (n > 0) return 'Gauntlet Match';
+    return '';
+  }
+
+  // Standard with no VS = Promo (1 wrestler, or multiple on the same side via &)
+  if (!hasVs) return wrestlers.length >= 1 ? 'Promo' : '';
+
+  // Split token chain by VS into sides, counting wrestlers per side
+  const sides = [[]];
+  for (const tok of tokens) {
+    if (tok.type === 'vs') sides.push([]);
+    else if (tok.type === 'wrestler' || tok.type === 'unknown') sides[sides.length - 1].push(tok);
+  }
+
+  const sideCount = sides.length;
+  const counts = sides.map(s => s.length);
+  const maxC = Math.max(...counts), minC = Math.min(...counts);
+  const allEqual = counts.every(c => c === counts[0]);
+  const perSide = counts[0];
+
+  if (sideCount === 2) {
+    if (minC !== maxC) return 'Handicap Match';
+    if (perSide === 1) return 'Singles Match';
+    if (perSide === 2) return 'Tag Team Match';
+    if (perSide === 3) return '6-Man Tag Match';
+    if (perSide === 4) return '8-Man Tag Match';
+    if (perSide === 5) return '10-Man Tag Match';
+    return `${perSide * 2}-Man Tag Match`;
+  }
+  if (sideCount === 3) {
+    if (allEqual && perSide === 1) return 'Triple Threat';
+    if (allEqual && perSide === 2) return 'Triple Threat Tag Match';
+    return 'Triple Threat';
+  }
+  if (sideCount === 4) {
+    if (allEqual && perSide === 1) return 'Fatal 4-Way';
+    return 'Fatal 4-Way';
+  }
+  if (sideCount === 5 && allEqual && perSide === 1) return '5-Way Match';
+  if (sideCount === 6 && allEqual && perSide === 1) return '6-Man Match';
+  if (sideCount >= 5) return `${sideCount}-Way Match`;
+  return '';
+}
+
 // ── Edit match details (non-wrestler fields only) ────────────────────────────
 function _openEditMatchDetailsModal(match, ev, isExtraCard, extraIndex, onSave) {
   const bg = document.createElement('div');
@@ -5141,8 +5193,8 @@ function _openEditMatchDetailsModal(match, ev, isExtraCard, extraIndex, onSave) 
     </div>
     <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
       <div>
-        <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Match Type</div>
-        <input id="_emd_type" class="_am-input" placeholder="e.g. Singles Match, Street Fight…" value="${(match.matchType||'').replace(/"/g,'&quot;')}" style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:10px 13px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;">
+        <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Match Type <span style="color:rgba(200,168,75,.4);font-weight:400;text-transform:none;font-size:.58rem;letter-spacing:.5px;">(auto-detected)</span></div>
+        <div style="display:flex;align-items:center;padding:9px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(200,168,75,.2);border-radius:9px;min-height:38px;width:100%;box-sizing:border-box;"><span style="font-family:'DM Sans',sans-serif;font-size:.8rem;color:#c8a84b;font-weight:700;">${_detectMatchType(match.tokens||[], match.matchFormat||'standard') || 'Unknown'}</span></div>
       </div>
       <div>
         <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Stipulation <span style="color:rgba(255,255,255,.18);font-weight:400;">(optional)</span></div>
@@ -5199,7 +5251,7 @@ function _openEditMatchDetailsModal(match, ev, isExtraCard, extraIndex, onSave) 
   }
 
   box.querySelector('#_emd_save').onclick = async () => {
-    match.matchType = box.querySelector('#_emd_type').value.trim();
+    match.matchType = _detectMatchType(match.tokens||[], match.matchFormat||'standard');
     match.stipulation = box.querySelector('#_emd_stip').value.trim();
     match.promoUrl = box.querySelector('#_emd_promo').value.trim();
     match.champ = selectedChamp;
@@ -5252,7 +5304,8 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
   const canAddAlly = () => !isFFA() && (lastType()==='wrestler' || lastType()==='unknown');
   const canAddVs = () => !isFFA() && (lastType()==='wrestler' || lastType()==='unknown');
   const canAddUnknown = () => isFFA() ? (lastType()==='wrestler'||lastType()==='unknown'||!tokens.length) : (lastType()==='vs'||lastType()==='ally'||!tokens.length);
-  const canSave = () => isFFA() ? tokens.length >= 2 && (lastType()==='wrestler'||lastType()==='unknown') : (lastType()==='wrestler'||lastType()==='unknown') && (tokens.length === 1 || hasVs());
+  // FFA: need 2+ and last must be wrestler. Standard: last must be wrestler (promo = no VS, match = has VS — both valid saves)
+  const canSave = () => isFFA() ? tokens.length >= 2 && (lastType()==='wrestler'||lastType()==='unknown') : (lastType()==='wrestler'||lastType()==='unknown');
 
   let selectedChamp = null;
   let activeSubPanel = null; // 'roster' | 'champ' | null
@@ -5378,9 +5431,9 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
   div1.style.cssText = 'height:1px;background:rgba(255,255,255,.06);';
   body.appendChild(div1);
 
-  // Match type input
+  // Match type auto-detect badge
   const mtWrap = document.createElement('div');
-  mtWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Match Type</div><input class="_am-input" id="_am_matchtype" placeholder="e.g. Singles Match, Street Fight, Ladder Match…">`;
+  mtWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Match Type <span style="color:rgba(200,168,75,.4);font-weight:400;text-transform:none;font-size:.58rem;letter-spacing:.5px;">(auto-detected)</span></div><div id="_am_matchtype_badge" style="display:flex;align-items:center;gap:8px;padding:9px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:9px;min-height:38px;width:100%;box-sizing:border-box;"><span id="_am_matchtype_label" style="font-family:'DM Sans',sans-serif;font-size:.8rem;color:rgba(255,255,255,.22);font-style:italic;">Add wrestlers to detect…</span></div>`;
   body.appendChild(mtWrap);
 
   // Stipulation input
@@ -5625,7 +5678,22 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
       return;
     }
     const acronym = document.getElementById('stat-acronym')?.textContent?.trim()||'';
-    const matchType = document.getElementById('_am_matchtype')?.value?.trim()||'';
+    const matchType = _detectMatchType(tokens, matchFormat);
+    // Sync badge label
+    const _mtLabel = document.getElementById('_am_matchtype_label');
+    if (_mtLabel) {
+      if (matchType) {
+        _mtLabel.textContent = matchType;
+        _mtLabel.style.color = '#c8a84b';
+        _mtLabel.style.fontStyle = 'normal';
+        _mtLabel.style.fontWeight = '700';
+      } else {
+        _mtLabel.textContent = 'Add wrestlers to detect…';
+        _mtLabel.style.color = 'rgba(255,255,255,.22)';
+        _mtLabel.style.fontStyle = 'italic';
+        _mtLabel.style.fontWeight = '400';
+      }
+    }
     const stip = document.getElementById('_am_stip')?.value?.trim()||'';
     const fakeMatch = { tokens, matchType, stipulation:stip, champ:selectedChamp, eventTitle: ev.title||'' };
     const avatarMap = {};
@@ -5669,7 +5737,7 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
         tokenHint.textContent = 'Add the next wrestler on this side.';
       } else if (lt==='wrestler'||lt==='unknown') {
         tokenHint.textContent = !hasVs()
-          ? 'Hit VS to face an opponent — or & to add a tag partner first.'
+          ? 'Hit VS to face an opponent, & to add a promo partner — or save now as a Promo.'
           : 'Hit VS for another opponent, & to add a partner, or save when done.';
       } else {
         tokenHint.textContent = '';
@@ -5685,7 +5753,6 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
   updateAll();
 
   // Live banner update on typing
-  document.getElementById('_am_matchtype')?.addEventListener('input', updateBanner);
   document.getElementById('_am_stip')?.addEventListener('input', updateBanner);
 
   // ── Save ──────────────────────────────────────────────────────────────────
@@ -5696,7 +5763,7 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
       uid: 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2,5),
       tokens,
       matchFormat,
-      matchType: document.getElementById('_am_matchtype')?.value?.trim()||'',
+      matchType: _detectMatchType(tokens, matchFormat),
       stipulation: document.getElementById('_am_stip')?.value?.trim()||'',
       champ: selectedChamp,
       promoUrl: document.getElementById('_am_promo')?.value?.trim()||'',
@@ -8289,96 +8356,8 @@ function bkGoStep(n) {
   const panel = document.getElementById('book-inline-panel');
   if (panel) setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   _bkTab.step = n;
-  if (n === 3) { bkSyncStepPreview('step3'); bkApplyAutoMatchType(); }
+  if (n === 3) bkSyncStepPreview('step3');
   if (n === 4) { bkSyncStepPreview('step4'); bkRenderChampGrid(); }
-  bkSyncPreview();
-}
-
-// ── Auto-detect Match Type from slot structure ────────────────────────────
-function bkDetectMatchType() {
-  const slots = _bkTab.slots;
-
-  // Battle royale overrides everything
-  if (_bkTab.isBattleRoyale && _bkTab.battleRoyaleSize) {
-    const size = _bkTab.battleRoyaleSize;
-    let label, icon;
-    if (size >= 30)      { label = '30-Man Royal Rumble'; icon = '🏆'; }
-    else if (size >= 20) { label = '20-Man Battle Royal'; icon = '🏟️'; }
-    else                 { label = '10-Man Battle Royal'; icon = '🏟️'; }
-    return { label, icon };
-  }
-
-  // No 'vs' at all = promo segment (solo or group, no match)
-  const hasVs = slots.some(s => s.type === 'vs');
-  if (!hasVs) return { label: 'Promo', icon: '🎤' };
-
-  // Parse slots into sides (split on 'vs') and team sizes (split on 'amp')
-  const sides = [];
-  let currentTeam = [];
-  slots.forEach(s => {
-    if (s.type === 'wrestler') {
-      currentTeam.push(s);
-    } else if (s.type === 'vs') {
-      if (currentTeam.length) sides.push(currentTeam);
-      currentTeam = [];
-    } else if (s.type === 'amp') {
-      // same team, just keep going
-    }
-  });
-  if (currentTeam.length) sides.push(currentTeam);
-
-  const numSides  = sides.length;
-  const teamSizes = sides.map(t => t.length);
-  const totalWrestlers = teamSizes.reduce((a,b)=>a+b, 0);
-  const allSolo = teamSizes.every(n => n === 1);
-  const allSameSize = teamSizes.every(n => n === teamSizes[0]);
-  const maxTeamSize = Math.max(...teamSizes);
-
-  // FFA (all solo, 2+ sides)
-  if (allSolo) {
-    if (numSides === 2) return { label: 'Singles Match',    icon: '🥊' };
-    if (numSides === 3) return { label: 'Triple Threat',    icon: '⚡' };
-    if (numSides === 4) return { label: 'Fatal 4-Way',      icon: '💥' };
-    if (numSides === 5) return { label: 'Five-Way Match',   icon: '⭐' };
-    if (numSides === 6) return { label: '6-Man Match',      icon: '🔥' };
-    if (numSides >= 7)  return { label: numSides + '-Man Match', icon: '🔥' };
-  }
-
-  // Tag matches (everyone on a team)
-  if (allSameSize && maxTeamSize >= 2) {
-    if (numSides === 2 && maxTeamSize === 2) return { label: 'Tag Team Match',         icon: '🤝' };
-    if (numSides === 2 && maxTeamSize === 3) return { label: '6-Man Tag Match',        icon: '🤝' };
-    if (numSides === 2 && maxTeamSize === 4) return { label: '8-Man Tag Match',        icon: '🤝' };
-    if (numSides === 2 && maxTeamSize === 5) return { label: '10-Man Tag Match',       icon: '🤝' };
-    if (numSides === 2 && maxTeamSize >= 2)  return { label: maxTeamSize + 'v' + maxTeamSize + ' Tag Match', icon: '🤝' };
-    if (numSides === 3 && maxTeamSize === 2) return { label: 'Triple Threat Tag Match',icon: '⚡' };
-    if (numSides === 3 && maxTeamSize >= 2)  return { label: 'Triple Tag Team Match',  icon: '⚡' };
-    if (numSides >= 4  && maxTeamSize >= 2)  return { label: numSides + '-Team Tag Match', icon: '🤝' };
-  }
-
-  // Mixed FFA with teams (multi-person sides, not all same size)
-  if (numSides === 3 && maxTeamSize >= 2) return { label: 'Triple Threat Tag Match', icon: '⚡' };
-
-  // Handicap: uneven sides (2 sides, different sizes)
-  if (numSides === 2 && !allSameSize) {
-    const a = teamSizes[0], b = teamSizes[1];
-    return { label: `Handicap Match (${a}v${b})`, icon: '⚠️' };
-  }
-
-  // Gauntlet / catch-all
-  if (totalWrestlers >= 4) return { label: 'Gauntlet Match', icon: '🏟️' };
-
-  return { label: 'Match', icon: '🥊' };
-}
-
-function bkApplyAutoMatchType() {
-  const { label, icon } = bkDetectMatchType();
-  const hiddenInput = document.getElementById('bk-match-type');
-  const displayLabel = document.getElementById('bk-match-type-label');
-  const displayIcon  = document.getElementById('bk-match-type-icon');
-  if (hiddenInput) hiddenInput.value = label;
-  if (displayLabel) displayLabel.textContent = label;
-  if (displayIcon)  displayIcon.textContent  = icon;
   bkSyncPreview();
 }
 
@@ -9386,7 +9365,8 @@ function _bkHandleMaxCheck(currentCount, proceed) {
 
 function _bkSetBattleRoyale(size, popup) {
   _bkTab.isBattleRoyale = true; _bkTab.battleRoyaleSize = size;
-  bkApplyAutoMatchType();
+  const mt = document.getElementById('bk-match-type');
+  if (mt) { mt.value = size + '-Man Battle Royale'; }
   if (popup) popup.remove();
   bkSyncComposer();
 }
