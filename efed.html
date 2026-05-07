@@ -4822,23 +4822,35 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel) {
   const hasPromo = !!match.promoUrl;
   if (hasStip || hasChamp || hasPromo) {
     const btm = document.createElement('div');
-    btm.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 14px;border-top:1px solid rgba(255,255,255,.05);flex-wrap:wrap;';
+    // 3-col grid: stip left | champ center | promo right
+    btm.style.cssText = 'display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:8px 14px;border-top:1px solid rgba(255,255,255,.05);gap:8px;';
+
+    // LEFT — stipulation
+    const leftSlot = document.createElement('div');
+    leftSlot.style.cssText = 'display:flex;align-items:center;';
     if (hasStip) {
       const st = document.createElement('span');
-      st.style.cssText = "font-size:.65rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.35);font-style:italic;";
+      st.style.cssText = "font-size:.63rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);font-style:italic;";
       st.textContent = match.stipulation;
-      btm.appendChild(st);
+      leftSlot.appendChild(st);
     }
+    btm.appendChild(leftSlot);
+
+    // CENTER — championship
+    const centerSlot = document.createElement('div');
+    centerSlot.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;';
     if (hasChamp) {
-      const cp = document.createElement('div');
-      cp.style.cssText = 'display:flex;align-items:center;gap:6px;';
       if (match.champ.beltImageUrl) {
-        cp.innerHTML = `<img src="${match.champ.beltImageUrl}" style="height:24px;max-width:40px;object-fit:contain;"><span style="font-size:.62rem;color:rgba(200,168,75,.8);font-family:'DM Sans',sans-serif;font-weight:700;">${match.champ.beltName}</span>`;
+        centerSlot.innerHTML = `<img src="${match.champ.beltImageUrl}" style="height:26px;max-width:44px;object-fit:contain;"><span style="font-size:.62rem;color:rgba(200,168,75,.85);font-family:'DM Sans',sans-serif;font-weight:700;">${match.champ.beltName}</span>`;
       } else {
-        cp.innerHTML = `<span style="font-size:.7rem;">🏆</span><span style="font-size:.62rem;color:rgba(200,168,75,.8);font-family:'DM Sans',sans-serif;font-weight:700;">${match.champ.beltName}</span>`;
+        centerSlot.innerHTML = `<span style="font-size:.75rem;">🏆</span><span style="font-size:.62rem;color:rgba(200,168,75,.85);font-family:'DM Sans',sans-serif;font-weight:700;">${match.champ.beltName}</span>`;
       }
-      btm.appendChild(cp);
     }
+    btm.appendChild(centerSlot);
+
+    // RIGHT — notable promo
+    const rightSlot = document.createElement('div');
+    rightSlot.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;';
     if (hasPromo) {
       const pl = document.createElement('button');
       pl.style.cssText = "background:rgba(192,0,14,.1);border:1px solid rgba(192,0,14,.3);border-radius:7px;padding:4px 10px;font-size:.63rem;color:rgba(255,100,100,.85);font-family:'DM Sans',sans-serif;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap;";
@@ -4852,12 +4864,44 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel) {
         if (match.matchType) pills.push({t: match.matchType, bg:'rgba(255,255,255,.04)', bd:'rgba(255,255,255,.08)', c:'rgba(255,255,255,.35)'});
         if (typeof _mcOpenVideoPopup === 'function') _mcOpenVideoPopup(match.promoUrl, 'Notable Promo', pills);
       };
-      btm.appendChild(pl);
+      rightSlot.appendChild(pl);
     }
+    btm.appendChild(rightSlot);
     wrap.appendChild(btm);
   }
 
   return wrap;
+}
+
+// ── Like toggle ─────────────────────────────────────────────────────────────
+async function _mcToggleLike(matchUid, isExtraCard, extraIndex, btnEl, countEl) {
+  const session = getSession(); if (!session) return;
+  const matchesRef = isExtraCard ? (window._efedExtraEvents||[])[extraIndex] : window._efedPrimaryEvent;
+  if (!matchesRef) return;
+  const match = (matchesRef.matches||[]).find(m => m.uid === matchUid);
+  if (!match) return;
+  if (!match.likes) match.likes = { count: 0, users: [] };
+  const me = session.username.toLowerCase();
+  const liked = match.likes.users.map(u=>u.toLowerCase()).includes(me);
+  if (liked) {
+    match.likes.users = match.likes.users.filter(u=>u.toLowerCase()!==me);
+  } else {
+    match.likes.users.push(session.username);
+  }
+  match.likes.count = match.likes.users.length;
+  // Update UI immediately
+  const nowLiked = !liked;
+  btnEl.textContent = nowLiked ? '❤️' : '🤍';
+  btnEl.style.color = nowLiked ? '#ff6b6b' : 'rgba(255,255,255,.3)';
+  countEl.textContent = match.likes.count || '';
+  // Save
+  try {
+    if (isExtraCard) {
+      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:window._efedExtraEvents})});
+    } else {
+      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_matches_json:matchesRef.matches})});
+    }
+  } catch(e) {}
 }
 
 // ── Render saved matches in the expand panel ─────────────────────────────────
@@ -4902,6 +4946,26 @@ function _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, ext
       // Controls row
       const ctrl = document.createElement('div');
       ctrl.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:4px 6px 8px;';
+
+      // Like button (left side — visible to all logged-in users)
+      const likeWrap = document.createElement('div');
+      likeWrap.style.cssText = 'display:flex;align-items:center;gap:5px;';
+      const likeBtn = document.createElement('button');
+      const session = typeof getSession === 'function' ? getSession() : null;
+      const likedByMe = session && (match.likes?.users||[]).map(u=>u.toLowerCase()).includes(session.username.toLowerCase());
+      likeBtn.textContent = likedByMe ? '❤️' : '🤍';
+      likeBtn.style.cssText = 'background:none;border:none;font-size:.95rem;cursor:pointer;padding:2px;line-height:1;transition:transform .15s;';
+      likeBtn.style.color = likedByMe ? '#ff6b6b' : 'rgba(255,255,255,.3)';
+      likeBtn.title = 'Like this match';
+      likeBtn.onmouseenter = () => { likeBtn.style.transform='scale(1.2)'; };
+      likeBtn.onmouseleave = () => { likeBtn.style.transform=''; };
+      const likeCount = document.createElement('span');
+      likeCount.style.cssText = "font-size:.65rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);min-width:12px;";
+      likeCount.textContent = match.likes?.count || '';
+      likeBtn.onclick = () => _mcToggleLike(match.uid, isExtraCard, extraIndex, likeBtn, likeCount);
+      likeWrap.appendChild(likeBtn);
+      likeWrap.appendChild(likeCount);
+      ctrl.appendChild(likeWrap);
 
       const editHint = document.createElement('span');
       editHint.style.cssText = "font-size:.58rem;color:rgba(255,255,255,.18);font-family:'DM Sans',sans-serif;font-style:italic;";
