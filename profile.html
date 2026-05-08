@@ -12440,31 +12440,72 @@ async function loadProfile() {
   const inviteCount = 0; // invites removed
   const allInviteBonus = 0;
 
-  // ── POINTS & CREDITS — read from DB ──
-  const dbPoints     = user.points  ?? 0;
-  const dbCredits    = user.credits ?? 0;
+  // ── POINTS & CREDITS — compute live from real data ──
   const dbHrsWatched = parseFloat(user.hours_watched) || 0;
   const trophyCount  = Array.isArray(user?.championships) ? user.championships.filter(c => c.verified).length : 0;
-  document.getElementById('stat-points').textContent  = dbPoints;
-  document.getElementById('stat-credits').textContent = dbCredits;
-  document.getElementById('pts-logins').value           = 0; // wired via daily login trigger
-  document.getElementById('pts-supports').value         = supportsData.length;
-  document.getElementById('pts-booked').value           = 0; // wired via booking trigger
-  document.getElementById('pts-trophies').value         = trophyCount;
-  document.getElementById('pts-profile-complete').value = 0;
-  document.getElementById('crd-watch-hours').value      = dbHrsWatched.toFixed(2);
-  // subs where video_owner = self or unset
+
+  // Profile completion: avatar + bio + at least 1 social link
+  const _hasSocial = !!(user.ig_handle || user.x_handle || user.twitch_channel || user.reddit_handle || user.discord_handle || user.spotify_handle || user.facebook_handle);
+  const _profComplete = (user.avatar_url && user.bio && _hasSocial) ? 1 : 0;
+
+  // Booked in a show — count plan_note matches across all roster rows (own profile only)
+  let _bookedCount = 0;
+  if (_isOwnProfile) {
+    try {
+      const _rosterPlanRows = await sbGet('roster', `username=eq.${encodeURIComponent(resolvedUser)}&status=eq.approved&select=plan_note`).catch(() => []);
+      _bookedCount = _rosterPlanRows.reduce((sum, r) => {
+        try {
+          const pn = typeof r.plan_note === 'string' ? JSON.parse(r.plan_note) : (r.plan_note || {});
+          return sum + (Array.isArray(pn.matches) ? pn.matches.length : 0);
+        } catch(e) { return sum; }
+      }, 0);
+    } catch(e) {}
+  }
+
+  // Owner fields for scoring
+  const _isOwner = (user.is_efed_owner || user.role === 'owner') ? 1 : 0;
+  document.getElementById('is-efed-owner').value = _isOwner;
+
+  // Owned subs split
   const _ownedSubsCount = subsData.filter(s => !s.video_owner || s.video_owner === resolvedUser).length;
+
+  // Set all hidden fields
+  document.getElementById('pts-logins').value           = 0; // requires server-side login tracking
+  document.getElementById('pts-supports').value         = supportsData.length;
+  document.getElementById('pts-booked').value           = _bookedCount;
+  document.getElementById('pts-trophies').value         = trophyCount;
+  document.getElementById('pts-profile-complete').value = _profComplete;
+  document.getElementById('crd-watch-hours').value      = dbHrsWatched.toFixed(2);
   document.getElementById('crd-owned-subs').value       = _ownedSubsCount;
   document.getElementById('crd-submitted').value        = subsData.length;
   document.getElementById('crd-rated').value            = ratingsData.length;
-  document.getElementById('crd-tagged').value           = 0;
-  document.getElementById('crd-part-of-show').value     = 0;
-  document.getElementById('crd-profile-complete').value = 0;
+  document.getElementById('crd-tagged').value           = 0; // requires tags table column
+  document.getElementById('crd-part-of-show').value     = 0; // requires submissions tagging
+  document.getElementById('crd-profile-complete').value = _profComplete;
+
+  // Compute totals
+  const _calcPoints = () => {
+    const sup      = supportsData.length;
+    const booked   = _bookedCount;
+    const troph    = trophyCount;
+    return (sup * 2) + (booked * 4) + (troph * 12) + (_profComplete * 20);
+  };
+  const _calcCredits = () => {
+    const unownedSubs = Math.max(0, subsData.length - _ownedSubsCount);
+    return Math.floor(dbHrsWatched) * 2 + unownedSubs * 6 + _ownedSubsCount * 6 + ratingsData.length * 6 + (_profComplete * 20);
+  };
+
+  const _livePoints  = _calcPoints();
+  const _liveCredits = _calcCredits();
+  document.getElementById('stat-points').textContent  = _livePoints;
+  document.getElementById('stat-credits').textContent = _liveCredits;
+
+  // Write back to DB if viewing own profile and values differ from stored
+  if (_isOwnProfile && (user.points !== _livePoints || user.credits !== _liveCredits)) {
+    sbPatch('users', `username=eq.${encodeURIComponent(resolvedUser)}`, { points: _livePoints, credits: _liveCredits }).catch(() => {});
+  }
 
   // ── OWNER FLAG + STATS ──
-  const _isOwner = (user.is_efed_owner || user.role === 'owner') ? 1 : 0;
-  document.getElementById('is-efed-owner').value = _isOwner;
   if (_isOwner && user.promo_name) {
     try {
       const [_vaultRow, _rosterRows, _supportRows, _trophyRows] = await Promise.allSettled([
@@ -12484,7 +12525,31 @@ async function loadProfile() {
       document.getElementById('pts-owner-roster-20').value     = _rosterMembers.length >= 20 ? 1 : 0;
       document.getElementById('pts-owner-supports-10').value   = _supCount >= 10 ? 1 : 0;
       document.getElementById('crd-owner-trophies-sent').value = _trCount;
+      // eFed fully set up: has logo + at least 1 roster member + at least 1 championship in vault
+      const _efedSetup = (user.promo_logo && _rosterMembers.length >= 1 && _vaultItems.length >= 1) ? 1 : 0;
+      document.getElementById('pts-owner-efed-setup').value = _efedSetup;
+      // Matches booked count — sum all matches across primary + extra events
+      try {
+        const _mbRows = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=efed_event_matches_json,efed_events_json`).catch(()=>[]);
+        const _mbRow = _mbRows[0] || {};
+        const _primMatches = Array.isArray(_mbRow.efed_event_matches_json) ? _mbRow.efed_event_matches_json.length : 0;
+        const _extraMatches = Array.isArray(_mbRow.efed_events_json) ? _mbRow.efed_events_json.reduce((s,ev)=>s+(Array.isArray(ev.matches)?ev.matches.length:0),0) : 0;
+        document.getElementById('crd-owner-matches-booked').value = _primMatches + _extraMatches;
+      } catch(e) {}
     } catch(e) {}
+    // Recalculate after owner data loaded and write to DB
+    const _ownerChamps    = parseInt(document.getElementById('pts-owner-championships').value) || 0;
+    const _ownerSetup     = parseInt(document.getElementById('pts-owner-efed-setup').value)    || 0;
+    const _ownerRoster20  = parseInt(document.getElementById('pts-owner-roster-20').value)     || 0;
+    const _ownerSupp10    = parseInt(document.getElementById('pts-owner-supports-10').value)   || 0;
+    const _ownerTrSent    = parseInt(document.getElementById('crd-owner-trophies-sent').value) || 0;
+    const _ownerMatchesBk = parseInt(document.getElementById('crd-owner-matches-booked').value)|| 0;
+    const _finalPoints  = _livePoints
+      + (_ownerChamps * 15) + (_ownerSetup * 20) + (_ownerRoster20 * 10) + (_ownerSupp10 * 15);
+    const _finalCredits = _liveCredits + (_ownerTrSent * 5) + (_ownerMatchesBk * 2);
+    document.getElementById('stat-points').textContent  = _finalPoints;
+    document.getElementById('stat-credits').textContent = _finalCredits;
+    sbPatch('users', `username=eq.${encodeURIComponent(resolvedUser)}`, { points: _finalPoints, credits: _finalCredits }).catch(() => {});
   }
 
   // Total watch hours — read from DB
