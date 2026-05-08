@@ -9531,6 +9531,46 @@ async function _profileToggleWatchlist(match, btnEl) {
   } catch(e) { console.error('Watchlist toggle:', e); }
 }
 
+
+// ── Compute match type live from tokens (ignores stale stored value) ──────────
+function _computeMT(match) {
+  const tokens = match.tokens || [];
+  const fmt = match.matchFormat || 'standard';
+  const hasVs = tokens.some(t => t.type === 'vs');
+  const wrestlers = tokens.filter(t => t.type === 'wrestler' || t.type === 'unknown');
+  if (fmt === 'ffa') {
+    const n = wrestlers.length;
+    if (n === 10) return 'Battle Royal (10-Man)';
+    if (n === 20) return 'Battle Royal (20-Man)';
+    if (n === 30) return 'Royal Rumble (30-Man)';
+    if (n > 0)   return 'Gauntlet Match';
+    return match.matchType || '';
+  }
+  if (!hasVs) return wrestlers.length >= 1 ? 'Promo' : (match.matchType || '');
+  const sides = [[]];
+  for (const tok of tokens) {
+    if (tok.type === 'vs') sides.push([]);
+    else if (tok.type === 'wrestler' || tok.type === 'unknown') sides[sides.length-1].push(tok);
+  }
+  const sc = sides.length, counts = sides.map(s => s.length);
+  const maxC = Math.max(...counts), minC = Math.min(...counts);
+  const allEq = counts.every(c => c === counts[0]), ps = counts[0];
+  if (sc === 2) {
+    if (minC !== maxC)  return 'Handicap Match';
+    if (ps === 1)       return 'Singles Match';
+    if (ps === 2)       return 'Tag Team Match';
+    if (ps === 3)       return '6-Man Tag Match';
+    if (ps === 4)       return '8-Man Tag Match';
+    if (ps === 5)       return '10-Man Tag Match';
+    return `${ps * 2}-Man Tag Match`;
+  }
+  if (sc === 3) return (allEq && ps === 2) ? 'Triple Threat Tag Match' : 'Triple Threat';
+  if (sc === 4) return 'Fatal 4-Way';
+  if (sc === 6 && allEq && ps === 1) return '6-Man Match';
+  if (sc >= 5)  return `${sc}-Way Match`;
+  return match.matchType || '';
+}
+
 async function loadAppearances(targetUser, isOwn) {
   const sec = document.getElementById('appearances-section');
   const list = document.getElementById('appearances-list');
@@ -9653,7 +9693,7 @@ async function loadAppearances(targetUser, isOwn) {
       if (match.stipulation) { const st=document.createElement('span'); st.style.cssText="font-family:'DM Sans',sans-serif;font-size:.58rem;color:rgba(255,255,255,.35);font-style:italic;white-space:nowrap;"; st.textContent=match.stipulation; centM.appendChild(st); }
       topBar.appendChild(centM);
       const rightM=document.createElement('div'); rightM.style.cssText='display:flex;align-items:center;justify-content:flex-end;';
-      if (match.matchType) { const mt=document.createElement('span'); mt.style.cssText="font-size:.6rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;white-space:nowrap;"; mt.textContent=match.matchType; rightM.appendChild(mt); }
+      const _lmt = _computeMT(match); if (_lmt) { const mt=document.createElement('span'); mt.style.cssText="font-size:.6rem;color:rgba(255,255,255,.28);font-family:'DM Sans',sans-serif;white-space:nowrap;"; mt.textContent=_lmt; rightM.appendChild(mt); }
       if (isOwn) {
         const _eyeSvgOpen  = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
         const _eyeSvgShut  = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
