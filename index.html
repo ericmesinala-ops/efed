@@ -7867,7 +7867,9 @@ window.addEventListener('popstate', function(e) {
         headers: SB_HEADERS
       }).then(r => r.ok ? r.json() : []).catch(() => []);
       if (Array.isArray(rows) && rows.length > 0) {
-        _hubTotalSecs = Number(rows[0]?.total_seconds) || 0;
+        // Use nullish coalescing — DB value of 0 is still valid
+        const dbVal = rows[0]?.total_seconds;
+        _hubTotalSecs = (dbVal != null && !isNaN(Number(dbVal))) ? Number(dbVal) : _hubTotalSecs;
       }
       _hubDbLoaded = true;
     } catch(e) {}
@@ -7878,37 +7880,39 @@ window.addEventListener('popstate', function(e) {
   async function _tick() {
     if (!_hubWatching || !_hubCurrentUrl || document.visibilityState === 'hidden') return;
     try {
-      // 1. Increment on server (upsert pattern via RPC)
-      const rpcRes = await fetch(SUPABASE_URL + '/rest/v1/rpc/increment_video_hub_seconds', {
+      // 1. Increment on server
+      await fetch(SUPABASE_URL + '/rest/v1/rpc/increment_video_hub_seconds', {
         method: 'POST',
         headers: { ...SB_HEADERS, 'Content-Type': 'application/json' },
         body: JSON.stringify({ vid_url: _hubCurrentUrl, inc: HUB_TICK_SECS })
       }).catch(() => null);
 
-      // 2. Re-read collective total so display reflects ALL viewers combined
+      // 2. Re-read collective total — use nullish check so 0 is valid
       const encoded = encodeURIComponent(_hubCurrentUrl);
       const fresh = await fetch(SUPABASE_URL + '/rest/v1/hub_video_stats?video_url=eq.' + encoded + '&select=total_seconds', {
         headers: SB_HEADERS
       }).then(r => r.ok ? r.json() : null).catch(() => null);
 
       if (fresh && Array.isArray(fresh) && fresh.length > 0) {
-        // Use server total (collective across all watchers)
-        _hubTotalSecs = Number(fresh[0]?.total_seconds) || _hubTotalSecs + HUB_TICK_SECS;
+        const dbVal = fresh[0]?.total_seconds;
+        if (dbVal != null && !isNaN(Number(dbVal))) {
+          _hubTotalSecs = Number(dbVal); // always trust server collective total
+        } else {
+          _hubTotalSecs += HUB_TICK_SECS;
+        }
       } else {
-        // RPC/table not yet set up — accumulate locally as fallback
         _hubTotalSecs += HUB_TICK_SECS;
       }
       _hubDbLoaded = true;
       _render();
     } catch(e) {
-      // Fallback: still increment locally so display works offline
       _hubTotalSecs += HUB_TICK_SECS;
       _render();
     }
   }
 
   // ── Public: called by openExpand ──
-  window.hubStartWatching = function(url) {
+  window.hubStartWatching = async function(url) {
     if (_hubWatching && _hubCurrentUrl === url) return;
     _hubStopWatching(); // clean up previous if any
     _hubWatching   = true;
@@ -7921,9 +7925,9 @@ window.addEventListener('popstate', function(e) {
     const wrap = document.getElementById('hub-video-stats');
     if (wrap) wrap.style.display = 'none';
 
-    // Load stats + start timers
-    _loadStats(url);
-    _tick();
+    // Load DB total FIRST, wait for it, THEN start ticking
+    // This prevents the first tick from using _hubTotalSecs=0 as a base
+    await _loadStats(url);
     _hubTickTimer = setInterval(_tick, HUB_TICK_SECS * 1000);
   };
 
