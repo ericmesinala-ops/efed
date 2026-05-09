@@ -3561,7 +3561,7 @@ function buildRosterRow(r, idx) {
       + '<input type="checkbox" class="rr-cb"' + (m.downloaded?' checked':'') + ' onchange="setRosterMgmt(\''+r.id+'\',\'downloaded\',this.checked)">'
     + '</div>'
     + '<div class="rr-name-cell">' + _esc(r.name)
-      + '<button class="rr-del-btn" onclick="event.stopPropagation();deleteRosterRow('+idx+')" title="Remove">×</button>'
+      + '<button class="rr-del-btn" onclick="event.stopPropagation();deleteRosterRow(\''+r.id+'\')" title="Remove">×</button>'
     + '</div>'
     + (r.championship ? '<div class="rr-champ-badge" title="' + _esc(r.championship) + '">🏆</div>' : '')
     + '<div class="rr-ovr-cell">'
@@ -3616,11 +3616,11 @@ function buildRosterRow(r, idx) {
     showRosterNotesPanel(r.id, r.name);
   });
 
-  // drag and drop
+  // drag and drop — use r.id (stable) not idx (shifts on splice)
   const handle = row1.querySelector('.rr-drag');
   handle.draggable = true;
   handle.addEventListener('dragstart', function(e) {
-    _rosterDragSrcIdx = idx; row.classList.add('dragging-src');
+    _rosterDragSrcIdx = r.id; row.classList.add('dragging-src');
     e.dataTransfer.effectAllowed = 'move';
   });
   handle.addEventListener('dragend', function() {
@@ -3628,7 +3628,7 @@ function buildRosterRow(r, idx) {
     document.querySelectorAll('.rr').forEach(function(r){ r.classList.remove('drag-over-top','drag-over-bot'); });
   });
   row.addEventListener('dragover', function(e) {
-    if (_rosterDragSrcIdx===null || _rosterDragSrcIdx===idx) return;
+    if (_rosterDragSrcIdx===null || _rosterDragSrcIdx===r.id) return;
     e.preventDefault();
     const rect=row.getBoundingClientRect(), mid=rect.top+rect.height/2;
     row.classList.remove('drag-over-top','drag-over-bot');
@@ -3637,12 +3637,15 @@ function buildRosterRow(r, idx) {
   row.addEventListener('dragleave', function() { row.classList.remove('drag-over-top','drag-over-bot'); });
   row.addEventListener('drop', function(e) {
     e.preventDefault(); row.classList.remove('drag-over-top','drag-over-bot');
-    if (_rosterDragSrcIdx===null || _rosterDragSrcIdx===idx) return;
+    if (_rosterDragSrcIdx===null || _rosterDragSrcIdx===r.id) return;
     const rect=row.getBoundingClientRect(), mid=rect.top+rect.height/2;
     const insertBefore=e.clientY<mid;
-    const moved=rosterData.splice(_rosterDragSrcIdx,1)[0];
-    const targetIdx=idx>_rosterDragSrcIdx?idx-1:idx;
-    rosterData.splice(insertBefore?targetIdx:targetIdx+1,0,moved);
+    const srcIdx=rosterData.findIndex(function(w){ return w.id===_rosterDragSrcIdx; });
+    const tgtIdx=rosterData.findIndex(function(w){ return w.id===r.id; });
+    if (srcIdx===-1||tgtIdx===-1) return;
+    const moved=rosterData.splice(srcIdx,1)[0];
+    const newTgt=rosterData.findIndex(function(w){ return w.id===r.id; });
+    rosterData.splice(insertBefore?newTgt:newTgt+1,0,moved);
     _rosterDragSrcIdx=null;
     renderRosterBody();
   });
@@ -3688,7 +3691,9 @@ function showRosterNotesPanel(id, name) {
   panel.appendChild(container);
 }
 
-function deleteRosterRow(idx) {
+function deleteRosterRow(id) {
+  const idx = rosterData.findIndex(function(r){ return String(r.id) === String(id); });
+  if (idx === -1) return;
   if (!confirm('Remove "' + (rosterData[idx].name||'wrestler') + '" from roster?')) return;
   rosterData.splice(idx, 1);
   renderRosterBody();
