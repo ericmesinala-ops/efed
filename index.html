@@ -5774,7 +5774,101 @@ function _mobMirror(srcId, destId, delayMs) {
 }
 
 function _loadMobDashShows() { _mobMirror('dash-shows-body', 'mob-dash-shows-body', 400); }
-function _loadMobDashFeed()  { _mobMirror('dash-feed-body',  'mob-dash-feed-body',  600); }
+function _loadMobDashFeed() {
+  // Load the mobile feed body directly (not via mirror) so it doesn't depend
+  // on the desktop feed panel having already finished rendering.
+  const dest = document.getElementById('mob-dash-feed-body');
+  if (!dest) return;
+  const session = getSession();
+  if (!session) { dest.innerHTML = '<div class="dash-empty">Sign in to see the feed.</div>'; return; }
+
+  // If the desktop body already has content, mirror it immediately.
+  const src = document.getElementById('dash-feed-body');
+  if (src && src.innerHTML && !src.innerHTML.includes('Loading')) {
+    dest.innerHTML = src.innerHTML;
+    return;
+  }
+
+  // Otherwise load independently into the mobile body.
+  _loadDashEfedFeedInto(dest, session);
+}
+
+// Shared feed loader that writes into any container element.
+async function _loadDashEfedFeedInto(body, session) {
+  body.innerHTML = '<div class="dash-empty">Loading…</div>';
+  try {
+    const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`);
+    const myEfeds = new Set(rosterRows.map(r => r.efed).filter(Boolean));
+    if (session.promo_name || session.promoName) myEfeds.add(session.promo_name || session.promoName);
+    if (!myEfeds.size) { body.innerHTML = '<div class="dash-empty">Join an eFed to see its feed.</div>'; return; }
+
+    const efedList = [...myEfeds];
+    const efedInFilter = efedList.map(e => encodeURIComponent(e)).join(',');
+    const rows = await sbGet('posts', `reply_to=is.null&efed=in.(${efedInFilter})&efed=not.is.null&order=created_at.desc&limit=40`);
+    if (!rows.length) { body.innerHTML = '<div class="dash-empty">No posts in your eFeds yet.</div>'; return; }
+
+    const usernames = [...new Set(rows.map(r => r.username))];
+    const avatarMap = {};
+    try {
+      const urows = await sbGet('users', `username=in.(${usernames.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
+      urows.forEach(u => { avatarMap[u.username] = { avatar_url: u.avatar_url, display_name: u.display_name }; });
+    } catch(e) {}
+
+    body.innerHTML = '';
+    for (const p of rows) {
+      const av = avatarMap[p.username] || {};
+      const name = av.display_name || p.username;
+      const avatarSrc = av.avatar_url || '';
+      const ago = _dashAgo(p.created_at);
+      const efedTag = p.efed ? `<div class="dash-feed-efed-tag">${_dEsc(p.efed)}</div>` : '';
+      const pType = (p.type || p.post_type || '').toLowerCase();
+      const typeBadge = pType === 'ic' ? `<span class="dash-feed-type-ic">IC</span>`
+                      : pType === 'ooc' ? `<span class="dash-feed-type-ooc">OOC</span>` : '';
+      const item = document.createElement('div');
+      item.className = 'dash-feed-item';
+      item.innerHTML = `<div style="display:flex;align-items:flex-start;gap:9px;margin-bottom:5px;">
+        ${avatarSrc
+          ? `<img class="dash-feed-av" src="${_dEsc(avatarSrc)}" loading="lazy" onerror="this.style.display='none'">`
+          : `<div class="dash-feed-av" style="display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:rgba(255,255,255,.3);">${(name[0]||'?').toUpperCase()}</div>`}
+        <div style="flex:1;min-width:0;">
+          ${efedTag}
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:2px;">
+            <span class="dash-feed-name">${_dEsc(name)}</span>${typeBadge}<span class="dash-feed-time">${ago}</span>
+          </div>
+        </div>
+      </div>
+      ${(p.text && pType === 'match_repost') ? `<div class="dash-feed-text" style="margin-bottom:5px;">${typeof renderStampTokens === 'function' ? renderStampTokens(_dEsc(p.text)) : _dEsc(p.text)}</div>` : ''}
+      ${(p.text && pType !== 'match_repost') ? `<div class="dash-feed-text">${typeof renderStampTokens === 'function' ? renderStampTokens(_dEsc(p.text)) : _dEsc(p.text)}</div>` : ''}`;
+      if (pType === 'match_repost' && p.image_url) {
+        try {
+          const mc = JSON.parse(p.image_url);
+          if (mc.type === 'match') {
+            const _matchRepostEl = document.createElement('div');
+            _matchRepostEl.style.cssText = 'margin-top:6px;';
+            const _mcAvatarMap = {};
+            const _mcUnames = (mc.tokens||[]).filter(t=>t.type==='wrestler'&&t.username).map(t=>t.username);
+            if (_mcUnames.length) {
+              try {
+                const _mcRows = await sbGet('users', `username=in.(${_mcUnames.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
+                _mcRows.forEach(u => { _mcAvatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name||u.username }; });
+              } catch(e) {}
+            }
+            _matchRepostEl.appendChild(_buildCompactMatchCard(mc, _mcAvatarMap));
+            item.appendChild(_matchRepostEl);
+          }
+        } catch(e) {}
+      }
+      item.onclick = () => { window.location.href = 'profile.html?u=' + encodeURIComponent(p.username); };
+      body.appendChild(item);
+    }
+
+    // Also update the desktop body if it's still showing Loading
+    const desktopBody = document.getElementById('dash-feed-body');
+    if (desktopBody && desktopBody.innerHTML.includes('Loading')) {
+      desktopBody.innerHTML = body.innerHTML;
+    }
+  } catch(e) { body.innerHTML = '<div class="dash-empty">Could not load feed.</div>'; }
+}
 
 function _loadMobDashSchedule() {
   // Schedule: mirror booked matches
