@@ -2333,6 +2333,9 @@ async function loadShow() {
       titleBeltsData = d.title_belts || [];
       currentShowIndex = 0;
       hasSavedData = true;
+      if (rosterData.length > 0 && rosterData.length < 5) {
+        setTimeout(() => showToast('⚠ Only ' + rosterData.length + ' wrestler(s) loaded — use Import if your roster looks incomplete.'), 1200);
+      }
     }
   } catch(e) { console.log('No saved management data, starting fresh'); }
 
@@ -2387,7 +2390,7 @@ async function loadShow() {
 async function importFromPlanner() {
   const session = getSession();
   if (!session) return;
-  if (!confirm('This will replace the current roster with data from Planner. Continue?')) return;
+  if (!confirm('This will restore your roster from the Planner. Your saved OVR ratings and notes will be kept. Continue?')) return;
   try {
     const pf = (val, fb) => { if (!val) return fb; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return fb; } } return val; };
     const plannerRows = await sbGet('show_planner', 'username=eq.'+encodeURIComponent(session.username)+'&order=updated_at.desc&limit=1');
@@ -2397,9 +2400,12 @@ async function importFromPlanner() {
     const pm = pf(pd.roster_mgmt, {});
     if (!pr.length) { showToast('Planner roster is empty'); return; }
     rosterData = pr;
-    rosterMgmt = pm;
+    // Merge: keep existing mgmt data (OVR, tags, notes) — only fill in gaps from planner
+    Object.keys(pm).forEach(function(id) {
+      if (!rosterMgmt[id]) rosterMgmt[id] = pm[id];
+    });
     if (currentView === 'roster') renderRoster();
-    showToast('Imported ' + pr.length + ' wrestlers — click Save!');
+    showToast('Restored ' + pr.length + ' wrestlers — click Save to keep!');
   } catch(e) { showToast('Import failed: ' + e.message); console.error(e); }
 }
 
@@ -3730,7 +3736,7 @@ function renderRoster() {
     + '<button id="roster-quick-btn" onclick="quickAddRoster()">Quick Add</button>'
     + '<button onclick="sortRoster(\'asc\')" style="background:transparent;border:1px solid rgba(200,168,75,.25);color:rgba(200,168,75,.6);border-radius:5px;padding:5px 10px;font-size:.68rem;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;letter-spacing:.5px;" title="Sort A→Z">A→Z</button>'
     + '<button onclick="sortRoster(\'desc\')" style="background:transparent;border:1px solid rgba(200,168,75,.25);color:rgba(200,168,75,.6);border-radius:5px;padding:5px 10px;font-size:.68rem;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;letter-spacing:.5px;" title="Sort Z→A">Z→A</button>'
-    + '<button onclick="importFromPlanner()" style="margin-left:auto;background:transparent;border:1px solid rgba(200,168,75,.35);color:rgba(200,168,75,.7);border-radius:5px;padding:7px 14px;font-size:.72rem;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;letter-spacing:.5px;transition:all .2s;" onmouseover="this.style.borderColor=\'rgba(200,168,75,.8)\';this.style.color=\'#c8a84b\'" onmouseout="this.style.borderColor=\'rgba(200,168,75,.35)\';this.style.color=\'rgba(200,168,75,.7)\'">⬇ Import</button>';
+    + '<button onclick="importFromPlanner()" style="margin-left:auto;background:transparent;border:1px solid rgba(200,168,75,.35);color:rgba(200,168,75,.7);border-radius:5px;padding:7px 14px;font-size:.72rem;font-weight:700;cursor:pointer;font-family:\'DM Sans\',sans-serif;letter-spacing:.5px;transition:all .2s;" onmouseover="this.style.borderColor=\'rgba(200,168,75,.8)\';this.style.color=\'#c8a84b\'" onmouseout="this.style.borderColor=\'rgba(200,168,75,.35)\';this.style.color=\'rgba(200,168,75,.7)\'">↩ Restore Roster</button>';
   wrap.appendChild(qa);
 
   // A-Z tab bar
