@@ -5809,88 +5809,96 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
   bd.classList.add('open');
 
   try {
-    // Fetch all planners including roster_mgmt (which has the per-wrestler profile data)
-    const rows = await sbGet('show_planner', 'select=username,roster,roster_mgmt&limit=200');
-    if (!rows || rows.error) throw new Error('No data');
+    // Search the users table by display_name (real hub profiles)
+    const encoded = encodeURIComponent(displayName);
+    const rows = await sbGet('users',
+      'display_name=ilike.' + encoded +
+      '&select=username,display_name,avatar_url,nickname,height,weight,hometown,faction,entrance_music,ig_handle,x_handle,twitter_handle&limit=20'
+    );
 
-    const matches = [];
-    rows.forEach(function(row) {
-      try {
-        const pf = function(val) { if (!val) return null; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return null; } } return val; };
-        const roster = pf(row.roster) || [];
-        const rMgmt = pf(row.roster_mgmt) || {};
-
-        roster.forEach(function(wr) {
-          if (wr && wr.name && wr.name.toLowerCase() === displayName.toLowerCase()) {
-            // Get this wrestler's mgmt data (keyed by their id)
-            const wrMgmt = rMgmt[wr.id] || {};
-            // The wrestler's own efed_username from their profile
-            const wrestlerUsername = (wrMgmt.efed_username || '').trim();
-            // Build a combined wrestler object with all profile fields
-            const combined = Object.assign({}, wr, wrMgmt, { _plannerOwner: row.username });
-            matches.push({ username: wrestlerUsername, plannerOwner: row.username, wrestler: combined });
-          }
-        });
-      } catch(e) {}
-    });
-
-    body.innerHTML = '';
-
-    if (!matches.length) {
-      const em = document.createElement('div');
-      em.className = 'hub-modal-empty';
-      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found with the name<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Make sure the wrestler name matches exactly.</span>';
-      body.appendChild(em);
-      return;
+    if (!rows || rows.error || !rows.length) {
+      // Try partial match if exact fails
+      const rows2 = await sbGet('users',
+        'display_name=ilike.*' + encoded + '*' +
+        '&select=username,display_name,avatar_url,nickname,height,weight,hometown,faction,entrance_music,ig_handle,x_handle,twitter_handle&limit=20'
+      );
+      if (!rows2 || rows2.error || !rows2.length) {
+        body.innerHTML = '';
+        const em = document.createElement('div');
+        em.className = 'hub-modal-empty';
+        em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Make sure the wrestler\'s hub username or display name matches.</span>';
+        body.appendChild(em);
+        return;
+      }
+      return _renderHubMatches(body, rows2, rosterId, displayName, mgmt, avatarEl, buildAvatarFn);
     }
 
-    const note = document.createElement('div');
-    note.style.cssText = 'font-size:.72rem;color:rgba(255,255,255,.4);margin-bottom:4px;';
-    note.textContent = matches.length + ' profile' + (matches.length > 1 ? 's' : '') + ' found in hub with this name';
-    body.appendChild(note);
-
-    matches.forEach(function(match) {
-      const item = document.createElement('div');
-      item.className = 'hub-match-item';
-
-      // Avatar
-      const wr = match.wrestler;
-      const avatarUrl = wr.avatar_url || wr.image || null;
-      let avEl;
-      if (avatarUrl) {
-        avEl = document.createElement('img');
-        avEl.className = 'hub-match-avatar';
-        avEl.src = avatarUrl; avEl.alt = wr.name;
-        avEl.onerror = function() { avEl.replaceWith(makeHubInitials(wr.name)); };
-      } else {
-        avEl = makeHubInitials(wr.name);
-      }
-      item.appendChild(avEl);
-
-      const info = document.createElement('div');
-      info.className = 'hub-match-info';
-      const nm = document.createElement('div'); nm.className = 'hub-match-name'; nm.textContent = wr.name;
-      const sub = document.createElement('div'); sub.className = 'hub-match-sub';
-      // Show the wrestler's own efed_username if available, otherwise show planner owner
-      const displayUsername = match.username || match.plannerOwner || '?';
-      sub.textContent = (match.username ? '@' + match.username : 'planner: @' + match.plannerOwner) + (wr.faction ? '  ·  ' + wr.faction : '');
-      info.appendChild(nm); info.appendChild(sub);
-      item.appendChild(info);
-
-      const chevron = document.createElement('div');
-      chevron.style.cssText = 'color:rgba(255,255,255,.25);font-size:.75rem;flex-shrink:0;';
-      chevron.textContent = '›';
-      item.appendChild(chevron);
-
-      item.onclick = function() {
-        showHubDataConfirm(rosterId, displayName, mgmt, match, avatarEl, buildAvatarFn);
-      };
-      body.appendChild(item);
-    });
+    _renderHubMatches(body, rows, rosterId, displayName, mgmt, avatarEl, buildAvatarFn);
 
   } catch(e) {
     body.innerHTML = '<div class="hub-modal-empty">Could not fetch hub data. Please try again.</div>';
   }
+}
+
+function _renderHubMatches(body, rows, rosterId, displayName, mgmt, avatarEl, buildAvatarFn) {
+  body.innerHTML = '';
+  const note = document.createElement('div');
+  note.style.cssText = 'font-size:.72rem;color:rgba(255,255,255,.4);margin-bottom:4px;';
+  note.textContent = rows.length + ' profile' + (rows.length > 1 ? 's' : '') + ' found on hub';
+  body.appendChild(note);
+
+  rows.forEach(function(u) {
+    const item = document.createElement('div');
+    item.className = 'hub-match-item';
+
+    // Avatar — use hub avatar_url, fall back to locally stored mgmt avatar
+    const resolvedAvatar = u.avatar_url || (mgmt && mgmt.avatar_url) || null;
+    let avEl;
+    if (resolvedAvatar) {
+      avEl = document.createElement('img');
+      avEl.className = 'hub-match-avatar';
+      avEl.src = resolvedAvatar; avEl.alt = u.display_name || u.username;
+      avEl.onerror = function() { avEl.replaceWith(makeHubInitials(u.display_name || u.username)); };
+    } else {
+      avEl = makeHubInitials(u.display_name || u.username);
+    }
+    item.appendChild(avEl);
+
+    const info = document.createElement('div');
+    info.className = 'hub-match-info';
+    const nm = document.createElement('div'); nm.className = 'hub-match-name'; nm.textContent = u.display_name || u.username;
+    const sub = document.createElement('div'); sub.className = 'hub-match-sub';
+    sub.textContent = '@' + u.username + (u.faction ? '  ·  ' + u.faction : '');
+    info.appendChild(nm); info.appendChild(sub);
+    item.appendChild(info);
+
+    const chevron = document.createElement('div');
+    chevron.style.cssText = 'color:rgba(255,255,255,.25);font-size:.75rem;flex-shrink:0;';
+    chevron.textContent = '›';
+    item.appendChild(chevron);
+
+    // Build a wrestler object matching the fields applyHubData expects
+    const wrestler = {
+      name: u.display_name || u.username,
+      nickname: u.nickname || '',
+      height: u.height || '',
+      weight: u.weight || '',
+      hometown: u.hometown || '',
+      faction: u.faction || '',
+      entrance_link: u.entrance_music || '',
+      efed_username: u.username || '',
+      twitter_handle: u.x_handle || u.twitter_handle || '',
+      instagram_handle: u.ig_handle || '',
+      avatar_url: u.avatar_url || '',
+    };
+
+    const match = { username: u.username, plannerOwner: u.username, wrestler: wrestler };
+
+    item.onclick = function() {
+      showHubDataConfirm(rosterId, displayName, mgmt, match, avatarEl, buildAvatarFn);
+    };
+    body.appendChild(item);
+  });
 }
 
 function makeHubInitials(name) {
