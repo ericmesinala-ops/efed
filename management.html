@@ -5940,35 +5940,19 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
   bd.classList.add('open');
 
   try {
-    const PROFILE_FIELDS = 'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags';
+    const FIELDS = 'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&limit=10';
+    const enc = encodeURIComponent(displayName.trim());
 
-    // Build search terms: display name as-is, and a slug guess from it
-    const nameEnc  = encodeURIComponent('*' + displayName.trim() + '*');
-    const slugGuess = displayName.trim().toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
-
-    // Also check if efed_username is already saved in mgmt for this wrestler
-    const savedUsername = (mgmt && mgmt.efed_username || '').trim().toLowerCase();
-
-    // Run all lookups in parallel
-    const [byDisplayName, byUsername, bySlug, bySaved] = await Promise.all([
-      // Match display_name (case-insensitive, wildcard)
-      sbGet('users', 'display_name=ilike.' + nameEnc + '&' + PROFILE_FIELDS + '&limit=10'),
-      // Match username as a slug of the display name e.g. "Derrick Maximus" → derrick_maximus
-      slugGuess ? sbGet('users', 'username=eq.' + slugGuess + '&' + PROFILE_FIELDS + '&limit=5') : Promise.resolve([]),
-      // Partial username match
-      slugGuess ? sbGet('users', 'username=ilike.*' + encodeURIComponent(slugGuess) + '*&' + PROFILE_FIELDS + '&limit=5') : Promise.resolve([]),
-      // Already-saved efed_username on this roster slot
-      savedUsername ? sbGet('users', 'username=eq.' + savedUsername + '&' + PROFILE_FIELDS + '&limit=1') : Promise.resolve([]),
+    // Same pattern as the working quick-add search: ilike on display_name AND username, in parallel
+    const [r1, r2] = await Promise.all([
+      sbGet('users', 'display_name=ilike.*' + enc + '*&' + FIELDS),
+      sbGet('users', 'username=ilike.*' + enc + '*&' + FIELDS),
     ]);
 
-    // Merge all results, deduplicate by username
-    const seen = new Map();
-    [byDisplayName, byUsername, bySlug, bySaved].forEach(function(rows) {
-      if (!rows || rows.error) return;
-      rows.forEach(function(u) { if (u && u.username) seen.set(u.username.toLowerCase(), u); });
-    });
-
-    const userRows = Array.from(seen.values());
+    const seen = new Set(); const userRows = [];
+    for (const row of [...(r1||[]), ...(r2||[])]) {
+      if (row && row.username && !seen.has(row.username) && !row.error) { seen.add(row.username); userRows.push(row); }
+    }
 
     if (!userRows.length) {
       body.innerHTML = '';
