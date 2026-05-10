@@ -4236,9 +4236,80 @@ function renderRoster() {
   const wrap = document.createElement('div'); wrap.id = 'roster-table-wrap';
   wrap.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;';
 
-  // quick-add bar
-  const qa = document.createElement('div'); qa.id = 'roster-quick-add';
-  qa.innerHTML = '<input id="roster-quick-inp" placeholder="Wrestler name…" maxlength="60" onkeydown="if(event.key===\'Enter\')quickAddRoster()">'
+  // quick-add bar with hub search
+  const qa = document.createElement('div'); qa.id = 'roster-quick-add'; qa.style.position = 'relative';
+  const qaInp = document.createElement('input');
+  qaInp.id = 'roster-quick-inp'; qaInp.placeholder = 'Search hub or type name…'; qaInp.maxLength = 60;
+  qaInp.autocomplete = 'off';
+  const qaBtn = document.createElement('button');
+  qaBtn.id = 'roster-quick-btn'; qaBtn.textContent = 'Quick Add';
+  qaBtn.onclick = function() { quickAddRoster(); };
+
+  const qaDrop = document.createElement('div');
+  qaDrop.id = 'qa-hub-drop';
+  qaDrop.style.cssText = 'display:none;position:absolute;top:100%;left:0;width:360px;background:#1a1a22;border:1px solid rgba(200,168,75,.35);border-radius:0 0 8px 8px;z-index:500;max-height:260px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.6);';
+
+  let _qaTimer = null;
+  qaInp.addEventListener('input', function() {
+    clearTimeout(_qaTimer);
+    const q = qaInp.value.trim();
+    if (!q || q.length < 2) { qaDrop.style.display = 'none'; return; }
+    _qaTimer = setTimeout(async function() {
+      const FIELDS = 'select=username,display_name,avatar_url,nickname,height,weight,hometown,faction,entrance_music,ig_handle,x_handle&limit=10';
+      const enc = encodeURIComponent(q);
+      const [r1, r2] = await Promise.all([
+        sbGet('users', 'display_name=ilike.*' + enc + '*&' + FIELDS),
+        sbGet('users', 'username=ilike.*' + enc + '*&' + FIELDS),
+      ]);
+      const seen = new Set(); const results = [];
+      for (const row of [...(r1||[]), ...(r2||[])]) {
+        if (row && row.username && !seen.has(row.username) && !row.error) { seen.add(row.username); results.push(row); }
+      }
+      qaDrop.innerHTML = '';
+      if (!results.length) { qaDrop.style.display = 'none'; return; }
+      results.forEach(function(u) {
+        const opt = document.createElement('div');
+        opt.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.05);transition:background .1s;';
+        opt.onmouseover = function() { opt.style.background = 'rgba(200,168,75,.1)'; };
+        opt.onmouseout = function() { opt.style.background = ''; };
+        const av = document.createElement('div');
+        av.style.cssText = 'width:30px;height:30px;border-radius:50%;flex-shrink:0;overflow:hidden;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:.75rem;color:rgba(200,168,75,.8);';
+        if (u.avatar_url) {
+          const img = document.createElement('img'); img.src = u.avatar_url; img.style.cssText = 'width:100%;height:100%;object-fit:cover;object-position:top;';
+          img.onerror = function() { img.remove(); av.textContent = (u.display_name||u.username||'?')[0].toUpperCase(); };
+          av.appendChild(img);
+        } else { av.textContent = (u.display_name||u.username||'?')[0].toUpperCase(); }
+        const info = document.createElement('div'); info.style.cssText = 'flex:1;min-width:0;';
+        const nm = document.createElement('div'); nm.style.cssText = 'font-size:.8rem;font-weight:700;color:#e8e8e8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'; nm.textContent = u.display_name || u.username;
+        const sub = document.createElement('div'); sub.style.cssText = 'font-size:.65rem;color:rgba(255,255,255,.4);'; sub.textContent = '@' + u.username + (u.faction ? ' · ' + u.faction : '');
+        info.appendChild(nm); info.appendChild(sub);
+        opt.appendChild(av); opt.appendChild(info);
+        opt.onmousedown = function(e) {
+          e.preventDefault();
+          qaDrop.style.display = 'none';
+          qaInp.value = '';
+          const wName = u.display_name || u.username;
+          const newId = Date.now();
+          const newEntry = { id: newId, name: wName, tier:'Tier 3', alignment:'Face' };
+          rosterData.unshift(newEntry);
+          if (!rosterMgmt[newId]) rosterMgmt[newId] = { downloaded:false, tags:'', rating:'', contact:'', twitter_handle:'', instagram_handle:'', nickname:'', weight:'', height:'', hometown:'', faction:'', created:false, entrance_link:'', notes:'', efed_username:'', avatar_url:'' };
+          const fields = { height:u.height||'', weight:u.weight||'', hometown:u.hometown||'', faction:u.faction||'', nickname:u.nickname||'', entrance_link:u.entrance_music||'', efed_username:u.username||'', twitter_handle:u.x_handle||'', instagram_handle:u.ig_handle||'', avatar_url:u.avatar_url||'' };
+          Object.entries(fields).forEach(function([k,v]) { if (v) rosterMgmt[newId][k] = v; });
+          _rosterAzFilter = /[A-Z]/.test(wName[0].toUpperCase()) ? wName[0].toUpperCase() : '#';
+          renderRosterBody();
+          saveShow();
+          showToast(wName + ' added from hub!');
+        };
+        qaDrop.appendChild(opt);
+      });
+      qaDrop.style.display = 'block';
+    }, 280);
+  });
+  qaInp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { qaDrop.style.display = 'none'; quickAddRoster(); } });
+  qaInp.addEventListener('blur', function() { setTimeout(function() { qaDrop.style.display = 'none'; }, 200); });
+
+  qa.appendChild(qaInp); qa.appendChild(qaBtn); qa.appendChild(qaDrop);
+  wrap.appendChild(qa);()">'
     + '<button id="roster-quick-btn" onclick="quickAddRoster()">Quick Add</button>'
     ;
   wrap.appendChild(qa);
@@ -5809,107 +5880,88 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
   bd.classList.add('open');
 
   try {
-    const FIELDS = 'select=username,display_name,avatar_url,nickname,height,weight,hometown,faction,entrance_music,ig_handle,x_handle&limit=20';
-    // If the card already has a hub username set, search that directly first
-    const knownUsername = (mgmt && mgmt.efed_username || '').trim();
-    const encodedName = encodeURIComponent(displayName);
-    // Also try username variant: "Derrick Maximus" -> "derrick_maximus" and "derrickmaximus"
-    const usernameGuess = displayName.toLowerCase().replace(/\s+/g, '_');
-    const usernameGuess2 = displayName.toLowerCase().replace(/\s+/g, '');
+    // Fetch all planners including roster_mgmt (which has the per-wrestler profile data)
+    const rows = await sbGet('show_planner', 'select=username,roster,roster_mgmt&limit=200');
+    if (!rows || rows.error) throw new Error('No data');
 
-    // Run all searches in parallel: exact display_name, partial display_name, username guess
-    const [r0, r1, r2, r3] = await Promise.all([
-      knownUsername ? sbGet('users', 'username=eq.' + encodeURIComponent(knownUsername) + '&' + FIELDS) : Promise.resolve([]),
-      sbGet('users', 'display_name=ilike.' + encodedName + '&' + FIELDS),
-      sbGet('users', 'display_name=ilike.*' + encodedName + '*&' + FIELDS),
-      sbGet('users', 'username=in.(' + encodeURIComponent(usernameGuess) + ',' + encodeURIComponent(usernameGuess2) + ')&' + FIELDS),
-    ]);
+    const matches = [];
+    rows.forEach(function(row) {
+      try {
+        const pf = function(val) { if (!val) return null; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return null; } } return val; };
+        const roster = pf(row.roster) || [];
+        const rMgmt = pf(row.roster_mgmt) || {};
 
-    // Merge, dedupe by username
-    const seen = new Set();
-    const all = [];
-    for (const row of [...(r0||[]), ...(r1||[]), ...(r2||[]), ...(r3||[])]) {
-      if (row && row.username && !seen.has(row.username) && !row.error) {
-        seen.add(row.username);
-        all.push(row);
-      }
-    }
+        roster.forEach(function(wr) {
+          if (wr && wr.name && wr.name.toLowerCase() === displayName.toLowerCase()) {
+            // Get this wrestler's mgmt data (keyed by their id)
+            const wrMgmt = rMgmt[wr.id] || {};
+            // The wrestler's own efed_username from their profile
+            const wrestlerUsername = (wrMgmt.efed_username || '').trim();
+            // Build a combined wrestler object with all profile fields
+            const combined = Object.assign({}, wr, wrMgmt, { _plannerOwner: row.username });
+            matches.push({ username: wrestlerUsername, plannerOwner: row.username, wrestler: combined });
+          }
+        });
+      } catch(e) {}
+    });
 
-    if (!all.length) {
-      body.innerHTML = '';
+    body.innerHTML = '';
+
+    if (!matches.length) {
       const em = document.createElement('div');
       em.className = 'hub-modal-empty';
-      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Try setting the USER field on this wrestler\'s card to their hub username.</span>';
+      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found with the name<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Make sure the wrestler name matches exactly.</span>';
       body.appendChild(em);
       return;
     }
 
-    _renderHubMatches(body, all, rosterId, displayName, mgmt, avatarEl, buildAvatarFn);
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:.72rem;color:rgba(255,255,255,.4);margin-bottom:4px;';
+    note.textContent = matches.length + ' profile' + (matches.length > 1 ? 's' : '') + ' found in hub with this name';
+    body.appendChild(note);
+
+    matches.forEach(function(match) {
+      const item = document.createElement('div');
+      item.className = 'hub-match-item';
+
+      // Avatar
+      const wr = match.wrestler;
+      const avatarUrl = wr.avatar_url || wr.image || null;
+      let avEl;
+      if (avatarUrl) {
+        avEl = document.createElement('img');
+        avEl.className = 'hub-match-avatar';
+        avEl.src = avatarUrl; avEl.alt = wr.name;
+        avEl.onerror = function() { avEl.replaceWith(makeHubInitials(wr.name)); };
+      } else {
+        avEl = makeHubInitials(wr.name);
+      }
+      item.appendChild(avEl);
+
+      const info = document.createElement('div');
+      info.className = 'hub-match-info';
+      const nm = document.createElement('div'); nm.className = 'hub-match-name'; nm.textContent = wr.name;
+      const sub = document.createElement('div'); sub.className = 'hub-match-sub';
+      // Show the wrestler's own efed_username if available, otherwise show planner owner
+      const displayUsername = match.username || match.plannerOwner || '?';
+      sub.textContent = (match.username ? '@' + match.username : 'planner: @' + match.plannerOwner) + (wr.faction ? '  ·  ' + wr.faction : '');
+      info.appendChild(nm); info.appendChild(sub);
+      item.appendChild(info);
+
+      const chevron = document.createElement('div');
+      chevron.style.cssText = 'color:rgba(255,255,255,.25);font-size:.75rem;flex-shrink:0;';
+      chevron.textContent = '›';
+      item.appendChild(chevron);
+
+      item.onclick = function() {
+        showHubDataConfirm(rosterId, displayName, mgmt, match, avatarEl, buildAvatarFn);
+      };
+      body.appendChild(item);
+    });
 
   } catch(e) {
     body.innerHTML = '<div class="hub-modal-empty">Could not fetch hub data. Please try again.</div>';
   }
-}
-
-function _renderHubMatches(body, rows, rosterId, displayName, mgmt, avatarEl, buildAvatarFn) {
-  body.innerHTML = '';
-  const note = document.createElement('div');
-  note.style.cssText = 'font-size:.72rem;color:rgba(255,255,255,.4);margin-bottom:4px;';
-  note.textContent = rows.length + ' profile' + (rows.length > 1 ? 's' : '') + ' found on hub';
-  body.appendChild(note);
-
-  rows.forEach(function(u) {
-    const item = document.createElement('div');
-    item.className = 'hub-match-item';
-
-    // Avatar — use hub avatar_url, fall back to locally stored mgmt avatar
-    const resolvedAvatar = u.avatar_url || (mgmt && mgmt.avatar_url) || null;
-    let avEl;
-    if (resolvedAvatar) {
-      avEl = document.createElement('img');
-      avEl.className = 'hub-match-avatar';
-      avEl.src = resolvedAvatar; avEl.alt = u.display_name || u.username;
-      avEl.onerror = function() { avEl.replaceWith(makeHubInitials(u.display_name || u.username)); };
-    } else {
-      avEl = makeHubInitials(u.display_name || u.username);
-    }
-    item.appendChild(avEl);
-
-    const info = document.createElement('div');
-    info.className = 'hub-match-info';
-    const nm = document.createElement('div'); nm.className = 'hub-match-name'; nm.textContent = u.display_name || u.username;
-    const sub = document.createElement('div'); sub.className = 'hub-match-sub';
-    sub.textContent = '@' + u.username + (u.faction ? '  ·  ' + u.faction : '');
-    info.appendChild(nm); info.appendChild(sub);
-    item.appendChild(info);
-
-    const chevron = document.createElement('div');
-    chevron.style.cssText = 'color:rgba(255,255,255,.25);font-size:.75rem;flex-shrink:0;';
-    chevron.textContent = '›';
-    item.appendChild(chevron);
-
-    // Build a wrestler object matching the fields applyHubData expects
-    const wrestler = {
-      name: u.display_name || u.username,
-      nickname: u.nickname || '',
-      height: u.height || '',
-      weight: u.weight || '',
-      hometown: u.hometown || '',
-      faction: u.faction || '',
-      entrance_link: u.entrance_music || '',
-      efed_username: u.username || '',
-      twitter_handle: u.x_handle || u.twitter_handle || '',
-      instagram_handle: u.ig_handle || '',
-      avatar_url: u.avatar_url || '',
-    };
-
-    const match = { username: u.username, plannerOwner: u.username, wrestler: wrestler };
-
-    item.onclick = function() {
-      showHubDataConfirm(rosterId, displayName, mgmt, match, avatarEl, buildAvatarFn);
-    };
-    body.appendChild(item);
-  });
 }
 
 function makeHubInitials(name) {
