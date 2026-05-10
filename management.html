@@ -5809,31 +5809,42 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
   bd.classList.add('open');
 
   try {
-    // Search the users table by display_name (real hub profiles)
-    const encoded = encodeURIComponent(displayName);
-    const rows = await sbGet('users',
-      'display_name=ilike.' + encoded +
-      '&select=username,display_name,avatar_url,nickname,height,weight,hometown,faction,entrance_music,ig_handle,x_handle,twitter_handle&limit=20'
-    );
+    const FIELDS = 'select=username,display_name,avatar_url,nickname,height,weight,hometown,faction,entrance_music,ig_handle,x_handle&limit=20';
+    // If the card already has a hub username set, search that directly first
+    const knownUsername = (mgmt && mgmt.efed_username || '').trim();
+    const encodedName = encodeURIComponent(displayName);
+    // Also try username variant: "Derrick Maximus" -> "derrick_maximus" and "derrickmaximus"
+    const usernameGuess = displayName.toLowerCase().replace(/\s+/g, '_');
+    const usernameGuess2 = displayName.toLowerCase().replace(/\s+/g, '');
 
-    if (!rows || rows.error || !rows.length) {
-      // Try partial match if exact fails
-      const rows2 = await sbGet('users',
-        'display_name=ilike.*' + encoded + '*' +
-        '&select=username,display_name,avatar_url,nickname,height,weight,hometown,faction,entrance_music,ig_handle,x_handle,twitter_handle&limit=20'
-      );
-      if (!rows2 || rows2.error || !rows2.length) {
-        body.innerHTML = '';
-        const em = document.createElement('div');
-        em.className = 'hub-modal-empty';
-        em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Make sure the wrestler\'s hub username or display name matches.</span>';
-        body.appendChild(em);
-        return;
+    // Run all searches in parallel: exact display_name, partial display_name, username guess
+    const [r0, r1, r2, r3] = await Promise.all([
+      knownUsername ? sbGet('users', 'username=eq.' + encodeURIComponent(knownUsername) + '&' + FIELDS) : Promise.resolve([]),
+      sbGet('users', 'display_name=ilike.' + encodedName + '&' + FIELDS),
+      sbGet('users', 'display_name=ilike.*' + encodedName + '*&' + FIELDS),
+      sbGet('users', 'username=in.(' + encodeURIComponent(usernameGuess) + ',' + encodeURIComponent(usernameGuess2) + ')&' + FIELDS),
+    ]);
+
+    // Merge, dedupe by username
+    const seen = new Set();
+    const all = [];
+    for (const row of [...(r0||[]), ...(r1||[]), ...(r2||[]), ...(r3||[])]) {
+      if (row && row.username && !seen.has(row.username) && !row.error) {
+        seen.add(row.username);
+        all.push(row);
       }
-      return _renderHubMatches(body, rows2, rosterId, displayName, mgmt, avatarEl, buildAvatarFn);
     }
 
-    _renderHubMatches(body, rows, rosterId, displayName, mgmt, avatarEl, buildAvatarFn);
+    if (!all.length) {
+      body.innerHTML = '';
+      const em = document.createElement('div');
+      em.className = 'hub-modal-empty';
+      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Try setting the USER field on this wrestler\'s card to their hub username.</span>';
+      body.appendChild(em);
+      return;
+    }
+
+    _renderHubMatches(body, all, rosterId, displayName, mgmt, avatarEl, buildAvatarFn);
 
   } catch(e) {
     body.innerHTML = '<div class="hub-modal-empty">Could not fetch hub data. Please try again.</div>';
