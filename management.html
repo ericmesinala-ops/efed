@@ -5957,10 +5957,13 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
     const knownUsername = (mgmt && mgmt.efed_username || '').trim();
     let allUsers;
 
-    const HUB_FIELDS = 'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags';
+    // Only select columns confirmed to exist in the users table
+    const HUB_FIELDS = 'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,entrance_music,x_handle,ig_handle';
+    const safeArr = function(r) { return Array.isArray(r) ? r : []; };
     if (knownUsername) {
       // Exact lookup by username — fetch only that account
       allUsers = await sbGet('users', HUB_FIELDS + '&username=eq.' + encodeURIComponent(knownUsername) + '&limit=1');
+      allUsers = safeArr(allUsers);
     } else {
       // Server-side ilike search on display_name AND username, merge results
       const enc = encodeURIComponent(displayName.trim());
@@ -5969,12 +5972,12 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
         sbGet('users', HUB_FIELDS + '&username=ilike.*' + enc + '*&limit=15'),
       ]);
       const seen = new Set(); allUsers = [];
-      for (const row of [...(r1||[]), ...(r2||[])]) {
+      for (const row of [...safeArr(r1), ...safeArr(r2)]) {
         if (row && row.username && !seen.has(row.username) && !row.error) { seen.add(row.username); allUsers.push(row); }
       }
     }
 
-    if (!allUsers || allUsers.error) {
+    if (!Array.isArray(allUsers)) {
       body.innerHTML = '<div class="hub-modal-empty">Could not fetch hub data. Please try again.</div>';
       return;
     }
@@ -6047,7 +6050,7 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
         entrance_link:    u.entrance_music  || '',
         twitter_handle:   u.x_handle        || '',
         instagram_handle: u.ig_handle       || '',
-        tags:             u.tags            || '',
+        tags:             '',  // not available in users table
         avatar_url:       u.avatar_url      || '',
         _hubUser:         u,
       };
