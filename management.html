@@ -5964,13 +5964,29 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
       }
     } catch(e) {}
 
-    // 2. Also search users table directly: display_name matches wrestler name
+    // 2. Also search users table directly: display_name matches wrestler name (fuzzy, case-insensitive)
     try {
+      // Build a wildcard pattern: "Derrick Maximus" → "*Derrick*Maximus*"
+      const nameParts = displayName.trim().split(/\s+/).filter(Boolean);
+      const ilikePattern = '*' + nameParts.join('*') + '*';
       const nameRows = await sbGet('users',
-        'display_name=ilike.' + encodeURIComponent(displayName) +
+        'display_name=ilike.' + encodeURIComponent(ilikePattern) +
         '&select=username&limit=10');
       if (nameRows && !nameRows.error) {
         nameRows.forEach(function(r) { if (r.username) usernames.add(r.username.toLowerCase()); });
+      }
+    } catch(e) {}
+
+    // 2b. Also try matching by username directly (slug from display name)
+    try {
+      const slugGuess = displayName.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+      if (slugGuess) {
+        const slugRows = await sbGet('users',
+          'username=ilike.*' + encodeURIComponent(slugGuess) + '*' +
+          '&select=username&limit=5');
+        if (slugRows && !slugRows.error) {
+          slugRows.forEach(function(r) { if (r.username) usernames.add(r.username.toLowerCase()); });
+        }
       }
     } catch(e) {}
 
@@ -5985,9 +6001,9 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
 
     // 3. Fetch full profiles from users table for all candidate usernames
     const uList = Array.from(usernames);
-    const encoded = uList.map(function(u) { return encodeURIComponent(u); }).join(',');
+    const inList = uList.join(',');
     const userRows = await sbGet('users',
-      'username=in.(' + encoded + ')' +
+      'username=in.(' + inList + ')' +
       '&select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&limit=20');
 
     if (!userRows || userRows.error || !userRows.length) {
