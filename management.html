@@ -5940,33 +5940,52 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
   bd.classList.add('open');
 
   try {
-    // Fetch all users (there are fewer than 100) and filter client-side
-    const allUsers = await sbGet('users',
-      'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&limit=200&order=display_name.asc');
+    const knownUsername = (mgmt && mgmt.efed_username || '').trim();
+    let allUsers;
+
+    if (knownUsername) {
+      // Exact lookup by username — fetch only that account
+      allUsers = await sbGet('users',
+        'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&username=eq.' + encodeURIComponent(knownUsername) + '&limit=1');
+    } else {
+      // Fallback: fetch all users and filter client-side by display name
+      allUsers = await sbGet('users',
+        'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&limit=200&order=display_name.asc');
+    }
 
     if (!allUsers || allUsers.error) {
       body.innerHTML = '<div class="hub-modal-empty">Could not fetch hub data. Please try again.</div>';
       return;
     }
 
-    // Filter: display_name or username contains any word from the wrestler name
-    const needle = displayName.trim().toLowerCase();
-    const words = needle.split(/\s+/).filter(Boolean);
+    let userRows;
+    if (knownUsername) {
+      // Username was set — use the exact result directly
+      userRows = allUsers;
+    } else {
+      // Filter: display_name or username contains any word from the wrestler name
+      const needle = displayName.trim().toLowerCase();
+      const words = needle.split(/\s+/).filter(Boolean);
 
-    const userRows = allUsers.filter(function(u) {
-      const dn = (u.display_name || '').toLowerCase();
-      const un = (u.username || '').toLowerCase();
-      // Match if display_name or username contains the full name OR any significant word
-      return dn.includes(needle) || un.includes(needle) ||
-             words.some(function(w) { return w.length > 2 && (dn.includes(w) || un.includes(w)); });
-    });
+      userRows = allUsers.filter(function(u) {
+        const dn = (u.display_name || '').toLowerCase();
+        const un = (u.username || '').toLowerCase();
+        // Match if display_name or username contains the full name OR any significant word
+        return dn.includes(needle) || un.includes(needle) ||
+               words.some(function(w) { return w.length > 2 && (dn.includes(w) || un.includes(w)); });
+      });
+    }
 
     body.innerHTML = '';
 
     if (!userRows.length) {
       const em = document.createElement('div');
       em.className = 'hub-modal-empty';
-      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">\uD83D\uDD0D</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Set their hub username in the USER field and try again.</span>';
+      if (knownUsername) {
+        em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">\uD83D\uDD0D</div>No hub account found for username<br><strong style="color:rgba(255,255,255,.7);">@' + _esc(knownUsername) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Double-check the USER field spelling and try again.</span>';
+      } else {
+        em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">\uD83D\uDD0D</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Set their hub username in the USER field and try again.</span>';
+      }
       body.appendChild(em);
       return;
     }
