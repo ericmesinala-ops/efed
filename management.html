@@ -2548,6 +2548,7 @@ async function saveShow() {
     } else {
       resp = await fetch(SUPABASE_URL+'/rest/v1/fsw_management_data', { method:'POST', headers:SB_HEADERS, body:JSON.stringify(payload) });
     }
+    let savedArr = null;
     if (!resp.ok) {
       const errText = await resp.text();
       if (errText.includes('roster_mgmt') || errText.includes('column')) {
@@ -2559,16 +2560,29 @@ async function saveShow() {
           { method: _mgmtDbId ? 'PATCH' : 'POST', headers:SB_HEADERS, body:JSON.stringify(payload) }
         );
         if (!resp2.ok) { const e2 = await resp2.text(); throw new Error(resp2.status + ': ' + e2); }
-        resp = resp2;
+        try { savedArr = await resp2.json(); } catch(e) {}
         showToast('Saved (roster_mgmt column missing — add it in Supabase)');
+      } else if (errText.includes('duplicate') || errText.includes('unique') || errText.includes('23505')) {
+        // Row exists but _mgmtDbId was lost — look it up and PATCH
+        const existing = await sbGet('fsw_management_data', 'username=eq.'+encodeURIComponent(session.username)+'&select=id&limit=1');
+        if (existing && existing[0] && existing[0].id) {
+          _mgmtDbId = existing[0].id;
+          const resp3 = await fetch(SUPABASE_URL+'/rest/v1/fsw_management_data?id=eq.'+_mgmtDbId, { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify(payload) });
+          if (!resp3.ok) { const e3 = await resp3.text(); throw new Error(resp3.status + ': ' + e3); }
+          try { savedArr = await resp3.json(); } catch(e) {}
+          showToast('Saved!');
+        } else {
+          throw new Error(resp.status + ': ' + errText);
+        }
       } else {
         throw new Error(resp.status + ': ' + errText);
       }
     } else {
+      try { savedArr = await resp.json(); } catch(e) {}
       showToast('Saved!');
     }
-    if (!_mgmtDbId) {
-      try { const arr = await resp.clone().json(); if (arr && arr[0] && arr[0].id) _mgmtDbId = arr[0].id; } catch(e) {}
+    if (!_mgmtDbId && savedArr) {
+      try { if (savedArr[0] && savedArr[0].id) _mgmtDbId = savedArr[0].id; } catch(e) {}
     }
     if (btn) { btn.textContent = '✓ Saved'; btn.style.background = '#2a7a3a'; setTimeout(() => { btn.textContent = origText; btn.style.background = ''; }, 1800); }
   } catch(e) {
@@ -5943,14 +5957,21 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
     const knownUsername = (mgmt && mgmt.efed_username || '').trim();
     let allUsers;
 
+    const HUB_FIELDS = 'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags';
     if (knownUsername) {
       // Exact lookup by username — fetch only that account
-      allUsers = await sbGet('users',
-        'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&username=eq.' + encodeURIComponent(knownUsername) + '&limit=1');
+      allUsers = await sbGet('users', HUB_FIELDS + '&username=eq.' + encodeURIComponent(knownUsername) + '&limit=1');
     } else {
-      // Fallback: fetch all users and filter client-side by display name
-      allUsers = await sbGet('users',
-        'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&limit=200&order=display_name.asc');
+      // Server-side ilike search on display_name AND username, merge results
+      const enc = encodeURIComponent(displayName.trim());
+      const [r1, r2] = await Promise.all([
+        sbGet('users', HUB_FIELDS + '&display_name=ilike.*' + enc + '*&limit=15'),
+        sbGet('users', HUB_FIELDS + '&username=ilike.*' + enc + '*&limit=15'),
+      ]);
+      const seen = new Set(); allUsers = [];
+      for (const row of [...(r1||[]), ...(r2||[])]) {
+        if (row && row.username && !seen.has(row.username) && !row.error) { seen.add(row.username); allUsers.push(row); }
+      }
     }
 
     if (!allUsers || allUsers.error) {
@@ -5958,23 +5979,8 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
       return;
     }
 
-    let userRows;
-    if (knownUsername) {
-      // Username was set — use the exact result directly
-      userRows = allUsers;
-    } else {
-      // Filter: display_name or username contains any word from the wrestler name
-      const needle = displayName.trim().toLowerCase();
-      const words = needle.split(/\s+/).filter(Boolean);
-
-      userRows = allUsers.filter(function(u) {
-        const dn = (u.display_name || '').toLowerCase();
-        const un = (u.username || '').toLowerCase();
-        // Match if display_name or username contains the full name OR any significant word
-        return dn.includes(needle) || un.includes(needle) ||
-               words.some(function(w) { return w.length > 2 && (dn.includes(w) || un.includes(w)); });
-      });
-    }
+    // userRows is allUsers — server already filtered
+    const userRows = allUsers;
 
     body.innerHTML = '';
 
