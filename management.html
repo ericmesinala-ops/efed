@@ -5940,71 +5940,100 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
   bd.classList.add('open');
 
   try {
-    // Fetch all planners including roster_mgmt (which has the per-wrestler profile data)
-    const rows = await sbGet('show_planner', 'select=username,roster,roster_mgmt&limit=200');
-    if (!rows || rows.error) throw new Error('No data');
+    const pf = function(val) { if (!val) return null; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return null; } } return val; };
+    const usernames = new Set();
 
-    const matches = [];
-    rows.forEach(function(row) {
-      try {
-        const pf = function(val) { if (!val) return null; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return null; } } return val; };
-        const roster = pf(row.roster) || [];
-        const rMgmt = pf(row.roster_mgmt) || {};
-
-        roster.forEach(function(wr) {
-          if (wr && wr.name && wr.name.toLowerCase() === displayName.toLowerCase()) {
-            // Get this wrestler's mgmt data (keyed by their id)
+    // 1. Search show_planner rosters for a wrestler with this exact name → grab their efed_username
+    try {
+      const plannerRows = await sbGet('show_planner', 'select=username,roster,roster_mgmt&limit=300');
+      if (plannerRows && !plannerRows.error) {
+        plannerRows.forEach(function(row) {
+          const roster = pf(row.roster) || [];
+          const rMgmt  = pf(row.roster_mgmt) || {};
+          roster.forEach(function(wr) {
+            if (!wr || !wr.name) return;
+            if (wr.name.toLowerCase() !== displayName.toLowerCase()) return;
+            // Grab the efed_username stored in mgmt for this wrestler
             const wrMgmt = rMgmt[wr.id] || {};
-            // The wrestler's own efed_username from their profile
-            const wrestlerUsername = (wrMgmt.efed_username || '').trim();
-            // Build a combined wrestler object with all profile fields
-            const combined = Object.assign({}, wr, wrMgmt, { _plannerOwner: row.username });
-            matches.push({ username: wrestlerUsername, plannerOwner: row.username, wrestler: combined });
-          }
+            const u = (wrMgmt.efed_username || '').trim().toLowerCase();
+            if (u) usernames.add(u);
+            // Also add the planner owner as a fallback candidate
+            if (row.username) usernames.add(row.username.toLowerCase());
+          });
         });
-      } catch(e) {}
-    });
+      }
+    } catch(e) {}
 
-    body.innerHTML = '';
+    // 2. Also search users table directly: display_name matches wrestler name
+    try {
+      const nameRows = await sbGet('users',
+        'display_name=ilike.' + encodeURIComponent(displayName) +
+        '&select=username&limit=10');
+      if (nameRows && !nameRows.error) {
+        nameRows.forEach(function(r) { if (r.username) usernames.add(r.username.toLowerCase()); });
+      }
+    } catch(e) {}
 
-    if (!matches.length) {
+    if (!usernames.size) {
+      body.innerHTML = '';
       const em = document.createElement('div');
       em.className = 'hub-modal-empty';
-      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found with the name<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Make sure the wrestler name matches exactly.</span>';
+      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Make sure their efed username is set in the USER field, or that their hub display name matches.</span>';
       body.appendChild(em);
       return;
     }
 
+    // 3. Fetch full profiles from users table for all candidate usernames
+    const uList = Array.from(usernames);
+    const encoded = uList.map(function(u) { return encodeURIComponent(u); }).join(',');
+    const userRows = await sbGet('users',
+      'username=in.(' + encoded + ')' +
+      '&select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&limit=20');
+
+    if (!userRows || userRows.error || !userRows.length) {
+      body.innerHTML = '';
+      const em = document.createElement('div');
+      em.className = 'hub-modal-empty';
+      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong>';
+      body.appendChild(em);
+      return;
+    }
+
+    body.innerHTML = '';
+
     const note = document.createElement('div');
     note.style.cssText = 'font-size:.72rem;color:rgba(255,255,255,.4);margin-bottom:4px;';
-    note.textContent = matches.length + ' profile' + (matches.length > 1 ? 's' : '') + ' found in hub with this name';
+    note.textContent = userRows.length + ' profile' + (userRows.length > 1 ? 's' : '') + ' found in hub';
     body.appendChild(note);
 
-    matches.forEach(function(match) {
+    userRows.forEach(function(u) {
       const item = document.createElement('div');
       item.className = 'hub-match-item';
 
       // Avatar
-      const wr = match.wrestler;
-      const avatarUrl = wr.avatar_url || wr.image || null;
+      const avatarUrl = u.avatar_url || null;
       let avEl;
       if (avatarUrl) {
         avEl = document.createElement('img');
         avEl.className = 'hub-match-avatar';
-        avEl.src = avatarUrl; avEl.alt = wr.name;
-        avEl.onerror = function() { avEl.replaceWith(makeHubInitials(wr.name)); };
+        avEl.src = avatarUrl; avEl.alt = u.display_name || u.username;
+        avEl.onerror = function() { avEl.replaceWith(makeHubInitials(u.display_name || u.username)); };
       } else {
-        avEl = makeHubInitials(wr.name);
+        avEl = makeHubInitials(u.display_name || u.username);
       }
       item.appendChild(avEl);
 
       const info = document.createElement('div');
       info.className = 'hub-match-info';
-      const nm = document.createElement('div'); nm.className = 'hub-match-name'; nm.textContent = wr.name;
-      const sub = document.createElement('div'); sub.className = 'hub-match-sub';
-      // Show the wrestler's own efed_username if available, otherwise show planner owner
-      const displayUsername = match.username || match.plannerOwner || '?';
-      sub.textContent = (match.username ? '@' + match.username : 'planner: @' + match.plannerOwner) + (wr.faction ? '  ·  ' + wr.faction : '');
+      const nm = document.createElement('div');
+      nm.className = 'hub-match-name';
+      nm.textContent = u.display_name || u.username;
+      const sub = document.createElement('div');
+      sub.className = 'hub-match-sub';
+      const parts = ['@' + u.username];
+      if (u.faction) parts.push(u.faction);
+      if (u.hometown) parts.push(u.hometown);
+      sub.textContent = parts.join('  ·  ');
       info.appendChild(nm); info.appendChild(sub);
       item.appendChild(info);
 
@@ -6012,6 +6041,26 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
       chevron.style.cssText = 'color:rgba(255,255,255,.25);font-size:.75rem;flex-shrink:0;';
       chevron.textContent = '›';
       item.appendChild(chevron);
+
+      // Build a wrestler object that applyHubData understands
+      // Map users table columns → mgmt keys
+      const wrData = {
+        name: u.display_name || u.username,
+        height:           u.height         || '',
+        weight:           u.weight         || '',
+        hometown:         u.hometown        || '',
+        nickname:         u.nickname        || '',
+        faction:          u.faction         || '',
+        efed_username:    u.username        || '',
+        entrance_link:    u.entrance_music  || '',
+        twitter_handle:   u.x_handle        || '',
+        instagram_handle: u.ig_handle       || '',
+        tags:             u.tags            || '',
+        avatar_url:       u.avatar_url      || '',
+        _hubUser:         u,
+      };
+
+      const match = { username: u.username, plannerOwner: u.username, wrestler: wrData };
 
       item.onclick = function() {
         showHubDataConfirm(rosterId, displayName, mgmt, match, avatarEl, buildAvatarFn);
@@ -6021,6 +6070,7 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
 
   } catch(e) {
     body.innerHTML = '<div class="hub-modal-empty">Could not fetch hub data. Please try again.</div>';
+    console.error('Hub search error:', e);
   }
 }
 
