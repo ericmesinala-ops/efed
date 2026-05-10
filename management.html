@@ -2388,6 +2388,68 @@ async function mgmtRemoveAvatar() {
   }
 }
 
+/* ── INPUT FORMATTERS ── */
+
+// Title-case a hometown string: "beverly hills, ca" → "Beverly Hills, CA"
+// Words that are US state abbreviations (2 uppercase letters after a comma) get fully uppercased.
+// Small connector words stay lowercase unless they're the first word.
+function _fmtHometown(val) {
+  if (!val) return val;
+  const lower = ['a','an','the','and','or','of','in','on','at','by','to','for','from','with','van','de','la','el','los','las'];
+  // Split on comma to handle "city, ST" — state part uppercased entirely
+  return val.replace(/[^,]+/g, function(segment, offset) {
+    const isFirst = offset === 0;
+    return segment.replace(/\S+/g, function(word, wOffset) {
+      const absOffset = offset + wOffset;
+      // After a comma the first real word is the state abbreviation — uppercase it all
+      const afterComma = !isFirst;
+      const stripped = word.replace(/[^a-zA-Z]/g, '');
+      if (afterComma && stripped.length <= 3) return word.toUpperCase();
+      // Small connectors stay lowercase unless they're the very first word
+      if (!isFirst && absOffset > 0 && lower.includes(word.toLowerCase())) return word.toLowerCase();
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    });
+  });
+}
+
+// Title-case a nickname: every word capitalized, small connectors lowercase (except first)
+function _fmtNickname(val) {
+  if (!val) return val;
+  const lower = ['a','an','the','and','or','of','in','on','at','by','to','for','with'];
+  return val.replace(/\S+/g, function(word, offset) {
+    if (offset > 0 && lower.includes(word.toLowerCase())) return word.toLowerCase();
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  });
+}
+
+// Normalize height: accepts many formats → "6'0"" style
+// Handles: 60, 6'0, 6'0", 6-0, 6 0, 6ft0in, etc.
+function _fmtHeight(val) {
+  if (!val) return val;
+  const s = val.trim();
+  // Already correct format like 6'0" or 6'11"
+  if (/^\d+'\d+"$/.test(s)) return s;
+  // Strip common suffixes: ft, foot, feet, in, inch, inches, " and '
+  const clean = s.replace(/feet|foot|ft/gi,'\'').replace(/inches|inch|in/gi,'"');
+  // Try to extract feet and inches
+  let feet = null, inches = null;
+  // Formats: 6'0, 6'0", 6' 0, 6-0, 6 0, 6.0 — all grab first number as feet, second as inches
+  const m = clean.match(/^(\d+)\s*['\-\.\s]\s*(\d*)["']?$/);
+  if (m) {
+    feet = parseInt(m[1], 10);
+    inches = m[2] !== '' ? parseInt(m[2], 10) : 0;
+  } else {
+    // Single number like "60" or "511" — assume first digit is feet
+    const d = clean.replace(/[^0-9]/g,'');
+    if (d.length === 2) { feet = parseInt(d[0]); inches = parseInt(d[1]); }
+    else if (d.length === 3) { feet = parseInt(d[0]); inches = parseInt(d.slice(1)); }
+    else return val; // can't parse, return as-is
+  }
+  if (feet === null || isNaN(feet)) return val;
+  inches = isNaN(inches) ? 0 : Math.min(inches, 11);
+  return feet + '\'' + inches + '"';
+}
+
 /* ── TOAST ── */
 let _toastTimer = null;
 function showToast(msg) {
@@ -3888,6 +3950,10 @@ function buildRosterRow(r) {
   const htCell = document.createElement('div'); htCell.className = 'rr-narrow-cell';
   const htInp = document.createElement('input'); htInp.className = 'rr-narrow-inp'; htInp.placeholder = '–'; htInp.value = m.height || '';
   htInp.oninput = function() { setRosterMgmt(r.id, 'height', htInp.value); };
+  htInp.onblur = function() {
+    const fmt = _fmtHeight(htInp.value);
+    if (fmt !== htInp.value) { htInp.value = fmt; setRosterMgmt(r.id, 'height', fmt); }
+  };
   htCell.appendChild(htInp); row1.appendChild(htCell);
 
   // Hometown
@@ -3895,6 +3961,10 @@ function buildRosterRow(r) {
   const htownCell = document.createElement('div'); htownCell.className = 'rr-field-cell rr-field-hometown';
   const htownInp = document.createElement('input'); htownInp.className = 'rr-inp'; htownInp.placeholder = 'City, State…'; htownInp.value = m.hometown || '';
   htownInp.oninput = function() { setRosterMgmt(r.id, 'hometown', htownInp.value); };
+  htownInp.onblur = function() {
+    const fmt = _fmtHometown(htownInp.value);
+    if (fmt !== htownInp.value) { htownInp.value = fmt; setRosterMgmt(r.id, 'hometown', fmt); }
+  };
   htownCell.appendChild(htownInp); row1.appendChild(htownCell);
 
   // Faction (now in Row 1, after Hometown)
@@ -3957,6 +4027,10 @@ function buildRosterRow(r) {
   const nickCell = document.createElement('div'); nickCell.className = 'rr-field-cell'; nickCell.style.width = '176px'; nickCell.style.flexShrink = '1';
   const nickInp = document.createElement('input'); nickInp.className = 'rr-inp'; nickInp.placeholder = '…'; nickInp.value = m.nickname || '';
   nickInp.oninput = function() { setRosterMgmt(r.id, 'nickname', nickInp.value); };
+  nickInp.onblur = function() {
+    const fmt = _fmtNickname(nickInp.value);
+    if (fmt !== nickInp.value) { nickInp.value = fmt; setRosterMgmt(r.id, 'nickname', fmt); }
+  };
   nickCell.appendChild(nickInp); row2.appendChild(nickCell);
 
   // Entrance Link + Play + Copy
