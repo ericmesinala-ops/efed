@@ -5928,7 +5928,7 @@ function closeHubDataModal() {
   if (bd) bd.classList.remove('open');
 }
 
-// Search hub for all planners that have a wrestler matching the given display name
+// Search hub by fetching all users and filtering client-side
 async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAvatarFn) {
   const bd = document.getElementById('hub-data-modal-bd');
   const body = document.getElementById('hub-data-modal-body');
@@ -5940,30 +5940,36 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
   bd.classList.add('open');
 
   try {
-    const FIELDS = 'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&limit=10';
-    const enc = encodeURIComponent(displayName.trim());
+    // Fetch all users (there are fewer than 100) and filter client-side
+    const allUsers = await sbGet('users',
+      'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&limit=200&order=display_name.asc');
 
-    // Same pattern as the working quick-add search: ilike on display_name AND username, in parallel
-    const [r1, r2] = await Promise.all([
-      sbGet('users', 'display_name=ilike.*' + enc + '*&' + FIELDS),
-      sbGet('users', 'username=ilike.*' + enc + '*&' + FIELDS),
-    ]);
-
-    const seen = new Set(); const userRows = [];
-    for (const row of [...(r1||[]), ...(r2||[])]) {
-      if (row && row.username && !seen.has(row.username) && !row.error) { seen.add(row.username); userRows.push(row); }
-    }
-
-    if (!userRows.length) {
-      body.innerHTML = '';
-      const em = document.createElement('div');
-      em.className = 'hub-modal-empty';
-      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Set their hub username in the USER field and try again.</span>';
-      body.appendChild(em);
+    if (!allUsers || allUsers.error) {
+      body.innerHTML = '<div class="hub-modal-empty">Could not fetch hub data. Please try again.</div>';
       return;
     }
 
+    // Filter: display_name or username contains any word from the wrestler name
+    const needle = displayName.trim().toLowerCase();
+    const words = needle.split(/\s+/).filter(Boolean);
+
+    const userRows = allUsers.filter(function(u) {
+      const dn = (u.display_name || '').toLowerCase();
+      const un = (u.username || '').toLowerCase();
+      // Match if display_name or username contains the full name OR any significant word
+      return dn.includes(needle) || un.includes(needle) ||
+             words.some(function(w) { return w.length > 2 && (dn.includes(w) || un.includes(w)); });
+    });
+
     body.innerHTML = '';
+
+    if (!userRows.length) {
+      const em = document.createElement('div');
+      em.className = 'hub-modal-empty';
+      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">\uD83D\uDD0D</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Set their hub username in the USER field and try again.</span>';
+      body.appendChild(em);
+      return;
+    }
 
     const note = document.createElement('div');
     note.style.cssText = 'font-size:.72rem;color:rgba(255,255,255,.4);margin-bottom:4px;';
@@ -5974,7 +5980,6 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
       const item = document.createElement('div');
       item.className = 'hub-match-item';
 
-      // Avatar
       const avatarUrl = u.avatar_url || null;
       let avEl;
       if (avatarUrl) {
@@ -5997,19 +6002,17 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
       const parts = ['@' + u.username];
       if (u.faction) parts.push(u.faction);
       if (u.hometown) parts.push(u.hometown);
-      sub.textContent = parts.join('  ·  ');
+      sub.textContent = parts.join('  \u00b7  ');
       info.appendChild(nm); info.appendChild(sub);
       item.appendChild(info);
 
       const chevron = document.createElement('div');
       chevron.style.cssText = 'color:rgba(255,255,255,.25);font-size:.75rem;flex-shrink:0;';
-      chevron.textContent = '›';
+      chevron.textContent = '\u203a';
       item.appendChild(chevron);
 
-      // Build a wrestler object that applyHubData understands
-      // Map users table columns → mgmt keys
       const wrData = {
-        name: u.display_name || u.username,
+        name:             u.display_name || u.username,
         height:           u.height         || '',
         weight:           u.weight         || '',
         hometown:         u.hometown        || '',
@@ -6037,7 +6040,6 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
     console.error('Hub search error:', e);
   }
 }
-
 function makeHubInitials(name) {
   const d = document.createElement('div');
   d.className = 'hub-match-initials';
