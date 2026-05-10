@@ -5940,77 +5940,41 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
   bd.classList.add('open');
 
   try {
-    const pf = function(val) { if (!val) return null; if (typeof val === 'string') { try { return JSON.parse(val); } catch(e) { return null; } } return val; };
-    const usernames = new Set();
+    const PROFILE_FIELDS = 'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags';
 
-    // 1. Search show_planner rosters for a wrestler with this exact name → grab their efed_username
-    try {
-      const plannerRows = await sbGet('show_planner', 'select=username,roster,roster_mgmt&limit=300');
-      if (plannerRows && !plannerRows.error) {
-        plannerRows.forEach(function(row) {
-          const roster = pf(row.roster) || [];
-          const rMgmt  = pf(row.roster_mgmt) || {};
-          roster.forEach(function(wr) {
-            if (!wr || !wr.name) return;
-            if (wr.name.toLowerCase() !== displayName.toLowerCase()) return;
-            // Grab the efed_username stored in mgmt for this wrestler
-            const wrMgmt = rMgmt[wr.id] || {};
-            const u = (wrMgmt.efed_username || '').trim().toLowerCase();
-            if (u) usernames.add(u);
-            // Also add the planner owner as a fallback candidate
-            if (row.username) usernames.add(row.username.toLowerCase());
-          });
-        });
-      }
-    } catch(e) {}
+    // Build search terms: display name as-is, and a slug guess from it
+    const nameEnc  = encodeURIComponent('*' + displayName.trim() + '*');
+    const slugGuess = displayName.trim().toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
 
-    // 2. Also search users table directly: display_name matches wrestler name (fuzzy, case-insensitive)
-    try {
-      // Build a wildcard pattern: "Derrick Maximus" → "*Derrick*Maximus*"
-      const nameParts = displayName.trim().split(/\s+/).filter(Boolean);
-      const ilikePattern = '*' + nameParts.join('*') + '*';
-      const nameRows = await sbGet('users',
-        'display_name=ilike.' + encodeURIComponent(ilikePattern) +
-        '&select=username&limit=10');
-      if (nameRows && !nameRows.error) {
-        nameRows.forEach(function(r) { if (r.username) usernames.add(r.username.toLowerCase()); });
-      }
-    } catch(e) {}
+    // Also check if efed_username is already saved in mgmt for this wrestler
+    const savedUsername = (mgmt && mgmt.efed_username || '').trim().toLowerCase();
 
-    // 2b. Also try matching by username directly (slug from display name)
-    try {
-      const slugGuess = displayName.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-      if (slugGuess) {
-        const slugRows = await sbGet('users',
-          'username=ilike.*' + encodeURIComponent(slugGuess) + '*' +
-          '&select=username&limit=5');
-        if (slugRows && !slugRows.error) {
-          slugRows.forEach(function(r) { if (r.username) usernames.add(r.username.toLowerCase()); });
-        }
-      }
-    } catch(e) {}
+    // Run all lookups in parallel
+    const [byDisplayName, byUsername, bySlug, bySaved] = await Promise.all([
+      // Match display_name (case-insensitive, wildcard)
+      sbGet('users', 'display_name=ilike.' + nameEnc + '&' + PROFILE_FIELDS + '&limit=10'),
+      // Match username as a slug of the display name e.g. "Derrick Maximus" → derrick_maximus
+      slugGuess ? sbGet('users', 'username=eq.' + slugGuess + '&' + PROFILE_FIELDS + '&limit=5') : Promise.resolve([]),
+      // Partial username match
+      slugGuess ? sbGet('users', 'username=ilike.*' + encodeURIComponent(slugGuess) + '*&' + PROFILE_FIELDS + '&limit=5') : Promise.resolve([]),
+      // Already-saved efed_username on this roster slot
+      savedUsername ? sbGet('users', 'username=eq.' + savedUsername + '&' + PROFILE_FIELDS + '&limit=1') : Promise.resolve([]),
+    ]);
 
-    if (!usernames.size) {
+    // Merge all results, deduplicate by username
+    const seen = new Map();
+    [byDisplayName, byUsername, bySlug, bySaved].forEach(function(rows) {
+      if (!rows || rows.error) return;
+      rows.forEach(function(u) { if (u && u.username) seen.set(u.username.toLowerCase(), u); });
+    });
+
+    const userRows = Array.from(seen.values());
+
+    if (!userRows.length) {
       body.innerHTML = '';
       const em = document.createElement('div');
       em.className = 'hub-modal-empty';
-      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Make sure their efed username is set in the USER field, or that their hub display name matches.</span>';
-      body.appendChild(em);
-      return;
-    }
-
-    // 3. Fetch full profiles from users table for all candidate usernames
-    const uList = Array.from(usernames);
-    const inList = uList.join(',');
-    const userRows = await sbGet('users',
-      'username=in.(' + inList + ')' +
-      '&select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags&limit=20');
-
-    if (!userRows || userRows.error || !userRows.length) {
-      body.innerHTML = '';
-      const em = document.createElement('div');
-      em.className = 'hub-modal-empty';
-      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong>';
+      em.innerHTML = '<div style="font-size:1.3rem;margin-bottom:8px;">🔍</div>No hub profiles found for<br><strong style="color:rgba(255,255,255,.7);">' + _esc(displayName) + '</strong><br><span style="font-size:.72rem;opacity:.6;">Set their hub username in the USER field and try again.</span>';
       body.appendChild(em);
       return;
     }
