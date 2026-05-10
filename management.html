@@ -2542,7 +2542,6 @@ async function saveShow() {
       title_belts: titleBeltsData,
       updated_at: new Date().toISOString()
     };
-    // Upsert on username — works whether or not the row exists, no _mgmtDbId needed
     const upsertHeaders = Object.assign({}, SB_HEADERS, {
       'Prefer': 'resolution=merge-duplicates,return=representation'
     });
@@ -2554,10 +2553,7 @@ async function saveShow() {
       const errText = await resp.text();
       throw new Error(resp.status + ': ' + errText);
     }
-    try {
-      const arr = await resp.json();
-      if (arr && arr[0] && arr[0].id) _mgmtDbId = arr[0].id;
-    } catch(e) {}
+    try { const arr = await resp.json(); if (arr && arr[0] && arr[0].id) _mgmtDbId = arr[0].id; } catch(e) {}
     if (btn) { btn.textContent = '✓ Saved'; btn.style.background = '#2a7a3a'; setTimeout(() => { btn.textContent = origText; btn.style.background = ''; }, 1800); }
     showToast('Saved!');
   } catch(e) {
@@ -4314,7 +4310,7 @@ function renderRoster() {
         sbGet('users', 'username=ilike.*' + enc + '*&' + FIELDS),
       ]);
       const seen = new Set(); const results = [];
-      for (const row of [...(r1||[]), ...(r2||[])]) {
+      for (const row of [...safeArr(r1), ...safeArr(r2)]) {
         if (row && row.username && !seen.has(row.username) && !row.error) { seen.add(row.username); results.push(row); }
       }
       qaDrop.innerHTML = '';
@@ -5932,10 +5928,11 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
     const knownUsername = (mgmt && mgmt.efed_username || '').trim();
     let allUsers;
 
-    const HUB_FIELDS = 'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,alignment,entrance_music,x_handle,ig_handle,tags';
+    const HUB_FIELDS = 'select=username,display_name,avatar_url,height,weight,hometown,nickname,faction,entrance_music,x_handle,ig_handle';
+    const safeArr = function(r) { return Array.isArray(r) ? r : []; };
     if (knownUsername) {
       // Exact lookup by username — fetch only that account
-      allUsers = await sbGet('users', HUB_FIELDS + '&username=eq.' + encodeURIComponent(knownUsername) + '&limit=1');
+      allUsers = safeArr(await sbGet('users', HUB_FIELDS + '&username=eq.' + encodeURIComponent(knownUsername) + '&limit=1'));
     } else {
       // Server-side ilike search on display_name AND username, merge results
       const enc = encodeURIComponent(displayName.trim());
@@ -5949,7 +5946,7 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
       }
     }
 
-    if (!allUsers || allUsers.error) {
+    if (!Array.isArray(allUsers)) {
       body.innerHTML = '<div class="hub-modal-empty">Could not fetch hub data. Please try again.</div>';
       return;
     }
@@ -6022,7 +6019,7 @@ async function showHubDataSearch(rosterId, displayName, mgmt, avatarEl, buildAva
         entrance_link:    u.entrance_music  || '',
         twitter_handle:   u.x_handle        || '',
         instagram_handle: u.ig_handle       || '',
-        tags:             u.tags            || '',
+        tags:             '',
         avatar_url:       u.avatar_url      || '',
         _hubUser:         u,
       };
