@@ -3748,19 +3748,90 @@ function sortRoster(dir) {
 
 function quickAddRoster() {
   const inp = document.getElementById('roster-quick-inp');
+  const qaDrop = document.getElementById('qa-hub-drop');
   const name = (inp.value||'').trim();
   if (!name) return;
-  const newEntry = { id: Date.now(), name, tier:'Tier 3', alignment:'Face' };
-  rosterData.unshift(newEntry); // prepend — appears first
-  inp.value = '';
-  // Switch to the new wrestler's letter tab
-  const firstChar = name[0].toUpperCase();
-  if (/[A-Z]/.test(firstChar)) {
-    _rosterAzFilter = firstChar;
-  } else {
-    _rosterAzFilter = '#';
-  }
-  renderRosterBody();
+
+  // If dropdown has exactly one result visible, auto-pick it
+  const opts = qaDrop && qaDrop.style.display !== 'none' ? qaDrop.querySelectorAll('div[data-username]') : [];
+  if (opts.length === 1) { opts[0].dispatchEvent(new MouseEvent('mousedown', {bubbles:true})); return; }
+
+  // Otherwise do a fresh hub search
+  const FIELDS = 'select=username,display_name,avatar_url,nickname,height,weight,age,hometown,faction,entrance_music,ig_handle,x_handle&limit=10';
+  const enc = encodeURIComponent(name);
+  Promise.all([
+    sbGet('users', 'display_name=ilike.*' + enc + '*&' + FIELDS),
+    sbGet('users', 'username=ilike.*' + enc + '*&' + FIELDS),
+  ]).then(function([r1, r2]) {
+    const seen = new Set(); const results = [];
+    for (const row of [...safeArr(r1), ...safeArr(r2)]) {
+      if (row && row.username && !seen.has(row.username) && !row.error) { seen.add(row.username); results.push(row); }
+    }
+    if (results.length === 1) {
+      // Single match — auto-add from hub
+      const u = results[0];
+      const wName = u.display_name || u.username;
+      const newId = Date.now();
+      rosterData.unshift({ id: newId, name: wName, tier:'Tier 3', alignment:'Face' });
+      if (!rosterMgmt[newId]) rosterMgmt[newId] = { downloaded:false, tags:'', rating:'', contact:'', twitter_handle:'', instagram_handle:'', nickname:'', weight:'', height:'', age:'', hometown:'', faction:'', created:false, entrance_link:'', notes:'', efed_username:'', avatar_url:'' };
+      const fields = { height:u.height||'', weight:u.weight||'', age:u.age||'', hometown:u.hometown||'', faction:u.faction||'', nickname:u.nickname||'', entrance_link:u.entrance_music||'', efed_username:u.username||'', twitter_handle:u.x_handle||'', instagram_handle:u.ig_handle||'', avatar_url:u.avatar_url||'' };
+      Object.entries(fields).forEach(function([k,v]) { if (v) rosterMgmt[newId][k] = v; });
+      inp.value = '';
+      if (qaDrop) qaDrop.style.display = 'none';
+      _rosterAzFilter = /[A-Z]/.test(wName[0].toUpperCase()) ? wName[0].toUpperCase() : '#';
+      renderRosterBody(); saveShow();
+      showToast(wName + ' added from hub!');
+    } else if (results.length > 1) {
+      // Multiple matches — show dropdown to pick
+      if (!qaDrop) return;
+      qaDrop.innerHTML = '';
+      results.forEach(function(u) {
+        const opt = document.createElement('div');
+        opt.dataset.username = u.username;
+        opt.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.05);transition:background .1s;';
+        opt.onmouseover = function() { opt.style.background = 'rgba(200,168,75,.1)'; };
+        opt.onmouseout = function() { opt.style.background = ''; };
+        const av = document.createElement('div');
+        av.style.cssText = 'width:30px;height:30px;border-radius:50%;flex-shrink:0;overflow:hidden;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.3);display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:.75rem;color:rgba(200,168,75,.8);';
+        if (u.avatar_url) { const img = document.createElement('img'); img.src = u.avatar_url; img.style.cssText = 'width:100%;height:100%;object-fit:cover;object-position:top;'; img.onerror = function() { img.remove(); av.textContent = (u.display_name||u.username||'?')[0].toUpperCase(); }; av.appendChild(img); } else { av.textContent = (u.display_name||u.username||'?')[0].toUpperCase(); }
+        const info = document.createElement('div'); info.style.cssText = 'flex:1;min-width:0;';
+        const nm = document.createElement('div'); nm.style.cssText = 'font-size:.8rem;font-weight:700;color:#e8e8e8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'; nm.textContent = u.display_name || u.username;
+        const sub = document.createElement('div'); sub.style.cssText = 'font-size:.65rem;color:rgba(255,255,255,.4);'; sub.textContent = '@' + u.username + (u.faction ? ' · ' + u.faction : '');
+        info.appendChild(nm); info.appendChild(sub);
+        opt.appendChild(av); opt.appendChild(info);
+        opt.onmousedown = function(e) {
+          e.preventDefault();
+          qaDrop.style.display = 'none'; inp.value = '';
+          const wName = u.display_name || u.username;
+          const newId = Date.now();
+          rosterData.unshift({ id: newId, name: wName, tier:'Tier 3', alignment:'Face' });
+          if (!rosterMgmt[newId]) rosterMgmt[newId] = { downloaded:false, tags:'', rating:'', contact:'', twitter_handle:'', instagram_handle:'', nickname:'', weight:'', height:'', age:'', hometown:'', faction:'', created:false, entrance_link:'', notes:'', efed_username:'', avatar_url:'' };
+          const fields = { height:u.height||'', weight:u.weight||'', age:u.age||'', hometown:u.hometown||'', faction:u.faction||'', nickname:u.nickname||'', entrance_link:u.entrance_music||'', efed_username:u.username||'', twitter_handle:u.x_handle||'', instagram_handle:u.ig_handle||'', avatar_url:u.avatar_url||'' };
+          Object.entries(fields).forEach(function([k,v]) { if (v) rosterMgmt[newId][k] = v; });
+          _rosterAzFilter = /[A-Z]/.test(wName[0].toUpperCase()) ? wName[0].toUpperCase() : '#';
+          renderRosterBody(); saveShow();
+          showToast(wName + ' added from hub!');
+        };
+        qaDrop.appendChild(opt);
+      });
+      qaDrop.style.display = 'block';
+    } else {
+      // No hub match — add as plain name
+      const newId = Date.now();
+      rosterData.unshift({ id: newId, name, tier:'Tier 3', alignment:'Face' });
+      inp.value = '';
+      if (qaDrop) qaDrop.style.display = 'none';
+      _rosterAzFilter = /[A-Z]/.test(name[0].toUpperCase()) ? name[0].toUpperCase() : '#';
+      renderRosterBody(); saveShow();
+    }
+  }).catch(function() {
+    // Network error fallback — add as plain name
+    const newId = Date.now();
+    rosterData.unshift({ id: newId, name, tier:'Tier 3', alignment:'Face' });
+    inp.value = '';
+    _rosterAzFilter = /[A-Z]/.test(name[0].toUpperCase()) ? name[0].toUpperCase() : '#';
+    renderRosterBody(); saveShow();
+  });
 }
 
 function updateAzTabs() {
@@ -3950,7 +4021,7 @@ function buildRosterRow(r) {
   const ageLbl = document.createElement('div'); ageLbl.className = 'rr-label'; ageLbl.textContent = 'AGE'; row1.appendChild(ageLbl);
   const ageCell = document.createElement('div'); ageCell.className = 'rr-narrow-cell';
   const ageInp = document.createElement('input'); ageInp.className = 'rr-narrow-inp'; ageInp.placeholder = '–'; ageInp.inputMode = 'numeric'; ageInp.maxLength = 3; ageInp.value = m.age || '';
-  ageInp.oninput = function() { setRosterMgmt(r.id, 'age', ageInp.value.replace(/\D/g,'')); ageInp.value = ageInp.value.replace(/\D/g,''); };
+  ageInp.oninput = function() { ageInp.value = ageInp.value.replace(/\D/g,''); setRosterMgmt(r.id, 'age', ageInp.value); };
   ageCell.appendChild(ageInp); row1.appendChild(ageCell);
 
   // Hometown
@@ -4213,10 +4284,10 @@ function showRosterNotesPanel(id, name) {
   ctrlRight.style.cssText = 'display:flex;align-items:center;gap:4px;';
   const searchBtn = document.createElement('button');
   searchBtn.type = 'button'; searchBtn.title = 'Update from hub';
-  searchBtn.style.cssText = 'background:transparent;border:none;cursor:pointer;padding:2px;display:flex;align-items:center;color:rgba(255,255,255,.35);border-radius:3px;';
-  searchBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
-  searchBtn.onmouseover = function() { this.style.color='rgba(200,168,75,.9)'; };
-  searchBtn.onmouseout = function() { this.style.color='rgba(255,255,255,.35)'; };
+  searchBtn.style.cssText = 'background:#22c55e;border:none;cursor:pointer;padding:3px 9px 3px 7px;display:flex;align-items:center;gap:5px;color:#fff;border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.65rem;font-weight:700;letter-spacing:.4px;transition:background .15s;';
+  searchBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Update';
+  searchBtn.onmouseover = function() { this.style.background='#16a34a'; };
+  searchBtn.onmouseout = function() { this.style.background='#22c55e'; };
   searchBtn.onclick = function(e) { e.stopPropagation(); showHubDataSearch(id, name, m, null, null); };
   const delBtn = document.createElement('button');
   delBtn.type = 'button'; delBtn.title = 'Remove';
@@ -4330,6 +4401,7 @@ function renderRoster() {
       if (!results.length) { qaDrop.style.display = 'none'; return; }
       results.forEach(function(u) {
         const opt = document.createElement('div');
+        opt.dataset.username = u.username;
         opt.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.05);transition:background .1s;';
         opt.onmouseover = function() { opt.style.background = 'rgba(200,168,75,.1)'; };
         opt.onmouseout = function() { opt.style.background = ''; };
@@ -6181,6 +6253,7 @@ function applyHubData(rosterId, wr, avatarUrl, avatarElRef, buildAvatarFn) {
   const FIELD_MAP = [
     { hubKey: 'height',           mgmtKey: 'height' },
     { hubKey: 'weight',           mgmtKey: 'weight' },
+    { hubKey: 'age',              mgmtKey: 'age' },
     { hubKey: 'hometown',         mgmtKey: 'hometown',  fmt: titleCase },
     { hubKey: 'faction',          mgmtKey: 'faction',   fmt: titleCase },
     { hubKey: 'nickname',         mgmtKey: 'nickname',  fmt: titleCase },
