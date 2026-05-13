@@ -2717,132 +2717,211 @@ const MOVESET_TABS = [
 
 let _currentMovesetTab = 'Standing';
 
+/* ── MOVESET DATA STORE ── */
+// movesetData[category][subCategory][slot] = [move1, move2, move3]
+// Stored in fsw_management_data under key: moveset
+let movesetData = {};
+
+function getMovesetVal(cat, sub, slot, idx) {
+  try { return (movesetData[cat][sub][slot][idx]) || ''; } catch(e) { return ''; }
+}
+function setMovesetVal(cat, sub, slot, idx, val) {
+  if (!movesetData[cat]) movesetData[cat] = {};
+  if (!movesetData[cat][sub]) movesetData[cat][sub] = {};
+  if (!movesetData[cat][sub][slot]) movesetData[cat][sub][slot] = ['','',''];
+  movesetData[cat][sub][slot][idx] = val;
+  saveMovesetData();
+}
+async function saveMovesetData() {
+  const session = getSession();
+  if (!session) return;
+  const upsertHeaders = Object.assign({}, SB_HEADERS, { 'Prefer': 'resolution=merge-duplicates,return=representation' });
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/fsw_management_data?on_conflict=username', {
+      method: 'POST', headers: upsertHeaders,
+      body: JSON.stringify({ username: session.username, moveset: movesetData, updated_at: new Date().toISOString() })
+    });
+  } catch(e) { console.log('Moveset save error:', e); }
+}
+async function loadMovesetData() {
+  const session = getSession();
+  if (!session) return;
+  try {
+    const rows = await sbGet('fsw_management_data', 'username=eq.'+encodeURIComponent(session.username)+'&select=moveset&limit=1');
+    if (rows && rows[0] && rows[0].moveset) movesetData = rows[0].moveset;
+  } catch(e) {}
+}
+
+/* ── PRIMARY TABS (only Standing active) ── */
+const MOVESET_PRIMARY_TABS = [
+  { name: 'Standing', active: true },
+  { name: 'Ground', active: false },
+  { name: 'Corner', active: false },
+  { name: 'Rope', active: false },
+  { name: 'Irish Whip', active: false },
+  { name: 'Apron', active: false },
+  { name: 'Signatures', active: false },
+  { name: 'Finisher', active: false },
+  { name: 'Diving', active: false },
+  { name: 'Springboard', active: false },
+  { name: 'Holds', active: false },
+  { name: 'Pre-Match', active: false },
+  { name: 'Movement', active: false },
+  { name: 'Taunt', active: false },
+];
+
+/* ── STANDING SUB-TABS (only Front active) ── */
+const STANDING_SUB_TABS = [
+  { name: 'Front', active: true },
+  { name: 'Rear', active: false },
+  { name: 'Carry', active: false },
+  { name: 'Foot Catch', active: false },
+  { name: 'Leverage Pin', active: false },
+];
+
+/* ── FRONT SLOTS (only Light Attack active) ── */
+const FRONT_SLOTS = [
+  { name: 'Light Attack', active: true },
+  { name: 'Combo Chain', active: false },
+  { name: 'Combo Enders', active: false },
+  { name: 'Heavy Attack', active: false },
+  { name: 'Light Grapple', active: false },
+  { name: 'Heavy Grapple', active: false },
+  { name: 'Running', active: false },
+];
+
+let _movesetPrimaryTab = 'Standing';
+let _movesetSubTab = 'Front';
+
 function renderMoveset() {
   const container = document.getElementById('sectionsContainer');
   container.innerHTML = '';
   container.style.cssText = 'display:flex;flex-direction:column;flex:1;min-height:0;height:100%;';
   document.getElementById('showTabsContainer').style.display = 'none';
 
+  const session = getSession();
+
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex-direction:column;flex:1;min-height:0;height:100%;';
 
-  // ── Secondary tabs bar ──
-  const tabsRow = document.createElement('div');
-  tabsRow.id = 'moveset-tabs-row';
-  tabsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:0;border-bottom:2px solid var(--border-primary);flex-shrink:0;background:var(--bg-secondary);padding:0 16px;overflow-x:auto;';
+  // ── USER PROFILE CARD ──
+  const profileCard = document.createElement('div');
+  profileCard.style.cssText = 'display:flex;align-items:center;gap:14px;padding:14px 20px;background:var(--bg-secondary);border-bottom:1px solid var(--border-primary);flex-shrink:0;';
 
-  MOVESET_TABS.forEach(tabName => {
+  const av = document.createElement('div');
+  av.style.cssText = 'width:44px;height:44px;border-radius:8px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.25);flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:1.1rem;font-weight:700;color:var(--accent-blue);font-family:"Barlow Condensed",sans-serif;';
+  const navImg = document.getElementById('nav-avatar-img');
+  if (navImg && navImg.src && navImg.style.display !== 'none') {
+    const img = document.createElement('img');
+    img.src = navImg.src;
+    img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+    av.appendChild(img);
+  } else {
+    const displayName = session ? (session.display_name || session.displayName || session.username || '?') : '?';
+    av.textContent = displayName[0].toUpperCase();
+  }
+
+  const profileInfo = document.createElement('div');
+  const displayName = session ? (session.display_name || session.displayName || session.username || 'Unknown') : 'Unknown';
+  profileInfo.innerHTML = `
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.1rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text-primary);">${_esc(displayName)} <span style="color:var(--text-muted);font-size:.75rem;font-weight:400;letter-spacing:1px;">Moveset</span></div>
+    <div style="font-size:.68rem;color:var(--text-muted);margin-top:2px;letter-spacing:.5px;">Recording moves from WWE 2K · Standing &rsaquo; Front &rsaquo; Light Attack</div>`;
+
+  profileCard.appendChild(av);
+  profileCard.appendChild(profileInfo);
+  wrap.appendChild(profileCard);
+
+  // ── PRIMARY TABS ROW ──
+  const primaryTabsRow = document.createElement('div');
+  primaryTabsRow.style.cssText = 'display:flex;flex-shrink:0;border-bottom:2px solid var(--border-primary);background:var(--bg-secondary);overflow-x:auto;padding:0 16px;';
+
+  MOVESET_PRIMARY_TABS.forEach(tab => {
     const btn = document.createElement('button');
-    btn.className = 'moveset-tab-btn' + (tabName === _currentMovesetTab ? ' moveset-tab-active' : '');
-    btn.textContent = tabName.toUpperCase();
-    btn.style.cssText = `padding:10px 14px;background:transparent;border:none;border-bottom:2px solid ${tabName===_currentMovesetTab?'var(--accent-blue)':'transparent'};margin-bottom:-2px;cursor:pointer;font-family:"Barlow Condensed",sans-serif;font-size:.8rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:${tabName===_currentMovesetTab?'var(--accent-blue)':'var(--text-muted)'};transition:color .15s;white-space:nowrap;`;
-    btn.onclick = () => {
-      _currentMovesetTab = tabName;
-      renderMoveset();
-      document.querySelectorAll('#fsw-sidebar .sidebar-btn').forEach(b => { if(b.textContent.trim()==='Moveset') b.classList.add('active'); else b.classList.remove('active'); });
-    };
-    tabsRow.appendChild(btn);
+    const isActive = tab.name === _movesetPrimaryTab && tab.active;
+    btn.style.cssText = `padding:10px 16px;background:transparent;border:none;border-bottom:2px solid ${isActive ? 'var(--accent-blue)' : 'transparent'};margin-bottom:-2px;font-family:"Barlow Condensed",sans-serif;font-size:.8rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;white-space:nowrap;transition:color .15s;
+      color:${isActive ? 'var(--accent-blue)' : tab.active ? 'var(--text-muted)' : 'rgba(255,255,255,.18)'};
+      cursor:${tab.active ? 'pointer' : 'not-allowed'};`;
+    btn.textContent = tab.name.toUpperCase();
+    btn.disabled = !tab.active;
+    if (tab.active) {
+      btn.onclick = () => { _movesetPrimaryTab = tab.name; renderMoveset(); };
+    }
+    primaryTabsRow.appendChild(btn);
   });
-  wrap.appendChild(tabsRow);
+  wrap.appendChild(primaryTabsRow);
 
-  // ── Content area for selected tab ──
+  // ── CONTENT AREA ──
   const content = document.createElement('div');
   content.style.cssText = 'flex:1;overflow-y:auto;padding:24px 28px;box-sizing:border-box;';
 
-  const header = document.createElement('div');
-  header.style.cssText = 'margin-bottom:18px;';
-  header.innerHTML = `
-    <div style="font-family:'Barlow Condensed',sans-serif;font-size:1.3rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text-primary);margin-bottom:4px;">${_currentMovesetTab}</div>
-    <div style="font-size:.78rem;color:var(--text-muted);line-height:1.55;">Moves recorded for the <strong style="color:var(--text-secondary);">${_currentMovesetTab}</strong> category. All records are view-only.</div>`;
-  content.appendChild(header);
+  // ── STANDING SUB-TABS ──
+  if (_movesetPrimaryTab === 'Standing') {
+    const subTabsRow = document.createElement('div');
+    subTabsRow.style.cssText = 'display:flex;gap:6px;margin-bottom:24px;flex-wrap:wrap;';
 
-  // Load moveset data from the saved roster mgmt data
-  // Display moves from each user's saved moveset records
-  const session = getSession();
-  const movesetKey = 'moveset_' + _currentMovesetTab.toLowerCase().replace(/\s+/g,'_');
-
-  // Build a table showing all roster members and their moves for this category
-  if (!rosterData.length) {
-    const empty = document.createElement('div');
-    empty.style.cssText = 'text-align:center;padding:48px 20px;color:var(--text-muted);font-size:.85rem;';
-    empty.innerHTML = '<div style="font-size:2rem;margin-bottom:12px;">📋</div><div>No roster members yet.</div>';
-    content.appendChild(empty);
-  } else {
-    // Grid of moveset cards per wrestler
-    const grid = document.createElement('div');
-    grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;';
-
-    rosterData.forEach(r => {
-      const m = getRosterMgmt(r.id);
-      const moves = (m[movesetKey] || '').toString().trim();
-
-      const card = document.createElement('div');
-      card.style.cssText = 'background:var(--bg-secondary);border:1px solid var(--border-primary);border-radius:8px;overflow:hidden;transition:border-color .2s;';
-
-      // Card header with avatar + name
-      const cardHead = document.createElement('div');
-      cardHead.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border-primary);';
-
-      const av = document.createElement('div');
-      av.style.cssText = 'width:32px;height:32px;border-radius:6px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.2);flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:.7rem;font-weight:700;color:var(--accent-blue);font-family:"Barlow Condensed",sans-serif;';
-      if (m.avatar_url) {
-        const img = document.createElement('img');
-        img.src = m.avatar_url;
-        img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-        img.onerror = () => { img.style.display='none'; av.textContent = (r.name||'?')[0].toUpperCase(); };
-        av.appendChild(img);
-      } else {
-        av.textContent = (r.name||'?')[0].toUpperCase();
+    STANDING_SUB_TABS.forEach(sub => {
+      const btn = document.createElement('button');
+      const isActive = sub.name === _movesetSubTab && sub.active;
+      btn.style.cssText = `padding:7px 16px;border-radius:5px;font-family:"Barlow Condensed",sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;white-space:nowrap;transition:all .15s;border:1px solid;
+        background:${isActive ? 'rgba(200,168,75,.15)' : 'transparent'};
+        border-color:${isActive ? 'rgba(200,168,75,.4)' : sub.active ? 'var(--border-primary)' : 'rgba(255,255,255,.06)'};
+        color:${isActive ? 'var(--accent-blue)' : sub.active ? 'var(--text-muted)' : 'rgba(255,255,255,.18)'};
+        cursor:${sub.active ? 'pointer' : 'not-allowed'};`;
+      btn.textContent = sub.name.toUpperCase();
+      btn.disabled = !sub.active;
+      if (sub.active) {
+        btn.onclick = () => { _movesetSubTab = sub.name; renderMoveset(); };
       }
-
-      const nameWrap = document.createElement('div');
-      nameWrap.style.cssText = 'flex:1;min-width:0;';
-      const nameEl = document.createElement('div');
-      nameEl.style.cssText = 'font-size:.85rem;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-      nameEl.textContent = r.name || 'Unknown';
-      const tierEl = document.createElement('div');
-      tierEl.style.cssText = 'font-size:.65rem;color:var(--text-muted);font-family:"Barlow Condensed",sans-serif;letter-spacing:.8px;text-transform:uppercase;';
-      tierEl.textContent = (r.tier||'') + (r.alignment ? ' · ' + r.alignment : '');
-      nameWrap.appendChild(nameEl);
-      nameWrap.appendChild(tierEl);
-
-      cardHead.appendChild(av);
-      cardHead.appendChild(nameWrap);
-      card.appendChild(cardHead);
-
-      // Moves display
-      const movesBody = document.createElement('div');
-      movesBody.style.cssText = 'padding:12px 14px;min-height:60px;';
-      if (moves) {
-        // Parse line by line
-        const lines = moves.split('\n').filter(l => l.trim());
-        lines.forEach(line => {
-          const row = document.createElement('div');
-          row.style.cssText = 'padding:4px 0;font-size:.8rem;color:var(--text-secondary);border-bottom:1px solid rgba(255,255,255,.03);display:flex;align-items:center;gap:6px;';
-          const dot = document.createElement('span');
-          dot.style.cssText = 'width:4px;height:4px;border-radius:50%;background:var(--accent-blue);flex-shrink:0;opacity:.6;';
-          const txt = document.createElement('span');
-          txt.textContent = line.trim();
-          row.appendChild(dot); row.appendChild(txt);
-          movesBody.appendChild(row);
-        });
-      } else {
-        movesBody.innerHTML = '<div style="font-size:.75rem;color:var(--text-muted);font-style:italic;">No moves recorded</div>';
-      }
-      card.appendChild(movesBody);
-      grid.appendChild(card);
+      subTabsRow.appendChild(btn);
     });
-    content.appendChild(grid);
+    content.appendChild(subTabsRow);
+
+    // ── FRONT SLOTS ──
+    if (_movesetSubTab === 'Front') {
+      FRONT_SLOTS.forEach(slot => {
+        const slotRow = document.createElement('div');
+        slotRow.style.cssText = `display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border-primary);opacity:${slot.active ? '1' : '0.28'};`;
+
+        const slotLabel = document.createElement('div');
+        slotLabel.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);width:130px;flex-shrink:0;';
+        slotLabel.textContent = slot.name.toUpperCase();
+
+        const inputsWrap = document.createElement('div');
+        inputsWrap.style.cssText = 'display:flex;gap:8px;flex:1;';
+
+        for (let i = 0; i < 3; i++) {
+          const inp = document.createElement('input');
+          inp.type = 'text';
+          inp.maxLength = 36;
+          inp.placeholder = 'Move ' + (i + 1);
+          inp.disabled = !slot.active;
+          inp.value = getMovesetVal('Standing', 'Front', slot.name, i);
+          inp.style.cssText = `flex:1;padding:8px 10px;background:${slot.active ? 'var(--bg-input)' : 'transparent'};border:1px solid ${slot.active ? 'var(--border-input)' : 'rgba(255,255,255,.08)'};border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:var(--text-primary);outline:none;transition:border-color .2s;min-width:0;`;
+          if (slot.active) {
+            inp.onfocus = () => inp.style.borderColor = 'var(--accent-blue)';
+            inp.onblur  = () => inp.style.borderColor = 'var(--border-input)';
+            inp.oninput = () => setMovesetVal('Standing', 'Front', slot.name, i, inp.value);
+          }
+          inputsWrap.appendChild(inp);
+        }
+
+        slotRow.appendChild(slotLabel);
+        slotRow.appendChild(inputsWrap);
+        content.appendChild(slotRow);
+      });
+    }
   }
 
   wrap.appendChild(content);
   container.appendChild(wrap);
+
+  // ── RIGHT PANEL ──
   clearPanel();
   const pt = document.createElement('div'); pt.className = 'details-title'; pt.textContent = 'Moveset';
   document.getElementById('detailsPanel').appendChild(pt);
   const hint = document.createElement('div');
-  hint.style.cssText = 'font-size:.7rem;color:var(--text-muted);line-height:1.6;margin-top:10px;padding:0 2px;';
-  hint.textContent = 'Select a tab to browse each move category across your full roster.';
+  hint.style.cssText = 'font-size:.7rem;color:var(--text-muted);line-height:1.7;margin-top:10px;';
+  hint.innerHTML = 'Record your CAW\'s moves from WWE 2K.<br><br>Each slot holds up to 3 moves. Grayed out sections are coming soon.';
   document.getElementById('detailsPanel').appendChild(hint);
 }
 
@@ -6211,6 +6290,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   try { window._customOpenerItems = JSON.parse(localStorage.getItem('efed_custom_opener_items') || '[]'); } catch(e) { window._customOpenerItems = []; }
   initNav();
   await loadShow();
+  await loadMovesetData();
   // Check if user is efed owner and show/hide the efed section
   await checkEfedOwnerAccess();
   renderMoveset();
