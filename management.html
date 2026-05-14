@@ -2767,7 +2767,7 @@ function getMovesetVal(cat, sub, slot, idx) {
 function setMovesetVal(cat, sub, slot, idx, val) {
   if (!movesetData[cat]) movesetData[cat] = {};
   if (!movesetData[cat][sub]) movesetData[cat][sub] = {};
-  if (!movesetData[cat][sub][slot]) movesetData[cat][sub][slot] = ['','',''];
+  if (!movesetData[cat][sub][slot]) movesetData[cat][sub][slot] = [];
   movesetData[cat][sub][slot][idx] = val;
   saveMovesetData();
 }
@@ -2941,79 +2941,131 @@ function renderMoveset() {
 
     // ── FRONT SLOTS ──
     if (_movesetSubTab === 'Front') {
-      FRONT_SLOTS.forEach(slot => {
-        const slotRow = document.createElement('div');
-        slotRow.style.cssText = `display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border-primary);opacity:${slot.active ? '1' : '0.28'};`;
+      // Per-slot counts. Slots with >3 use 2-row layout (row1: 3, row2: remainder)
+      const SLOT_COUNTS = {
+        'Light Attack':  3,
+        'Combo Chain':   3,
+        'Combo Enders':  3,
+        'Heavy Attack':  3,
+        'Light Grapple': 5,
+        'Heavy Grapple': 5,
+        'Running':       3,
+      };
 
-        const slotLabel = document.createElement('div');
-        slotLabel.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);width:130px;flex-shrink:0;';
-        slotLabel.textContent = slot.name.toUpperCase();
+      // Helper: build one move cell (chip + hidden input)
+      function makeMoveCell(slot, i, totalSlots) {
+        const cellVal = getMovesetVal('Standing', 'Front', slot.name, i);
+        const cell = document.createElement('div');
+        cell.style.cssText = 'flex:1;min-width:0;position:relative;';
 
-        const inputsWrap = document.createElement('div');
-        inputsWrap.style.cssText = 'display:flex;gap:8px;flex:1;';
-
-        for (let i = 0; i < 3; i++) {
-          const cellVal = getMovesetVal('Standing', 'Front', slot.name, i);
-          const cell = document.createElement('div');
-          cell.style.cssText = `flex:1;min-width:0;position:relative;`;
-
-          const chip = document.createElement('div');
-          chip.dataset.moveChip = '1';
-          const hasVal = cellVal && cellVal.trim();
-          chip.style.cssText = `padding:7px 10px;border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:${hasVal ? 'var(--text-primary)' : 'var(--text-muted)'};background:transparent;border:1px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s,border-color .15s,color .15s;${slot.active ? 'cursor:pointer;' : 'opacity:.35;'}`;
-          chip.textContent = hasVal ? cellVal : '+ Move ' + (i + 1);
-          if (slot.active) {
-            chip.title = 'Click to edit';
-            chip.onmouseenter = () => { chip.style.background = 'var(--bg-tertiary)'; chip.style.borderColor = 'var(--border-input)'; };
-            chip.onmouseleave = () => { chip.style.background = 'transparent'; chip.style.borderColor = 'transparent'; };
-          }
-
-          const inp = document.createElement('input');
-          inp.type = 'text';
-          inp.maxLength = 36;
-          inp.placeholder = 'Move ' + (i + 1);
-          inp.value = cellVal;
-          inp.style.cssText = `display:none;width:100%;padding:7px 10px;background:var(--bg-input);border:1px solid var(--accent-blue);border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:var(--text-primary);outline:none;min-width:0;box-sizing:border-box;`;
-
-          function saveAndHide(chipEl, inputEl, slotName, idx) {
-            const v = inputEl.value.trim();
-            if (!movesetData['Standing']) movesetData['Standing'] = {};
-            if (!movesetData['Standing']['Front']) movesetData['Standing']['Front'] = {};
-            if (!movesetData['Standing']['Front'][slotName]) movesetData['Standing']['Front'][slotName] = ['','',''];
-            movesetData['Standing']['Front'][slotName][idx] = inputEl.value;
-            chipEl.textContent = v || ('+ Move ' + (idx + 1));
-            chipEl.style.color = v ? 'var(--text-primary)' : 'var(--text-muted)';
-            inputEl.style.display = 'none';
-            chipEl.style.display = '';
-          }
-
-          if (slot.active) {
-            chip.onclick = () => {
-              chip.style.display = 'none';
-              inp.style.display = 'block';
-              inp.focus();
-              inp.select();
-            };
-            inp.onblur = () => saveAndHide(chip, inp, slot.name, i);
-            inp.onkeydown = (e) => {
-              if (e.key === 'Enter' || e.key === 'Escape') { inp.blur(); }
-            };
-            inp.oninput = () => {
-              if (!movesetData['Standing']) movesetData['Standing'] = {};
-              if (!movesetData['Standing']['Front']) movesetData['Standing']['Front'] = {};
-              if (!movesetData['Standing']['Front'][slot.name]) movesetData['Standing']['Front'][slot.name] = ['','',''];
-              movesetData['Standing']['Front'][slot.name][i] = inp.value;
-            };
-          }
-
-          cell.appendChild(chip);
-          cell.appendChild(inp);
-          inputsWrap.appendChild(cell);
+        const chip = document.createElement('div');
+        chip.dataset.moveChip = '1';
+        const hasVal = cellVal && cellVal.trim();
+        chip.style.cssText = `padding:7px 10px;border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:${hasVal ? 'var(--text-primary)' : 'var(--text-muted)'};background:transparent;border:1px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s,border-color .15s,color .15s;${slot.active ? 'cursor:pointer;' : 'opacity:.35;'}`;
+        chip.textContent = hasVal ? cellVal : '+ Move ' + (i + 1);
+        if (slot.active) {
+          chip.title = 'Click to edit';
+          chip.onmouseenter = () => { chip.style.background = 'var(--bg-tertiary)'; chip.style.borderColor = 'var(--border-input)'; };
+          chip.onmouseleave = () => { chip.style.background = 'transparent'; chip.style.borderColor = 'transparent'; };
         }
 
-        slotRow.appendChild(slotLabel);
-        slotRow.appendChild(inputsWrap);
-        content.appendChild(slotRow);
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.maxLength = 36;
+        inp.placeholder = 'Move ' + (i + 1);
+        inp.value = cellVal;
+        inp.style.cssText = 'display:none;width:100%;padding:7px 10px;background:var(--bg-input);border:1px solid var(--accent-blue);border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:var(--text-primary);outline:none;min-width:0;box-sizing:border-box;';
+
+        function saveAndHide(chipEl, inputEl, slotName, idx) {
+          const v = inputEl.value.trim();
+          if (!movesetData['Standing']) movesetData['Standing'] = {};
+          if (!movesetData['Standing']['Front']) movesetData['Standing']['Front'] = {};
+          if (!movesetData['Standing']['Front'][slotName]) movesetData['Standing']['Front'][slotName] = Array(totalSlots).fill('');
+          movesetData['Standing']['Front'][slotName][idx] = inputEl.value;
+          chipEl.textContent = v || ('+ Move ' + (idx + 1));
+          chipEl.style.color = v ? 'var(--text-primary)' : 'var(--text-muted)';
+          inputEl.style.display = 'none';
+          chipEl.style.display = '';
+        }
+
+        if (slot.active) {
+          chip.onclick = () => { chip.style.display = 'none'; inp.style.display = 'block'; inp.focus(); inp.select(); };
+          inp.onblur = () => saveAndHide(chip, inp, slot.name, i);
+          inp.onkeydown = (e) => { if (e.key === 'Enter' || e.key === 'Escape') inp.blur(); };
+          inp.oninput = () => {
+            if (!movesetData['Standing']) movesetData['Standing'] = {};
+            if (!movesetData['Standing']['Front']) movesetData['Standing']['Front'] = {};
+            if (!movesetData['Standing']['Front'][slot.name]) movesetData['Standing']['Front'][slot.name] = Array(totalSlots).fill('');
+            movesetData['Standing']['Front'][slot.name][i] = inp.value;
+          };
+        }
+
+        cell.appendChild(chip);
+        cell.appendChild(inp);
+        return cell;
+      }
+
+      FRONT_SLOTS.forEach(slot => {
+        const total = SLOT_COUNTS[slot.name] || 3;
+        const useRows = total > 3; // 5-slot slots get 2 rows (3+2)
+
+        const slotWrap = document.createElement('div');
+        slotWrap.style.cssText = `padding:14px 0;border-bottom:1px solid var(--border-primary);opacity:${slot.active ? '1' : '0.28'};`;
+
+        if (!useRows) {
+          // ── Single row ──
+          const slotRow = document.createElement('div');
+          slotRow.style.cssText = 'display:flex;align-items:center;gap:16px;';
+
+          const slotLabel = document.createElement('div');
+          slotLabel.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);width:130px;flex-shrink:0;';
+          slotLabel.textContent = slot.name.toUpperCase();
+
+          const inputsWrap = document.createElement('div');
+          inputsWrap.style.cssText = 'display:flex;gap:8px;flex:1;';
+          for (let i = 0; i < total; i++) inputsWrap.appendChild(makeMoveCell(slot, i, total));
+
+          slotRow.appendChild(slotLabel);
+          slotRow.appendChild(inputsWrap);
+          slotWrap.appendChild(slotRow);
+
+        } else {
+          // ── Two-row layout (3 + 2) ──
+          const headerRow = document.createElement('div');
+          headerRow.style.cssText = 'display:flex;align-items:flex-start;gap:16px;';
+
+          const slotLabel = document.createElement('div');
+          slotLabel.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);width:130px;flex-shrink:0;padding-top:7px;';
+          slotLabel.textContent = slot.name.toUpperCase();
+
+          const rowsWrap = document.createElement('div');
+          rowsWrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;flex:1;';
+
+          // Row 1 — 3 cells
+          const row1 = document.createElement('div');
+          row1.style.cssText = 'display:flex;gap:8px;';
+          for (let i = 0; i < 3; i++) row1.appendChild(makeMoveCell(slot, i, total));
+
+          // Row 2 — remaining cells (2 for a 5-slot)
+          const row2 = document.createElement('div');
+          row2.style.cssText = 'display:flex;gap:8px;';
+          for (let i = 3; i < total; i++) row2.appendChild(makeMoveCell(slot, i, total));
+          // Pad row 2 so cells align with row 1 widths
+          const remainder = total - 3;
+          for (let p = remainder; p < 3; p++) {
+            const spacer = document.createElement('div');
+            spacer.style.cssText = 'flex:1;min-width:0;';
+            row2.appendChild(spacer);
+          }
+
+          rowsWrap.appendChild(row1);
+          rowsWrap.appendChild(row2);
+          headerRow.appendChild(slotLabel);
+          headerRow.appendChild(rowsWrap);
+          slotWrap.appendChild(headerRow);
+        }
+
+        content.appendChild(slotWrap);
       });
     }
   }
