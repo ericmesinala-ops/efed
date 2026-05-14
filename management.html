@@ -2815,7 +2815,7 @@ async function loadMovesetData() {
 /* ── PRIMARY TABS (only Standing active) ── */
 const MOVESET_PRIMARY_TABS = [
   { name: 'Standing', active: true },
-  { name: 'Ground', active: false },
+  { name: 'Ground', active: true },
   { name: 'Corner', active: false },
   { name: 'Rope', active: false },
   { name: 'Irish Whip', active: false },
@@ -2830,14 +2830,88 @@ const MOVESET_PRIMARY_TABS = [
   { name: 'Taunt', active: false },
 ];
 
-/* ── STANDING SUB-TABS (only Front active) ── */
+/* ── STANDING SUB-TABS ── */
 const STANDING_SUB_TABS = [
-  { name: 'Front', active: true },
-  { name: 'Rear', active: false },
-  { name: 'Carry', active: false },
-  { name: 'Foot Catch', active: false },
-  { name: 'Leverage Pin', active: false },
+  { name: 'Front',        active: true },
+  { name: 'Rear',         active: true },
+  { name: 'Carry',        active: true },
+  { name: 'Foot Catch',   active: true },
+  { name: 'Leverage Pin', active: true },
 ];
+
+/* ── STANDING > REAR SLOTS ── */
+const REAR_SLOTS = [
+  { name: 'Heavy Attack',  active: true },
+  { name: 'Light Grapple', active: true },
+  { name: 'Heavy Grapple', active: true },
+  { name: 'Running',       active: true },
+];
+const REAR_SLOT_COUNTS = {
+  'Heavy Attack':  1,
+  'Light Grapple': 5,
+  'Heavy Grapple': 5,
+  'Running':       3,
+};
+
+/* ── STANDING > CARRY SLOTS ── */
+const CARRY_SLOTS = [
+  { name: 'Carry 1', active: true },
+  { name: 'Carry 2', active: true },
+  { name: 'Carry 3', active: true },
+  { name: 'Carry 4', active: true },
+];
+const CARRY_SLOT_COUNTS = { 'Carry 1': 4, 'Carry 2': 4, 'Carry 3': 4, 'Carry 4': 4 };
+
+/* ── STANDING > FOOT CATCH SLOTS ── */
+const FOOT_CATCH_SLOTS = [
+  { name: 'Catch 1', active: true },
+  { name: 'Catch 2', active: true },
+  { name: 'Catch 3', active: true },
+  { name: 'Catch 4', active: true },
+];
+const FOOT_CATCH_SLOT_COUNTS = { 'Catch 1': 4, 'Catch 2': 4, 'Catch 3': 4, 'Catch 4': 4 };
+
+/* ── STANDING > LEVERAGE PIN SLOTS ── */
+const LEVERAGE_PIN_SLOTS = [
+  { name: 'Pin 1', active: true },
+  { name: 'Pin 2', active: true },
+];
+const LEVERAGE_PIN_SLOT_COUNTS = { 'Pin 1': 4, 'Pin 2': 4 };
+
+/* ── GROUND SUB-TABS ── */
+const GROUND_SUB_TABS = [
+  { name: 'Supine',  active: true },
+  { name: 'Prone',   active: true },
+  { name: 'Kneeling',active: true },
+  { name: 'Seated',  active: true },
+  { name: 'Corner',  active: true },
+];
+let _movesetGroundSubTab = 'Supine';
+let _movesetGroundPosition = 'Upper'; // for Supine/Prone: Upper/Side/Lower; Kneeling: Front/Rear; Seated: Front/Rear
+
+/* Ground position configs */
+const GROUND_CONFIGS = {
+  'Supine': {
+    positions: ['Upper', 'Side', 'Lower', 'Running'],
+    counts: { 'Upper': 3, 'Side': 3, 'Lower': 3, 'Running': 1 },
+  },
+  'Prone': {
+    positions: ['Upper', 'Side', 'Lower'],
+    counts: { 'Upper': 3, 'Side': 3, 'Lower': 3 },
+  },
+  'Kneeling': {
+    positions: ['Front', 'Rear'],
+    counts: { 'Front': 5, 'Rear': 2 },
+  },
+  'Seated': {
+    positions: ['Front', 'Rear'],
+    counts: { 'Front': 3, 'Rear': 2 },
+  },
+  'Corner': {
+    positions: ['Corner'],
+    counts: { 'Corner': 1 },
+  },
+};
 
 /* ── FRONT SLOTS (only Light Attack active) ── */
 const FRONT_SLOTS = [
@@ -2904,7 +2978,14 @@ function renderMoveset() {
     btn.textContent = tab.name.toUpperCase();
     btn.disabled = !tab.active;
     if (tab.active) {
-      btn.onclick = () => { _movesetPrimaryTab = tab.name; renderMoveset(); };
+      btn.onclick = () => {
+        _movesetPrimaryTab = tab.name;
+        if (tab.name === 'Ground') {
+          _movesetGroundSubTab = 'Supine';
+          _movesetGroundPosition = 'Upper';
+        }
+        renderMoveset();
+      };
     }
     primaryTabsRow.appendChild(btn);
   });
@@ -2936,134 +3017,202 @@ function renderMoveset() {
     });
     content.appendChild(subTabsRow);
 
-    // ── FRONT SLOTS ──
-    if (_movesetSubTab === 'Front') {
-      // Per-slot counts. Slots with >3 use 2-row layout (row1: 3, row2: remainder)
-      const SLOT_COUNTS = {
-        'Light Attack':  3,
-        'Combo Chain':   3,
-        'Combo Enders':  3,
-        'Heavy Attack':  3,
-        'Light Grapple': 5,
-        'Heavy Grapple': 5,
-        'Running':       3,
-      };
+    // ── GENERIC MOVE CELL BUILDER (category + subCategory aware) ──
+    function makeMoveCell(cat, subCat, slotName, i, totalSlots, slotActive) {
+      const cellVal = getMovesetVal(cat, subCat, slotName, i);
+      const cell = document.createElement('div');
+      cell.style.cssText = 'flex:1;min-width:0;position:relative;';
 
-      // Helper: build one move cell (chip + hidden input)
-      function makeMoveCell(slot, i, totalSlots) {
-        const cellVal = getMovesetVal('Standing', 'Front', slot.name, i);
-        const cell = document.createElement('div');
-        cell.style.cssText = 'flex:1;min-width:0;position:relative;';
-
-        const chip = document.createElement('div');
-        chip.dataset.moveChip = '1';
-        const hasVal = cellVal && cellVal.trim();
-        chip.style.cssText = `padding:7px 10px;border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:${hasVal ? 'var(--text-primary)' : 'var(--text-muted)'};background:transparent;border:1px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s,border-color .15s,color .15s;${slot.active ? 'cursor:pointer;' : 'opacity:.35;'}`;
-        chip.textContent = hasVal ? cellVal : '+ Move ' + (i + 1);
-        if (slot.active) {
-          chip.title = 'Click to edit';
-          chip.onmouseenter = () => { chip.style.background = 'var(--bg-tertiary)'; chip.style.borderColor = 'var(--border-input)'; };
-          chip.onmouseleave = () => { chip.style.background = 'transparent'; chip.style.borderColor = 'transparent'; };
-        }
-
-        const inp = document.createElement('input');
-        inp.type = 'text';
-        inp.maxLength = 36;
-        inp.placeholder = 'Move ' + (i + 1);
-        inp.value = cellVal;
-        inp.style.cssText = 'display:none;width:100%;padding:7px 10px;background:var(--bg-input);border:1px solid var(--accent-blue);border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:var(--text-primary);outline:none;min-width:0;box-sizing:border-box;';
-
-        function saveAndHide(chipEl, inputEl, slotName, idx) {
-          const v = inputEl.value.trim();
-          if (!movesetData['Standing']) movesetData['Standing'] = {};
-          if (!movesetData['Standing']['Front']) movesetData['Standing']['Front'] = {};
-          if (!movesetData['Standing']['Front'][slotName]) movesetData['Standing']['Front'][slotName] = Array(totalSlots).fill('');
-          movesetData['Standing']['Front'][slotName][idx] = inputEl.value;
-          chipEl.textContent = v || ('+ Move ' + (idx + 1));
-          chipEl.style.color = v ? 'var(--text-primary)' : 'var(--text-muted)';
-          inputEl.style.display = 'none';
-          chipEl.style.display = '';
-        }
-
-        if (slot.active) {
-          chip.onclick = () => { chip.style.display = 'none'; inp.style.display = 'block'; inp.focus(); inp.select(); };
-          inp.onblur = () => saveAndHide(chip, inp, slot.name, i);
-          inp.onkeydown = (e) => { if (e.key === 'Enter' || e.key === 'Escape') inp.blur(); };
-          inp.oninput = () => {
-            if (!movesetData['Standing']) movesetData['Standing'] = {};
-            if (!movesetData['Standing']['Front']) movesetData['Standing']['Front'] = {};
-            if (!movesetData['Standing']['Front'][slot.name]) movesetData['Standing']['Front'][slot.name] = Array(totalSlots).fill('');
-            movesetData['Standing']['Front'][slot.name][i] = inp.value;
-          };
-        }
-
-        cell.appendChild(chip);
-        cell.appendChild(inp);
-        return cell;
+      const chip = document.createElement('div');
+      chip.dataset.moveChip = '1';
+      const hasVal = cellVal && cellVal.trim();
+      chip.style.cssText = `padding:7px 10px;border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:${hasVal ? 'var(--text-primary)' : 'var(--text-muted)'};background:transparent;border:1px solid transparent;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s,border-color .15s,color .15s;${slotActive ? 'cursor:pointer;' : 'opacity:.35;'}`;
+      chip.textContent = hasVal ? cellVal : '+ Move ' + (i + 1);
+      if (slotActive) {
+        chip.title = 'Click to edit';
+        chip.onmouseenter = () => { chip.style.background = 'var(--bg-tertiary)'; chip.style.borderColor = 'var(--border-input)'; };
+        chip.onmouseleave = () => { chip.style.background = 'transparent'; chip.style.borderColor = 'transparent'; };
       }
 
-      FRONT_SLOTS.forEach(slot => {
-        const total = SLOT_COUNTS[slot.name] || 3;
-        const useRows = total > 3; // 5-slot slots get 2 rows (3+2)
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.maxLength = 36;
+      inp.placeholder = 'Move ' + (i + 1);
+      inp.value = cellVal;
+      inp.style.cssText = 'display:none;width:100%;padding:7px 10px;background:var(--bg-input);border:1px solid var(--accent-blue);border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:var(--text-primary);outline:none;min-width:0;box-sizing:border-box;';
 
+      if (slotActive) {
+        chip.onclick = () => { chip.style.display = 'none'; inp.style.display = 'block'; inp.focus(); inp.select(); };
+        inp.onblur = () => {
+          const v = inp.value.trim();
+          if (!movesetData[cat]) movesetData[cat] = {};
+          if (!movesetData[cat][subCat]) movesetData[cat][subCat] = {};
+          if (!movesetData[cat][subCat][slotName]) movesetData[cat][subCat][slotName] = Array(totalSlots).fill('');
+          movesetData[cat][subCat][slotName][i] = inp.value;
+          chip.textContent = v || ('+ Move ' + (i + 1));
+          chip.style.color = v ? 'var(--text-primary)' : 'var(--text-muted)';
+          inp.style.display = 'none';
+          chip.style.display = '';
+          saveMovesetData();
+        };
+        inp.onkeydown = (e) => { if (e.key === 'Enter' || e.key === 'Escape') inp.blur(); };
+        inp.oninput = () => {
+          if (!movesetData[cat]) movesetData[cat] = {};
+          if (!movesetData[cat][subCat]) movesetData[cat][subCat] = {};
+          if (!movesetData[cat][subCat][slotName]) movesetData[cat][subCat][slotName] = Array(totalSlots).fill('');
+          movesetData[cat][subCat][slotName][i] = inp.value;
+        };
+      }
+
+      cell.appendChild(chip);
+      cell.appendChild(inp);
+      return cell;
+    }
+
+    // ── GENERIC SLOT RENDERER ──
+    function renderSlots(cat, subCat, slots, slotCounts) {
+      slots.forEach(slot => {
+        const total = slotCounts[slot.name] || 3;
+        const useRows = total > 3;
         const slotWrap = document.createElement('div');
         slotWrap.style.cssText = `padding:14px 0;border-bottom:1px solid var(--border-primary);opacity:${slot.active ? '1' : '0.28'};`;
 
         if (!useRows) {
-          // ── Single row ──
           const slotRow = document.createElement('div');
           slotRow.style.cssText = 'display:flex;align-items:center;gap:16px;';
-
           const slotLabel = document.createElement('div');
           slotLabel.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);width:130px;flex-shrink:0;';
           slotLabel.textContent = slot.name.toUpperCase();
-
           const inputsWrap = document.createElement('div');
           inputsWrap.style.cssText = 'display:flex;gap:8px;flex:1;';
-          for (let i = 0; i < total; i++) inputsWrap.appendChild(makeMoveCell(slot, i, total));
-
+          for (let i = 0; i < total; i++) inputsWrap.appendChild(makeMoveCell(cat, subCat, slot.name, i, total, slot.active));
           slotRow.appendChild(slotLabel);
           slotRow.appendChild(inputsWrap);
           slotWrap.appendChild(slotRow);
-
         } else {
-          // ── Two-row layout (3 + 2) ──
           const headerRow = document.createElement('div');
           headerRow.style.cssText = 'display:flex;align-items:flex-start;gap:16px;';
-
           const slotLabel = document.createElement('div');
           slotLabel.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:.82rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);width:130px;flex-shrink:0;padding-top:7px;';
           slotLabel.textContent = slot.name.toUpperCase();
-
           const rowsWrap = document.createElement('div');
           rowsWrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;flex:1;';
-
-          // Row 1 — 3 cells
           const row1 = document.createElement('div');
           row1.style.cssText = 'display:flex;gap:8px;';
-          for (let i = 0; i < 3; i++) row1.appendChild(makeMoveCell(slot, i, total));
-
-          // Row 2 — remaining cells (2 for a 5-slot)
+          for (let i = 0; i < 3; i++) row1.appendChild(makeMoveCell(cat, subCat, slot.name, i, total, slot.active));
           const row2 = document.createElement('div');
           row2.style.cssText = 'display:flex;gap:8px;';
-          for (let i = 3; i < total; i++) row2.appendChild(makeMoveCell(slot, i, total));
-          // Pad row 2 so cells align with row 1 widths
+          for (let i = 3; i < total; i++) row2.appendChild(makeMoveCell(cat, subCat, slot.name, i, total, slot.active));
           const remainder = total - 3;
           for (let p = remainder; p < 3; p++) {
-            const spacer = document.createElement('div');
-            spacer.style.cssText = 'flex:1;min-width:0;';
-            row2.appendChild(spacer);
+            const spacer = document.createElement('div'); spacer.style.cssText = 'flex:1;min-width:0;'; row2.appendChild(spacer);
           }
-
           rowsWrap.appendChild(row1);
           rowsWrap.appendChild(row2);
           headerRow.appendChild(slotLabel);
           headerRow.appendChild(rowsWrap);
           slotWrap.appendChild(headerRow);
         }
-
         content.appendChild(slotWrap);
       });
+    }
+
+    // ── FRONT SLOTS ──
+    if (_movesetSubTab === 'Front') {
+      const SLOT_COUNTS = { 'Light Attack':3,'Combo Chain':3,'Combo Enders':3,'Heavy Attack':3,'Light Grapple':5,'Heavy Grapple':5,'Running':3 };
+      renderSlots('Standing', 'Front', FRONT_SLOTS, SLOT_COUNTS);
+    }
+
+    // ── REAR SLOTS ──
+    if (_movesetSubTab === 'Rear') {
+      renderSlots('Standing', 'Rear', REAR_SLOTS, REAR_SLOT_COUNTS);
+    }
+
+    // ── CARRY SLOTS ──
+    if (_movesetSubTab === 'Carry') {
+      const carrySlots = [
+        { name: 'Carry 1', active: true }, { name: 'Carry 2', active: true },
+        { name: 'Carry 3', active: true }, { name: 'Carry 4', active: true },
+      ];
+      renderSlots('Standing', 'Carry', carrySlots, { 'Carry 1':4,'Carry 2':4,'Carry 3':4,'Carry 4':4 });
+    }
+
+    // ── FOOT CATCH SLOTS ──
+    if (_movesetSubTab === 'Foot Catch') {
+      const fcSlots = [
+        { name: 'Catch 1', active: true }, { name: 'Catch 2', active: true },
+        { name: 'Catch 3', active: true }, { name: 'Catch 4', active: true },
+      ];
+      renderSlots('Standing', 'Foot Catch', fcSlots, { 'Catch 1':4,'Catch 2':4,'Catch 3':4,'Catch 4':4 });
+    }
+
+    // ── LEVERAGE PIN SLOTS ──
+    if (_movesetSubTab === 'Leverage Pin') {
+      const lpSlots = [
+        { name: 'Pin 1', active: true }, { name: 'Pin 2', active: true },
+      ];
+      renderSlots('Standing', 'Leverage Pin', lpSlots, { 'Pin 1':4,'Pin 2':4 });
+    }
+  }
+
+  // ── GROUND TAB ──
+  if (_movesetPrimaryTab === 'Ground') {
+    const subTabsRow = document.createElement('div');
+    subTabsRow.style.cssText = 'display:flex;gap:6px;margin-bottom:24px;flex-wrap:wrap;';
+    GROUND_SUB_TABS.forEach(sub => {
+      const btn = document.createElement('button');
+      const isActive = sub.name === _movesetGroundSubTab;
+      btn.style.cssText = `padding:7px 16px;border-radius:5px;font-family:"Barlow Condensed",sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;white-space:nowrap;transition:all .15s;border:1px solid;
+        background:${isActive ? 'rgba(200,168,75,.15)' : 'transparent'};
+        border-color:${isActive ? 'rgba(200,168,75,.4)' : 'var(--border-primary)'};
+        color:${isActive ? 'var(--accent-blue)' : 'var(--text-muted)'};cursor:pointer;`;
+      btn.textContent = sub.name.toUpperCase();
+      btn.onclick = () => {
+        _movesetGroundSubTab = sub.name;
+        const cfg = GROUND_CONFIGS[sub.name];
+        _movesetGroundPosition = cfg ? cfg.positions[0] : '';
+        renderMoveset();
+      };
+      subTabsRow.appendChild(btn);
+    });
+    content.appendChild(subTabsRow);
+
+    const cfg = GROUND_CONFIGS[_movesetGroundSubTab];
+    if (cfg) {
+      // Only show position pills if more than 1 position
+      if (cfg.positions.length > 1) {
+        const posRow = document.createElement('div');
+        posRow.style.cssText = 'display:flex;gap:6px;margin-bottom:20px;';
+        cfg.positions.forEach(pos => {
+          const pb = document.createElement('button');
+          const isP = pos === _movesetGroundPosition;
+          pb.style.cssText = `padding:5px 14px;border-radius:4px;font-family:"Barlow Condensed",sans-serif;font-size:.72rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;transition:all .15s;border:1px solid;
+            background:${isP ? 'rgba(200,168,75,.1)' : 'transparent'};
+            border-color:${isP ? 'var(--accent-blue)' : 'var(--border-primary)'};
+            color:${isP ? 'var(--accent-blue)' : 'var(--text-tertiary)'};cursor:pointer;`;
+          pb.textContent = pos.toUpperCase();
+          pb.onclick = () => { _movesetGroundPosition = pos; renderMoveset(); };
+          posRow.appendChild(pb);
+        });
+        content.appendChild(posRow);
+      }
+
+      const pos = cfg.positions.length === 1 ? cfg.positions[0] : _movesetGroundPosition;
+      const count = cfg.counts[pos] || 3;
+      const subCatKey = _movesetGroundSubTab + ' - ' + pos;
+      const slots = [];
+      for (let s = 1; s <= count; s++) slots.push({ name: 'Move ' + s, active: true });
+      const slotCounts = {};
+      slots.forEach(sl => { slotCounts[sl.name] = 3; });
+
+      // For Ground > Corner single slot, just show 1 slot of 1 move
+      if (_movesetGroundSubTab === 'Corner') {
+        const cSlots = [{ name: 'Corner', active: true }];
+        const cCounts = { 'Corner': 1 };
+        renderSlots('Ground', 'Corner', cSlots, cCounts);
+      } else {
+        renderSlots('Ground', subCatKey, slots, slotCounts);
+      }
     }
   }
 
@@ -3076,7 +3225,7 @@ function renderMoveset() {
   document.getElementById('detailsPanel').appendChild(pt);
   const hint = document.createElement('div');
   hint.style.cssText = 'font-size:.7rem;color:var(--text-muted);line-height:1.7;margin-top:10px;';
-  hint.innerHTML = 'Record your CAW\'s moves from WWE 2K.<br><br>Each slot holds up to 3 moves. Grayed out sections are coming soon.';
+  hint.innerHTML = 'Record your CAW\'s moves from WWE 2K.<br><br>Click any move chip to edit. Changes save automatically.';
   document.getElementById('detailsPanel').appendChild(hint);
 }
 
