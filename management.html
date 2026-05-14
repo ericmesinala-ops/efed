@@ -80,6 +80,10 @@ html.day-mode .nav-tv-svg--day{display:inline;}
 .nav-right{display:flex;align-items:center;gap:10px;}
 .nav-icon-btn{background:none;border:none;cursor:pointer;color:rgba(255,255,255,.6);padding:4px;display:flex;align-items:center;justify-content:center;border-radius:50%;transition:color .2s,background .2s;}
 .nav-icon-btn:hover{color:#fff;background:rgba(255,255,255,.08);}
+.bnav-notif-dot{display:none;position:absolute;width:7px;height:7px;border-radius:50%;background:#c0000e;border:1.5px solid #07070a;}
+.bnav-notif-dot.visible{display:block;}
+.mail-unread-dot{background:#22c55e!important;}
+@media(min-width:769px){#nav-mail-btn{display:flex!important;}}
 .nav-avatar-initials{width:42px;height:42px;border-radius:50%;border:2px solid rgba(200,168,75,.4);background:rgba(200,168,75,.12);color:var(--gold);font-size:.75rem;font-weight:700;display:flex;align-items:center;justify-content:center;overflow:hidden;}
 .nav-user-wrap{position:relative;}
 .user-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:rgba(13,13,16,.98);border:1px solid rgba(255,255,255,.1);border-radius:10px;min-width:190px;padding:6px 0;opacity:0;pointer-events:none;transform:translateY(-6px);transition:opacity .2s,transform .2s;box-shadow:0 20px 48px rgba(0,0,0,.7);z-index:400;}
@@ -1657,6 +1661,10 @@ html.day-mode .settings-toggle-track { background: rgba(0,0,0,.15); }
     </div>
   </a>
   <div class="nav-right">
+    <a href="messages.html" class="nav-icon-btn" id="nav-mail-btn" style="position:relative;display:none;" title="Messages">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      <div class="bnav-notif-dot mail-unread-dot" id="mail-unread-dot-nav" style="top:2px;right:2px;background:#22c55e;"></div>
+    </a>
     <div class="nav-user-wrap">
       <button class="nav-icon-btn" id="nav-user-btn" onclick="toggleDropdown()" style="visibility:hidden;">
         <div class="nav-avatar-initials" id="nav-avatar-wrap">
@@ -2080,6 +2088,29 @@ function initNav() {
   if (nameEl) nameEl.textContent = displayName;
   if (emailEl) emailEl.textContent = '@' + session.username;
   document.getElementById('nav-user-btn').style.visibility = 'visible';
+  // Show mail button in header nav (desktop only)
+  const _navMailBtn = document.getElementById('nav-mail-btn');
+  if (_navMailBtn) _navMailBtn.style.display = '';
+  // Check unread messages
+  (async function() {
+    try {
+      const _fbCfg={apiKey:"AIzaSyDqtd_BdmxW4r3mAhs8rWFz-xTu3EkFwYo",projectId:"efed-hub-4a899"};
+      const _fbRes=await fetch(`https://firestore.googleapis.com/v1/projects/${_fbCfg.projectId}/databases/(default)/documents:runQuery`,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({structuredQuery:{
+          from:[{collectionId:'conversations'}],
+          where:{compositeFilter:{op:'AND',filters:[
+            {fieldFilter:{field:{fieldPath:'participants'},op:'ARRAY_CONTAINS',value:{stringValue:session.username}}},
+            {fieldFilter:{field:{fieldPath:`unreadCount.${session.username.toLowerCase()}`},op:'GREATER_THAN',value:{integerValue:'0'}}}
+          ]}},
+          limit:1
+        }})
+      });
+      const _fbJson=await _fbRes.json();
+      const _hasUnread=Array.isArray(_fbJson)&&_fbJson.some(r=>r.document);
+      if(_hasUnread){const dot=document.getElementById('mail-unread-dot-nav');if(dot)dot.classList.add('visible');}
+    } catch(e) {}
+  })();
   const profBtn = document.getElementById('my-profile-btn');
   if (profBtn) profBtn.style.display = 'flex';
   if ((session.username||'').toLowerCase() === ADMIN_USERNAME) {
