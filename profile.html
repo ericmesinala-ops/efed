@@ -17326,20 +17326,32 @@ const _vp = (() => {
   // ── Load ──────────────────────────────────────────────────────────────────
   async function load(username, isOwn, cooldown, avatarUrl, displayName){
     _user=username; _isOwn=isOwn; _cd=cooldown||{}; _avatar=avatarUrl||''; _displayName=displayName||username||'';
-    // Load user's roster memberships + each eFed's events
+    // Load user's roster memberships AND owned efeds
     _efeds=[];
     try{
-      const rows=await sbGet('roster',`username=eq.${encodeURIComponent(username)}&status=eq.approved&select=efed`);
-      const efedNames=[...new Set(rows.map(r=>r.efed))].filter(Boolean);
+      // 1. Approved roster memberships
+      const rosterRows=await sbGet('roster',`username=eq.${encodeURIComponent(username)}&status=eq.approved&select=efed`);
+      const rosterNames=[...new Set(rosterRows.map(r=>r.efed))].filter(Boolean);
+      // 2. Efed(s) the user owns (promo_name field on their own user row)
+      const userRows=await sbGet('users',`username=eq.${encodeURIComponent(username)}&select=promo_name,is_efed_owner,role`);
+      const u=userRows[0];
+      const ownedEfed=(u?.is_efed_owner||u?.role==='owner')&&u?.promo_name?u.promo_name:null;
+      // Merge: owned efed first, then roster, deduplicated case-insensitively
+      const seen=new Set();
+      const efedNames=[];
+      const add=n=>{if(n&&!seen.has(n.toLowerCase())){seen.add(n.toLowerCase());efedNames.push(n);}};
+      if(ownedEfed)add(ownedEfed);
+      rosterNames.forEach(add);
+      // 3. For each efed, fetch its metadata (acronym + events)
       for(const en of efedNames){
         try{
           const eu=await sbGet('users',`promo_name=ilike.${encodeURIComponent(en)}&select=promo_name,acronym,efed_event_title,efed_event_date,efed_events_json&limit=1`);
-          if(!eu.length) continue;
-          const u=eu[0]; const events=[];
-          if(u.efed_event_title)events.push({title:u.efed_event_title,date:u.efed_event_date||'TBA'});
-          if(Array.isArray(u.efed_events_json))u.efed_events_json.forEach(ev=>{if(ev.title)events.push({title:ev.title,date:ev.date||'TBA'});});
-          _efeds.push({efed_name:en,acronym:u.acronym||'',events});
-        }catch(e){}
+          if(!eu.length){_efeds.push({efed_name:en,acronym:'',events:[]});continue;}
+          const row=eu[0]; const events=[];
+          if(row.efed_event_title)events.push({title:row.efed_event_title,date:row.efed_event_date||'TBA'});
+          if(Array.isArray(row.efed_events_json))row.efed_events_json.forEach(ev=>{if(ev.title)events.push({title:ev.title,date:ev.date||'TBA'});});
+          _efeds.push({efed_name:en,acronym:row.acronym||'',events});
+        }catch(e){_efeds.push({efed_name:en,acronym:'',events:[]});}
       }
     }catch(e){}
     // Load existing promos for this user
@@ -17549,6 +17561,17 @@ const _vp = (() => {
 }
 .mr-efed-pill:hover { background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.22); color:rgba(255,255,255,.75); }
 .mr-efed-pill.active { background:rgba(200,168,75,.14); border-color:rgba(200,168,75,.4); color:#c8a84b; }
+/* ── Single cycling pill ── */
+.mr-cycle-pill {
+  display:inline-flex; align-items:center; gap:5px;
+  padding:5px 12px 5px 10px; border-radius:20px;
+  background:rgba(200,168,75,.12); border:1px solid rgba(200,168,75,.38); color:#c8a84b;
+  font-family:'DM Sans',sans-serif; font-size:.68rem; font-weight:700;
+  letter-spacing:.3px; cursor:pointer; white-space:nowrap;
+  transition:background .15s,border-color .15s; user-select:none;
+}
+.mr-cycle-pill:hover { background:rgba(200,168,75,.22); border-color:rgba(200,168,75,.6); }
+.mr-cycle-pill::after { content:'›'; font-size:.95rem; opacity:.65; }
 /* Preview card */
 .mr-preview {
   border-radius:12px; overflow:hidden;
@@ -17618,10 +17641,8 @@ const _vp = (() => {
     </div>
     <div class="mr-mode-hint" id="pr-hint">In character — speak as your wrestler</div>
     <div class="mr-efed-row" id="pr-efed-row">
-      <div class="mr-efed-row-label">Post to eFed</div>
-      <div class="mr-efed-pills-wrap">
-        <div class="mr-efed-pills" id="pr-pills"></div>
-      </div>
+      <div class="mr-efed-row-label">Post to</div>
+      <button type="button" id="pr-cycle-pill" class="mr-cycle-pill" onclick="pr_cyclePill()">—</button>
     </div>
     <div class="mr-preview" id="pr-preview"></div>
     <textarea class="mr-textarea" id="pr-text" placeholder="Add a comment… (optional)" maxlength="800" oninput="var c=document.getElementById('pr-char');if(c)c.textContent=this.value.length+' / 800'"></textarea>
@@ -17667,42 +17688,50 @@ function pr_setMode(mode) {
   if (hint)   hint.textContent = mode==='ic' ? 'In character — speak as your wrestler' : 'Out of character — real you, casual';
 }
 
+// ── Cycling pill: single pill, click advances through options ──────────────
+let _prPillOptions = []; // [{val, label}]
+let _prPillIdx = 0;
+
 function pr_buildPills(efeds, matchEfed) {
-  const row   = document.getElementById('pr-efed-row');
-  const strip = document.getElementById('pr-pills');
-  if (!row || !strip) return;
-  strip.innerHTML = '';
-  // The match's own eFed first (always shown + pre-selected)
-  const allEfeds = matchEfed ? [matchEfed, ...efeds.filter(e=>e.toLowerCase()!==matchEfed.toLowerCase())] : efeds;
-  allEfeds.forEach(name => {
-    const p = document.createElement('button'); p.type='button';
-    p.className='mr-efed-pill'; p.textContent=name; p.dataset.val=name;
-    p.onclick = () => pr_selectPill(name);
-    strip.appendChild(p);
-  });
-  if (allEfeds.length > 1) {
-    const all = document.createElement('button'); all.type='button';
-    all.className='mr-efed-pill'; all.textContent='All'; all.dataset.val='__all__';
-    all.onclick = () => pr_selectPill('__all__');
-    strip.appendChild(all);
-  }
-  const mf = document.createElement('button'); mf.type='button';
-  mf.className='mr-efed-pill'; mf.textContent='My Feed Only'; mf.dataset.val='__myfeed__';
-  mf.onclick = () => pr_selectPill('__myfeed__');
-  strip.appendChild(mf);
+  const row = document.getElementById('pr-efed-row');
+  if (!row) return;
+  // Build ordered option list: match efed first, then others, then All (if >1), then My Feed Only
+  const allEfeds = matchEfed
+    ? [matchEfed, ...efeds.filter(e => e.toLowerCase() !== matchEfed.toLowerCase())]
+    : [...efeds];
+  _prPillOptions = [];
+  allEfeds.forEach(name => _prPillOptions.push({val: name, label: name}));
+  if (allEfeds.length > 1) _prPillOptions.push({val: '__all__', label: 'All eFeds'});
+  _prPillOptions.push({val: '__myfeed__', label: 'My Feed Only'});
+  // Default to match efed (index 0) or My Feed Only
+  _prPillIdx = 0;
   row.style.display = '';
-  // Default: match's own eFed
-  pr_selectPill(matchEfed || (allEfeds[0]||'__myfeed__'));
+  _prUpdateCyclePill();
 }
 
-function pr_selectPill(val) {
-  window.prSelectedEfed = val==='__myfeed__' ? null : val==='__all__' ? '__all__' : val;
-  document.querySelectorAll('#pr-pills .mr-efed-pill').forEach(p=>{
-    p.classList.toggle('active', p.dataset.val===val);
-  });
-  // Refresh stamp picker for selected eFed
-  pr_buildStamps(val==='__myfeed__'||val==='__all__' ? null : val);
+function _prUpdateCyclePill() {
+  const pill = document.getElementById('pr-cycle-pill');
+  if (!pill || !_prPillOptions.length) return;
+  const opt = _prPillOptions[_prPillIdx];
+  pill.textContent = opt.label; // ::after adds the › via CSS
+  // Update selection state
+  window.prSelectedEfed = opt.val === '__myfeed__' ? null : opt.val === '__all__' ? '__all__' : opt.val;
+  pr_buildStamps(opt.val === '__myfeed__' || opt.val === '__all__' ? null : opt.val);
 }
+
+function pr_cyclePill() {
+  if (!_prPillOptions.length) return;
+  _prPillIdx = (_prPillIdx + 1) % _prPillOptions.length;
+  _prUpdateCyclePill();
+}
+
+// Keep pr_selectPill as a helper for direct selection (used internally)
+function pr_selectPill(val) {
+  const idx = _prPillOptions.findIndex(o => o.val === val);
+  if (idx !== -1) _prPillIdx = idx;
+  _prUpdateCyclePill();
+}
+
 
 function pr_buildStamps(efedName) {
   if (typeof getEfedStamps !== 'function') return;
