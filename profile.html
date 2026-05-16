@@ -17561,17 +17561,20 @@ const _vp = (() => {
 }
 .mr-efed-pill:hover { background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.22); color:rgba(255,255,255,.75); }
 .mr-efed-pill.active { background:rgba(200,168,75,.14); border-color:rgba(200,168,75,.4); color:#c8a84b; }
-/* ── Single cycling pill ── */
-.mr-cycle-pill {
-  display:inline-flex; align-items:center; gap:5px;
-  padding:5px 12px 5px 10px; border-radius:20px;
-  background:rgba(200,168,75,.12); border:1px solid rgba(200,168,75,.38); color:#c8a84b;
-  font-family:'DM Sans',sans-serif; font-size:.68rem; font-weight:700;
-  letter-spacing:.3px; cursor:pointer; white-space:nowrap;
-  transition:background .15s,border-color .15s; user-select:none;
+/* ── Destination dropdown ── */
+.mr-dest-sel {
+  width:100%; padding:9px 12px; border-radius:10px; font-size:.8rem;
+  background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.1);
+  color:rgba(255,255,255,.75); font-family:'DM Sans',sans-serif;
+  cursor:pointer; outline:none; appearance:none; -webkit-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,.35)' stroke-width='2.5' stroke-linecap='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 10px center;
+  padding-right:30px; transition:border-color .15s;
 }
-.mr-cycle-pill:hover { background:rgba(200,168,75,.22); border-color:rgba(200,168,75,.6); }
-.mr-cycle-pill::after { content:'›'; font-size:.95rem; opacity:.65; }
+.mr-dest-sel:focus { border-color:rgba(200,168,75,.4); }
+.mr-dest-sel option { background:#111; color:#e8e8e8; }
+html.day-mode .mr-dest-sel { background-color:rgba(0,0,0,.03); border-color:rgba(0,0,0,.15); color:#111; }
+html.day-mode .mr-dest-sel option { background:#fff; color:#111; }
 /* Preview card */
 .mr-preview {
   border-radius:12px; overflow:hidden;
@@ -17642,7 +17645,7 @@ const _vp = (() => {
     <div class="mr-mode-hint" id="pr-hint">In character — speak as your wrestler</div>
     <div class="mr-efed-row" id="pr-efed-row">
       <div class="mr-efed-row-label">Post to</div>
-      <button type="button" id="pr-cycle-pill" class="mr-cycle-pill" onclick="pr_cyclePill()">—</button>
+      <select id="pr-dest-sel" class="mr-dest-sel" onchange="pr_onDestChange(this.value)"></select>
     </div>
     <div class="mr-preview" id="pr-preview"></div>
     <textarea class="mr-textarea" id="pr-text" placeholder="Add a comment… (optional)" maxlength="800" oninput="var c=document.getElementById('pr-char');if(c)c.textContent=this.value.length+' / 800'"></textarea>
@@ -17689,47 +17692,37 @@ function pr_setMode(mode) {
 }
 
 // ── Cycling pill: single pill, click advances through options ──────────────
-let _prPillOptions = []; // [{val, label}]
-let _prPillIdx = 0;
-
 function pr_buildPills(efeds, matchEfed) {
   const row = document.getElementById('pr-efed-row');
-  if (!row) return;
+  const sel = document.getElementById('pr-dest-sel');
+  if (!row || !sel) return;
   // Build ordered option list: match efed first, then others, then All (if >1), then My Feed Only
   const allEfeds = matchEfed
     ? [matchEfed, ...efeds.filter(e => e.toLowerCase() !== matchEfed.toLowerCase())]
     : [...efeds];
-  _prPillOptions = [];
-  allEfeds.forEach(name => _prPillOptions.push({val: name, label: name}));
-  if (allEfeds.length > 1) _prPillOptions.push({val: '__all__', label: 'All eFeds'});
-  _prPillOptions.push({val: '__myfeed__', label: 'My Feed Only'});
-  // Default to match efed (index 0) or My Feed Only
-  _prPillIdx = 0;
+  sel.innerHTML = '';
+  allEfeds.forEach(name => {
+    const o = document.createElement('option'); o.value = name; o.textContent = name; sel.appendChild(o);
+  });
+  if (allEfeds.length > 1) {
+    const o = document.createElement('option'); o.value = '__all__'; o.textContent = 'All eFeds'; sel.appendChild(o);
+  }
+  const mf = document.createElement('option'); mf.value = '__myfeed__'; mf.textContent = 'My Feed Only'; sel.appendChild(mf);
+  // Default to match efed
+  sel.value = matchEfed || (allEfeds[0] || '__myfeed__');
   row.style.display = '';
-  _prUpdateCyclePill();
+  pr_onDestChange(sel.value);
 }
 
-function _prUpdateCyclePill() {
-  const pill = document.getElementById('pr-cycle-pill');
-  if (!pill || !_prPillOptions.length) return;
-  const opt = _prPillOptions[_prPillIdx];
-  pill.textContent = opt.label; // ::after adds the › via CSS
-  // Update selection state
-  window.prSelectedEfed = opt.val === '__myfeed__' ? null : opt.val === '__all__' ? '__all__' : opt.val;
-  pr_buildStamps(opt.val === '__myfeed__' || opt.val === '__all__' ? null : opt.val);
+function pr_onDestChange(val) {
+  window.prSelectedEfed = val === '__myfeed__' ? null : val === '__all__' ? '__all__' : val;
+  pr_buildStamps(val === '__myfeed__' || val === '__all__' ? null : val);
 }
 
-function pr_cyclePill() {
-  if (!_prPillOptions.length) return;
-  _prPillIdx = (_prPillIdx + 1) % _prPillOptions.length;
-  _prUpdateCyclePill();
-}
-
-// Keep pr_selectPill as a helper for direct selection (used internally)
+// Legacy alias kept so any other call sites don't break
 function pr_selectPill(val) {
-  const idx = _prPillOptions.findIndex(o => o.val === val);
-  if (idx !== -1) _prPillIdx = idx;
-  _prUpdateCyclePill();
+  const sel = document.getElementById('pr-dest-sel');
+  if (sel) { sel.value = val; pr_onDestChange(val); }
 }
 
 
