@@ -12254,6 +12254,8 @@ async function loadProfile() {
     var _2kUser = resolvedUser;
     var _2kIsOwn = _isOwnProfile;
     var _2kLoaded = false;
+    var _2kDirty = false;      // true only after an unsaved edit
+    var _2kSaveBtn = null;     // reference to the live save button across renders
     var _2kActiveSection = 'Moveset'; // Moveset | Entrance | Victory
     var _2kPrimaryTab = 'Standing';
     var _2kSubTab = 'Front';
@@ -12273,13 +12275,14 @@ async function loadProfile() {
         var rows = await res.json();
         _2kData = (rows && rows[0] && rows[0].moveset) ? rows[0].moveset : {};
       } catch(e) { _2kData = {}; }
+      _2kDirty = false;
       _2kLoaded = true;
       _2kRender();
     }
 
     // ── Save moveset (own profile only) ──
     async function _2kSave(btn) {
-      if (!_2kIsOwn) return;
+      if (!_2kIsOwn || !_2kDirty) return;
       var session = getSession(); if (!session) return;
       var origText = btn ? btn.textContent : 'Save';
       if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
@@ -12289,9 +12292,29 @@ async function loadProfile() {
         var payload = Object.assign({}, base, { username: session.username, moveset: _2kData, updated_at: new Date().toISOString() });
         var upsertHeaders = Object.assign({}, SB_HEADERS, { 'Prefer': 'resolution=merge-duplicates,return=representation' });
         await fetch(SUPABASE_URL + '/rest/v1/fsw_management_data?on_conflict=username', { method: 'POST', headers: upsertHeaders, body: JSON.stringify(payload) });
-        if (btn) { btn.textContent = '✓ Saved'; btn.style.background = '#2a7a3a'; setTimeout(function(){ btn.textContent = origText; btn.style.background = '#c0000e'; btn.disabled = false; }, 1800); }
+        _2kDirty = false;
+        _2kSetSaveBtnState(btn, false); // gray out after successful save
+        if (btn) { btn.textContent = '✓ Saved'; btn.style.background = '#2a7a3a'; btn.style.opacity = '1'; setTimeout(function(){ btn.textContent = origText; btn.style.background = ''; _2kSetSaveBtnState(btn, false); }, 1800); }
       } catch(e) {
-        if (btn) { btn.textContent = origText; btn.style.background = '#c0000e'; btn.disabled = false; }
+        if (btn) { btn.textContent = origText; btn.disabled = false; _2kSetSaveBtnState(btn, _2kDirty); }
+      }
+    }
+
+    // ── Enable/disable save button based on dirty state ──
+    function _2kSetSaveBtnState(btn, dirty) {
+      if (!btn) return;
+      if (dirty) {
+        btn.disabled = false;
+        btn.style.background = '#c0000e';
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+      } else {
+        btn.disabled = true;
+        btn.style.background = 'rgba(255,255,255,.08)';
+        btn.style.opacity = '1';
+        btn.style.cursor = 'default';
+        btn.style.color = 'rgba(255,255,255,.25)';
+        btn.style.border = '1px solid rgba(255,255,255,.08)';
       }
     }
 
@@ -12302,6 +12325,7 @@ async function loadProfile() {
       if (!_2kData[cat][sub]) _2kData[cat][sub] = {};
       if (!_2kData[cat][sub][slot]) _2kData[cat][sub][slot] = [];
       _2kData[cat][sub][slot][idx] = val;
+      if (!_2kDirty) { _2kDirty = true; _2kSetSaveBtnState(_2kSaveBtn, true); }
     }
 
     // ── Move cell builder ──
@@ -12535,11 +12559,13 @@ async function loadProfile() {
         warnSpan.style.cssText = 'font-size:.58rem;letter-spacing:1.8px;color:rgba(255,180,0,.55);font-family:"Barlow Condensed",sans-serif;font-weight:700;text-transform:uppercase;white-space:nowrap;';
         warnSpan.textContent = '⚠ Always Save Your Work';
         var saveBtn = document.createElement('button');
-        saveBtn.style.cssText = 'padding:7px 16px;border-radius:6px;font-family:"DM Sans",sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;border:1px solid rgba(255,255,255,.1);background:#c0000e;color:#fff;transition:opacity .15s;';
+        saveBtn.style.cssText = 'padding:7px 16px;border-radius:6px;font-family:"DM Sans",sans-serif;font-size:.78rem;font-weight:700;border:1px solid rgba(255,255,255,.1);color:#fff;transition:opacity .15s;';
         saveBtn.textContent = 'Save';
-        saveBtn.onmouseenter = function(){ saveBtn.style.opacity='.85'; };
+        saveBtn.onmouseenter = function(){ if (!saveBtn.disabled) saveBtn.style.opacity='.85'; };
         saveBtn.onmouseleave = function(){ saveBtn.style.opacity='1'; };
         saveBtn.onclick = function(){ _2kSave(saveBtn); };
+        _2kSaveBtn = saveBtn; // keep reference so _2kSet can update it live
+        _2kSetSaveBtnState(saveBtn, _2kDirty); // start grayed unless there are pending edits
         saveBar.appendChild(warnSpan);
         saveBar.appendChild(saveBtn);
         mWrap.appendChild(saveBar);
