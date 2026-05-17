@@ -1487,10 +1487,7 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></svg>
           My eFed
         </button>
-        <button class="dropdown-item" id="planner-btn" onclick="toggleDropdown(true); window.location.href='management.html';" style="display:none;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="12" y1="14" x2="12" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/></svg>
-          Records
-        </button>
+
         <div style="height:1px;background:rgba(255,255,255,.06);margin:4px 0;"></div>
         <button class="dropdown-item" id="edit-profile-dd-btn" onclick="toggleDropdown(true); openEditModal('profile')" style="display:none;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -1793,36 +1790,43 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 
   /* ── switch by index ── */
   let _panelHideTimer;
+  function _visibleTabCount() {
+    /* Count visible tabs — on mobile, records tab is display:none so 4 tabs; desktop 5 */
+    return Array.from(document.querySelectorAll('.profile-tab'))
+      .filter(function(t) { return t.offsetParent !== null; }).length || TABS.length;
+  }
   function _goTo(idx, animate) {
-    idx = Math.max(0, Math.min(TABS.length - 1, idx));
+    const n = _visibleTabCount();          /* 4 on mobile, 5 on desktop */
+    const panelPct = 100 / n;             /* 25% on mobile, 20% on desktop */
+    idx = Math.max(0, Math.min(n - 1, idx));
     _curIdx = idx;
 
-    /* tab buttons */
-    document.querySelectorAll('.profile-tab').forEach((t, i) =>
-      t.classList.toggle('active', i === idx));
+    /* tab buttons — only iterate visible ones so index matches position */
+    Array.from(document.querySelectorAll('.profile-tab'))
+      .filter(function(t) { return t.offsetParent !== null; })
+      .forEach(function(t, i) { t.classList.toggle('active', i === idx); });
 
     /* ink slider */
     const ink = document.getElementById('profile-tab-ink');
     if (ink) ink.style.transform = 'translateX(' + (idx * 100) + '%)';
 
-    /* panel track */
+    /* panel track — each panel is panelPct wide inside track */
     const track = document.getElementById('profile-panels-track');
     if (track) {
       if (!animate) track.classList.add('no-transition');
-      track.style.transform = 'translateX(-' + (idx * 20) + '%)';
-      if (!animate) requestAnimationFrame(() => track.classList.remove('no-transition'));
+      track.style.transform = 'translateX(-' + (idx * panelPct) + '%)';
+      if (!animate) requestAnimationFrame(function() { track.classList.remove('no-transition'); });
     }
 
-    /* After transition settles, hide off-screen panels from GPU compositing.
-       content-visibility:hidden skips paint but keeps layout so the slide works. */
+    /* After transition settles, hide off-screen panels from GPU compositing */
     clearTimeout(_panelHideTimer);
     _panelHideTimer = setTimeout(function() {
       document.querySelectorAll('.profile-tab-panel').forEach(function(p, i) {
         p.style.contentVisibility = (i === _curIdx) ? 'visible' : 'hidden';
       });
-    }, 420); /* slightly after the .32s transition */
+    }, 420);
 
-    /* ── 2K Settings tab: lazy-init on first visit ── */
+    /* 2K Settings tab: desktop only (idx === 4) */
     if (idx === 4 && typeof window._2kSettingsInit === 'function') {
       window._2kSettingsInit();
     }
@@ -1892,13 +1896,11 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 
       if (_locked === 'h') {
         e.preventDefault();
-        /* clamp: can't swipe past first/last */
         const maxDrag = viewport.offsetWidth * 0.55;
         const clamped = Math.max(-maxDrag, Math.min(maxDrag, _tx));
-        const base = _curIdx * 25; /* % */
-        /* convert px drag to % of track width (track = 4× viewport) */
-        const pct = (clamped / (viewport.offsetWidth * 4)) * 100;
-        track.style.transform = 'translateX(calc(-' + base + '% + ' + (clamped) + 'px))';
+        const n = _visibleTabCount();
+        const basePct = _curIdx * (100 / n); /* e.g. 25% steps on mobile, 20% on desktop */
+        track.style.transform = 'translateX(calc(-' + basePct + '% + ' + clamped + 'px))';
       }
     }, { passive: false });
 
@@ -1914,7 +1916,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
         track.classList.remove('no-transition');
         void track.offsetWidth; /* reflow */
 
-        if (_tx < -THRESHOLD && _curIdx < TABS.length - 1) {
+        if (_tx < -THRESHOLD && _curIdx < _visibleTabCount() - 1) {
           _goTo(_curIdx + 1, true);
         } else if (_tx > THRESHOLD && _curIdx > 0) {
           _goTo(_curIdx - 1, true);
@@ -9494,9 +9496,6 @@ async function loadMyEfedBtn() {
     _myEfedList = efeds.map(e => e.name);
     if (!efeds.length) { btn.style.display = 'none'; return; }
     btn.style.display = 'flex';
-    const plannerBtn = document.getElementById('planner-btn');
-    const _isMobileDev = window.innerWidth <= 700;
-    if (plannerBtn && !_isMobileDev) plannerBtn.style.display = 'flex';
     const navEfed = document.getElementById('nav-tab-myefed');
     if (navEfed) navEfed.onclick = () => handleMyEfedClick();
   } catch(e) { console.error('[profile] loadMyEfedBtn error:', e); }
@@ -11669,9 +11668,7 @@ async function initNav() {
   }
   if (ddName) ddName.innerHTML = _esc(displayName);
   if (ddEmail) ddEmail.textContent = '@' + session.username;
-  // Show Records for all logged-in users (desktop only)
-  const _plannerBtnInitP = document.getElementById('planner-btn');
-  if (_plannerBtnInitP && window.innerWidth > 700) _plannerBtnInitP.style.display = 'flex';
+  // Show Records for all logged-in users — removed (now lives in 2K Settings tab)
   const _targetUser = new URLSearchParams(location.search).get('u');
   const _isOwnPage = !_targetUser || _targetUser.toLowerCase() === session.username.toLowerCase();
   if (_isOwnPage) {
