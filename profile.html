@@ -1598,7 +1598,7 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
   <button class="profile-tab" data-tab="activity" onclick="switchProfileTab(1)">Activity</button>
   <button class="profile-tab" data-tab="career" onclick="switchProfileTab(2)">Career</button>
   <button class="profile-tab" data-tab="media" onclick="switchProfileTab(3)">Media</button>
-  <button class="profile-tab" data-tab="records" onclick="switchProfileTab(4)">Records</button>
+  <button class="profile-tab" data-tab="records" onclick="switchProfileTab(4)">2K Settings</button>
   <div class="profile-tab-ink" id="profile-tab-ink"></div>
 </div>
 
@@ -7575,7 +7575,7 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
   <div id="records-panel-inner" style="width:100%;min-height:80vh;position:relative;">
     <iframe
       id="records-iframe"
-      src="management.html"
+      src=""
       style="width:100%;height:calc(100vh - 120px);min-height:600px;border:none;display:block;"
       title="Hub Records"
       loading="lazy"
@@ -12245,24 +12245,64 @@ async function loadProfile() {
   const resolvedUser = targetUser || session.username;
   _isOwnProfile = resolvedUser.toLowerCase() === session.username.toLowerCase();
 
-  // ── RECORDS TAB: apply mode once _isOwnProfile is known ──
-  window._applyRecordsMode = function() {
+  // ── RECORDS TAB: set iframe src with profile owner, apply mode once loaded ──
+  (function() {
+    var f = document.getElementById('records-iframe');
+    if (f && !f.src) {
+      // Pass the profile owner username so management.html loads their data
+      f.src = 'management.html';
+    }
+  })();
+
+  window._applyRecordsMode = async function() {
     var f = document.getElementById('records-iframe');
     if (!f) return;
     try {
       var d = f.contentDocument;
+      var w = f.contentWindow;
+      // Hide management nav
       var nav = d.getElementById('nav'); if (nav) nav.style.display = 'none';
+      // Sticky topbar
       var tb = d.getElementById('mgmt-topbar');
       if (tb) { tb.style.position = 'sticky'; tb.style.top = '0'; tb.style.zIndex = '200'; }
+
       if (!_isOwnProfile) {
+        // ── Fetch the profile owner's moveset and inject it ──
+        try {
+          var res = await fetch(SUPABASE_URL + '/rest/v1/fsw_management_data?username=eq.' + encodeURIComponent(resolvedUser) + '&select=moveset&limit=1', { headers: SB_HEADERS });
+          var rows = await res.json();
+          if (rows && rows[0] && rows[0].moveset) {
+            w.movesetData = rows[0].moveset;
+          } else {
+            w.movesetData = {};
+          }
+          if (typeof w.renderMoveset === 'function') w.renderMoveset();
+        } catch(e) {}
+
+        // ── Also fix the profile card name/avatar to show the owner ──
+        try {
+          var uRes = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(resolvedUser) + '&select=display_name,avatar_url&limit=1', { headers: SB_HEADERS });
+          var uRows = await uRes.json();
+          if (uRows && uRows[0]) {
+            var u = uRows[0];
+            // Find the avatar img inside the moveset profile card
+            var avImg = d.querySelector('#sectionsContainer img');
+            if (avImg && u.avatar_url) avImg.src = u.avatar_url;
+            // Find the name span
+            var nameEls = d.querySelectorAll('#sectionsContainer [style*="Barlow Condensed"]');
+            if (nameEls.length && u.display_name) nameEls[0].childNodes[0].textContent = u.display_name.toUpperCase() + ' ';
+          }
+        } catch(e) {}
+
+        // ── Hide save + block all interaction with overlay ──
         var actions = d.getElementById('mgmt-topbar-actions'); if (actions) actions.style.display = 'none';
-        var body = d.getElementById('fsw-body');
-        if (body && !d.getElementById('records-readonly-overlay')) {
-          body.style.position = 'relative';
+        var wrap = d.getElementById('mgmt-wrap');
+        if (wrap && !d.getElementById('records-readonly-overlay')) {
+          wrap.style.position = 'relative';
           var ov = d.createElement('div');
           ov.id = 'records-readonly-overlay';
           ov.style.cssText = 'position:absolute;inset:0;z-index:9999;cursor:default;';
-          body.appendChild(ov);
+          wrap.appendChild(ov);
         }
       }
     } catch(e) {}
