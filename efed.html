@@ -20015,7 +20015,7 @@ function _mcSubmitRepost() { mc_submit(); }
   async function _save(){
     var btn=document.getElementById('er-save-btn'); if(!btn) return;
     var orig=btn.textContent;
-    btn.innerHTML='Saving…'; btn.disabled=true; btn.style.background='rgba(255,255,255,.15)';
+    btn.textContent='Saving…'; btn.disabled=true; btn.style.background='rgba(255,255,255,.15)';
     try {
       var session=(typeof getSession==='function')?getSession():null;
       if(!session) throw new Error('not logged in');
@@ -20032,92 +20032,236 @@ function _mcSubmitRepost() { mc_submit(); }
         method:'POST',headers:upsertHeaders,body:JSON.stringify(payload)
       });
       if(!resp.ok){var t=await resp.text();throw new Error(t);}
-      btn.innerHTML='✓ Saved'; btn.style.background='#2a7a3a'; btn.disabled=false;
+      btn.textContent='✓ Saved'; btn.style.background='#2a7a3a'; btn.disabled=false;
       _erDirty=false;
-      setTimeout(function(){btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save';btn.style.background='rgba(255,255,255,.07)';},2000);
+      setTimeout(function(){btn.textContent='Save';btn.style.background='rgba(255,255,255,.07)';},2000);
       if(typeof showToast==='function') showToast('Roster saved!');
     } catch(e){
-      btn.innerHTML=orig; btn.style.background='#c0000e'; btn.disabled=false;
+      btn.textContent=orig; btn.style.background='#c0000e'; btn.disabled=false;
       if(typeof showToast==='function') showToast('Save failed: '+e.message);
     }
   }
   window._erSave=_save;
 
   /* ── render full panel chrome ── */
+  /* ── Hub data modal ── */
+  window._erCloseHubModal=function(){
+    var bd=document.getElementById('er-hub-modal-bd'); if(bd) bd.classList.remove('open');
+  };
+  function _erCloseHubModal(){ window._erCloseHubModal(); }
+  function _erMakeInitials(name){
+    var d=document.createElement('div'); d.className='er-hub-init';
+    d.textContent=(name||'?').split(/\s+/).map(function(w){return w[0]||'';}).slice(0,2).join('').toUpperCase();
+    return d;
+  }
+  function _erShowHubSearch(rosterId, displayName, mgmt){
+    var bd=document.getElementById('er-hub-modal-bd');
+    var body=document.getElementById('er-hub-modal-body');
+    var title=document.getElementById('er-hub-modal-title');
+    if(!bd||!body||!title) return;
+    title.textContent='Update Real Data';
+    body.innerHTML='<div class="er-hub-empty">🔍 Searching hub…</div>';
+    bd.classList.add('open');
+    var HUB_FIELDS='select=username,display_name,avatar_url,height,weight,age,hometown,nickname,faction,entrance_music,x_handle,ig_handle';
+    var knownUser=(mgmt&&mgmt.efed_username||'').trim();
+    var p;
+    if(knownUser){
+      p=sbGet('users',HUB_FIELDS+'&username=eq.'+encodeURIComponent(knownUser)+'&limit=1').then(function(r){return Array.isArray(r)?r:[];});
+    } else {
+      var enc=encodeURIComponent(displayName.trim());
+      p=Promise.all([
+        sbGet('users',HUB_FIELDS+'&display_name=ilike.*'+enc+'*&limit=12'),
+        sbGet('users',HUB_FIELDS+'&username=ilike.*'+enc+'*&limit=12')
+      ]).then(function(res){
+        var seen=new Set(), all=[];
+        (res[0]||[]).concat(res[1]||[]).forEach(function(u){
+          if(u&&u.username&&!seen.has(u.username)&&!u.error){seen.add(u.username);all.push(u);}
+        });
+        return all;
+      });
+    }
+    p.then(function(rows){
+      body.innerHTML='';
+      if(!rows.length){
+        var em=document.createElement('div'); em.className='er-hub-empty';
+        em.innerHTML=knownUser
+          ?'<div style="font-size:1.2rem;margin-bottom:6px;">🔍</div>No hub account found for <strong style="color:rgba(255,255,255,.7);">@'+_esc(knownUser)+'</strong><br><span style="font-size:.7rem;opacity:.55;">Check the username spelling and try again.</span>'
+          :'<div style="font-size:1.2rem;margin-bottom:6px;">🔍</div>No profiles found for <strong style="color:rgba(255,255,255,.7);">'+_esc(displayName)+'</strong><br><span style="font-size:.7rem;opacity:.55;">Set their hub username in the USER field and try again.</span>';
+        body.appendChild(em); return;
+      }
+      var note=document.createElement('div');
+      note.style.cssText='font-size:.7rem;color:rgba(255,255,255,.38);margin-bottom:2px;';
+      note.textContent=rows.length+' profile'+(rows.length>1?'s':'')+' found in hub';
+      body.appendChild(note);
+      rows.forEach(function(u){
+        var item=document.createElement('div'); item.className='er-hub-item';
+        var av=u.avatar_url?(function(){var i=document.createElement('img');i.className='er-hub-av';i.src=u.avatar_url;i.alt=u.display_name||u.username;i.onerror=function(){i.replaceWith(_erMakeInitials(u.display_name||u.username));};return i;}()):_erMakeInitials(u.display_name||u.username);
+        var info=document.createElement('div'); info.className='er-hub-info';
+        var nm=document.createElement('div'); nm.className='er-hub-name'; nm.textContent=u.display_name||u.username;
+        var sub=document.createElement('div'); sub.className='er-hub-sub';
+        var parts=['@'+u.username]; if(u.faction) parts.push(u.faction); if(u.hometown) parts.push(u.hometown);
+        sub.textContent=parts.join('  ·  ');
+        info.appendChild(nm); info.appendChild(sub);
+        var chev=document.createElement('div'); chev.style.cssText='color:rgba(255,255,255,.25);font-size:.8rem;flex-shrink:0;'; chev.textContent='›';
+        item.appendChild(av); item.appendChild(info); item.appendChild(chev);
+        var wrData={height:u.height||'',weight:u.weight||'',age:u.age||'',hometown:u.hometown||'',nickname:u.nickname||'',faction:u.faction||'',efed_username:u.username||'',entrance_link:u.entrance_music||'',twitter_handle:u.x_handle||'',instagram_handle:u.ig_handle||'',tags:'',avatar_url:u.avatar_url||''};
+        item.onclick=function(){_erShowHubConfirm(rosterId,displayName,wrData,u.avatar_url||null);};
+        body.appendChild(item);
+      });
+    }).catch(function(){
+      body.innerHTML='<div class="er-hub-empty">Could not fetch hub data. Please try again.</div>';
+    });
+  }
+  function _erShowHubConfirm(rosterId, displayName, wr, avatarUrl){
+    var body=document.getElementById('er-hub-modal-body');
+    var title=document.getElementById('er-hub-modal-title');
+    if(!body||!title) return;
+    title.textContent='Confirm Update';
+    body.innerHTML='';
+    var FIELD_MAP=[
+      {k:'height',lbl:'Height'},{k:'weight',lbl:'Weight'},{k:'age',lbl:'Age'},
+      {k:'hometown',lbl:'Hometown'},{k:'faction',lbl:'Faction'},{k:'nickname',lbl:'Nickname'},
+      {k:'entrance_link',lbl:'Entrance Music'},{k:'efed_username',lbl:'Username'},
+      {k:'twitter_handle',lbl:'X (Twitter)'},{k:'instagram_handle',lbl:'Instagram'},{k:'tags',lbl:'Hashtag'}
+    ];
+    var willCopy=FIELD_MAP.filter(function(f){return (wr[f.k]||'').toString().trim()!=='';});
+    var willSkip=FIELD_MAP.filter(function(f){return (wr[f.k]||'').toString().trim()==='';});
+    /* header */
+    var hdr=document.createElement('div'); hdr.style.cssText='display:flex;align-items:center;gap:12px;padding:4px 0 8px;';
+    var av=avatarUrl?(function(){var i=document.createElement('img');i.className='er-hub-confirm-av';i.src=avatarUrl;i.onerror=function(){i.replaceWith(_erMakeInitials(wr.nickname||displayName));};return i;}()):_erMakeInitials(wr.nickname||displayName);
+    var hi=document.createElement('div'); hi.style.cssText='flex:1;min-width:0;';
+    var hnm=document.createElement('div'); hnm.className='er-hub-confirm-name'; hnm.textContent=wr.nickname||displayName;
+    var hsub=document.createElement('div'); hsub.style.cssText='font-size:.7rem;color:rgba(255,255,255,.38);margin-top:2px;'; hsub.textContent=wr.efed_username?'@'+wr.efed_username:'';
+    hi.appendChild(hnm); hi.appendChild(hsub); hdr.appendChild(av); hdr.appendChild(hi); body.appendChild(hdr);
+    var div1=document.createElement('div'); div1.style.cssText='height:1px;background:rgba(255,255,255,.07);margin:2px 0 10px;'; body.appendChild(div1);
+    var note=document.createElement('div'); note.className='er-hub-confirm-note';
+    var noteHtml='Clicking <em>Proceed</em> will pull data from this hub profile into your roster.';
+    if(willSkip.length) noteHtml+=' Fields not filled in their profile ('+willSkip.map(function(f){return f.lbl;}).join(', ')+') will <strong>not</strong> override your data.';
+    note.innerHTML=noteHtml; body.appendChild(note);
+    if(willCopy.length){
+      var cl=document.createElement('div'); cl.style.cssText='font-size:.63rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(200,168,75,.7);margin:10px 0 5px;font-family:"Barlow Condensed",sans-serif;'; cl.textContent='Will copy:'; body.appendChild(cl);
+      var cv=document.createElement('div'); cv.style.cssText='font-size:.72rem;color:rgba(255,255,255,.48);line-height:1.8;';
+      cv.innerHTML=willCopy.map(function(f){var v=(wr[f.k]||'').toString().trim();return '• '+f.lbl+': <span style="color:rgba(255,255,255,.78);">'+_esc(v.length>45?v.slice(0,45)+'…':v)+'</span>';}).join('<br>');
+      body.appendChild(cv);
+    }
+    var btnRow=document.createElement('div'); btnRow.className='er-hub-btn-row';
+    var cancelBtn=document.createElement('button'); cancelBtn.className='er-hub-btn er-hub-btn-cancel'; cancelBtn.textContent='Cancel'; cancelBtn.onclick=_erCloseHubModal;
+    var proceedBtn=document.createElement('button'); proceedBtn.className='er-hub-btn er-hub-btn-proceed'; proceedBtn.textContent='Proceed';
+    proceedBtn.onclick=function(){
+      _erApplyHubData(rosterId,wr,avatarUrl); _erCloseHubModal();
+    };
+    btnRow.appendChild(cancelBtn); btnRow.appendChild(proceedBtn); body.appendChild(btnRow);
+  }
+  function _erApplyHubData(rosterId, wr, avatarUrl){
+    function tc(s){
+      if(!s) return s;
+      var ABBREVS=new Set(['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC','UK','USA','UAE']);
+      return s.replace(/[^\s\-]+/g,function(w){var u=w.toUpperCase();return ABBREVS.has(u)?u:w.charAt(0).toUpperCase()+w.slice(1).toLowerCase();});
+    }
+    var FIELD_MAP=[
+      {k:'height',mk:'height'},{k:'weight',mk:'weight'},{k:'age',mk:'age'},
+      {k:'hometown',mk:'hometown',fmt:tc},{k:'faction',mk:'faction',fmt:tc},
+      {k:'nickname',mk:'nickname',fmt:tc},{k:'entrance_link',mk:'entrance_link'},
+      {k:'efed_username',mk:'efed_username'},{k:'twitter_handle',mk:'twitter_handle'},
+      {k:'instagram_handle',mk:'instagram_handle'},{k:'tags',mk:'tags'}
+    ];
+    FIELD_MAP.forEach(function(f){
+      var v=(wr[f.k]||'').toString().trim();
+      if(v){ if(f.fmt) v=f.fmt(v); _setMgmt(rosterId,f.mk,v); }
+    });
+    if(avatarUrl) _setMgmt(rosterId,'avatar_url',avatarUrl);
+    _markDirty(); _erRenderList();
+    if(typeof showToast==='function') showToast('Profile data updated from hub!');
+  }
+
   function _erRender(inner){
     inner.innerHTML='';
 
-    /* top bar */
+    /* ── Quick-add bar ── */
+    var qa=document.createElement('div'); qa.id='er-quick-add';
+    var qaInp=document.createElement('input'); qaInp.id='er-quick-inp'; qaInp.type='text';
+    qaInp.placeholder='Search hub or type name to add…'; qaInp.maxLength=60; qaInp.autocomplete='off';
+    var qaBtn=document.createElement('button'); qaBtn.id='er-quick-btn'; qaBtn.textContent='Quick Add';
+    qaBtn.onclick=function(){
+      var name=qaInp.value.trim(); if(!name) return;
+      var newId=Date.now();
+      _erRoster.unshift({id:newId,name:name,tier:'Tier 3',alignment:'Face'});
+      _getMgmt(newId); _markDirty(); qaInp.value='';
+      qaDrop.style.display='none'; _erRenderList();
+      if(typeof showToast==='function') showToast(name+' added!');
+    };
+    /* quick-add dropdown */
+    var qaDrop=document.createElement('div'); qaDrop.id='er-qa-drop';
+    document.body.appendChild(qaDrop);
+    function _posQaDrop(){
+      var rect=qaInp.getBoundingClientRect();
+      qaDrop.style.top=rect.bottom+'px'; qaDrop.style.left=rect.left+'px';
+      qaDrop.style.width=Math.max(rect.width,300)+'px';
+    }
+    var _qaT=null;
+    qaInp.addEventListener('input',function(){
+      clearTimeout(_qaT);
+      var q=qaInp.value.trim();
+      if(!q||q.length<2){qaDrop.style.display='none';return;}
+      _qaT=setTimeout(function(){
+        sbGet('users','or=(display_name.ilike.*'+encodeURIComponent(q.replace(/^@/,''))+'*,username.ilike.*'+encodeURIComponent(q.replace(/^@/,''))+'*)&select=username,display_name,avatar_url,nickname,height,weight,age,hometown,faction,entrance_music,ig_handle,x_handle&limit=10').then(function(rows){
+          qaDrop.innerHTML='';
+          var results=Array.isArray(rows)?rows.filter(function(r){return r&&r.username&&!r.error;}):[]; 
+          if(!results.length){
+            var em=document.createElement('div'); em.style.cssText='padding:10px 14px;font-size:.74rem;color:rgba(255,255,255,.32);text-align:center;'; em.textContent='No hub users found';
+            qaDrop.appendChild(em); qaDrop.style.display='block'; _posQaDrop(); return;
+          }
+          results.forEach(function(u){
+            var opt=document.createElement('div'); opt.className='er-qa-opt';
+            var th=u.avatar_url?(function(){var i=document.createElement('img');i.src=u.avatar_url;i.style.cssText='width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;';return i;}()):(function(){var d=document.createElement('div');d.className='er-qa-opt-init';d.textContent=(u.display_name||u.username||'?')[0].toUpperCase();return d;}());
+            var tx=document.createElement('div');
+            var tn=document.createElement('div'); tn.className='er-qa-name'; tn.textContent=u.display_name||u.username;
+            var ts=document.createElement('div'); ts.className='er-qa-sub'; ts.textContent='@'+u.username+(u.faction?' · '+u.faction:'');
+            tx.appendChild(tn); tx.appendChild(ts); opt.appendChild(th); opt.appendChild(tx);
+            opt.onmousedown=function(e){
+              e.preventDefault(); qaDrop.style.display='none'; qaInp.value='';
+              var wName=u.display_name||u.username; var newId=Date.now();
+              _erRoster.unshift({id:newId,name:wName,tier:'Tier 3',alignment:'Face'});
+              var mg=_getMgmt(newId);
+              var fields={height:u.height||'',weight:u.weight||'',age:u.age||'',hometown:u.hometown||'',faction:u.faction||'',nickname:u.nickname||'',entrance_link:u.entrance_music||'',efed_username:u.username||'',twitter_handle:u.x_handle||'',instagram_handle:u.ig_handle||'',avatar_url:u.avatar_url||''};
+              Object.keys(fields).forEach(function(k){if(fields[k]) mg[k]=fields[k];});
+              _erAzFilter=/[A-Z]/.test((wName[0]||'').toUpperCase())?wName[0].toUpperCase():'#';
+              _markDirty(); _erRenderList(); _save();
+              if(typeof showToast==='function') showToast(wName+' added from hub!');
+            };
+            qaDrop.appendChild(opt);
+          });
+          qaDrop.style.display='block'; _posQaDrop();
+        }).catch(function(){});
+      },300);
+    });
+    qaInp.addEventListener('keydown',function(e){if(e.key==='Enter'){qaDrop.style.display='none';qaBtn.onclick();}});
+    qaInp.addEventListener('blur',function(){setTimeout(function(){qaDrop.style.display='none';},200);});
+    qa.appendChild(qaInp); qa.appendChild(qaBtn);
+    inner.appendChild(qa);
+
+    /* ── top bar: search / sort / count / save ── */
     var topbar=document.createElement('div'); topbar.id='er-topbar';
     var title=document.createElement('div'); title.id='er-topbar-title'; title.textContent='ROSTER';
     topbar.appendChild(title);
-
-    var srch=document.createElement('input'); srch.id='er-search-inp'; srch.type='text'; srch.placeholder='Search…';
-    srch.value=_erSearch;
+    var srch=document.createElement('input'); srch.id='er-search-inp'; srch.type='text'; srch.placeholder='Search…'; srch.value=_erSearch;
     srch.oninput=function(){_erSearch=srch.value.trim().toLowerCase();_erRenderList();};
     topbar.appendChild(srch);
-
     var sortSel=document.createElement('select'); sortSel.id='er-sort-sel';
-    [['az','A → Z'],['za','Z → A']].forEach(function(o){
-      var opt=document.createElement('option'); opt.value=o[0]; opt.textContent=o[1];
-      if(o[0]===_erSort) opt.selected=true; sortSel.appendChild(opt);
-    });
+    [['az','A → Z'],['za','Z → A']].forEach(function(o){var opt=document.createElement('option');opt.value=o[0];opt.textContent=o[1];if(o[0]===_erSort)opt.selected=true;sortSel.appendChild(opt);});
     sortSel.onchange=function(){_erSort=sortSel.value;_erRenderList();};
     topbar.appendChild(sortSel);
-
-    var badge=document.createElement('div'); badge.id='er-count-badge';
-    badge.textContent=_erRoster.length+' member'+(_erRoster.length===1?'':'s');
+    var badge=document.createElement('div'); badge.id='er-count-badge'; badge.textContent=_erRoster.length+' member'+(_erRoster.length===1?'':'s');
     topbar.appendChild(badge);
-
-    /* update non-blank button */
-    var updateBtn=document.createElement('button'); updateBtn.id='er-update-btn';
-    updateBtn.title='Fetch profile data from Supabase and fill in any blank fields';
-    updateBtn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 14.97-6.63L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-14.97 6.63L3 16"/></svg>Update Non-Blank';
-    updateBtn.onclick=async function(){
-      updateBtn.disabled=true; updateBtn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9" stroke-opacity=".2"/><path d="M12 3a9 9 0 0 1 9 9"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur=".8s" repeatCount="indefinite"/></path></svg>Updating…';
-      try {
-        var updated=0;
-        for(var i=0;i<_erRoster.length;i++){
-          var rr=_erRoster[i]; var mg=_getMgmt(rr.id);
-          if(!mg.efed_username) continue;
-          try {
-            var uRows=await sbGet('users','username=eq.'+encodeURIComponent(mg.efed_username)+'&select=username,display_name,avatar_url&limit=1');
-            if(!uRows||!uRows.length) continue;
-            var u=uRows[0];
-            var changed=false;
-            if(u.avatar_url&&!mg.avatar_url){ mg.avatar_url=u.avatar_url; changed=true; }
-            if(u.display_name&&!mg.nickname){ mg.nickname=u.display_name; changed=true; }
-            if(changed){ _markDirty(); updated++; }
-          } catch(e2){}
-        }
-        if(updated>0) _erRenderList();
-        if(typeof showToast==='function') showToast(updated>0 ? updated+' profile'+(updated===1?'':'s')+' updated!' : 'Nothing new to fill in.');
-      } catch(e){
-        if(typeof showToast==='function') showToast('Update failed: '+e.message);
-      }
-      updateBtn.disabled=false; updateBtn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 14.97-6.63L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-14.97 6.63L3 16"/></svg>Update Non-Blank';
-    };
-    topbar.appendChild(updateBtn);
-
-    /* save button */
-    var saveBtn=document.createElement('button'); saveBtn.id='er-save-btn';
-    saveBtn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save';
-    saveBtn.onmouseover=function(){if(!_erDirty)return;this.style.opacity='.85';};
-    saveBtn.onmouseout=function(){this.style.opacity='1';};
-    saveBtn.onclick=_save;
-    topbar.appendChild(saveBtn);
+    var saveBtn=document.createElement('button'); saveBtn.id='er-save-btn'; saveBtn.textContent='Save';
+    saveBtn.onclick=_save; topbar.appendChild(saveBtn);
     inner.appendChild(topbar);
 
     /* A–Z bar */
     var azBar=document.createElement('div'); azBar.id='er-az-bar';
     ['ALL'].concat('ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('')).forEach(function(l){
-      var b=document.createElement('button'); b.className='er-az-btn'+(l===_erAzFilter?' active':'');
-      b.textContent=l;
-      b.onclick=function(){
-        _erAzFilter=l;
-        azBar.querySelectorAll('.er-az-btn').forEach(function(x){x.classList.remove('active');});
-        b.classList.add('active'); _erRenderList();
-      };
+      var b=document.createElement('button'); b.className='er-az-btn'+(l===_erAzFilter?' active':''); b.textContent=l;
+      b.onclick=function(){_erAzFilter=l;azBar.querySelectorAll('.er-az-btn').forEach(function(x){x.classList.remove('active');});b.classList.add('active');_erRenderList();};
       azBar.appendChild(b);
     });
     inner.appendChild(azBar);
@@ -20126,10 +20270,19 @@ function _mcSubmitRepost() { mc_submit(); }
     var scroll=document.createElement('div'); scroll.id='er-scroll';
     var list=document.createElement('div'); list.id='er-list';
     scroll.appendChild(list); inner.appendChild(scroll);
+
+    /* hub modal (singleton, append to body once) */
+    if(!document.getElementById('er-hub-modal-bd')){
+      var bd=document.createElement('div'); bd.id='er-hub-modal-bd';
+      bd.onclick=function(e){if(e.target===bd)_erCloseHubModal();};
+      bd.innerHTML='<div id="er-hub-modal"><div id="er-hub-modal-hdr"><span id="er-hub-modal-title">Update Real Data</span><button id="er-hub-modal-close" onclick="_erCloseHubModal&&_erCloseHubModal()">✕</button></div><div id="er-hub-modal-body"></div></div>';
+      document.body.appendChild(bd);
+    }
+
     _erRenderList();
   }
 
-  /* ── re-render the list rows ── */
+  /* ── re-render the list ── */
   function _erRenderList(){
     var list=document.getElementById('er-list'); if(!list) return;
     list.innerHTML='';
@@ -20140,173 +20293,89 @@ function _mcSubmitRepost() { mc_submit(); }
         else if(c!==_erAzFilter) return false;
       }
       if(_erSearch){
-        var m=_getMgmt(r.id);
-        var hay=[r.name,m.nickname,m.faction,m.hometown,m.efed_username].filter(Boolean).join(' ').toLowerCase();
+        var mg=_getMgmt(r.id);
+        var hay=[r.name,mg.nickname,mg.faction,mg.hometown,mg.efed_username].filter(Boolean).join(' ').toLowerCase();
         if(hay.indexOf(_erSearch)===-1) return false;
       }
       return true;
     });
-    filtered.sort(function(a,b){
-      if(_erSort==='za') return (b.name||'').localeCompare(a.name||'');
-      return (a.name||'').localeCompare(b.name||'');
-    });
+    filtered.sort(function(a,b){if(_erSort==='za') return (b.name||'').localeCompare(a.name||''); return (a.name||'').localeCompare(b.name||'');});
     if(!filtered.length){
       var empty=document.createElement('div'); empty.id='er-empty'; empty.textContent='No wrestlers found.';
       list.appendChild(empty); return;
     }
-    filtered.forEach(function(r){ list.appendChild(_buildRow(r)); });
+    filtered.forEach(function(r){list.appendChild(_buildRow(r));});
     var badge=document.getElementById('er-count-badge');
     if(badge) badge.textContent=filtered.length+(_erRoster.length!==filtered.length?' of '+_erRoster.length:'')+' member'+(filtered.length===1?'':'s');
   }
 
-  /* ── build one card ── */
+  /* ── build one card row ── */
   function _buildRow(r){
     var m=_getMgmt(r.id);
     var row=document.createElement('div'); row.className='er-row'; row.dataset.id=r.id;
-
-    /* ── CARD FACE ── */
-    var face=document.createElement('div'); face.className='er-card-face';
 
     /* drag handle */
     var drag=document.createElement('div'); drag.className='er-drag'; drag.title='Drag to reorder';
     drag.innerHTML='<svg width="10" height="9" viewBox="0 0 10 9" fill="currentColor"><rect width="10" height="1.5" rx=".75"/><rect y="3.5" width="10" height="1.5" rx=".75"/><rect y="7" width="10" height="1.5" rx=".75"/></svg>';
     drag.draggable=true;
-    drag.addEventListener('dragstart',function(e){
-      _erDragSrcId=r.id; row.classList.add('er-dragging');
-      e.dataTransfer.effectAllowed='move';
-    });
-    drag.addEventListener('dragend',function(){
-      row.classList.remove('er-dragging'); _erDragSrcId=null;
-      document.querySelectorAll('.er-row').forEach(function(x){x.classList.remove('er-drag-top','er-drag-bot');});
-    });
-    row.addEventListener('dragover',function(e){
-      if(!_erDragSrcId||_erDragSrcId===r.id) return; e.preventDefault();
-      var mid=row.getBoundingClientRect().top+row.offsetHeight/2;
-      row.classList.remove('er-drag-top','er-drag-bot');
-      row.classList.add(e.clientY<mid?'er-drag-top':'er-drag-bot');
-    });
+    drag.addEventListener('dragstart',function(e){_erDragSrcId=r.id;row.classList.add('er-dragging');e.dataTransfer.effectAllowed='move';});
+    drag.addEventListener('dragend',function(){row.classList.remove('er-dragging');_erDragSrcId=null;document.querySelectorAll('.er-row').forEach(function(x){x.classList.remove('er-drag-top','er-drag-bot');});});
+    row.addEventListener('dragover',function(e){if(!_erDragSrcId||_erDragSrcId===r.id)return;e.preventDefault();var mid=row.getBoundingClientRect().top+row.offsetHeight/2;row.classList.remove('er-drag-top','er-drag-bot');row.classList.add(e.clientY<mid?'er-drag-top':'er-drag-bot');});
     row.addEventListener('dragleave',function(){row.classList.remove('er-drag-top','er-drag-bot');});
-    row.addEventListener('drop',function(e){
-      e.preventDefault(); row.classList.remove('er-drag-top','er-drag-bot');
-      if(!_erDragSrcId||_erDragSrcId===r.id) return;
-      var srcIdx=_erRoster.findIndex(function(w){return w.id===_erDragSrcId;});
-      if(srcIdx===-1) return;
-      var mid=row.getBoundingClientRect().top+row.offsetHeight/2;
-      var before=e.clientY<mid;
-      var moved=_erRoster.splice(srcIdx,1)[0];
-      var tgtIdx=_erRoster.findIndex(function(w){return w.id===r.id;});
-      if(tgtIdx===-1) _erRoster.push(moved);
-      else _erRoster.splice(before?tgtIdx:tgtIdx+1,0,moved);
-      _erDragSrcId=null; _markDirty(); _erRenderList();
-    });
+    row.addEventListener('drop',function(e){e.preventDefault();row.classList.remove('er-drag-top','er-drag-bot');if(!_erDragSrcId||_erDragSrcId===r.id)return;var si=_erRoster.findIndex(function(w){return w.id===_erDragSrcId;});if(si===-1)return;var mid=row.getBoundingClientRect().top+row.offsetHeight/2;var before=e.clientY<mid;var moved=_erRoster.splice(si,1)[0];var ti=_erRoster.findIndex(function(w){return w.id===r.id;});if(ti===-1)_erRoster.push(moved);else _erRoster.splice(before?ti:ti+1,0,moved);_erDragSrcId=null;_markDirty();_erRenderList();});
 
     /* avatar */
     var avWrap=document.createElement('div'); avWrap.className='er-row-av';
     function _buildAv(url){
-      if(url){
-        var img=document.createElement('img'); img.src=url; img.alt=r.name;
-        img.className='er-row-av-img';
-        img.onerror=function(){img.replaceWith(_buildInitEl());};
-        return img;
-      }
+      if(url){var img=document.createElement('img');img.src=url;img.alt=r.name;img.className='er-row-av-img';img.onerror=function(){img.replaceWith(_buildInitEl());};return img;}
       return _buildInitEl();
     }
-    function _buildInitEl(){
-      var d=document.createElement('div'); d.className='er-row-av-init'; d.textContent=_initials(r.name); return d;
-    }
+    function _buildInitEl(){var d=document.createElement('div');d.className='er-row-av-init';d.textContent=_initials(r.name);return d;}
     var avEl=_buildAv(m.avatar_url||null); avWrap.appendChild(avEl);
 
-    /* card info */
-    var info=document.createElement('div'); info.className='er-card-info';
+    /* content column */
+    var content=document.createElement('div'); content.className='er-row-content';
 
-    var nameDiv=document.createElement('div'); nameDiv.className='er-card-name';
-    nameDiv.textContent=r.name||'—';
-    if(r.championship) nameDiv.title=r.championship;
-    info.appendChild(nameDiv);
+    /* name row */
+    var nameRow=document.createElement('div'); nameRow.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:2px;';
+    var nameDiv=document.createElement('div'); nameDiv.className='er-row-name';
+    nameDiv.textContent=r.name||'—'; if(r.championship) nameDiv.title=r.championship;
+    nameRow.appendChild(nameDiv);
+    if(r.championship){var cc=document.createElement('span');cc.style.cssText='font-size:.6rem;color:rgba(200,168,75,.7);';cc.textContent='🏆 '+r.championship;nameRow.appendChild(cc);}
+    /* Update button (green, matching management) */
+    var updBtn=document.createElement('button'); updBtn.type='button';
+    updBtn.style.cssText='margin-left:auto;flex-shrink:0;background:#22c55e;border:none;cursor:pointer;padding:3px 9px 3px 7px;display:flex;align-items:center;gap:5px;color:#fff;border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.63rem;font-weight:700;letter-spacing:.4px;transition:background .15s;';
+    updBtn.innerHTML='<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Update';
+    updBtn.onmouseover=function(){this.style.background='#16a34a';};
+    updBtn.onmouseout=function(){this.style.background='#22c55e';};
+    updBtn.onclick=function(e){e.stopPropagation();_erShowHubSearch(r.id,r.name,_getMgmt(r.id));};
+    nameRow.appendChild(updBtn);
+    content.appendChild(nameRow);
 
-    if(m.nickname){
-      var nickDiv=document.createElement('div'); nickDiv.className='er-card-nick';
-      nickDiv.textContent='"'+m.nickname+'"';
-      info.appendChild(nickDiv);
-    }
-
-    var chips=document.createElement('div'); chips.className='er-card-chips';
-    if(m.rating){ var c=document.createElement('span'); c.className='er-chip er-chip-gold'; c.textContent='OVR '+m.rating; chips.appendChild(c); }
-    if(r.alignment){ var c2=document.createElement('span'); c2.className='er-chip'; c2.textContent=r.alignment; chips.appendChild(c2); }
-    if(m.faction){ var c3=document.createElement('span'); c3.className='er-chip'; c3.textContent=m.faction; chips.appendChild(c3); }
-    if(m.hometown){ var c4=document.createElement('span'); c4.className='er-chip'; c4.textContent=m.hometown; chips.appendChild(c4); }
-    if(m.downloaded){ var c5=document.createElement('span'); c5.className='er-chip er-chip-green'; c5.textContent='DL\'d'; chips.appendChild(c5); }
-    if(r.championship){ var c6=document.createElement('span'); c6.className='er-chip er-chip-gold'; c6.textContent='🏆 '+r.championship; chips.appendChild(c6); }
-    info.appendChild(chips);
-
-    /* chevron */
-    var chevron=document.createElement('div'); chevron.className='er-card-chevron';
-    chevron.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
-
-    face.appendChild(avWrap);
-    face.appendChild(info);
-    face.appendChild(chevron);
-    face.appendChild(drag);
-
-    /* ── EDIT DRAWER ── */
-    var drawer=document.createElement('div'); drawer.className='er-drawer';
-    var drawerInner=document.createElement('div'); drawerInner.className='er-drawer-inner';
-
-    /* drawer header */
-    var dHeader=document.createElement('div'); dHeader.className='er-drawer-header';
-    var dTitle=document.createElement('div'); dTitle.className='er-drawer-title'; dTitle.textContent='Edit';
-    dHeader.appendChild(dTitle);
-
-    /* per-card update non-blank button */
-    var cardUpdateBtn=document.createElement('button'); cardUpdateBtn.className='er-drawer-update-btn';
-    cardUpdateBtn.title='Fetch from Supabase and fill blank fields for this wrestler';
-    cardUpdateBtn.innerHTML='<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 14.97-6.63L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-14.97 6.63L3 16"/></svg>Update Non-Blank';
-    cardUpdateBtn.onclick=function(e){
-      e.stopPropagation();
-      var mg=_getMgmt(r.id);
-      if(!mg.efed_username){ if(typeof showToast==='function') showToast('Set a username first.'); return; }
-      cardUpdateBtn.disabled=true;
-      sbGet('users','username=eq.'+encodeURIComponent(mg.efed_username)+'&select=username,display_name,avatar_url&limit=1').then(function(uRows){
-        if(!uRows||!uRows.length){ if(typeof showToast==='function') showToast('User not found.'); cardUpdateBtn.disabled=false; return; }
-        var u=uRows[0]; var changed=0;
-        if(u.avatar_url&&!mg.avatar_url){ mg.avatar_url=u.avatar_url; var newAv=_buildAv(u.avatar_url); avEl.replaceWith(newAv); avEl=newAv; changed++; }
-        if(u.display_name&&!mg.nickname){ mg.nickname=u.display_name; nickInp.value=u.display_name; changed++; }
-        if(changed){ _markDirty(); _erRenderList(); if(typeof showToast==='function') showToast(changed+' field'+(changed===1?'':'s')+' updated!'); }
-        else { if(typeof showToast==='function') showToast('All fields already filled.'); }
-        cardUpdateBtn.disabled=false;
-      }).catch(function(){ cardUpdateBtn.disabled=false; if(typeof showToast==='function') showToast('Lookup failed.'); });
-    };
-    dHeader.appendChild(cardUpdateBtn);
-    drawerInner.appendChild(dHeader);
-
-    /* helper: build a labeled input and return the input element */
-    function _inp2(cls,ph,val,field,opts){
+    /* helper */
+    function _inp(cls,ph,val,field,opts){
       var w=document.createElement('div'); w.className='er-field-wrap';
       var lbl=document.createElement('span'); lbl.className='er-field-lbl'; lbl.textContent=(opts&&opts.lbl)||field.toUpperCase();
       var inp=document.createElement('input'); inp.className='er-field-inp '+cls; inp.placeholder=ph; inp.value=val||'';
-      if(opts&&opts.numeric){inp.inputMode='numeric'; inp.maxLength=opts.maxLen||4;}
+      if(opts&&opts.numeric){inp.inputMode='numeric';inp.maxLength=opts.maxLen||4;}
       inp.oninput=function(){_setMgmt(r.id,field,inp.value);};
       if(opts&&opts.onBlur) inp.onblur=opts.onBlur;
-      w.appendChild(lbl); w.appendChild(inp); return {wrap:w, inp:inp};
+      w.appendChild(lbl); w.appendChild(inp); return {wrap:w,inp:inp};
     }
 
-    /* ── SECTION A: stats ── */
-    var secA=document.createElement('div'); secA.className='er-drawer-section';
-    secA.appendChild(_inp2('er-inp-narrow','–',m.rating,'rating',{lbl:'OVR',numeric:true,maxLen:2}).wrap);
-    secA.appendChild(_inp2('er-inp-narrow','lbs',m.weight,'weight',{lbl:'WT'}).wrap);
-    secA.appendChild(_inp2('er-inp-narrow','–',m.height,'height',{lbl:'HT'}).wrap);
-    secA.appendChild(_inp2('er-inp-narrow','–',m.age,'age',{lbl:'AGE',numeric:true,maxLen:3}).wrap);
-    secA.appendChild(_inp2('er-inp-md','City, State…',m.hometown,'hometown',{lbl:'FROM'}).wrap);
-    secA.appendChild(_inp2('er-inp-md','…',m.faction,'faction',{lbl:'FACTION'}).wrap);
-    drawerInner.appendChild(secA);
+    /* ROW 1: OVR | WT | HT | AGE | FROM | FACTION */
+    var row1=document.createElement('div'); row1.className='er-row-fields';
+    row1.appendChild(_inp('er-inp-narrow','–',m.rating,'rating',{lbl:'OVR',numeric:true,maxLen:2}).wrap);
+    row1.appendChild(_inp('er-inp-narrow','–',m.weight,'weight',{lbl:'WT'}).wrap);
+    row1.appendChild(_inp('er-inp-narrow','–',m.height,'height',{lbl:'HT'}).wrap);
+    row1.appendChild(_inp('er-inp-narrow','–',m.age,'age',{lbl:'AGE',numeric:true,maxLen:3}).wrap);
+    row1.appendChild(_inp('er-inp-md','City, State…',m.hometown,'hometown',{lbl:'FROM'}).wrap);
+    row1.appendChild(_inp('er-inp-md','…',m.faction,'faction',{lbl:'FACTION'}).wrap);
+    content.appendChild(row1);
 
-    var divA=document.createElement('div'); divA.className='er-drawer-divider';
-    drawerInner.appendChild(divA);
-
-    /* ── SECTION B: user/nick/entrance ── */
-    var secB=document.createElement('div'); secB.className='er-drawer-section';
-
-    /* username with autocomplete */
+    /* ROW 2: USER (autocomplete) | NICK | ENTRANCE */
+    var row2=document.createElement('div'); row2.className='er-row-fields';
+    /* username */
     var userWrap=document.createElement('div'); userWrap.className='er-field-wrap';
     var userLbl=document.createElement('span'); userLbl.className='er-field-lbl'; userLbl.textContent='USER';
     var userInner=document.createElement('div'); userInner.style.cssText='position:relative;flex:1;min-width:0;';
@@ -20315,150 +20384,86 @@ function _mcSubmitRepost() { mc_submit(); }
     var _ut=null;
     userInp.oninput=function(){
       _setMgmt(r.id,'efed_username',userInp.value);
-      clearTimeout(_ut);
-      var q=userInp.value.trim();
+      clearTimeout(_ut); var q=userInp.value.trim();
       if(!q||q.length<2){userDrop.style.display='none';return;}
-      _ut=setTimeout(async function(){
-        try{
-          var res=await sbGet('users','username=ilike.*'+encodeURIComponent(q)+'*&select=username,display_name,avatar_url&limit=8');
+      _ut=setTimeout(function(){
+        sbGet('users','username=ilike.*'+encodeURIComponent(q)+'*&select=username,display_name,avatar_url&limit=8').then(function(res){
           userDrop.innerHTML='';
-          if(!res||!res.length){userDrop.style.display='none';return;}
-          res.forEach(function(u){
+          var results=Array.isArray(res)?res.filter(function(u){return u&&u.username&&!u.error;}):[]; 
+          if(!results.length){userDrop.style.display='none';return;}
+          results.forEach(function(u){
             var opt=document.createElement('div'); opt.className='er-username-opt';
-            var av=u.avatar_url?'<img src="'+_esc(u.avatar_url)+'" style="width:22px;height:22px;border-radius:4px;object-fit:cover;flex-shrink:0;">'
-              :'<div style="width:22px;height:22px;border-radius:4px;background:rgba(200,168,75,.15);display:flex;align-items:center;justify-content:center;font-size:.6rem;color:rgba(200,168,75,.8);font-family:\'Bebas Neue\',sans-serif;flex-shrink:0;">'+_esc((u.username||'?')[0].toUpperCase())+'</div>';
-            opt.innerHTML=av+'<span style="font-size:.72rem;font-weight:600;color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+_esc(u.display_name||u.username)+'</span>';
-            opt.onmousedown=function(e2){
-              e2.preventDefault();
-              userInp.value=u.username; _setMgmt(r.id,'efed_username',u.username);
-              if(u.avatar_url){ _setMgmt(r.id,'avatar_url',u.avatar_url); var newAv=_buildAv(u.avatar_url); avEl.replaceWith(newAv); avEl=newAv; }
-              userDrop.style.display='none';
-            };
+            var th=u.avatar_url?(function(){var i=document.createElement('img');i.src=u.avatar_url;i.style.cssText='width:22px;height:22px;border-radius:50%;object-fit:cover;flex-shrink:0;';return i;}()):(function(){var d=document.createElement('div');d.style.cssText='width:22px;height:22px;border-radius:50%;background:rgba(200,168,75,.15);display:flex;align-items:center;justify-content:center;font-family:"Bebas Neue",sans-serif;font-size:.6rem;color:rgba(200,168,75,.8);flex-shrink:0;';d.textContent=(u.username||'?')[0].toUpperCase();return d;}());
+            var ns=document.createElement('span'); ns.style.cssText='font-size:.72rem;font-weight:600;color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'; ns.textContent=u.display_name||u.username;
+            opt.appendChild(th); opt.appendChild(ns);
+            opt.onmousedown=function(e2){e2.preventDefault();userInp.value=u.username;_setMgmt(r.id,'efed_username',u.username);if(u.avatar_url){_setMgmt(r.id,'avatar_url',u.avatar_url);var nv=_buildAv(u.avatar_url);avEl.replaceWith(nv);avEl=nv;}userDrop.style.display='none';};
             userDrop.appendChild(opt);
           });
           userDrop.style.display='block';
-        }catch(e2){userDrop.style.display='none';}
+        }).catch(function(){userDrop.style.display='none';});
       },280);
     };
     userInp.onblur=function(){setTimeout(function(){userDrop.style.display='none';},150);};
     userInner.appendChild(userInp); userInner.appendChild(userDrop);
-    userWrap.appendChild(userLbl); userWrap.appendChild(userInner);
-    secB.appendChild(userWrap);
+    userWrap.appendChild(userLbl); userWrap.appendChild(userInner); row2.appendChild(userWrap);
 
-    var nickResult=_inp2('er-inp-md','…',m.nickname,'nickname',{lbl:'NICK'});
-    var nickInp=nickResult.inp;
-    secB.appendChild(nickResult.wrap);
+    var nickRes=_inp('er-inp-md','…',m.nickname,'nickname',{lbl:'NICK'}); row2.appendChild(nickRes.wrap);
 
-    /* entrance link + play/copy */
+    /* entrance */
     var entWrap=document.createElement('div'); entWrap.className='er-field-wrap er-entrance-wrap';
     var entLbl=document.createElement('span'); entLbl.className='er-field-lbl'; entLbl.textContent='ENTRANCE';
-    var entRow=document.createElement('div'); entRow.style.cssText='display:flex;align-items:center;gap:5px;';
     var entInp=document.createElement('input'); entInp.className='er-field-inp er-inp-lg'; entInp.placeholder='YouTube link…'; entInp.value=m.entrance_link||'';
-    var playBtn=document.createElement('button'); playBtn.type='button'; playBtn.className='er-ent-btn'; playBtn.title='Play'; playBtn.textContent='▶️';
-    playBtn.style.opacity=m.entrance_link?'1':'0.3';
-    var copyBtn=document.createElement('button'); copyBtn.type='button'; copyBtn.className='er-ent-btn'; copyBtn.title='Copy'; copyBtn.textContent='📋';
-    copyBtn.style.opacity=m.entrance_link?'1':'0.3';
-    entInp.oninput=function(){
-      _setMgmt(r.id,'entrance_link',entInp.value);
-      var has=!!entInp.value.trim(); playBtn.style.opacity=has?'1':'0.3'; copyBtn.style.opacity=has?'1':'0.3';
-    };
-    playBtn.onclick=function(e){
-      e.stopPropagation();
-      var url=entInp.value.trim(); if(!url) return;
-      var ytid=_ytId(url); if(!ytid) return;
-      window.open('https://www.youtube.com/watch?v='+ytid,'_blank');
-    };
-    copyBtn.onclick=function(e){
-      e.stopPropagation();
-      var val=entInp.value.trim(); if(!val) return;
-      navigator.clipboard.writeText(val).catch(function(){});
-      copyBtn.textContent='✓'; setTimeout(function(){copyBtn.textContent='📋';},1600);
-    };
-    entRow.appendChild(entInp); entRow.appendChild(playBtn); entRow.appendChild(copyBtn);
-    entWrap.appendChild(entLbl); entWrap.appendChild(entRow);
-    secB.appendChild(entWrap);
-    drawerInner.appendChild(secB);
+    var playBtn=document.createElement('button'); playBtn.type='button'; playBtn.className='er-ent-btn'; playBtn.title='Play'; playBtn.textContent='▶️'; playBtn.style.opacity=m.entrance_link?'1':'0.3';
+    var copyBtn=document.createElement('button'); copyBtn.type='button'; copyBtn.className='er-ent-btn'; copyBtn.title='Copy'; copyBtn.textContent='📋'; copyBtn.style.opacity=m.entrance_link?'1':'0.3';
+    entInp.oninput=function(){_setMgmt(r.id,'entrance_link',entInp.value);var h=!!entInp.value.trim();playBtn.style.opacity=h?'1':'0.3';copyBtn.style.opacity=h?'1':'0.3';};
+    playBtn.onclick=function(e){e.stopPropagation();var url=entInp.value.trim();if(!url)return;var ytid=_ytId(url);if(!ytid)return;window.open('https://www.youtube.com/watch?v='+ytid,'_blank');};
+    copyBtn.onclick=function(e){e.stopPropagation();var val=entInp.value.trim();if(!val)return;navigator.clipboard.writeText(val).catch(function(){});copyBtn.textContent='✓';setTimeout(function(){copyBtn.textContent='📋';},1600);};
+    entWrap.appendChild(entLbl); entWrap.appendChild(entInp); entWrap.appendChild(playBtn); entWrap.appendChild(copyBtn);
+    row2.appendChild(entWrap);
+    content.appendChild(row2);
 
-    var divB=document.createElement('div'); divB.className='er-drawer-divider';
-    drawerInner.appendChild(divB);
-
-    /* ── SECTION C: social / tags / downloaded ── */
-    var secC=document.createElement('div'); secC.className='er-drawer-section';
-    secC.appendChild(_inp2('er-inp-md','hashtags…',m.tags,'tags',{lbl:'#TAGS'}).wrap);
-
+    /* ROW 3: TAGS | X | IG | EMAIL | DL checkbox | Notes toggle */
+    var row3=document.createElement('div'); row3.className='er-row-fields';
+    row3.appendChild(_inp('er-inp-md','hashtags…',m.tags,'tags',{lbl:'#TAGS'}).wrap);
     /* X */
     var xWrap=document.createElement('div'); xWrap.className='er-field-wrap';
-    var xLbl=document.createElement('span'); xLbl.className='er-field-lbl';
-    xLbl.innerHTML='<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
-    var xInp=document.createElement('input'); xInp.className='er-field-inp er-inp-sm'; xInp.placeholder='@twitter'; xInp.value=m.twitter_handle||'';
-    xInp.oninput=function(){_setMgmt(r.id,'twitter_handle',xInp.value);};
-    xWrap.appendChild(xLbl); xWrap.appendChild(xInp); secC.appendChild(xWrap);
-
+    var xLbl=document.createElement('span'); xLbl.className='er-field-lbl'; xLbl.innerHTML='<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
+    var xInp=document.createElement('input'); xInp.className='er-field-inp er-inp-sm'; xInp.placeholder='@twitter'; xInp.value=m.twitter_handle||''; xInp.oninput=function(){_setMgmt(r.id,'twitter_handle',xInp.value);};
+    xWrap.appendChild(xLbl); xWrap.appendChild(xInp); row3.appendChild(xWrap);
     /* IG */
     var igWrap=document.createElement('div'); igWrap.className='er-field-wrap';
-    var igLbl=document.createElement('span'); igLbl.className='er-field-lbl';
-    igLbl.innerHTML='<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>';
-    var igInp=document.createElement('input'); igInp.className='er-field-inp er-inp-sm'; igInp.placeholder='@instagram'; igInp.value=m.instagram_handle||'';
-    igInp.oninput=function(){_setMgmt(r.id,'instagram_handle',igInp.value);};
-    igWrap.appendChild(igLbl); igWrap.appendChild(igInp); secC.appendChild(igWrap);
-
-    secC.appendChild(_inp2('er-inp-md','name@email.com',m.contact,'contact',{lbl:'EMAIL'}).wrap);
-
-    /* downloaded */
-    var dlWrap=document.createElement('div'); dlWrap.className='er-field-wrap er-dl-wrap';
-    var dlLbl=document.createElement('span'); dlLbl.className='er-field-lbl'; dlLbl.style.cursor='pointer'; dlLbl.textContent='DL\'D';
-    var dlCb=document.createElement('input'); dlCb.type='checkbox'; dlCb.checked=!!m.downloaded;
-    dlCb.style.cssText='width:13px;height:13px;accent-color:#22c55e;cursor:pointer;flex-shrink:0;';
-    dlCb.onchange=function(){_setMgmt(r.id,'downloaded',dlCb.checked);};
-    dlLbl.onclick=function(){dlCb.click();};
-    dlWrap.appendChild(dlLbl); dlWrap.appendChild(dlCb); secC.appendChild(dlWrap);
-    drawerInner.appendChild(secC);
-
-    /* notes */
-    var notesToggle=document.createElement('button'); notesToggle.type='button'; notesToggle.className='er-notes-toggle';
+    var igLbl=document.createElement('span'); igLbl.className='er-field-lbl'; igLbl.innerHTML='<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>';
+    var igInp=document.createElement('input'); igInp.className='er-field-inp er-inp-sm'; igInp.placeholder='@instagram'; igInp.value=m.instagram_handle||''; igInp.oninput=function(){_setMgmt(r.id,'instagram_handle',igInp.value);};
+    igWrap.appendChild(igLbl); igWrap.appendChild(igInp); row3.appendChild(igWrap);
+    row3.appendChild(_inp('er-inp-md','name@email.com',m.contact,'contact',{lbl:'EMAIL'}).wrap);
+    /* downloaded checkbox */
+    var dlWrap=document.createElement('div'); dlWrap.className='er-field-wrap'; dlWrap.style.gap='5px';
+    var dlCb=document.createElement('input'); dlCb.type='checkbox'; dlCb.checked=!!m.downloaded; dlCb.style.cssText='width:13px;height:13px;accent-color:#22c55e;cursor:pointer;flex-shrink:0;'; dlCb.onchange=function(){_setMgmt(r.id,'downloaded',dlCb.checked);};
+    var dlLbl=document.createElement('span'); dlLbl.className='er-field-lbl'; dlLbl.style.cursor='pointer'; dlLbl.textContent="DL'D"; dlLbl.onclick=function(){dlCb.click();};
+    dlWrap.appendChild(dlCb); dlWrap.appendChild(dlLbl); row3.appendChild(dlWrap);
+    /* notes toggle */
+    var notesToggle=document.createElement('button'); notesToggle.type='button'; notesToggle.className='er-notes-toggle'; notesToggle.style.marginLeft='auto';
     notesToggle.innerHTML='<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h11"/></svg>Notes';
     var notesPanel=document.createElement('div'); notesPanel.className='er-notes-panel';
-    var notesTA=document.createElement('textarea'); notesTA.className='er-notes-ta'; notesTA.placeholder='Add notes about this wrestler…'; notesTA.value=m.notes||'';
-    notesTA.oninput=function(){_setMgmt(r.id,'notes',notesTA.value);};
+    var notesTA=document.createElement('textarea'); notesTA.className='er-notes-ta'; notesTA.placeholder='Notes…'; notesTA.value=m.notes||''; notesTA.oninput=function(){_setMgmt(r.id,'notes',notesTA.value);};
     notesPanel.appendChild(notesTA);
-    var notesOpen=false;
-    notesToggle.onclick=function(e){
-      e.stopPropagation();
-      notesOpen=!notesOpen;
-      notesPanel.style.maxHeight=notesOpen?notesPanel.scrollHeight+40+'px':'0';
-      notesPanel.style.opacity=notesOpen?'1':'0';
-      notesToggle.classList.toggle('active',notesOpen);
-    };
-    drawerInner.appendChild(notesToggle);
-    drawerInner.appendChild(notesPanel);
+    var _notesOpen=false;
+    notesToggle.onclick=function(){_notesOpen=!_notesOpen;notesPanel.style.maxHeight=_notesOpen?notesPanel.scrollHeight+40+'px':'0';notesPanel.style.opacity=_notesOpen?'1':'0';notesToggle.classList.toggle('active',_notesOpen);};
+    row3.appendChild(notesToggle);
+    content.appendChild(row3);
+    content.appendChild(notesPanel);
 
-    drawer.appendChild(drawerInner);
-
-    /* ── toggle open/close on card face click ── */
-    face.addEventListener('click',function(e){
-      if(e.target.closest('.er-drag')||e.target.closest('.er-ent-btn')) return;
-      var isOpen=row.classList.contains('er-open');
-      row.classList.toggle('er-open',!isOpen);
-      if(!isOpen){
-        // Set max-height to scroll height so animation works
-        drawer.style.maxHeight=drawerInner.scrollHeight+40+'px';
-        drawer.style.opacity='1';
-        drawer.style.borderTopColor='rgba(200,168,75,.1)';
-      } else {
-        drawer.style.maxHeight='0';
-        drawer.style.opacity='0';
-        drawer.style.borderTopColor='transparent';
-      }
-    });
-
-    /* legacy .er-row-content stub so any external code doesn't crash */
-    var stub=document.createElement('div'); stub.className='er-row-content';
-
-    row.appendChild(face);
-    row.appendChild(drawer);
-    row.appendChild(stub);
+    row.appendChild(drag);
+    row.appendChild(avWrap);
+    row.appendChild(content);
     return row;
   }
+    var userWrap=document.createElement('div'); userWrap.className='er-field-wrap';
+    var userLbl=document.createElement('span'); userLbl.className='er-field-lbl'; userLbl.textContent='USER';
+    var userInner=document.createElement('div'); userInner.style.cssText='position:relative;flex:1;min-width:0;';
+    var userInp=document.createElement('input'); userInp.className='er-field-inp er-inp-md'; userInp.placeholder='username…'; userInp.value=m.efed_username||'';
+    var userDrop=document.createElement('div'); userDrop.className='er-username-drop'; userDrop.style.display='none';
+
 
   /* ── public API ── */
   window._erLoad=function(){
