@@ -20303,7 +20303,7 @@ function _mcSubmitRepost() { mc_submit(); }
           var existingRoster=await sbGet('roster','efed=eq.'+encodeURIComponent(EFED_NAME)+'&status=eq.approved&select=id,username,plan_note');
           if(existingRoster&&existingRoster.length){
             var usernames=existingRoster.filter(function(r){return r.username&&!r.username.startsWith('__ghost__');}).map(function(r){return r.username;});
-            var userRows=usernames.length?await sbGet('users','username=in.('+usernames.map(encodeURIComponent).join(',')+')'+'&select=username,display_name,avatar_url,nickname,hometown,faction,height,weight,age,entrance_music,x_handle,ig_handle&limit=200'):[];
+            var userRows=usernames.length?await sbGet('users','username=in.('+usernames.join(',')+')'+'&select=username,display_name,avatar_url,nickname,hometown,faction,height,weight,age,entrance_music,x_handle,ig_handle&limit=200'):[];
             var ownerRow=await sbGet('users','promo_name=eq.'+encodeURIComponent(EFED_NAME)+'&select=username,display_name,avatar_url,nickname,hometown,faction,height,weight,age,entrance_music,x_handle,ig_handle&limit=1');
             var allSeed=[].concat(ownerRow||[]).concat(userRows||[]);
             var seen=new Set();
@@ -20655,17 +20655,19 @@ function _mcSubmitRepost() { mc_submit(); }
       loadingEl.style.cssText='text-align:center;padding:40px;font-size:.8rem;color:rgba(255,255,255,.35);';
       loadingEl.textContent='Loading roster…';
       inner.appendChild(loadingEl);
-      /* Fetch from supabase roster table */
-      var ownerUsername=(typeof EFED_OWNER!=='undefined')?EFED_OWNER:'';
-      Promise.all([
-        ownerUsername?sbGet('users','promo_name=eq.'+encodeURIComponent(EFED_NAME)+'&select=username,display_name,avatar_url,avatar_banner&limit=1'):[],
-        sbGet('roster','efed=eq.'+encodeURIComponent(EFED_NAME)+'&status=eq.approved&select=id,username,status')
-        .then(function(rows){
-          var usernames=(rows||[]).filter(function(r){return r.username&&!r.username.startsWith('__ghost__');}).map(function(r){return r.username;});
-          if(!usernames.length) return [];
-          return sbGet('users','username=in.('+usernames.map(encodeURIComponent).join(',')+')&select=username,display_name,avatar_url,avatar_banner&limit=200');
-        })
-      ]).then(function(res){
+      /* Fetch from supabase roster table — defer slightly to ensure EFED_NAME is populated */
+      function _doPublicLoad(){
+        var efedName=(typeof EFED_NAME!=='undefined'&&EFED_NAME)?EFED_NAME:'';
+        if(!efedName){ setTimeout(_doPublicLoad,300); return; }
+        Promise.all([
+          sbGet('users','promo_name=eq.'+encodeURIComponent(efedName)+'&select=username,display_name,avatar_url,avatar_banner&limit=1'),
+          sbGet('roster','efed=eq.'+encodeURIComponent(efedName)+'&status=eq.approved&select=username')
+          .then(function(rows){
+            var usernames=(rows||[]).filter(function(r){return r&&r.username&&!r.username.startsWith('__ghost__');}).map(function(r){return r.username;});
+            if(!usernames.length) return [];
+            return sbGet('users','username=in.('+usernames.join(',')+')&select=username,display_name,avatar_url,avatar_banner&limit=200');
+          })
+        ]).then(function(res){
         inner.innerHTML='';
         var ownerRows=res[0]||[];
         var memberRows=res[1]||[];
@@ -20683,6 +20685,8 @@ function _mcSubmitRepost() { mc_submit(); }
         inner.innerHTML='';
         _erRenderPublic(inner, []);
       });
+      } // end _doPublicLoad
+      _doPublicLoad();
       return;
     }
 
@@ -20921,7 +20925,7 @@ function _mcSubmitRepost() { mc_submit(); }
     var avWrap=document.createElement('div'); avWrap.className='er-row-av';
     /* If linked to hub profile, make avatar clickable */
     if(m.efed_username){
-      avWrap.style.cursor='pointer'; avWrap.title='View '+r.name+''s profile';
+      avWrap.style.cursor='pointer';       avWrap.title='View profile';
       avWrap.onclick=function(e){e.stopPropagation();window.location.href='profile.html?u='+encodeURIComponent(m.efed_username);};
     }
     var avEl=_buildAv(m.avatar_url||null); avWrap.appendChild(avEl);
