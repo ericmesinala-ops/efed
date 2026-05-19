@@ -2230,6 +2230,21 @@ html.day-mode #sf-inline-form { background: rgba(168,130,10,.04); border-color: 
   <div style="height:1px;background:rgba(255,255,255,.06);margin-top:16px;"></div>
 </div>
 
+<!-- ── OVR RATINGS SECTION ── -->
+<div class="section" id="ovr-ratings-section" style="display:none;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <div class="sec-title" style="margin-bottom:0;flex:1;">Ratings</div>
+    <div id="ovr-vis-toggle-wrap" style="display:none;align-items:center;gap:6px;">
+      <span id="ovr-vis-label" style="font-size:.68rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;font-family:'DM Sans',sans-serif;">Show</span>
+      <div id="ovr-vis-toggle" onclick="toggleOvrVis()" style="width:36px;height:20px;border-radius:40px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.1);cursor:pointer;position:relative;transition:background .2s,border-color .2s;flex-shrink:0;">
+        <div id="ovr-vis-knob" style="position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .2s;opacity:.4;"></div>
+      </div>
+    </div>
+  </div>
+  <div id="ovr-bars-inner"></div>
+  <div id="ovr-efed-credit" style="margin-top:8px;font-size:.65rem;color:rgba(255,255,255,.22);font-family:'DM Sans',sans-serif;letter-spacing:.2px;"></div>
+</div>
+
 <div class="section" id="moveset-section" style="display:none;">
   <div class="sec-title">Moveset</div>
   <div class="moveset-grid">
@@ -11270,7 +11285,126 @@ async function htSlotSave(el) {
   } catch(e) { showToast('Save failed'); }
 }
 
-async function toggleHashtagVis() {
+async function toggleOvrVis() {
+  const session = getSession();
+  if (!session) return;
+  const newVal = !window._ovrRatingsVisible;
+  window._ovrRatingsVisible = newVal;
+  _applyOvrVisToggleUI(newVal);
+  try {
+    await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ show_ovr_ratings: newVal })
+    });
+  } catch(e) {}
+}
+
+function _applyOvrVisToggleUI(visible) {
+  const label    = document.getElementById('ovr-vis-label');
+  const knob     = document.getElementById('ovr-vis-knob');
+  const toggleEl = document.getElementById('ovr-vis-toggle');
+  const sec      = document.getElementById('ovr-ratings-section');
+  if (label)    label.textContent = visible ? 'Show' : 'Hidden';
+  if (toggleEl) { toggleEl.style.background = visible ? '#c8a84b' : 'rgba(255,255,255,.12)'; toggleEl.style.borderColor = visible ? '#c8a84b' : 'rgba(255,255,255,.1)'; }
+  if (knob)     { knob.style.transform = visible ? 'translateX(16px)' : 'translateX(0)'; knob.style.opacity = visible ? '1' : '.4'; }
+  // Dim (don't fully hide) the section for owner so they can still toggle back
+  if (sec) sec.style.opacity = visible ? '1' : '0.35';
+}
+
+function _buildOvrBarsHTML(mic, inRing, look, selling) {
+  const stats = [
+    { lbl:'Mic',     val: mic     },
+    { lbl:'In-ring', val: inRing  },
+    { lbl:'Look',    val: look    },
+    { lbl:'Selling', val: selling },
+  ];
+  const ovr = Math.round(stats.reduce((s,x)=>s+(parseInt(x.val)||0),0)/stats.length) || 0;
+  let html = `<div style="display:flex;align-items:center;gap:20px;">`;
+  // Circle
+  html += `<div style="width:66px;height:66px;border-radius:50%;background:rgba(255,255,255,.05);border:2px solid rgba(255,255,255,.12);display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;">
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:1.7rem;color:#e8e8e8;line-height:1;letter-spacing:1px;">${ovr||'—'}</div>
+    <div style="font-size:.48rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-top:1px;">OVR</div>
+  </div>`;
+  // Bars
+  html += `<div style="flex:1;display:flex;flex-direction:column;gap:7px;">`;
+  stats.forEach(s => {
+    const v = Math.min(100,Math.max(0,parseInt(s.val)||0));
+    html += `<div style="display:flex;align-items:center;gap:10px;">
+      <div style="font-size:.68rem;color:rgba(255,255,255,.55);width:54px;flex-shrink:0;">${s.lbl}</div>
+      <div style="flex:1;height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;">
+        <div style="height:100%;border-radius:3px;background:linear-gradient(90deg,#3b82f6,#22c55e);width:${v}%;"></div>
+      </div>
+      <div style="font-size:.72rem;font-weight:700;color:rgba(255,255,255,.7);width:24px;text-align:right;flex-shrink:0;">${v||'—'}</div>
+    </div>`;
+  });
+  html += `</div></div>`;
+  return html;
+}
+
+async function loadOvrRatings(profileUsername, isOwn, showOvrSetting) {
+  const sec    = document.getElementById('ovr-ratings-section');
+  const inner  = document.getElementById('ovr-bars-inner');
+  const credit = document.getElementById('ovr-efed-credit');
+  const wrap   = document.getElementById('ovr-vis-toggle-wrap');
+  if (!sec || !inner) return;
+
+  try {
+    // Step 1: find which eFed this user belongs to (approved roster entry)
+    const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(profileUsername)}&status=eq.approved&select=efed&limit=1`);
+    if (!rosterRows || !rosterRows.length || !rosterRows[0].efed) return;
+    const efedName = rosterRows[0].efed;
+
+    // Step 2: find the eFed owner
+    const ownerRows = await sbGet('users', `promo_name=ilike.${encodeURIComponent(efedName)}&select=username,acronym&limit=1`);
+    if (!ownerRows || !ownerRows.length) return;
+    const ownerUsername = ownerRows[0].username;
+    const efedAcronym   = ownerRows[0].acronym || efedName;
+
+    // Step 3: fetch owner's fsw_management_data
+    const mgmtRows = await sbGet('fsw_management_data', `username=eq.${encodeURIComponent(ownerUsername)}&select=roster,roster_mgmt&limit=1`);
+    if (!mgmtRows || !mgmtRows.length) return;
+    const rosterArr  = mgmtRows[0].roster  || [];
+    const rosterMgmt = mgmtRows[0].roster_mgmt || {};
+
+    // Step 4: find this user's entry by efed_username match, fallback to display_name
+    let targetMeta = null;
+    for (const entry of rosterArr) {
+      const meta = rosterMgmt[entry.id];
+      if (!meta) continue;
+      if ((meta.efed_username||'').toLowerCase() === profileUsername.toLowerCase()) {
+        targetMeta = meta; break;
+      }
+    }
+    if (!targetMeta) return; // no entry found with linked username
+
+    const mic     = parseInt(targetMeta.mic)     || 0;
+    const inRing  = parseInt(targetMeta.in_ring) || 0;
+    const look    = parseInt(targetMeta.look)    || 0;
+    const selling = parseInt(targetMeta.selling) || 0;
+    if (!mic && !inRing && !look && !selling) return; // no ratings set yet
+
+    // Render bars
+    inner.innerHTML = _buildOvrBarsHTML(mic, inRing, look, selling);
+
+    // Credit line
+    if (credit) {
+      credit.innerHTML = `Generated by <strong style="color:rgba(200,168,75,.6);">${_esc(efedAcronym)}</strong>. These ratings reflect their in-game use in <strong style="color:rgba(200,168,75,.6);">${_esc(efedAcronym)}</strong>.`;
+    }
+
+    // Show section
+    const visible = (showOvrSetting !== false); // default show
+    window._ovrRatingsVisible = visible;
+    sec.style.display = 'block';
+    sec.style.opacity  = visible ? '1' : '0.35';
+
+    // Owner toggle
+    if (isOwn && wrap) {
+      wrap.style.display = 'flex';
+      _applyOvrVisToggleUI(visible);
+    }
+  } catch(e) { console.warn('[loadOvrRatings]', e); }
+}
+
+
   const session = getSession();
   if (!session) return;
   const newVal = !window._hashtagVisible;
@@ -12945,7 +13079,7 @@ async function loadProfile() {
   try {
     let users;
     try {
-      users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,spotify_handle,discord_handle,facebook_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,age,hometown,alignment,faction,entrance_music,moveset,points,credits,hours_watched,is_efed_owner`);
+      users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,spotify_handle,discord_handle,facebook_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,age,hometown,alignment,faction,entrance_music,moveset,points,credits,hours_watched,is_efed_owner,show_ovr_ratings`);
     } catch(e) {
       // One or more columns may not exist yet — progressively fall back
       const missing = ['spotify_handle','discord_handle','facebook_handle','height','weight','hometown','nickname','alignment','faction','entrance_music','moveset'];
@@ -13033,6 +13167,7 @@ async function loadProfile() {
     renderSocialLinks(ig, x, twitch, reddit, spotify, discord, facebook);
     loadCawImages(user);
     renderMoveset(user.moveset, _isOwnProfile);
+    loadOvrRatings(resolvedUser, _isOwnProfile, user.show_ovr_ratings !== false);
     _posts.load(resolvedUser);
     loadAppearances(resolvedUser, _isOwnProfile);
     loadCareerRecords(resolvedUser, _isOwnProfile);
