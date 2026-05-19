@@ -20595,8 +20595,13 @@ function _mgmtBuildOvrView(m) {
   } else {
     var ph=document.createElement('div'); ph.style.cssText='font-size:.75rem;color:rgba(255,255,255,.2);font-style:italic;'; ph.textContent='No breakdown set'; bars.appendChild(ph);
   }
-  wrap.appendChild(circle); wrap.appendChild(bars);
-  return wrap;
+  var ovrNote = document.createElement('div');
+  ovrNote.style.cssText = 'font-size:.65rem;color:rgba(255,255,255,.22);font-family:"DM Sans",sans-serif;margin-top:6px;letter-spacing:.2px;';
+  ovrNote.innerHTML = 'This overall reflects the ratings used in-game by <span style="color:rgba(200,168,75,.55);font-weight:600;">' + ((typeof EFED_NAME !== 'undefined' && EFED_NAME) ? EFED_NAME : 'this eFed') + '</span>.';
+  var ovrWrap2 = document.createElement('div'); ovrWrap2.style.cssText = 'display:flex;flex-direction:column;';
+  ovrWrap2.appendChild(wrap);
+  ovrWrap2.appendChild(ovrNote);
+  return ovrWrap2;
 }
 
 /* ── OVR edit-mode: 4 sliders ── */
@@ -20909,10 +20914,87 @@ function _mgmtShowHubConfirm(rosterId, displayName, u) {
 }
 
 /* ── Quick-Add dropdown renderer ── */
+/* ── Duplicate check helpers ── */
+function _mgmtIsDupe(name, username) {
+  var nameLow = (name||'').toLowerCase().trim();
+  var unLow   = (username||'').toLowerCase().trim();
+  return _mgmtRosterData.some(function(r) {
+    var rNameLow = (r.name||'').toLowerCase().trim();
+    var rMeta    = _mgmtGetMgmt(r.id);
+    var rUnLow   = (rMeta.efed_username||'').toLowerCase().trim();
+    if (unLow && rUnLow && unLow === rUnLow) return true;
+    if (nameLow && rNameLow === nameLow) return true;
+    return false;
+  });
+}
+
+function _mgmtDupeUpdatePopup(displayName, r, inp) {
+  var efedLabel = (typeof EFED_NAME !== 'undefined' ? EFED_NAME : 'this eFed') || 'this eFed';
+  // Build modal overlay
+  var ov = document.createElement('div');
+  ov.id = 'mgmt-dupe-ov';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#111114;border:1px solid rgba(200,168,75,.35);border-radius:12px;padding:24px 22px 20px;max-width:360px;width:100%;box-shadow:0 12px 48px rgba(0,0,0,.8);font-family:"DM Sans",sans-serif;';
+  // Icon row
+  var iconRow = document.createElement('div');
+  iconRow.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:14px;';
+  var icon = document.createElement('div');
+  icon.style.cssText = 'width:36px;height:36px;border-radius:50%;background:rgba(46,200,100,.15);border:1.5px solid rgba(46,200,100,.5);display:flex;align-items:center;justify-content:center;flex-shrink:0;';
+  icon.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2ec864" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+  var title = document.createElement('div');
+  title.style.cssText = 'font-size:.85rem;font-weight:700;color:#e8e8e8;line-height:1.3;';
+  title.textContent = 'Already on the Roster';
+  iconRow.appendChild(icon); iconRow.appendChild(title);
+  // Body
+  var body = document.createElement('div');
+  body.style.cssText = 'font-size:.78rem;color:rgba(255,255,255,.6);line-height:1.6;margin-bottom:20px;';
+  body.innerHTML = '<strong style="color:#e8e8e8;">' + (displayName||'This wrestler') + '</strong> is already part of <strong style="color:#e8e8e8;">' + efedLabel + '</strong>.<br>Do you want to update your records instead?';
+  // Buttons
+  var btns = document.createElement('div');
+  btns.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+  var cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'padding:7px 16px;background:transparent;border:1px solid rgba(255,255,255,.15);border-radius:6px;color:rgba(255,255,255,.5);font-size:.75rem;font-weight:600;cursor:pointer;font-family:"DM Sans",sans-serif;transition:border-color .15s;';
+  cancelBtn.onmouseenter=function(){this.style.borderColor='rgba(255,255,255,.35)';};
+  cancelBtn.onmouseleave=function(){this.style.borderColor='rgba(255,255,255,.15)';};
+  cancelBtn.onclick=function(){ ov.remove(); if(inp){inp.value=''; ['qaUsername','qaAvatarUrl','qaNickname','qaHeight','qaWeight','qaHometown','qaFaction','qaEntranceLink','qaTwitter','qaInstagram'].forEach(function(k){delete inp.dataset[k];});} };
+  var updateBtn = document.createElement('button');
+  updateBtn.textContent = 'Update';
+  updateBtn.style.cssText = 'padding:7px 18px;background:#c8a84b;border:none;border-radius:6px;color:#111;font-size:.75rem;font-weight:700;cursor:pointer;font-family:"DM Sans",sans-serif;transition:background .15s;';
+  updateBtn.onmouseenter=function(){this.style.background='#d9bb62';};
+  updateBtn.onmouseleave=function(){this.style.background='#c8a84b';};
+  updateBtn.onclick=function(){
+    ov.remove();
+    // Overwrite mgmt metadata for the existing roster entry
+    var m = _mgmtGetMgmt(r.id);
+    if (inp.dataset.qaUsername)      m.efed_username    = inp.dataset.qaUsername;
+    if (inp.dataset.qaAvatarUrl)     m.avatar_url       = inp.dataset.qaAvatarUrl;
+    if (inp.dataset.qaNickname)      m.nickname         = inp.dataset.qaNickname;
+    if (inp.dataset.qaHeight)        m.height           = inp.dataset.qaHeight;
+    if (inp.dataset.qaWeight)        m.weight           = inp.dataset.qaWeight;
+    if (inp.dataset.qaHometown)      m.hometown         = inp.dataset.qaHometown;
+    if (inp.dataset.qaFaction)       m.faction          = inp.dataset.qaFaction;
+    if (inp.dataset.qaEntranceLink)  m.entrance_link    = inp.dataset.qaEntranceLink;
+    if (inp.dataset.qaTwitter)       m.twitter_handle   = inp.dataset.qaTwitter;
+    if (inp.dataset.qaInstagram)     m.instagram_handle = inp.dataset.qaInstagram;
+    // Clear input
+    inp.value='';
+    ['qaUsername','qaAvatarUrl','qaNickname','qaHeight','qaWeight','qaHometown','qaFaction','qaEntranceLink','qaTwitter','qaInstagram'].forEach(function(k){delete inp.dataset[k];});
+    if (typeof _mgmtRosterRender==='function') _mgmtRosterRender();
+    if (typeof showToast==='function') showToast('✏️ ' + (displayName||r.name) + ' records updated');
+  };
+  btns.appendChild(cancelBtn); btns.appendChild(updateBtn);
+  box.appendChild(iconRow); box.appendChild(body); box.appendChild(btns);
+  ov.appendChild(box);
+  // Close on backdrop click
+  ov.addEventListener('mousedown', function(e){ if(e.target===ov) cancelBtn.onclick(); });
+  document.body.appendChild(ov);
+}
+
 function _mgmtShowQaDrop(results, inp, drop) {
   drop.innerHTML = '';
   if (!results || results.length === 0) {
-    // No hub matches — show a "just type & add" nudge
     var hint = document.createElement('div');
     hint.style.cssText = 'padding:10px 14px;font-size:.75rem;color:rgba(255,255,255,.35);font-family:"DM Sans",sans-serif;';
     hint.textContent = 'No hub matches — just hit Quick Add to create this wrestler.';
@@ -20922,6 +21004,7 @@ function _mgmtShowQaDrop(results, inp, drop) {
     return;
   }
   results.forEach(function(r) {
+    var isDupe = _mgmtIsDupe(r.display_name || r.username, r.username);
     var item = document.createElement('div');
     item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:background .12s;border-bottom:1px solid rgba(255,255,255,.05);';
     item.onmouseenter = function(){ this.style.background='rgba(200,168,75,.12)'; };
@@ -20930,6 +21013,7 @@ function _mgmtShowQaDrop(results, inp, drop) {
     av.src = r.avatar_url || 'https://placehold.co/28x28/1a1a22/888?text=' + encodeURIComponent((r.display_name||r.username||'?')[0].toUpperCase());
     av.style.cssText = 'width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;';
     var txt = document.createElement('div');
+    txt.style.cssText = 'flex:1;min-width:0;';
     var dn = document.createElement('div');
     dn.style.cssText = 'font-size:.8rem;font-weight:600;color:#e8e8e8;font-family:"DM Sans",sans-serif;';
     dn.textContent = r.display_name || r.username;
@@ -20938,21 +21022,40 @@ function _mgmtShowQaDrop(results, inp, drop) {
     un.textContent = '@' + r.username;
     txt.appendChild(dn); txt.appendChild(un);
     item.appendChild(av); item.appendChild(txt);
+    // Green person badge if already on roster
+    if (isDupe) {
+      var badge = document.createElement('div');
+      badge.title = 'Already on roster';
+      badge.style.cssText = 'flex-shrink:0;width:22px;height:22px;border-radius:50%;background:rgba(46,200,100,.15);border:1.5px solid rgba(46,200,100,.55);display:flex;align-items:center;justify-content:center;';
+      badge.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2ec864" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+      item.appendChild(badge);
+    }
     item.addEventListener('mousedown', function(e) {
       e.preventDefault();
-      inp.value = r.display_name || r.username;
-      inp.dataset.qaUsername = r.username;
-      inp.dataset.qaAvatarUrl = r.avatar_url || '';
-      inp.dataset.qaNickname = r.nickname || '';
-      inp.dataset.qaHeight = r.height || '';
-      inp.dataset.qaWeight = r.weight || '';
-      inp.dataset.qaHometown = r.hometown || '';
-      inp.dataset.qaFaction = r.faction || '';
-      inp.dataset.qaEntranceLink = r.entrance_music || '';
-      inp.dataset.qaTwitter = r.x_handle || '';
-      inp.dataset.qaInstagram = r.ig_handle || '';
       drop.style.display = 'none';
-      mgmtQuickAddRoster();
+      // Store dataset regardless — needed for both add and update paths
+      inp.value = r.display_name || r.username;
+      inp.dataset.qaUsername     = r.username;
+      inp.dataset.qaAvatarUrl    = r.avatar_url || '';
+      inp.dataset.qaNickname     = r.nickname || '';
+      inp.dataset.qaHeight       = r.height || '';
+      inp.dataset.qaWeight       = r.weight || '';
+      inp.dataset.qaHometown     = r.hometown || '';
+      inp.dataset.qaFaction      = r.faction || '';
+      inp.dataset.qaEntranceLink = r.entrance_music || '';
+      inp.dataset.qaTwitter      = r.x_handle || '';
+      inp.dataset.qaInstagram    = r.ig_handle || '';
+      if (isDupe) {
+        // Find the existing roster entry for Update
+        var existingR = _mgmtRosterData.find(function(row) {
+          var m = _mgmtGetMgmt(row.id);
+          return (m.efed_username||'').toLowerCase() === r.username.toLowerCase() ||
+                 (row.name||'').toLowerCase() === (r.display_name||r.username||'').toLowerCase();
+        });
+        _mgmtDupeUpdatePopup(r.display_name || r.username, existingR || { id: null, name: r.display_name||r.username }, inp);
+      } else {
+        mgmtQuickAddRoster();
+      }
     });
     drop.appendChild(item);
   });
@@ -20973,6 +21076,18 @@ function mgmtQuickAddRoster() {
   if (!inp) return;
   var name = inp.value.trim();
   if (!name) { inp.focus(); inp.placeholder = '← Type a name first!'; setTimeout(function(){ inp.placeholder = 'Type any name & Quick Add →'; }, 2000); return; }
+
+  // Duplicate guard for free-typed names
+  var typedUsername = inp.dataset.qaUsername || '';
+  if (_mgmtIsDupe(name, typedUsername)) {
+    var existingR = _mgmtRosterData.find(function(row) {
+      var m = _mgmtGetMgmt(row.id);
+      if (typedUsername && (m.efed_username||'').toLowerCase() === typedUsername.toLowerCase()) return true;
+      return (row.name||'').toLowerCase() === name.toLowerCase();
+    });
+    _mgmtDupeUpdatePopup(name, existingR || { id: null, name: name }, inp);
+    return;
+  }
 
   // Generate a stable ID
   var newId = 'r_' + Date.now() + '_' + Math.floor(Math.random() * 9999);
