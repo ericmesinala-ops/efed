@@ -19927,33 +19927,70 @@ async function mgmtRosterLoad() {
       } catch(e2) {}
     }
   }
-  // Viewer fallback: if mgmt roster is empty, synthesize cards from the roster table
-  // so members who joined before the owner set up mgmt data still appear
-  if (isViewer && _mgmtRosterData.length === 0 && typeof EFED_NAME !== 'undefined' && EFED_NAME) {
-    try {
-      var rosterRows = await sbGet('roster', 'efed=eq.'+encodeURIComponent(EFED_NAME)+'&status=eq.approved&select=username,plan_note');
-      var realUnames = rosterRows.map(function(r){return r.username;}).filter(function(u){return !u.startsWith('__ghost__');});
-      var uRows = realUnames.length ? await sbGet('users','username=in.('+realUnames.map(function(u){return encodeURIComponent(u);}).join(',')+ ')&select=username,display_name,avatar_url') : [];
-      var uMap = {}; uRows.forEach(function(r){ uMap[r.username]=r; });
-      _mgmtRosterData = realUnames.map(function(u){
-        var disp = (uMap[u]&&uMap[u].display_name) || u;
-        var newId = 'roster_'+u;
-        if (uMap[u]&&uMap[u].avatar_url) { _mgmtGetMgmt(newId).avatar_url = uMap[u].avatar_url; }
-        _mgmtGetMgmt(newId).efed_username = u;
-        return { id: newId, name: disp, tier: 'Member', alignment: 'Unknown' };
-      });
-      // Also add ghosts
-      rosterRows.filter(function(r){return r.username.startsWith('__ghost__');}).forEach(function(gr){
-        var gName = gr.username;
-        if (gr.plan_note) { try { var gd=JSON.parse(gr.plan_note); if(gd.ghostName) gName=gd.ghostName; } catch(e){} }
-        var newId = 'roster_'+gr.username;
-        _mgmtRosterData.push({ id: newId, name: gName+' 👻', tier: 'Member', alignment: 'Unknown' });
-      });
-    } catch(e) { console.warn('[mgmtRosterLoad viewer fallback]', e); }
+  // Viewer fallback handled by _mgmtRenderViewerRoster() below
+  if (isViewer) {
+    // Viewers get a dedicated render from the roster table — skip mgmt machinery entirely
+    await _mgmtRenderViewerRoster();
+  } else {
+    _mgmtRosterRender();
   }
-  _mgmtRosterRender();
   // Populate _efedRosterMembers from roster table so booking & locker room work correctly
   _populateRosterMembers().catch(function(e){console.warn('[mgmtRosterLoad _populateRosterMembers]',e);});
+}
+
+/* ── Viewer-mode roster render ── */
+// Loads from the roster table, synthesises _mgmtRosterData entries,
+// then calls _mgmtRosterRender() — same card layout as owner, inputs locked by CSS.
+async function _mgmtRenderViewerRoster() {
+  var body = document.getElementById('mgmt-roster-list-body');
+  var badge = document.getElementById('mgmt-roster-count');
+  if (body) body.innerHTML = '<div style="padding:28px 16px;text-align:center;font-size:.75rem;color:rgba(255,255,255,.25);">Loading roster…</div>';
+  try {
+    var efed = (typeof EFED_NAME !== 'undefined') ? EFED_NAME : '';
+    if (!efed) { if(body) body.innerHTML='<div style="padding:28px 16px;text-align:center;font-size:.75rem;color:rgba(255,255,255,.25);">eFed not found.</div>'; return; }
+    var ownerUsername = (typeof EFED_OWNER !== 'undefined') ? EFED_OWNER : '';
+    // Load roster table + user profiles
+    var rosterRows = await sbGet('roster', 'efed=ilike.'+encodeURIComponent(efed)+'&status=eq.approved&select=username,plan_note');
+    var realUnames = rosterRows.filter(function(r){return !r.username.startsWith('__ghost__');}).map(function(r){return r.username;});
+    var ghostRows  = rosterRows.filter(function(r){return r.username.startsWith('__ghost__');});
+    var uMap = {};
+    if (realUnames.length) {
+      var uRows = await sbGet('users','username=in.('+realUnames.map(function(u){return encodeURIComponent(u);}).join(',')+ ')&select=username,display_name,avatar_url,nickname,height,weight,hometown,faction,x_handle,ig_handle,entrance_music');
+      uRows.forEach(function(u){ uMap[u.username]=u; });
+    }
+    // Synthesise _mgmtRosterData + _mgmtRosterMgmt from roster table
+    _mgmtRosterData = [];
+    _mgmtRosterMgmt = {};
+    // Owner first
+    if (ownerUsername && uMap[ownerUsername]) {
+      var ou = uMap[ownerUsername];
+      var oid = 'v_'+ownerUsername;
+      _mgmtRosterData.push({ id: oid, name: ou.display_name||ownerUsername, tier:'Owner', alignment:'', championship:false });
+      var om = _mgmtGetMgmt(oid);
+      om.efed_username=ownerUsername; om.avatar_url=ou.avatar_url||''; om.nickname=ou.nickname||''; om.height=ou.height||''; om.weight=ou.weight||''; om.hometown=ou.hometown||''; om.faction=ou.faction||''; om.twitter_handle=ou.x_handle||''; om.instagram_handle=ou.ig_handle||''; om.entrance_link=ou.entrance_music||'';
+    }
+    // Roster members (skip owner duplicate)
+    realUnames.forEach(function(u){
+      if (u===ownerUsername) return;
+      var ud = uMap[u]||{};
+      var mid = 'v_'+u;
+      _mgmtRosterData.push({ id: mid, name: ud.display_name||u, tier:'Member', alignment:'', championship:false });
+      var mm = _mgmtGetMgmt(mid);
+      mm.efed_username=u; mm.avatar_url=ud.avatar_url||''; mm.nickname=ud.nickname||''; mm.height=ud.height||''; mm.weight=ud.weight||''; mm.hometown=ud.hometown||''; mm.faction=ud.faction||''; mm.twitter_handle=ud.x_handle||''; mm.instagram_handle=ud.ig_handle||''; mm.entrance_link=ud.entrance_music||'';
+    });
+    // Ghost slots
+    ghostRows.forEach(function(gr){
+      var gName=gr.username; if(gr.plan_note){try{var gd=JSON.parse(gr.plan_note);if(gd.ghostName)gName=gd.ghostName;}catch(e){}}
+      var gid='v_'+gr.username;
+      _mgmtRosterData.push({id:gid,name:gName+' 👻',tier:'Guest',alignment:'',championship:false});
+      _mgmtGetMgmt(gid).efed_username=gr.username;
+    });
+    // Render using the same mgmt card layout — viewer CSS handles read-only state
+    _mgmtRosterRender();
+  } catch(e) {
+    console.error('[_mgmtRenderViewerRoster]', e);
+    if(body) body.innerHTML='<div style="padding:28px 16px;text-align:center;font-size:.75rem;color:rgba(255,255,255,.25);">Could not load roster.</div>';
+  }
 }
 
 /* ── Save to Supabase (fsw_management_data) ── */
@@ -20344,12 +20381,16 @@ document.addEventListener('DOMContentLoaded', function() {
   inp.addEventListener('keydown',function(e){if(e.key==='Enter'){drop.style.display='none';mgmtQuickAddRoster();}});
 });
 
-/* ── Load roster when the efed profile loads ── */
+/* ── Load roster when the efed profile loads (owner only) ── */
 (function() {
-  // Wait for the existing page init then load
-  var _origOnLoad=window.onload;
   window.addEventListener('load', function() {
-    setTimeout(mgmtRosterLoad, 800);
+    // Only pre-load mgmt roster for the owner — visitors load it when they click the tab,
+    // at which point EFED_OWNER is already resolved and viewer mode class is set correctly.
+    setTimeout(function() {
+      if (typeof _isOwnProfile !== 'undefined' && _isOwnProfile) {
+        mgmtRosterLoad();
+      }
+    }, 800);
   });
   // Also expose for manual call
   window.mgmtRosterLoad = mgmtRosterLoad;
