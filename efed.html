@@ -10289,22 +10289,21 @@ function openRosterModal() {
   const list = document.getElementById('roster-modal-list');
   const countBadge = document.getElementById('roster-modal-count');
   if (!bg || !list) return;
-  const cards = document.querySelectorAll('#roster-grid [data-username]');
+  // Use _efedRosterMembers (populated from roster table) — roster-grid is no longer the source
+  const members = (window._efedRosterMembers || []).filter(m => !m.username.startsWith('__ghost__'));
   list.innerHTML = '';
-  if (!cards.length) {
+  if (!members.length) {
     if (countBadge) countBadge.style.display = 'none';
     list.innerHTML = '<div style="padding:28px 20px;text-align:center;"><div style="font-size:.72rem;color:rgba(255,255,255,.2);letter-spacing:.5px;">No roster members yet.</div></div>';
   } else {
-    if (countBadge) { countBadge.textContent = cards.length + ' member' + (cards.length !== 1 ? 's' : ''); countBadge.style.display = 'block'; }
-    cards.forEach((card, i) => {
-      const username = card.dataset.username;
-      const name = card.dataset.name || username;
-      const img = card.querySelector('img');
-      const roleEl = card.querySelector('div:nth-child(2) + div');
-      const role = roleEl?.textContent?.trim() || '';
-      const avHtml = img
-        ? `<img loading="lazy" src="${img.src}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
-        : `<span style="font-family:"Bebas Neue",sans-serif;font-size:1rem;color:#c8a84b;">${name[0]?.toUpperCase()||'?'}</span>`;
+    if (countBadge) { countBadge.textContent = members.length + ' member' + (members.length !== 1 ? 's' : ''); countBadge.style.display = 'block'; }
+    members.forEach(m => {
+      const username = m.username;
+      const name = m.display_name || username;
+      const avHtml = m.avatar_url
+        ? `<img loading="lazy" src="${m.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
+        : `<span style="font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#c8a84b;">${(name[0]||'?').toUpperCase()}</span>`;
+      const isOwner = username === (typeof EFED_OWNER !== 'undefined' ? EFED_OWNER : '');
       const row = document.createElement('a');
       row.href = 'profile.html?u=' + encodeURIComponent(username);
       row.style.cssText = 'display:flex;align-items:center;gap:13px;padding:11px 20px;text-decoration:none;transition:background .15s,border-color .15s;border-bottom:1px solid rgba(255,255,255,.04);';
@@ -10317,7 +10316,7 @@ function openRosterModal() {
         </div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:.86rem;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name.replace(/</g,'&lt;')}</div>
-          <div style="font-size:.58rem;color:${role ? 'rgba(200,168,75,.65)' : 'rgba(255,255,255,.18)'};letter-spacing:1.2px;margin-top:3px;text-transform:uppercase;">${role || 'Roster Member'}</div>
+          <div style="font-size:.58rem;color:${isOwner ? 'rgba(200,168,75,.65)' : 'rgba(255,255,255,.18)'};letter-spacing:1.2px;margin-top:3px;text-transform:uppercase;">${isOwner ? 'Owner' : 'Roster Member'}</div>
         </div>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(200,168,75,.3)" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>`;
       list.appendChild(row);
@@ -19926,6 +19925,30 @@ async function mgmtRosterLoad() {
         if (saved) { var d = JSON.parse(saved); _mgmtRosterData = d.roster || []; _mgmtRosterMgmt = d.roster_mgmt || {}; }
       } catch(e2) {}
     }
+  }
+  // Viewer fallback: if mgmt roster is empty, synthesize cards from the roster table
+  // so members who joined before the owner set up mgmt data still appear
+  if (isViewer && _mgmtRosterData.length === 0 && typeof EFED_NAME !== 'undefined' && EFED_NAME) {
+    try {
+      var rosterRows = await sbGet('roster', 'efed=eq.'+encodeURIComponent(EFED_NAME)+'&status=eq.approved&select=username,plan_note');
+      var realUnames = rosterRows.map(function(r){return r.username;}).filter(function(u){return !u.startsWith('__ghost__');});
+      var uRows = realUnames.length ? await sbGet('users','username=in.('+realUnames.map(function(u){return encodeURIComponent(u);}).join(',')+ ')&select=username,display_name,avatar_url') : [];
+      var uMap = {}; uRows.forEach(function(r){ uMap[r.username]=r; });
+      _mgmtRosterData = realUnames.map(function(u){
+        var disp = (uMap[u]&&uMap[u].display_name) || u;
+        var newId = 'roster_'+u;
+        if (uMap[u]&&uMap[u].avatar_url) { _mgmtGetMgmt(newId).avatar_url = uMap[u].avatar_url; }
+        _mgmtGetMgmt(newId).efed_username = u;
+        return { id: newId, name: disp, tier: 'Member', alignment: 'Unknown' };
+      });
+      // Also add ghosts
+      rosterRows.filter(function(r){return r.username.startsWith('__ghost__');}).forEach(function(gr){
+        var gName = gr.username;
+        if (gr.plan_note) { try { var gd=JSON.parse(gr.plan_note); if(gd.ghostName) gName=gd.ghostName; } catch(e){} }
+        var newId = 'roster_'+gr.username;
+        _mgmtRosterData.push({ id: newId, name: gName+' 👻', tier: 'Member', alignment: 'Unknown' });
+      });
+    } catch(e) { console.warn('[mgmtRosterLoad viewer fallback]', e); }
   }
   _mgmtRosterRender();
   // Populate _efedRosterMembers from roster table so booking & locker room work correctly
