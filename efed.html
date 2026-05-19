@@ -7300,29 +7300,34 @@ async function loadProfile() {
     // Deep-link: ?tab=roster&u=username → auto-open roster tab + select that wrestler
     const _dlTab = params.get('tab');
     const _dlUser = params.get('u');
-    if (_dlTab === 'roster') {
-      setTimeout(function() {
-        if (typeof _goTo === 'function') _goTo('roster');
-        if (_dlUser) {
-          setTimeout(function() {
-            // Find the roster entry whose efed_username matches _dlUser
-            var target = _mgmtRosterData.find(function(r) {
-              var meta = _mgmtGetMgmt(r.id);
-              return (meta.efed_username||'').toLowerCase() === _dlUser.toLowerCase() ||
-                     (r.name||'').toLowerCase() === _dlUser.toLowerCase();
-            });
-            if (target) {
-              // Select in list and open detail panel
-              if (typeof _mgmtDesktopSelectItem === 'function') {
-                _mgmtDesktopSelectItem(target.id);
-                // Scroll the list item into view
-                var li = document.querySelector('.mgmt-dl-item[data-id="'+target.id+'"]');
-                if (li) li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-              }
-            }
-          }, 800); // wait for roster to render
+    if (_dlTab === 'roster' && _dlUser) {
+      // Switch to roster tab first
+      setTimeout(function() { if (typeof _goTo === 'function') _goTo('roster'); }, 300);
+      // Poll until _mgmtRosterData has the target entry (roster loads async)
+      var _dlAttempts = 0;
+      var _dlInterval = setInterval(function() {
+        _dlAttempts++;
+        if (_dlAttempts > 30) { clearInterval(_dlInterval); return; } // give up after ~6s
+        if (!_mgmtRosterData || !_mgmtRosterData.length) return; // not loaded yet
+        var target = _mgmtRosterData.find(function(r) {
+          var meta = (typeof _mgmtGetMgmt === 'function') ? _mgmtGetMgmt(r.id) : {};
+          return (meta.efed_username||'').toLowerCase() === _dlUser.toLowerCase()
+              || (r.name||'').toLowerCase() === _dlUser.toLowerCase();
+        });
+        if (!target) return; // might not be rendered yet — keep polling
+        clearInterval(_dlInterval);
+        // Open the detail panel
+        if (typeof _mgmtDesktopSelectItem === 'function') {
+          _mgmtDesktopSelectItem(target.id);
         }
-      }, 400); // wait for tab switch animation
+        // Scroll list item into view
+        setTimeout(function() {
+          var li = document.querySelector('.mgmt-dl-item[data-id="' + target.id + '"]');
+          if (li) li.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 200);
+      }, 200); // check every 200ms
+    } else if (_dlTab === 'roster') {
+      setTimeout(function() { if (typeof _goTo === 'function') _goTo('roster'); }, 300);
     }
 
     // Signings toggle state
