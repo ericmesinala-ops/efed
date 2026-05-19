@@ -544,14 +544,18 @@ html.day-mode .stamp-btn:hover { background: rgba(0,0,0,.1); }
 #efed-panel-roster.roster-viewer-mode #mgmt-roster-notes-panel,
 #efed-panel-roster.roster-viewer-mode .mgmt-rr-ovr-cell,
 #efed-panel-roster.roster-viewer-mode .mgmt-rr-row3 { display: none !important; }
-/* Hide the OVR label (first label in row1) */
-#efed-panel-roster.roster-viewer-mode .mgmt-rr-row1 > .mgmt-rr-label:first-child { display: none !important; }
+/* Hide the OVR column in viewer mode (new vertical column system) */
+#efed-panel-roster.roster-viewer-mode .mgmt-rr-vinp--ovr,
+#efed-panel-roster.roster-viewer-mode .mgmt-rr-vinp--ovr + .mgmt-rr-vlabel,
+#efed-panel-roster.roster-viewer-mode .mgmt-rr-vcol:has(.mgmt-rr-vinp--ovr) { display: none !important; }
 /* Hide the quick-add bar row entirely */
 #efed-panel-roster.roster-viewer-mode #mgmt-roster-wrap > div:has(#mgmt-roster-quick-inp) { display: none !important; }
-/* Make all inputs look like plain text */
+/* Make all inputs look like plain read-only text */
 #efed-panel-roster.roster-viewer-mode .mgmt-rr-inp,
 #efed-panel-roster.roster-viewer-mode .mgmt-rr-narrow-inp,
-#efed-panel-roster.roster-viewer-mode .mgmt-rr-entrance-inp { pointer-events: none !important; background: transparent !important; border-color: transparent !important; color: rgba(255,255,255,.6) !important; cursor: default !important; }
+#efed-panel-roster.roster-viewer-mode .mgmt-rr-entrance-inp,
+#efed-panel-roster.roster-viewer-mode .mgmt-rr-vinp { pointer-events: none !important; background: transparent !important; border-color: transparent !important; color: rgba(255,255,255,.6) !important; cursor: default !important; }
+#efed-panel-roster.roster-viewer-mode .mgmt-rr-vinp--ovr,
 #efed-panel-roster.roster-viewer-mode .mgmt-rr-entrance-inp { color: rgba(255,255,255,.35) !important; }
 /* Hide copy button, keep play button */
 #efed-panel-roster.roster-viewer-mode button[title="Copy link"] { display: none !important; }
@@ -1974,8 +1978,10 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
         } else {
           _rosterPanel.classList.add('roster-viewer-mode');
           // Load owner's data into the mgmt roster so viewers see it
-          if (!window._rosterViewerLoaded) {
-            window._rosterViewerLoaded = true;
+          // Always reload viewer roster — guard only against rapid double-clicks
+          if (!window._rosterViewerLoading) {
+            window._rosterViewerLoading = true;
+            setTimeout(function() { window._rosterViewerLoading = false; }, 2000);
             if (typeof mgmtRosterLoad === 'function') mgmtRosterLoad();
           }
         }
@@ -19837,6 +19843,11 @@ async function mgmtRosterLoad() {
   var isViewer = document.getElementById('efed-panel-roster')?.classList.contains('roster-viewer-mode');
   // Viewers load the efed owner's roster data; owners load their own
   var loadUsername = (isViewer && typeof EFED_OWNER !== 'undefined' && EFED_OWNER) ? EFED_OWNER : (s ? s.username : null);
+  // If viewer but EFED_OWNER not resolved yet, wait and retry
+  if (!loadUsername && isViewer) {
+    setTimeout(function() { if (typeof mgmtRosterLoad === 'function') mgmtRosterLoad(); }, 800);
+    return;
+  }
   if (!loadUsername) { _mgmtRosterRender(); return; }
   try {
     var rows = await sbGet('fsw_management_data', 'username=eq.' + encodeURIComponent(loadUsername) + '&limit=1');
