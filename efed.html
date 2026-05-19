@@ -19980,10 +19980,10 @@ async function mgmtRosterLoad() {
       } catch(e2) {}
     }
   }
-  // Viewer fallback handled by _mgmtRenderViewerRoster() below
-  if (isViewer) {
-    // Viewers get a dedicated render from the roster table — skip mgmt machinery entirely
-    await _mgmtRenderViewerRoster();
+  // Both owners and viewers use _mgmtRosterRender — data already loaded from fsw_management_data.
+  // For viewers: if owner has no mgmt data yet, fall back to roster table.
+  if (isViewer && _mgmtRosterData.length === 0) {
+    await _mgmtRenderViewerRoster(); // roster-table fallback only when owner hasn't set up mgmt yet
   } else {
     _mgmtRosterRender();
   }
@@ -20170,7 +20170,17 @@ function _mgmtBuildRow(r) {
   var avCol=document.createElement('div'); avCol.className='mgmt-rr-avatar-col';
   function buildAv(url) { if(url){var img=document.createElement('img');img.className='mgmt-rr-avatar';img.src=url;img.onerror=function(){img.replaceWith(buildInits());};return img;} return buildInits(); }
   function buildInits(){var d=document.createElement('div');d.className='mgmt-rr-avatar-initials';d.textContent=_mgmtInitials(r.name);return d;}
-  var avEl=buildAv(m.avatar_url||null); avCol.appendChild(avEl); card.appendChild(avCol);
+  var avEl=buildAv(m.avatar_url||null);
+  // Wrap avatar in a link when a hub username is linked
+  if (m.efed_username) {
+    var avLink=document.createElement('a');avLink.href='profile.html?u='+encodeURIComponent(m.efed_username);avLink.title='View profile';
+    avLink.style.cssText='display:block;text-decoration:none;border-radius:50%;transition:opacity .15s;';
+    avLink.onmouseover=function(){avLink.style.opacity='.75';};avLink.onmouseout=function(){avLink.style.opacity='1';};
+    avLink.appendChild(avEl);avCol.appendChild(avLink);
+  } else {
+    avCol.appendChild(avEl);
+  }
+  card.appendChild(avCol);
 
   // Content column
   var cc=document.createElement('div'); cc.className='mgmt-rr-content-col';
@@ -20249,14 +20259,14 @@ function _mgmtBuildRow(r) {
   // Activity slider
   var actVal=parseInt((_mgmtRosterMgmt[r.id]&&_mgmtRosterMgmt[r.id].activity)||'0')||0;
   var actLabels=['Inactive','Low','Moderate','Active','Very Active'];
-  var actColors=['rgba(255,255,255,.25)','#f59e0b','#3b82f6','#22c55e','#c0000e'];
+  var actColors=['rgba(255,255,255,.25)','#f59e0b','#3b82f6','#22c55e','#c8a84b'];
   var actCol=document.createElement('div');actCol.className='mgmt-rr-vcol';actCol.style.cssText='flex:1;min-width:130px;';
   var actLbl=document.createElement('div');actLbl.className='mgmt-rr-vlabel';actLbl.textContent='ACTIVITY';
-  var actWrap=document.createElement('div');actWrap.style.cssText='display:flex;align-items:center;gap:6px;padding-top:3px;';
+  var actWrap=document.createElement('div');actWrap.style.cssText='display:flex;align-items:center;gap:8px;padding-top:3px;';
   var actSlider=document.createElement('input');actSlider.type='range';actSlider.min='0';actSlider.max='4';actSlider.value=String(actVal);
-  actSlider.style.cssText='flex:1;height:3px;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.1);border-radius:2px;cursor:pointer;accent-color:'+actColors[actVal]+';outline:none;';
+  actSlider.style.cssText='width:80px;flex-shrink:0;height:3px;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.1);border-radius:2px;cursor:pointer;accent-color:'+actColors[actVal]+';outline:none;';
   var actBadge=document.createElement('span');
-  actBadge.style.cssText='font-size:.58rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:'+actColors[actVal]+';white-space:nowrap;min-width:64px;text-align:right;';
+  actBadge.style.cssText='font-size:.58rem;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:'+actColors[actVal]+';white-space:nowrap;min-width:64px;';
   actBadge.textContent=actLabels[actVal];
   actSlider.oninput=function(){var v=parseInt(actSlider.value);_mgmtSetMgmt(r.id,'activity',String(v));actBadge.textContent=actLabels[v];actBadge.style.color=actColors[v];actSlider.style.accentColor=actColors[v];};
   actWrap.appendChild(actSlider);actWrap.appendChild(actBadge);
