@@ -10365,7 +10365,8 @@ async function _saveRosterOrder() {
 
 async function loadRoster() {
   // Roster tab is now the management roster — handled by mgmtRosterLoad()
-  return;
+  // Still populate _efedRosterMembers from the roster table for booking + cross-page connections
+  await _populateRosterMembers(); return;
   const session = getSession();
   try {
     // Owner sees all rows; logged-in user sees approved + their own pending; others see approved only
@@ -19831,6 +19832,72 @@ var _mgmtRosterAz     = 'ALL';
 var _mgmtRosterSort   = 'az';
 var _mgmtRosterDragId = null;
 
+/* ── Roster ↔ Hub cross-page bridge ── */
+// Populates window._efedRosterMembers from the canonical `roster` table
+// (used by booking modal, locker room gate, and any system that needs live membership)
+async function _populateRosterMembers() {
+  if (typeof EFED_NAME === 'undefined' || !EFED_NAME) return;
+  try {
+    var ownerRows = await sbGet('users', 'promo_name=eq.'+encodeURIComponent(EFED_NAME)+'&select=username,display_name,avatar_url&limit=1');
+    var owner = ownerRows[0];
+    var ownerUsername = owner ? owner.username : (typeof EFED_OWNER !== 'undefined' ? EFED_OWNER : '');
+    var allRows = await sbGet('roster', 'efed=eq.'+encodeURIComponent(EFED_NAME)+'&status=eq.approved&select=username,plan_note');
+    var realUnames = allRows.map(function(r){return r.username;}).filter(function(u){return !u.startsWith('__ghost__') && u !== ownerUsername;});
+    var ghostUnames = allRows.map(function(r){return r.username;}).filter(function(u){return u.startsWith('__ghost__');});
+    var uRows = realUnames.length ? await sbGet('users','username=in.('+realUnames.map(function(u){return encodeURIComponent(u);}).join(',')+ ')&select=username,display_name,avatar_url') : [];
+    var uMap = {}; uRows.forEach(function(r){ uMap[r.username]=r; });
+    window._efedRosterMembers = realUnames.map(function(u){ return { username:u, display_name:(uMap[u]&&uMap[u].display_name)||u, avatar_url:(uMap[u]&&uMap[u].avatar_url)||null }; });
+    ghostUnames.forEach(function(gu) {
+      var gr = allRows.find(function(r){return r.username===gu;});
+      var gName = gu;
+      if (gr && gr.plan_note) { try { var gd=JSON.parse(gr.plan_note); if(gd.ghostName) gName=gd.ghostName; } catch(e) {} }
+      window._efedRosterMembers.push({ username:gu, display_name:gName+' 👻', avatar_url:null });
+    });
+    if (owner) window._efedRosterMembers.unshift({ username:owner.username, display_name:owner.display_name||owner.username, avatar_url:owner.avatar_url||null });
+  } catch(e) { console.warn('[populateRosterMembers]', e); }
+}
+
+// Syncs hub usernames from mgmt metadata to the canonical `roster` table.
+// Called after Save Roster. Sends notifications to newly added members.
+// Also removes members whose efed_username was cleared or the card deleted.
+async function _syncMgmtToRosterTable() {
+  if (typeof EFED_NAME === 'undefined' || !EFED_NAME) return;
+  if (typeof _isOwnProfile === 'undefined' || !_isOwnProfile) return;
+  var session = typeof getSession === 'function' ? getSession() : null;
+  if (!session) return;
+  // Collect every linked hub username from roster_mgmt entries that still exist in roster data
+  var activeIds = new Set(_mgmtRosterData.map(function(r){ return String(r.id); }));
+  var hubUsernames = new Set();
+  Object.keys(_mgmtRosterMgmt).forEach(function(id) {
+    if (!activeIds.has(id)) return; // skip orphaned mgmt entries
+    var u = (_mgmtRosterMgmt[id].efed_username || '').trim();
+    if (u && !u.startsWith('__ghost__')) hubUsernames.add(u);
+  });
+  try {
+    // Current non-ghost approved rows
+    var existing = await sbGet('roster', 'efed=eq.'+encodeURIComponent(EFED_NAME)+'&status=eq.approved&select=id,username');
+    var existingReal = existing.filter(function(r){ return !r.username.startsWith('__ghost__'); });
+    var existingMap = {}; existingReal.forEach(function(r){ existingMap[r.username]=r.id; });
+    // Add new members
+    for (var newUser of hubUsernames) {
+      if (!existingMap.hasOwnProperty(newUser)) {
+        try {
+          await fetch(SUPABASE_URL+'/rest/v1/roster', { method:'POST', headers:Object.assign({},SB_HEADERS,{'Prefer':'return=minimal'}), body:JSON.stringify({ username:newUser, efed:EFED_NAME, status:'approved', joined_at:new Date().toISOString() }) });
+          try { await sbInsert('notifications', { username:newUser, type:'roster_approved', message:'✅ You have been added to the <strong>'+(typeof _esc==='function'?_esc(EFED_NAME):EFED_NAME)+'</strong> roster!', read:false, created_at:new Date().toISOString() }); } catch(ne) {}
+        } catch(e) { console.warn('[syncRoster] insert failed for', newUser, e); }
+      }
+    }
+    // Remove real members who were deleted from mgmt roster
+    for (var exUser in existingMap) {
+      if (!hubUsernames.has(exUser)) {
+        try { await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+existingMap[exUser], { method:'DELETE', headers:SB_HEADERS }); } catch(e) {}
+      }
+    }
+    // Refresh booking members list
+    await _populateRosterMembers();
+  } catch(e) { console.warn('[syncMgmtToRosterTable]', e); }
+}
+
 /* ── Persistence key (per-efed, per-user) ── */
 function _mgmtRosterKey() {
   var s = typeof getSession === 'function' ? getSession() : null;
@@ -19865,6 +19932,8 @@ async function mgmtRosterLoad() {
     }
   }
   _mgmtRosterRender();
+  // Populate _efedRosterMembers from roster table so booking & locker room work correctly
+  _populateRosterMembers().catch(function(e){console.warn('[mgmtRosterLoad _populateRosterMembers]',e);});
 }
 
 /* ── Save to Supabase (fsw_management_data) ── */
@@ -19882,6 +19951,8 @@ async function mgmtRosterSave() {
     localStorage.setItem(_mgmtRosterKey(), JSON.stringify({ roster: _mgmtRosterData, roster_mgmt: _mgmtRosterMgmt }));
     if (btn) { btn.textContent = '✓ Saved'; btn.style.background = 'rgba(34,197,94,.2)'; btn.style.borderColor = 'rgba(34,197,94,.5)'; btn.style.color = '#4ade80'; setTimeout(function(){ if(btn){ btn.textContent='Save Roster'; btn.style.background=''; btn.style.borderColor=''; btn.style.color=''; } }, 2000); }
     showToast('Roster saved!');
+    // Sync hub usernames to roster table so profile/locker room/feed connections are live
+    _syncMgmtToRosterTable().catch(function(e){ console.warn('[roster sync]', e); });
   } catch(e) {
     if (btn) { btn.textContent = 'Save Roster'; }
     showToast('Save failed. Check connection.');
@@ -20147,6 +20218,19 @@ function _mgmtAddFromHub(u) {
   Object.entries(fields).forEach(function(e){if(e[1])_mgmtSetMgmt(newId,e[0],e[1]);});
   _mgmtRosterAz=/[A-Z]/.test(wName[0].toUpperCase())?wName[0].toUpperCase():'#';
   _mgmtRosterRender(); showToast(wName+' added from hub!');
+  // Immediately sync to roster table → profile shows eFed, locker room access granted, notification sent
+  if (u.username && typeof EFED_NAME !== 'undefined' && EFED_NAME) {
+    (async function() {
+      try {
+        var ex = await sbGet('roster', 'efed=eq.'+encodeURIComponent(EFED_NAME)+'&username=eq.'+encodeURIComponent(u.username)+'&select=id');
+        if (!ex || !ex.length) {
+          await fetch(SUPABASE_URL+'/rest/v1/roster', { method:'POST', headers: Object.assign({}, SB_HEADERS, {'Prefer':'return=minimal'}), body: JSON.stringify({ username: u.username, efed: EFED_NAME, status:'approved', joined_at: new Date().toISOString() }) });
+          try { await sbInsert('notifications', { username: u.username, type:'roster_approved', message:'✅ You have been added to the <strong>'+(typeof _esc==='function'?_esc(EFED_NAME):EFED_NAME)+'</strong> roster!', read:false, created_at: new Date().toISOString() }); } catch(ne) {}
+          await _populateRosterMembers();
+        }
+      } catch(e) { console.warn('[addFromHub roster sync]', e); }
+    })();
+  }
 }
 
 /* ── Hub search modal ── */
@@ -20205,6 +20289,19 @@ function _mgmtShowHubConfirm(rosterId, displayName, u) {
     var fields={height:u.height||'',weight:u.weight||'',age:u.age||'',hometown:u.hometown||'',faction:u.faction||'',nickname:u.nickname||'',entrance_link:u.entrance_music||'',efed_username:u.username||'',twitter_handle:u.x_handle||'',instagram_handle:u.ig_handle||'',avatar_url:u.avatar_url||''};
     Object.entries(fields).forEach(function(e){if(e[1])_mgmtSetMgmt(rosterId,e[0],e[1]);});
     _mgmtRosterRender();closeHubDataModal();showToast('Profile updated from hub!');
+    // Sync this linked user to roster table immediately
+    if (u.username && typeof EFED_NAME !== 'undefined' && EFED_NAME) {
+      (async function() {
+        try {
+          var ex = await sbGet('roster','efed=eq.'+encodeURIComponent(EFED_NAME)+'&username=eq.'+encodeURIComponent(u.username)+'&select=id');
+          if (!ex || !ex.length) {
+            await fetch(SUPABASE_URL+'/rest/v1/roster',{method:'POST',headers:Object.assign({},SB_HEADERS,{'Prefer':'return=minimal'}),body:JSON.stringify({username:u.username,efed:EFED_NAME,status:'approved',joined_at:new Date().toISOString()})});
+            try{await sbInsert('notifications',{username:u.username,type:'roster_approved',message:'✅ You have been added to the <strong>'+(typeof _esc==='function'?_esc(EFED_NAME):EFED_NAME)+'</strong> roster!',read:false,created_at:new Date().toISOString()});}catch(ne){}
+            await _populateRosterMembers();
+          }
+        } catch(e){console.warn('[hubConfirm roster sync]',e);}
+      })();
+    }
   };
   btnRow.appendChild(cancelBtn);btnRow.appendChild(proceedBtn);body.appendChild(btnRow);
 }
