@@ -7336,6 +7336,34 @@ async function loadProfile() {
     // Backfill plan_notes for wrestlers missing a roster row (e.g. eFed owner) — runs once per eFed
     if (typeof _isOwnProfile !== 'undefined' && _isOwnProfile) setTimeout(() => _backfillMatchPlanNotes().catch(e=>console.warn('[backfill]',e)), 2000);
 
+    // Deep-link: ?tab=roster&u=username → auto-open roster tab + select that wrestler
+    const _dlTab = params.get('tab');
+    const _dlUser = params.get('u');
+    if (_dlTab === 'roster') {
+      setTimeout(function() {
+        if (typeof _goTo === 'function') _goTo('roster');
+        if (_dlUser) {
+          setTimeout(function() {
+            // Find the roster entry whose efed_username matches _dlUser
+            var target = _mgmtRosterData.find(function(r) {
+              var meta = _mgmtGetMgmt(r.id);
+              return (meta.efed_username||'').toLowerCase() === _dlUser.toLowerCase() ||
+                     (r.name||'').toLowerCase() === _dlUser.toLowerCase();
+            });
+            if (target) {
+              // Select in list and open detail panel
+              if (typeof _mgmtDesktopSelectItem === 'function') {
+                _mgmtDesktopSelectItem(target.id);
+                // Scroll the list item into view
+                var li = document.querySelector('.mgmt-dl-item[data-id="'+target.id+'"]');
+                if (li) li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              }
+            }
+          }, 800); // wait for roster to render
+        }
+      }, 400); // wait for tab switch animation
+    }
+
     // Signings toggle state
     _signingsOn = !!user.efed_open_signings;
     updateSigningsUI(_signingsOn);
@@ -20656,11 +20684,10 @@ function _mgmtBuildOvrView(m) {
     var ph=document.createElement('div'); ph.style.cssText='font-size:.75rem;color:rgba(255,255,255,.2);font-style:italic;'; ph.textContent='No breakdown set'; bars.appendChild(ph);
   }
   wrap.appendChild(circle); wrap.appendChild(bars);
-  var ovrWrapOuter = document.createElement('div'); ovrWrapOuter.style.cssText='display:flex;flex-direction:column;padding:18px 0 16px;border-bottom:1px solid rgba(255,255,255,.07);margin-bottom:20px;';
-  wrap.style.cssText='display:flex;align-items:center;gap:20px;padding:0 0 10px;';
+  var ovrWrapOuter = document.createElement('div'); ovrWrapOuter.style.cssText='display:flex;flex-direction:column;';
   ovrWrapOuter.appendChild(wrap);
   var ovrNote = document.createElement('div');
-  ovrNote.style.cssText = 'font-size:.65rem;color:rgba(255,255,255,.22);font-family:"DM Sans",sans-serif;margin-top:2px;letter-spacing:.2px;';
+  ovrNote.style.cssText = 'font-size:.65rem;color:rgba(255,255,255,.22);font-family:"DM Sans",sans-serif;margin-top:6px;letter-spacing:.2px;';
   ovrNote.innerHTML = 'This overall reflects the ratings used in-game by <span style="color:rgba(200,168,75,.55);font-weight:600;">' + ((typeof EFED_NAME !== 'undefined' && EFED_NAME) ? EFED_NAME : 'this eFed') + '</span>.';
   ovrWrapOuter.appendChild(ovrNote);
   return ovrWrapOuter;
@@ -20748,69 +20775,78 @@ function _mgmtDesktopRenderDetail(id) {
     var profA=document.createElement('a');profA.href='profile.html?u='+encodeURIComponent(m.efed_username);profA.style.cssText='font-size:.7rem;color:rgba(200,168,75,.65);text-decoration:none;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-top:5px;display:inline-block;';profA.textContent='View Profile →';heroRight.appendChild(profA);
   }
   if (editMode) {
-    var delBtn2=document.createElement('button');delBtn2.style.cssText='background:rgba(192,0,14,.12);border:1px solid rgba(192,0,14,.3);border-radius:6px;color:#ff6b6b;font-family:"DM Sans",sans-serif;font-size:.72rem;font-weight:700;padding:6px 14px;cursor:pointer;margin-top:8px;';delBtn2.textContent='Remove from Roster';
-    delBtn2.onclick=function(){if(!confirm('Remove "'+r.name+'" from roster?'))return;var idx=_mgmtRosterData.findIndex(function(x){return x.id===id;});if(idx!==-1)_mgmtRosterData.splice(idx,1);var _delU=(m.efed_username||'').trim();if(_delU&&typeof EFED_NAME!=='undefined'&&EFED_NAME){(async function(){try{await fetch(SUPABASE_URL+'/rest/v1/roster?efed=eq.'+encodeURIComponent(EFED_NAME)+'&username=eq.'+encodeURIComponent(_delU),{method:'DELETE',headers:SB_HEADERS});await _populateRosterMembers();}catch(e){}})();}_mgmtEditMode=false;_mgmtDesktopSelectedId=null;_mgmtRosterRender();};
+    var delBtn2=document.createElement('button');delBtn2.style.cssText='display:none;'; // moved to danger zone at bottom
     heroRight.appendChild(delBtn2);
   }
 
-  // ── W/L record block (right side of hero) ──
-  var wlWins   = parseInt(m.record_w||'0')||0;
-  var wlLosses = parseInt(m.record_l||'0')||0;
-  var wlPct    = (wlWins+wlLosses)>0 ? Math.round((wlWins/(wlWins+wlLosses))*100) : null;
-  var wlBlock  = document.createElement('div');
-  wlBlock.style.cssText='flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:6px;';
+  // ── Record block (right side of hero) ──
+  var _sw  = parseInt(m.record_sw||'0')||0;
+  var _sl  = parseInt(m.record_sl||'0')||0;
+  var _mw  = parseInt(m.record_mw||'0')||0;
+  var _ml  = parseInt(m.record_ml||'0')||0;
+  var _tw  = parseInt(m.record_tw||'0')||0;
+  var _td  = parseInt(m.record_td||'0')||0;
+  var _totalW   = _sw + _mw;
+  var _totalAll = _sw + _sl + _mw + _ml;
+  var _winPct   = _totalAll > 0 ? Math.round((_totalW / _totalAll) * 100) : null;
+  var _hasAnyRecord = (_sw||_sl||_mw||_ml||_tw||_td) > 0;
 
-  // W / L / Win% cells row
-  var wlRow=document.createElement('div'); wlRow.style.cssText='display:flex;gap:0;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);border-radius:10px;overflow:hidden;';
-  function _mkWLCell(lbl,valStr,color){
-    var c=document.createElement('div');c.style.cssText='padding:10px 14px;border-right:1px solid rgba(255,255,255,.06);min-width:52px;text-align:center;';
-    var cl=document.createElement('div');cl.style.cssText='font-size:.5rem;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:4px;';cl.textContent=lbl;
-    var cv=document.createElement('div');cv.style.cssText='font-family:"Bebas Neue",sans-serif;font-size:1.25rem;letter-spacing:.5px;color:'+(color||'#e8e8e8')+';';cv.textContent=valStr;
-    c.appendChild(cl);c.appendChild(cv);return c;
+  var wlBlock = document.createElement('div');
+  wlBlock.style.cssText = 'flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:5px;max-width:310px;' + (!_hasAnyRecord && !editMode ? 'opacity:.3;' : '');
+
+  function _mkRC(lbl, val, color, noBorder) {
+    var c  = document.createElement('div');
+    c.style.cssText = 'padding:8px 11px;' + (noBorder?'':'border-right:1px solid rgba(255,255,255,.05);') + 'min-width:44px;text-align:center;flex:1;';
+    var cl = document.createElement('div');
+    cl.style.cssText = 'font-size:.42rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.25);margin-bottom:3px;white-space:nowrap;';
+    cl.textContent = lbl;
+    var cv = document.createElement('div');
+    cv.style.cssText = 'font-family:"Bebas Neue",sans-serif;font-size:1.15rem;letter-spacing:.5px;color:' + (color||'rgba(255,255,255,.75)') + ';';
+    cv.textContent = val;
+    c.appendChild(cl); c.appendChild(cv); return c;
   }
-  var wCell  = _mkWLCell('W', wlWins,   '#22c55e');
-  var lCell  = _mkWLCell('L', wlLosses, '#ef4444');
-  var pCell  = _mkWLCell('WIN%', wlPct!==null?(wlPct+'%'):'—', 'rgba(255,255,255,.6)');
-  pCell.style.borderRight='none';
-  wlRow.appendChild(wCell); wlRow.appendChild(lCell); wlRow.appendChild(pCell);
-  wlBlock.appendChild(wlRow);
 
+  // Row 1: S-W | S-L | M-W | M-L | WIN%
+  var rcRow1 = document.createElement('div');
+  rcRow1.style.cssText = 'display:flex;width:100%;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.07);border-radius:10px;overflow:hidden;';
+  rcRow1.appendChild(_mkRC('S-W',  _sw,  'rgba(100,220,130,.9)'));
+  rcRow1.appendChild(_mkRC('S-L',  _sl,  'rgba(220,80,80,.85)'));
+  rcRow1.appendChild(_mkRC('M-W',  _mw,  'rgba(100,200,150,.8)'));
+  rcRow1.appendChild(_mkRC('M-L',  _ml,  'rgba(200,100,100,.75)'));
+  rcRow1.appendChild(_mkRC('WIN%', _winPct!==null?(_winPct+'%'):'—', 'rgba(255,255,255,.55)', true));
+  wlBlock.appendChild(rcRow1);
+
+  // Row 2: Title Wins | Title Defenses
+  var rcRow2 = document.createElement('div');
+  rcRow2.style.cssText = 'display:flex;width:100%;background:rgba(200,168,75,.04);border:1px solid rgba(200,168,75,.18);border-radius:10px;overflow:hidden;';
+  rcRow2.appendChild(_mkRC('🏆 Title W',   _tw, 'rgba(200,168,75,.95)'));
+  rcRow2.appendChild(_mkRC('🛡 Title Def',  _td, 'rgba(200,168,75,.75)', true));
+  wlBlock.appendChild(rcRow2);
+
+  // Edit-mode steppers
   if (editMode) {
-    // +/- stepper row for W and L
-    var stepRow=document.createElement('div'); stepRow.style.cssText='display:flex;gap:8px;';
-    function _mkStepper(label, getVal, setKey) {
-      var sw=document.createElement('div');sw.style.cssText='display:flex;flex-direction:column;align-items:center;gap:3px;';
-      var sl=document.createElement('div');sl.style.cssText='font-size:.48rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.25);';sl.textContent=label;
-      var sbRow=document.createElement('div');sbRow.style.cssText='display:flex;gap:4px;align-items:center;';
-      var minusBtn=document.createElement('button');minusBtn.textContent='−';
-      minusBtn.style.cssText='width:22px;height:22px;border-radius:5px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.6);font-size:.85rem;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;transition:background .12s;';
-      var plusBtn=document.createElement('button');plusBtn.textContent='+';
-      plusBtn.style.cssText='width:22px;height:22px;border-radius:5px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.6);font-size:.85rem;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;transition:background .12s;';
-      minusBtn.onmouseenter=function(){minusBtn.style.background='rgba(255,255,255,.12)';};minusBtn.onmouseleave=function(){minusBtn.style.background='rgba(255,255,255,.06)';};
-      plusBtn.onmouseenter=function(){plusBtn.style.background='rgba(255,255,255,.12)';};plusBtn.onmouseleave=function(){plusBtn.style.background='rgba(255,255,255,.06)';};
-      minusBtn.onclick=function(){
-        var cur=Math.max(0,(parseInt(_mgmtGetMgmt(id)[setKey])||0)-1);
-        _mgmtSetMgmt(id,setKey,String(cur));
-        _mgmtDesktopRenderDetail(id);
-      };
-      plusBtn.onclick=function(){
-        var cur=(parseInt(_mgmtGetMgmt(id)[setKey])||0)+1;
-        _mgmtSetMgmt(id,setKey,String(cur));
-        _mgmtDesktopRenderDetail(id);
-      };
-      sbRow.appendChild(minusBtn);sbRow.appendChild(plusBtn);
-      sw.appendChild(sl);sw.appendChild(sbRow);
-      return sw;
+    function _rcStepper(key) {
+      var sw2=document.createElement('div'); sw2.style.cssText='display:flex;flex-direction:column;align-items:center;flex:1;';
+      var sbR=document.createElement('div'); sbR.style.cssText='display:flex;gap:3px;';
+      var mb=document.createElement('button'); mb.textContent='−';
+      mb.style.cssText='width:19px;height:19px;border-radius:4px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.5);font-size:.8rem;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;';
+      var pb=document.createElement('button'); pb.textContent='+';
+      pb.style.cssText=mb.style.cssText;
+      mb.onclick=function(){_mgmtSetMgmt(id,key,String(Math.max(0,(parseInt(_mgmtGetMgmt(id)[key])||0)-1)));_mgmtDesktopRenderDetail(id);};
+      pb.onclick=function(){_mgmtSetMgmt(id,key,String((parseInt(_mgmtGetMgmt(id)[key])||0)+1));_mgmtDesktopRenderDetail(id);};
+      sbR.appendChild(mb); sbR.appendChild(pb); sw2.appendChild(sbR); return sw2;
     }
-    stepRow.appendChild(_mkStepper('W', function(){return m.record_w;}, 'record_w'));
-    stepRow.appendChild(_mkStepper('L', function(){return m.record_l;}, 'record_l'));
-    wlBlock.appendChild(stepRow);
+    var sr1=document.createElement('div'); sr1.style.cssText='display:flex;width:100%;';
+    ['record_sw','record_sl','record_mw','record_ml'].forEach(function(k){sr1.appendChild(_rcStepper(k));});
+    var pctSp=document.createElement('div'); pctSp.style.cssText='flex:1;'; sr1.appendChild(pctSp);
+    var sr2=document.createElement('div'); sr2.style.cssText='display:flex;width:100%;';
+    ['record_tw','record_td'].forEach(function(k){sr2.appendChild(_rcStepper(k));});
+    wlBlock.appendChild(sr1); wlBlock.appendChild(sr2);
   }
 
-  // Disclaimer note
   var wlNote=document.createElement('div');
-  wlNote.style.cssText='font-size:.58rem;color:rgba(255,255,255,.18);font-family:"DM Sans",sans-serif;text-align:right;max-width:160px;line-height:1.4;';
-  wlNote.textContent='eFed record — may not reflect all matches';
+  wlNote.style.cssText='font-size:.53rem;color:rgba(255,255,255,.15);font-family:"DM Sans",sans-serif;text-align:right;line-height:1.4;font-style:italic;';
+  wlNote.textContent='eFed-tracked record — unofficial, may be incomplete';
   wlBlock.appendChild(wlNote);
 
   if (m.efed_username&&m.avatar_url) { var avLink=document.createElement('a');avLink.href='profile.html?u='+encodeURIComponent(m.efed_username);avLink.style.cssText='border-radius:50%;display:block;flex-shrink:0;';avLink.appendChild(bigAv);hero.appendChild(avLink); } else { hero.appendChild(bigAv); }
@@ -20939,6 +20975,28 @@ function _mgmtDesktopRenderDetail(id) {
     var nta=document.createElement('textarea');nta.className='mgmt-mob-inp';nta.rows=3;nta.value=m.notes||'';nta.placeholder='Private notes…';nta.style.resize='vertical';nta.oninput=function(){_mgmtSetMgmt(id,'notes',nta.value);};
     nw.appendChild(nl);nw.appendChild(nta);wrap.appendChild(nw);
 
+    // ── Danger zone ──
+    var dz=document.createElement('div');
+    dz.style.cssText='margin-top:32px;padding:14px 16px;border:1px dashed rgba(192,0,14,.2);border-radius:10px;background:rgba(192,0,14,.03);';
+    var dzL=document.createElement('div');dzL.style.cssText='font-size:.5rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(192,0,14,.35);margin-bottom:6px;';dzL.textContent='⚠ DANGER ZONE';
+    var dzN=document.createElement('div');dzN.style.cssText='font-size:.7rem;color:rgba(255,255,255,.25);margin-bottom:10px;line-height:1.5;font-family:"DM Sans",sans-serif;';
+    dzN.textContent='Removing a member is permanent and cannot be undone from this screen.';
+    var dzB=document.createElement('button');
+    dzB.style.cssText='background:transparent;border:1px solid rgba(192,0,14,.25);border-radius:6px;color:rgba(255,100,100,.4);font-family:"DM Sans",sans-serif;font-size:.7rem;font-weight:600;padding:6px 14px;cursor:pointer;transition:all .2s;';
+    dzB.textContent='Remove '+r.name+' from Roster';
+    dzB.onmouseenter=function(){dzB.style.background='rgba(192,0,14,.12)';dzB.style.color='#ff6b6b';dzB.style.borderColor='rgba(192,0,14,.55)';};
+    dzB.onmouseleave=function(){dzB.style.background='transparent';dzB.style.color='rgba(255,100,100,.4)';dzB.style.borderColor='rgba(192,0,14,.25)';};
+    dzB.onclick=function(){
+      if(!confirm('Remove "'+r.name+'" from the roster?\n\nThis cannot be undone.')) return;
+      var _delU=(m.efed_username||'').trim();
+      var idx=_mgmtRosterData.findIndex(function(x){return x.id===id;});
+      if(idx!==-1) _mgmtRosterData.splice(idx,1);
+      if(_delU&&typeof EFED_NAME!=='undefined'&&EFED_NAME){
+        (async function(){try{await fetch(SUPABASE_URL+'/rest/v1/roster?efed=eq.'+encodeURIComponent(EFED_NAME)+'&username=eq.'+encodeURIComponent(_delU),{method:'DELETE',headers:SB_HEADERS});await _populateRosterMembers();}catch(e){}})(  );
+      }
+      _mgmtEditMode=false;_mgmtDesktopSelectedId=null;_mgmtRosterRender();
+    };
+    dz.appendChild(dzL);dz.appendChild(dzN);dz.appendChild(dzB);wrap.appendChild(dz);
   }
 
   panel.appendChild(wrap);
@@ -21022,7 +21080,6 @@ function _mgmtShowHubConfirm(rosterId, displayName, u) {
     // Alignment lives on _mgmtRosterData entry directly, not in mgmt meta
     if (u.alignment) { var _ai=_mgmtRosterData.findIndex(function(x){return x.id===rosterId;}); if(_ai!==-1) _mgmtRosterData[_ai].alignment=u.alignment; }
     _mgmtRosterRender();closeHubDataModal();showToast('Profile updated from hub!');
-    // Auto-save to Supabase so changes persist immediately
     if (typeof mgmtRosterSave === 'function') mgmtRosterSave();
     // Sync this linked user to roster table immediately
     if (u.username && typeof EFED_NAME !== 'undefined' && EFED_NAME) {
