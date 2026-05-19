@@ -3020,7 +3020,7 @@ window._efedRules = (function(){
         <div id="bk-composer-empty" style="font-size:.65rem;color:rgba(255,255,255,.18);font-style:italic;font-family:'DM Sans',sans-serif;">Build your match below</div>
       </div>
       <!-- Sticky action row -->
-      <div id="bk-action-row" style="position:sticky;top:112px;z-index:9;background:#07070a;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:8px 10px;margin-bottom:14px;display:flex;align-items:center;gap:6px;">
+      <div id="bk-action-row" style="position:sticky;top:112px;z-index:9;background:#07070a;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:8px 10px;margin-bottom:14px;display:none;align-items:center;gap:6px;">
         <button id="bk-act-comp" onclick="bkActCompetitor()" title="Add Competitor" style="display:flex;align-items:center;gap:5px;padding:7px 12px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.35);border-radius:8px;color:rgba(200,168,75,.9);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap;" onmouseover="this.style.background='rgba(200,168,75,.2)'" onmouseout="this.style.background='rgba(200,168,75,.1)'">🤼 Competitor</button>
         <button id="bk-act-vs" onclick="bkActVs()" disabled title="Add VS" style="padding:7px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:not-allowed;transition:all .15s;white-space:nowrap;">vs</button>
         <button id="bk-act-amp" onclick="bkActAmpersand()" disabled title="Add &amp;" style="padding:7px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:not-allowed;transition:all .15s;white-space:nowrap;">&amp;</button>
@@ -8911,6 +8911,10 @@ function bkStartNewMatch() {
   const se = document.getElementById('bk-save-err'); if (se) se.textContent = '';
   bkSyncChampToggle();
   bkGoStep(2);
+  // Auto-open roster picker so user immediately sees wrestlers to pick
+  _bkTab.pickerOpen = true;
+  const picker = document.getElementById('bk-roster-picker');
+  if (picker) picker.style.display = 'block';
   bkLoadRoster();
 }
 
@@ -9354,9 +9358,29 @@ async function bkUpdateShow() {
 async function bkLoadRoster() {
   const grid = document.getElementById('bk-comp-grid');
   if (!grid) return;
+  // Reuse mgmt roster cache if already loaded
+  if (typeof _mgmtRosterData !== 'undefined' && _mgmtRosterData.length > 0) {
+    _bkTab.rosterCache = [];
+    _bkTab.bookedUsernames = new Set();
+    _mgmtRosterData.forEach(function(r) {
+      var meta = (typeof _mgmtGetMgmt === 'function') ? _mgmtGetMgmt(r.id) : {};
+      if (!meta.efed_username) return;
+      _bkTab.rosterCache.push({
+        username:     meta.efed_username,
+        display_name: r.name ? r.name.replace(/ \u{1F47B}$/u, '') : meta.efed_username,
+        avatar_url:   meta.avatar_url || null,
+        rosterRowId:  null,
+        planNote:     null,
+        isGhost:      !!(r.name && r.name.endsWith(' \u{1F47B}'))
+      });
+    });
+    bkInjectGhostsIntoRosterCache();
+    bkRenderCompGrid();
+    return;
+  }
   grid.innerHTML = '<div style="grid-column:1/-1;font-size:.72rem;color:rgba(255,255,255,.2);padding:16px 0;text-align:center;font-family:"DM Sans",sans-serif;">Loading roster…</div>';
   try {
-    const rosterRows = await sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id,username,plan_note`);
+    const rosterRows = await sbGet('roster', `efed=ilike.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id,username,plan_note`);
     const nonGhost = rosterRows.filter(r => !r.username.startsWith('__ghost__'));
     const ghosts   = rosterRows.filter(r => r.username.startsWith('__ghost__'));
     let uMap = {};
@@ -9826,6 +9850,10 @@ function bkSyncPreview() {
   if (!bar) return;
 
   const wrestlers = _bkTab.slots.filter(s=>s.type==='wrestler');
+
+  // Show/hide action row based on whether wrestlers have been picked
+  const actionRow = document.getElementById('bk-action-row');
+  if (actionRow) actionRow.style.display = wrestlers.length > 0 ? 'flex' : 'none';
 
   if (!_bkTab.show && !wrestlers.length) {
     bar.innerHTML = '<span id="bk-preview-empty" style="font-size:.63rem;color:rgba(255,255,255,.18);font-family:"DM Sans",sans-serif;font-style:italic;">Select a show to begin</span>';
