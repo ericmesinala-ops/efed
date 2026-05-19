@@ -4855,6 +4855,52 @@ function _showMatchcardMigrationNotice() {
   document.body.appendChild(bar);
 }
 
+// ── Backfill: re-writes plan_note for every match in efed_event_matches_json + efed_events_json ──
+// Called once automatically on owner page load if not yet run; also exposed as window._backfillMatchPlanNotes() for manual use.
+async function _backfillMatchPlanNotes() {
+  const session = getSession(); if (!session) return;
+  const key = '_mc_backfill_done_' + (EFED_NAME||'').toLowerCase().replace(/\s+/g,'_');
+  if (localStorage.getItem(key)) return; // already ran
+  // Collect all matches from primary + extra events
+  const primary = window._efedPrimaryEvent || {};
+  const extras  = window._efedExtraEvents  || [];
+  const allPairs = []; // { match, ev }
+  (primary.matches || []).forEach(m => allPairs.push({ match: m, ev: primary }));
+  extras.forEach(ev => (ev.matches||[]).forEach(m => allPairs.push({ match: m, ev })));
+  if (!allPairs.length) return;
+  console.log('[backfill] Writing plan_notes for', allPairs.length, 'matches…');
+  for (const { match, ev } of allPairs) {
+    if (!match.uid || !Array.isArray(match.tokens)) continue;
+    const eventTitle = ev.title || '';
+    const eventDate  = ev.date  || '';
+    const wrestlers  = match.tokens.filter(t => t.type==='wrestler' && t.username && !t.username.startsWith('__ghost__'));
+    for (const w of wrestlers) {
+      try {
+        let rows = await sbGet('roster', `username=eq.${encodeURIComponent(w.username)}&efed=ilike.${encodeURIComponent(EFED_NAME)}&select=id,plan_note`);
+        if (!rows.length) {
+          try {
+            const uph = Object.assign({}, SB_HEADERS, { 'Prefer': 'return=representation,resolution=merge-duplicates' });
+            const ins = await fetch(SUPABASE_URL+'/rest/v1/roster?on_conflict=username,efed', { method:'POST', headers:uph, body:JSON.stringify({ username:w.username, efed:EFED_NAME, status:'approved', joined_at:new Date().toISOString() }) });
+            if (ins.ok) { const b=await ins.json(); rows=Array.isArray(b)?b:(b?[b]:[]); }
+            if (!rows.length) rows = await sbGet('roster', `username=eq.${encodeURIComponent(w.username)}&efed=ilike.${encodeURIComponent(EFED_NAME)}&select=id,plan_note`);
+          } catch(ue) {}
+        }
+        if (!rows.length) continue;
+        const row = rows[0];
+        let pn = {};
+        try { pn = typeof row.plan_note==='string' ? JSON.parse(row.plan_note||'{}') : (row.plan_note||{}); } catch(e) {}
+        if (!Array.isArray(pn.matches)) pn.matches = [];
+        pn.matches = pn.matches.filter(m => m.uid !== match.uid);
+        pn.matches.push({ uid:match.uid, eventUid:_getEvUid(ev, false, -1), eventTitle, eventDate, efed:EFED_NAME, ownerUsername:session.username, tokens:match.tokens, matchType:match.matchType||'', stipulation:match.stipulation||'', champ:match.champ||null, promoUrl:match.promoUrl||'' });
+        await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+row.id, { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({ plan_note:JSON.stringify(pn) }) });
+      } catch(e) { console.warn('[backfill]', w.username, e); }
+    }
+  }
+  localStorage.setItem(key, '1');
+  console.log('[backfill] Done — plan_notes synced for all wrestlers.');
+}
+window._backfillMatchPlanNotes = _backfillMatchPlanNotes;
+
 // ── Stable event uid ────────────────────────────────────────────────────────
 function _getEvUid(ev, isExtraCard, extraIndex) {
   if (!isExtraCard) return 'ev_primary';
@@ -5279,10 +5325,22 @@ async function _saveMatch(match, ev, isExtraCard, extraIndex) {
   // Write to each wrestler's plan_note
   const eventUid = _getEvUid(ev, isExtraCard, extraIndex);
   const eventTitle = ev.title || '';
-  const wrestlers = (match.tokens||[]).filter(t=>t.type==='wrestler'&&t.username);
+  const wrestlers = (match.tokens||[]).filter(t=>t.type==='wrestler'&&t.username&&!t.username.startsWith('__ghost__'));
   for (const w of wrestlers) {
     try {
-      const rows = await sbGet('roster', `username=eq.${encodeURIComponent(w.username)}&efed=ilike.${encodeURIComponent(EFED_NAME)}&select=id,plan_note`);
+      let rows = await sbGet('roster', `username=eq.${encodeURIComponent(w.username)}&efed=ilike.${encodeURIComponent(EFED_NAME)}&select=id,plan_note`);
+      // Auto-upsert: owner and wrestlers without a roster row get one created automatically
+      if (!rows.length) {
+        try {
+          const upsertHeaders = Object.assign({}, SB_HEADERS, { 'Prefer': 'return=representation,resolution=merge-duplicates' });
+          const ins = await fetch(SUPABASE_URL+'/rest/v1/roster?on_conflict=username,efed', {
+            method: 'POST', headers: upsertHeaders,
+            body: JSON.stringify({ username: w.username, efed: EFED_NAME, status: 'approved', joined_at: new Date().toISOString() })
+          });
+          if (ins.ok) { const b = await ins.json(); rows = Array.isArray(b) ? b : (b ? [b] : []); }
+          if (!rows.length) rows = await sbGet('roster', `username=eq.${encodeURIComponent(w.username)}&efed=ilike.${encodeURIComponent(EFED_NAME)}&select=id,plan_note`);
+        } catch(ue) { console.warn('[_saveMatch upsert]', w.username, ue); }
+      }
       if (!rows.length) continue;
       const row = rows[0];
       let pn = {};
@@ -5292,7 +5350,7 @@ async function _saveMatch(match, ev, isExtraCard, extraIndex) {
       pn.matches = pn.matches.filter(m => m.uid !== match.uid);
       pn.matches.push({ uid: match.uid, eventUid, eventTitle, eventDate: ev.date||'', efed: EFED_NAME, ownerUsername: session.username, tokens: match.tokens, matchType: match.matchType, stipulation: match.stipulation||'', champ: match.champ||null, promoUrl: match.promoUrl||'' });
       await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+row.id,{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({plan_note:JSON.stringify(pn)})});
-    } catch(e) {}
+    } catch(e) { console.warn('[_saveMatch plan_note]', w.username, e); }
   }
   _showMatchcardMigrationNotice();
 }
@@ -7275,6 +7333,8 @@ async function loadProfile() {
     _initMatchWatchlistUids();
     window._efedPrimaryEvent = { title: user.efed_event_title, date: user.efed_event_date, location: user.efed_event_location, main: user.efed_event_main, hype: user.efed_event_hype, banner: user.efed_event_banner || null, matches: Array.isArray(user.efed_event_matches_json) ? user.efed_event_matches_json : [] };
     renderEvent(window._efedPrimaryEvent, _extraEventsFromDB);
+    // Backfill plan_notes for wrestlers missing a roster row (e.g. eFed owner) — runs once per eFed
+    if (typeof _isOwnProfile !== 'undefined' && _isOwnProfile) setTimeout(() => _backfillMatchPlanNotes().catch(e=>console.warn('[backfill]',e)), 2000);
 
     // Signings toggle state
     _signingsOn = !!user.efed_open_signings;
