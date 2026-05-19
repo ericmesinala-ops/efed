@@ -3020,7 +3020,7 @@ window._efedRules = (function(){
         <div id="bk-composer-empty" style="font-size:.65rem;color:rgba(255,255,255,.18);font-style:italic;font-family:'DM Sans',sans-serif;">Build your match below</div>
       </div>
       <!-- Sticky action row -->
-      <div id="bk-action-row" style="position:sticky;top:112px;z-index:9;background:#07070a;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:8px 10px;margin-bottom:14px;display:none;align-items:center;gap:6px;">
+      <div id="bk-action-row" style="position:sticky;top:112px;z-index:9;background:#07070a;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:8px 10px;margin-bottom:14px;display:flex;align-items:center;gap:6px;">
         <button id="bk-act-comp" onclick="bkActCompetitor()" title="Add Competitor" style="display:flex;align-items:center;gap:5px;padding:7px 12px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.35);border-radius:8px;color:rgba(200,168,75,.9);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap;" onmouseover="this.style.background='rgba(200,168,75,.2)'" onmouseout="this.style.background='rgba(200,168,75,.1)'">🤼 Competitor</button>
         <button id="bk-act-vs" onclick="bkActVs()" disabled title="Add VS" style="padding:7px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:not-allowed;transition:all .15s;white-space:nowrap;">vs</button>
         <button id="bk-act-amp" onclick="bkActAmpersand()" disabled title="Add &amp;" style="padding:7px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:not-allowed;transition:all .15s;white-space:nowrap;">&amp;</button>
@@ -5607,188 +5607,42 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
 
   let selectedChamp  = null;
   let activeSubPanel = null;
+  let currentStep    = 1; // 1 = wrestlers, 2 = stipulation, 3 = championship
 
-  if (!document.getElementById('_am_styles')) {
-    const s = document.createElement('style'); s.id='_am_styles';
-    s.textContent = `
-      @keyframes _amFadeIn{from{opacity:0}to{opacity:1}}
-      @keyframes _amSlideUp{from{transform:translateY(36px);opacity:0}to{transform:translateY(0);opacity:1}}
-      ._am-input{width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:10px 13px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.8rem;outline:none;transition:border-color .15s;}
-      ._am-input::placeholder{color:rgba(255,255,255,.22);}
-      ._am-input:focus{border-color:rgba(200,168,75,.45);}
-      ._am-tok-btn{padding:8px 16px;border-radius:24px;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;border:1px solid;transition:all .15s;white-space:nowrap;}
-      ._am-tok-btn:disabled{opacity:.2;cursor:not-allowed;}
-      ._am-roster-card{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;cursor:pointer;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02);transition:all .15s;}
-      ._am-roster-card:hover,._am-roster-card.selected{background:rgba(200,168,75,.1);border-color:rgba(200,168,75,.35);}
-    `;
-    document.head.appendChild(s);
-  }
-
+  // ── Overlay ───────────────────────────────────────────────────────────────
   const bg = document.createElement('div');
-  bg.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.82);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;padding:16px;animation:_amFadeIn .18s ease;';
+  bg.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9999;display:flex;align-items:flex-end;justify-content:center;';
+  bg.onclick = e => { if (e.target===bg) bg.remove(); };
 
   const box = document.createElement('div');
-  box.style.cssText = 'background:#13131a;border:1px solid rgba(255,255,255,.1);border-radius:20px;width:100%;max-width:520px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 32px 80px rgba(0,0,0,.95);animation:_amSlideUp .22s cubic-bezier(.32,.72,0,1);overflow:hidden;';
+  box.style.cssText = 'width:100%;max-width:600px;max-height:92vh;background:#0d0d12;border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;';
+  bg.appendChild(box);
 
   // ── Header ────────────────────────────────────────────────────────────────
   const hdr = document.createElement('div');
-  hdr.style.cssText = 'padding:16px 20px 14px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;';
-  hdr.innerHTML = `<div><span style="font-family:'Bebas Neue',sans-serif;font-size:1.15rem;letter-spacing:3px;color:#fff;">Build a Match</span><div style="font-family:'DM Sans',sans-serif;font-size:.62rem;color:rgba(255,255,255,.28);margin-top:2px;">${ev.title||'Unnamed Event'}</div></div><button id="_am_x" style="background:none;border:none;color:rgba(255,255,255,.35);font-size:1.1rem;cursor:pointer;padding:2px 6px;transition:color .15s;">✕</button>`;
+  hdr.style.cssText = 'padding:16px 20px 12px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;';
+  hdr.innerHTML = `
+    <div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:3px;color:#fff;">BUILD A MATCH</div>
+      <div style="font-family:'DM Sans',sans-serif;font-size:.65rem;color:rgba(255,255,255,.3);">${ev.title||''}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button id="_am_back" style="display:none;background:none;border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;padding:6px 12px;cursor:pointer;">← Back</button>
+      <button id="_am_x" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:1.3rem;cursor:pointer;line-height:1;padding:0 2px;">✕</button>
+    </div>`;
   box.appendChild(hdr);
 
-  // ── Scrollable body ────────────────────────────────────────────────────────
-  const body = document.createElement('div');
-  body.style.cssText = 'flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:14px;';
-
-  // Live banner preview
+  // ── Live preview banner ───────────────────────────────────────────────────
   const bannerWrap = document.createElement('div');
   bannerWrap.id = '_am_banner_wrap';
-  bannerWrap.style.cssText = 'min-height:72px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:rgba(255,255,255,.02);border:1px dashed rgba(255,255,255,.07);';
-  bannerWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.72rem;color:rgba(255,255,255,.2);text-align:center;padding:12px;">Your match card preview will appear here as you build.</div>`;
-  body.appendChild(bannerWrap);
+  bannerWrap.style.cssText = 'padding:10px 20px;border-bottom:1px solid rgba(255,255,255,.05);min-height:48px;display:flex;align-items:center;justify-content:center;flex-shrink:0;';
+  bannerWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.72rem;color:rgba(255,255,255,.2);text-align:center;font-style:italic;">Your match card preview will appear here as you build.</div>`;
+  box.appendChild(bannerWrap);
 
-  // ── Step 1: Format picker ──────────────────────────────────────────────────
-  const step1Lbl = document.createElement('div');
-  step1Lbl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.58rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.28);";
-  step1Lbl.textContent = 'Step 1 — Pick a format';
-  body.appendChild(step1Lbl);
-
-  const fmtWrap = document.createElement('div');
-  fmtWrap.style.cssText = 'display:flex;gap:8px;';
-
-  const mkFmtBtn = (label, val, flavor) => {
-    const btn = document.createElement('button');
-    btn.style.cssText = 'flex:1;padding:9px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);cursor:pointer;text-align:left;transition:all .15s;';
-    btn.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.73rem;font-weight:700;color:rgba(255,255,255,.5);margin-bottom:2px;">${label}</div><div style="font-family:'DM Sans',sans-serif;font-size:.6rem;color:rgba(255,255,255,.22);line-height:1.4;">${flavor}</div>`;
-    btn.dataset.fmt = val;
-    btn.onclick = () => {
-      if (formatLocked()) return;
-      matchFormat = val;
-      fmtWrap.querySelectorAll('button').forEach(b => {
-        const active = b.dataset.fmt === val;
-        b.style.background  = active ? 'rgba(200,168,75,.12)' : 'rgba(255,255,255,.03)';
-        b.style.borderColor = active ? 'rgba(200,168,75,.4)'  : 'rgba(255,255,255,.1)';
-        b.querySelector('div').style.color = active ? '#e8e8e8' : 'rgba(255,255,255,.5)';
-      });
-      updateAll();
-    };
-    return btn;
-  };
-
-  const fmtStd = mkFmtBtn('Standard', 'standard', 'Singles, tag team, triple threat — clear sides.');
-  const fmtFFA = mkFmtBtn('Free-For-All', 'ffa', 'Battle Royal, Rumble, Gauntlet — everyone for themselves.');
-  fmtStd.style.background  = 'rgba(200,168,75,.12)';
-  fmtStd.style.borderColor = 'rgba(200,168,75,.4)';
-  fmtStd.querySelector('div').style.color = '#e8e8e8';
-  fmtWrap.append(fmtStd, fmtFFA);
-  body.appendChild(fmtWrap);
-
-  const fmtLockHint = document.createElement('div');
-  fmtLockHint.style.cssText = "display:none;font-family:'DM Sans',sans-serif;font-size:.58rem;color:rgba(255,255,255,.18);font-style:italic;margin-top:-6px;";
-  fmtLockHint.textContent = 'Format is locked once you start adding wrestlers. Undo all to change.';
-  body.appendChild(fmtLockHint);
-
-  // ── Step 2: Token builder ──────────────────────────────────────────────────
-  const step2Lbl = document.createElement('div');
-  step2Lbl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.58rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.28);";
-  step2Lbl.textContent = 'Step 2 — Add participants';
-  body.appendChild(step2Lbl);
-
-  // Contextual hint
-  const tokenHint = document.createElement('div');
-  tokenHint.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.68rem;color:rgba(255,255,255,.35);font-style:italic;min-height:16px;transition:opacity .2s;line-height:1.5;";
-  body.appendChild(tokenHint);
-
-  // Token action buttons
-  const tokBtnRow = document.createElement('div');
-  tokBtnRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
-
-  const btnWrestler = document.createElement('button');
-  btnWrestler.className = '_am-tok-btn';
-  btnWrestler.style.cssText += 'background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.35);color:#4ade80;';
-  btnWrestler.innerHTML = '+ Add Wrestler';
-
-  const btnVs = document.createElement('button');
-  btnVs.className = '_am-tok-btn';
-  btnVs.style.cssText += 'background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.2);color:rgba(255,255,255,.65);';
-  btnVs.textContent = 'VS';
-
-  const btnAlly = document.createElement('button');
-  btnAlly.className = '_am-tok-btn';
-  btnAlly.style.cssText += 'background:rgba(200,168,75,.08);border-color:rgba(200,168,75,.25);color:rgba(200,168,75,.7);';
-  btnAlly.textContent = '& Tag Partner';
-
-  const btnUnknown = document.createElement('button');
-  btnUnknown.className = '_am-tok-btn';
-  btnUnknown.style.cssText += 'background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.12);color:rgba(255,255,255,.35);';
-  btnUnknown.textContent = 'TBA / Mystery';
-
-  const btnUndo = document.createElement('button');
-  btnUndo.className = '_am-tok-btn';
-  btnUndo.style.cssText += 'background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.08);color:rgba(255,255,255,.3);';
-  btnUndo.textContent = '↩ Undo';
-
-  tokBtnRow.append(btnWrestler, btnVs, btnAlly, btnUnknown, btnUndo);
-  body.appendChild(tokBtnRow);
-
-  // Divider
-  body.appendChild(Object.assign(document.createElement('div'),{style:'height:1px;background:rgba(255,255,255,.06);'}));
-
-  // Match type auto-detect
-  const mtWrap = document.createElement('div');
-  mtWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Match Type <span style="color:rgba(200,168,75,.4);font-weight:400;text-transform:none;font-size:.58rem;letter-spacing:.5px;">(auto-detected from wrestlers added)</span></div><div id="_am_matchtype_badge" style="display:flex;align-items:center;gap:8px;padding:9px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:9px;min-height:38px;width:100%;box-sizing:border-box;"><span id="_am_matchtype_label" style="font-family:'DM Sans',sans-serif;font-size:.8rem;color:rgba(255,255,255,.22);font-style:italic;">Add wrestlers above to detect…</span></div>`;
-  body.appendChild(mtWrap);
-
-  // Stipulation
-  const stipWrap = document.createElement('div');
-  stipWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Stipulation <span style="color:rgba(255,255,255,.18);font-weight:400;text-transform:none;">(optional)</span></div><input class="_am-input" id="_am_stip" placeholder="e.g. No Disqualification, Last Man Standing, Loser Leaves Town…">`;
-  body.appendChild(stipWrap);
-
-  // Championship picker
-  const activeVault = typeof _vault!=='undefined' ? _vault.getActiveItems() : [];
-  const champWrap = document.createElement('div');
-  champWrap.id = '_am_champ_wrap';
-  if (activeVault.length) {
-    const champLbl = document.createElement('div');
-    champLbl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:8px;";
-    champLbl.textContent = 'Championship on the Line';
-    champWrap.appendChild(champLbl);
-    const champPills = document.createElement('div');
-    champPills.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
-    const noneBtn = document.createElement('button');
-    noneBtn.textContent = 'None';
-    noneBtn.style.cssText = "padding:6px 14px;border-radius:20px;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;border:1px solid rgba(200,168,75,.4);background:rgba(200,168,75,.15);color:#c8a84b;transition:all .15s;";
-    noneBtn.onclick = () => { selectedChamp=null; updateChampPills(); updateBanner(); };
-    champPills.appendChild(noneBtn);
-    activeVault.forEach(belt => {
-      const b = document.createElement('button');
-      b.style.cssText = "padding:6px 14px;border-radius:20px;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:rgba(255,255,255,.45);transition:all .15s;display:flex;align-items:center;gap:5px;";
-      b.innerHTML = belt.image_url ? `<img src="${belt.image_url}" style="height:16px;max-width:24px;object-fit:contain;">${belt.name}` : `🏆 ${belt.name}`;
-      b.onclick = () => { selectedChamp={beltId:belt.id,beltName:belt.name,beltImageUrl:belt.image_url||null}; updateChampPills(); updateBanner(); };
-      champPills.appendChild(b);
-    });
-    function updateChampPills() {
-      champPills.querySelectorAll('button').forEach((b,i) => {
-        const active = i===0 ? !selectedChamp : (selectedChamp?.beltId===activeVault[i-1]?.id);
-        b.style.background  = active ? 'rgba(200,168,75,.15)' : 'rgba(255,255,255,.04)';
-        b.style.borderColor = active ? 'rgba(200,168,75,.4)'  : 'rgba(255,255,255,.12)';
-        b.style.color       = active ? '#c8a84b' : 'rgba(255,255,255,.45)';
-      });
-    }
-    champWrap.appendChild(champPills);
-  }
-  body.appendChild(champWrap);
-
-  // Notable Promo
-  const promoWrap = document.createElement('div');
-  promoWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Notable Promo <span style="color:rgba(255,255,255,.18);font-weight:400;text-transform:none;">(YouTube link, optional)</span></div><input class="_am-input" id="_am_promo" placeholder="https://youtube.com/…">`;
-  body.appendChild(promoWrap);
-
-  // ── Roster picker sub-panel ────────────────────────────────────────────────
-  const subPanel = document.createElement('div');
-  subPanel.id = '_am_subpanel';
-  subPanel.style.cssText = 'display:none;background:#0d0d12;border:1px solid rgba(255,255,255,.08);border-radius:14px;overflow:hidden;flex-shrink:0;max-height:360px;flex-direction:column;';
-  box.appendChild(subPanel);
+  // ── Step container ────────────────────────────────────────────────────────
+  const stepWrap = document.createElement('div');
+  stepWrap.style.cssText = 'flex:1;overflow-y:auto;display:flex;flex-direction:column;';
+  box.appendChild(stepWrap);
 
   // ── Footer ────────────────────────────────────────────────────────────────
   const ftr = document.createElement('div');
@@ -5797,249 +5651,348 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
   cancelBtn.textContent = 'Cancel';
   cancelBtn.style.cssText = "flex:1;padding:12px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:11px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.82rem;cursor:pointer;";
   cancelBtn.onclick = () => bg.remove();
-
-  const saveBtn = document.createElement('button');
-  saveBtn.textContent = 'Save Match';
-  saveBtn.disabled = true;
-  saveBtn.style.cssText = "flex:2;padding:12px 0;background:rgba(200,168,75,.9);border:none;border-radius:11px;color:#111;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;transition:opacity .15s;opacity:.25;";
-
-  ftr.append(cancelBtn, saveBtn);
-  box.appendChild(body);
+  const nextBtn = document.createElement('button');
+  nextBtn.id = '_am_next';
+  nextBtn.textContent = 'Next →';
+  nextBtn.disabled = true;
+  nextBtn.style.cssText = "flex:2;padding:12px 0;background:rgba(200,168,75,.9);border:none;border-radius:11px;color:#111;font-family:'DM Sans',sans-serif;font-size:.82rem;font-weight:700;cursor:pointer;transition:opacity .15s;opacity:.25;";
+  ftr.append(cancelBtn, nextBtn);
   box.appendChild(ftr);
-  bg.appendChild(box);
+
   document.body.appendChild(bg);
   hdr.querySelector('#_am_x').onclick = () => bg.remove();
 
-  // ── Roster picker ─────────────────────────────────────────────────────────
-  let _selectedRosterUser = null;
+  // ── Step navigation ───────────────────────────────────────────────────────
+  function goStep(n) {
+    currentStep = n;
+    stepWrap.innerHTML = '';
+    const backBtn = hdr.querySelector('#_am_back');
+    backBtn.style.display = n > 1 ? 'block' : 'none';
+    if (n === 1) renderStep1();
+    else if (n === 2) renderStep2();
+    else if (n === 3) renderStep3();
+  }
 
-  function openRosterPicker() {
-    activeSubPanel = 'roster';
-    subPanel.style.display = 'flex';
-    subPanel.innerHTML = '';
+  hdr.querySelector('#_am_back').onclick = () => goStep(currentStep - 1);
 
-    const ph = document.createElement('div');
-    ph.style.cssText = 'padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;';
-    ph.innerHTML = `<span style="font-family:'Bebas Neue',sans-serif;font-size:.9rem;letter-spacing:2px;color:#fff;">Select Wrestler</span><input id="_am_search" placeholder="Search…" style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:5px 10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.73rem;outline:none;width:140px;">`;
-    subPanel.appendChild(ph);
+  // ── UPDATE banner ─────────────────────────────────────────────────────────
+  function updateBanner() {
+    if (!tokens.length) {
+      bannerWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.72rem;color:rgba(255,255,255,.2);text-align:center;font-style:italic;">Your match card preview will appear here as you build.</div>`;
+      return;
+    }
+    const parts = tokens.map(t => {
+      if (t.type==='vs')      return `<span style="font-size:.55rem;font-weight:800;color:rgba(255,255,255,.3);letter-spacing:2px;font-family:'DM Sans',sans-serif;">VS</span>`;
+      if (t.type==='ally')    return `<span style="font-size:.55rem;font-weight:800;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;">&amp;</span>`;
+      const init = (t.name||'?').split(/\s+/).map(w=>w[0]?.toUpperCase()||'').slice(0,2).join('');
+      const av = t.avatar_url
+        ? `<img src="${t.avatar_url}" style="width:22px;height:22px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(200,168,75,.3);">`
+        : `<div style="width:22px;height:22px;border-radius:50%;background:rgba(192,0,14,.1);border:1.5px solid rgba(192,0,14,.25);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.55rem;color:#c0000e;">${init}</div>`;
+      return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px 3px 4px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:20px;font-size:.65rem;color:#e0e0e0;font-family:'DM Sans',sans-serif;font-weight:600;">${av}${(t.name||'???').length>13?(t.name||'???').slice(0,12)+'…':(t.name||'???')}</span>`;
+    });
+    bannerWrap.innerHTML = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;">${parts.join('')}</div>`;
+  }
+
+  // ── STEP 1: Select Wrestlers ──────────────────────────────────────────────
+  async function renderStep1() {
+    nextBtn.textContent = 'Next →';
+    nextBtn.onclick = () => goStep(2);
+
+    // Format row
+    const fmtRow = document.createElement('div');
+    fmtRow.style.cssText = 'display:flex;gap:8px;padding:14px 20px 0;flex-shrink:0;';
+    const mkFmtBtn = (label, val, flavor) => {
+      const btn = document.createElement('button');
+      btn.style.cssText = 'flex:1;padding:9px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);cursor:pointer;text-align:left;transition:all .15s;';
+      btn.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.73rem;font-weight:700;color:rgba(255,255,255,.5);margin-bottom:2px;">${label}</div><div style="font-family:'DM Sans',sans-serif;font-size:.6rem;color:rgba(255,255,255,.22);line-height:1.4;">${flavor}</div>`;
+      btn.dataset.fmt = val;
+      btn.onclick = () => {
+        if (formatLocked()) return;
+        matchFormat = val;
+        fmtRow.querySelectorAll('button').forEach(b => {
+          const active = b.dataset.fmt === val;
+          b.style.background  = active ? 'rgba(200,168,75,.12)' : 'rgba(255,255,255,.03)';
+          b.style.borderColor = active ? 'rgba(200,168,75,.4)'  : 'rgba(255,255,255,.1)';
+          b.querySelector('div').style.color = active ? '#e8e8e8' : 'rgba(255,255,255,.5)';
+        });
+      };
+      return btn;
+    };
+    const fmtStd = mkFmtBtn('Standard','standard','Singles, tag team, triple threat — clear sides.');
+    const fmtFFA = mkFmtBtn('Free-For-All','ffa','Battle Royal, Rumble, Gauntlet — everyone for themselves.');
+    fmtStd.style.background='rgba(200,168,75,.12)'; fmtStd.style.borderColor='rgba(200,168,75,.4)'; fmtStd.querySelector('div').style.color='#e8e8e8';
+    fmtRow.append(fmtStd, fmtFFA);
+    stepWrap.appendChild(fmtRow);
+
+    // Action buttons
+    const tokBtnRow = document.createElement('div');
+    tokBtnRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;padding:12px 20px 0;flex-shrink:0;';
+    const mkTokBtn = (label, style) => {
+      const b = document.createElement('button');
+      b.className = '_am-tok-btn';
+      b.style.cssText += style;
+      b.innerHTML = label;
+      return b;
+    };
+    const btnWrestler = mkTokBtn('+ Add Wrestler','background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.35);color:#4ade80;');
+    const btnVs       = mkTokBtn('VS','background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.2);color:rgba(255,255,255,.65);');
+    const btnAlly     = mkTokBtn('&amp; Tag Partner','background:rgba(200,168,75,.08);border-color:rgba(200,168,75,.25);color:rgba(200,168,75,.7);');
+    const btnUnknown  = mkTokBtn('TBA / Mystery','background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.12);color:rgba(255,255,255,.35);');
+    const btnUndo     = mkTokBtn('↩ Undo','background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.08);color:rgba(255,255,255,.3);');
+    tokBtnRow.append(btnWrestler, btnVs, btnAlly, btnUnknown, btnUndo);
+    stepWrap.appendChild(tokBtnRow);
+
+    // Token hint
+    const tokenHint = document.createElement('div');
+    tokenHint.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.68rem;color:rgba(255,255,255,.35);font-style:italic;padding:6px 20px 0;min-height:20px;";
+    stepWrap.appendChild(tokenHint);
+
+    // Roster picker (always visible)
+    const pickerHeader = document.createElement('div');
+    pickerHeader.style.cssText = 'padding:10px 20px 6px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;';
+    pickerHeader.innerHTML = `<span style="font-family:'Bebas Neue',sans-serif;font-size:.9rem;letter-spacing:2px;color:#fff;">SELECT WRESTLER</span><input id="_am_search" placeholder="Search..." style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:5px 10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.73rem;outline:none;width:140px;">`;
+    stepWrap.appendChild(pickerHeader);
 
     const listWrap = document.createElement('div');
-    listWrap.style.cssText = 'flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:6px;';
+    listWrap.style.cssText = 'flex:1;overflow-y:auto;padding:6px 20px 14px;display:flex;flex-direction:column;gap:6px;';
+    stepWrap.appendChild(listWrap);
 
-    // Build list from _mgmtRosterData (everyone in roster tab, including non-hub)
+    // Load roster
+    if (typeof mgmtRosterLoad === 'function' && (!_mgmtRosterData || !_mgmtRosterData.length)) {
+      await mgmtRosterLoad();
+    }
     const rosterList = (_mgmtRosterData||[]).map(r => {
       const meta = (typeof _mgmtGetMgmt==='function') ? _mgmtGetMgmt(r.id) : {};
-      return {
-        username: meta.efed_username || r.id,
-        display_name: r.name,
-        avatar_url: meta.avatar_url || null
-      };
+      return { username: meta.efed_username||r.id, display_name: r.name ? r.name.replace(/ 👻$/,'') : r.id, avatar_url: meta.avatar_url||null, isGhost: !!(r.name&&r.name.endsWith(' 👻')) };
     }).filter(r => r.display_name);
+
+    let _selectedRosterUser = null;
 
     function renderList(query) {
       listWrap.innerHTML = '';
       const q = (query||'').toLowerCase();
-
       const filtered = rosterList.filter(m => !q || (m.display_name||'').toLowerCase().includes(q));
-
-      if (!filtered.length && !q) {
+      if (!filtered.length) {
         const empty = document.createElement('div');
         empty.style.cssText = "font-size:.75rem;color:rgba(255,255,255,.25);font-family:'DM Sans',sans-serif;padding:12px 4px;text-align:center;";
-        empty.textContent = 'No wrestlers in the roster yet.';
-        listWrap.appendChild(empty);
-      } else if (!filtered.length) {
-        const empty = document.createElement('div');
-        empty.style.cssText = "font-size:.75rem;color:rgba(255,255,255,.25);font-family:'DM Sans',sans-serif;padding:8px 4px;";
-        empty.textContent = 'No match for "' + query + '"';
+        empty.textContent = q ? `No match for "${query}"` : 'No wrestlers in the roster yet.';
         listWrap.appendChild(empty);
       } else {
         filtered.forEach(m => {
           const card = document.createElement('div');
-          card.className = '_am-roster-card' + (_selectedRosterUser?.username===m.username ? ' selected' : '');
+          const isSelected = _selectedRosterUser?.username === m.username;
+          card.style.cssText = `display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;cursor:pointer;background:${isSelected?'rgba(34,197,94,.1)':'rgba(255,255,255,.02)'};border:1px solid ${isSelected?'rgba(34,197,94,.4)':'rgba(255,255,255,.06)'};transition:all .15s;`;
           const av = m.avatar_url
             ? `<img src="${m.avatar_url}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(255,255,255,.15);flex-shrink:0;">`
             : `<div style="width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:.85rem;color:rgba(255,255,255,.5);flex-shrink:0;">${(m.display_name||'?')[0].toUpperCase()}</div>`;
           card.innerHTML = `${av}<span style="font-family:'DM Sans',sans-serif;font-size:.8rem;color:#e8e8e8;">${m.display_name}</span>`;
-          card.onclick = () => { _selectedRosterUser = m; renderList(ph.querySelector('#_am_search').value); };
+          card.onclick = () => { _selectedRosterUser = m; renderList(pickerHeader.querySelector('#_am_search').value); };
           listWrap.appendChild(card);
         });
       }
-
-      // Not-on-list hint
       const hint = document.createElement('div');
-      hint.style.cssText = "margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);font-size:.65rem;color:rgba(255,255,255,.25);font-family:'DM Sans',sans-serif;line-height:1.5;";
-      hint.textContent = "Wrestler not on this list? Go to the Roster tab and add them first, then come back here.";
+      hint.style.cssText = "margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);font-size:.65rem;color:rgba(255,255,255,.25);font-family:'DM Sans',sans-serif;";
+      hint.textContent = 'Wrestler not on this list? Go to the Roster tab and add them first, then come back here.';
       listWrap.appendChild(hint);
     }
 
     renderList('');
-    ph.querySelector('#_am_search').addEventListener('input', e => renderList(e.target.value));
-    subPanel.appendChild(listWrap);
+    pickerHeader.querySelector('#_am_search').oninput = e => renderList(e.target.value);
 
-    const pf = document.createElement('div');
-    pf.style.cssText = 'padding:10px 14px;border-top:1px solid rgba(255,255,255,.07);flex-shrink:0;';
-    const selBtn = document.createElement('button');
-    selBtn.textContent = 'Select';
-    selBtn.style.cssText = "width:100%;padding:10px 0;background:rgba(200,168,75,.9);border:none;border-radius:10px;color:#111;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;transition:opacity .15s;";
-    selBtn.onclick = () => {
-      if (!_selectedRosterUser) return;
-      const m = _selectedRosterUser;
-      tokens.push({ type:'wrestler', username:m.username, display_name:m.display_name, avatar_url:m.avatar_url||null });
+    // Select button
+    const selectBtn = document.createElement('button');
+    selectBtn.textContent = 'Select';
+    selectBtn.style.cssText = "margin:0 20px 14px;padding:13px;background:rgba(200,168,75,.9);border:none;border-radius:11px;color:#111;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer;opacity:.25;flex-shrink:0;";
+    selectBtn.disabled = true;
+    stepWrap.appendChild(selectBtn);
+
+    function syncButtons() {
+      // Format lock hint
+      const locked = formatLocked();
+      fmtStd.style.opacity = locked && matchFormat!=='standard' ? '.4' : '1';
+      fmtFFA.style.opacity  = locked && matchFormat!=='ffa'      ? '.4' : '1';
+
+      btnVs.disabled      = !canAddVs();
+      btnAlly.disabled    = !canAddAlly();
+      btnUndo.disabled    = !tokens.length;
+      btnWrestler.disabled = !canAddWrestler();
+
+      [btnVs,btnAlly,btnUndo,btnWrestler].forEach(b => { b.style.opacity = b.disabled?'.3':'1'; b.style.cursor=b.disabled?'not-allowed':'pointer'; });
+
+      tokenHint.textContent = tokens.length===0
+        ? 'Start by clicking "+ Add Wrestler" to pick the first participant.'
+        : canAddWrestler() ? 'Add another wrestler, or tap VS / & to connect.' : 'Add VS or & to continue.';
+
+      // Select button
+      selectBtn.disabled = !_selectedRosterUser || !canAddWrestler();
+      selectBtn.style.opacity = selectBtn.disabled ? '.25' : '1';
+
+      // Next button
+      nextBtn.disabled = !canSave();
+      nextBtn.style.opacity = nextBtn.disabled ? '.25' : '1';
+
+      updateBanner();
+    }
+
+    btnWrestler.onclick = () => {
+      if (!_selectedRosterUser) { selectBtn.scrollIntoView({behavior:'smooth',block:'center'}); return; }
+      tokens.push({ type:'wrestler', username:_selectedRosterUser.username, name:_selectedRosterUser.display_name, avatar_url:_selectedRosterUser.avatar_url });
       _selectedRosterUser = null;
-      closeSubPanel();
-      updateAll();
+      renderList(pickerHeader.querySelector('#_am_search').value);
+      syncButtons();
     };
-    pf.appendChild(selBtn);
-    subPanel.appendChild(pf);
-  }
-
-  function closeSubPanel() {
-    activeSubPanel = null;
-    subPanel.style.display = 'none';
-    subPanel.innerHTML = '';
-  }
-
-  // ── Token button logic ────────────────────────────────────────────────────
-  btnWrestler.onclick = () => {
-    if (!canAddWrestler()) return;
-    if (activeSubPanel==='roster') { closeSubPanel(); return; }
-    _selectedRosterUser = null;
-    openRosterPicker();
-  };
-  btnVs.onclick = () => {
-    if (!canAddVs()) return;
-    tokens.push({ type:'vs' });
-    closeSubPanel();
-    updateAll();
-  };
-  btnAlly.onclick = () => {
-    if (!canAddAlly()) return;
-    tokens.push({ type:'ally' });
-    closeSubPanel();
-    updateAll();
-  };
-  btnUnknown.onclick = () => {
-    if (!canAddUnknown()) return;
-    tokens.push({ type:'unknown' });
-    closeSubPanel();
-    updateAll();
-  };
-  btnUndo.onclick = () => {
-    if (!tokens.length) return;
-    tokens.pop();
-    closeSubPanel();
-    updateAll();
-  };
-
-  // ── Update banner + button states ─────────────────────────────────────────
-  function updateBanner() {
-    if (!tokens.length) {
-      bannerWrap.style.cssText = 'min-height:72px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:rgba(255,255,255,.02);border:1px dashed rgba(255,255,255,.07);';
-      bannerWrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.72rem;color:rgba(255,255,255,.2);text-align:center;padding:12px;">Your match card preview will appear here as you build.</div>`;
-      return;
-    }
-    bannerWrap.style.cssText = 'min-height:80px;display:flex;align-items:center;justify-content:center;';
-    const acronym  = document.getElementById('stat-acronym')?.textContent?.trim()||'';
-    const matchType = _detectMatchType(tokens, matchFormat);
-    const _mtLabel  = document.getElementById('_am_matchtype_label');
-    if (_mtLabel) {
-      if (matchType) { _mtLabel.textContent=matchType; _mtLabel.style.color='#c8a84b'; _mtLabel.style.fontStyle='normal'; _mtLabel.style.fontWeight='700'; }
-      else { _mtLabel.textContent='Add wrestlers to detect…'; _mtLabel.style.color='rgba(255,255,255,.22)'; _mtLabel.style.fontStyle='italic'; _mtLabel.style.fontWeight='400'; }
-    }
-    const stip = document.getElementById('_am_stip')?.value?.trim()||'';
-    const fakeMatch = { tokens, matchType, stipulation:stip, champ:selectedChamp, eventTitle:ev.title||'' };
-    const avatarMap = {};
-    (_mgmtRosterData||[]).forEach(r => { const meta=(typeof _mgmtGetMgmt==='function')?_mgmtGetMgmt(r.id):{}; if(meta.avatar_url) avatarMap[meta.efed_username||r.id]=meta.avatar_url; });
-    const existing = bannerWrap.querySelector('div[data-mc-banner]');
-    if (existing) existing.remove();
-    const banner = _buildMatchBanner(fakeMatch, avatarMap, acronym, false);
-    banner.dataset.mcBanner = '1';
-    banner.style.width = '100%';
-    bannerWrap.innerHTML = '';
-    bannerWrap.appendChild(banner);
-  }
-
-  function updateButtons() {
-    const lt = lastType();
-    const locked = formatLocked();
-
-    // Format lock
-    fmtLockHint.style.display = locked ? 'block' : 'none';
-    fmtWrap.style.opacity = locked ? '.4' : '1';
-    fmtWrap.style.pointerEvents = locked ? 'none' : '';
-
-    // Add Wrestler — always visible, enabled when valid
-    btnWrestler.disabled = !canAddWrestler();
-    btnWrestler.style.opacity = canAddWrestler() ? '1' : '.25';
-
-    // VS — only show after first wrestler placed, hide in FFA
-    btnVs.style.display = (!isFFA() && tokens.length > 0) ? '' : 'none';
-    btnVs.disabled = !canAddVs();
-
-    // Tag Partner — only show when last token is a wrestler, hide in FFA
-    btnAlly.style.display = (!isFFA() && (lt==='wrestler'||lt==='unknown')) ? '' : 'none';
-    btnAlly.disabled = !canAddAlly();
-
-    // TBA/Mystery — hide until needed
-    btnUnknown.style.display = canAddUnknown() ? '' : 'none';
-    btnUnknown.disabled = !canAddUnknown();
-
-    // Undo — only show when there's something to undo
-    btnUndo.style.display = tokens.length ? '' : 'none';
-    btnUndo.disabled = !tokens.length;
-
-    // Contextual hint
-    if (!tokens.length) {
-      tokenHint.textContent = isFFA()
-        ? 'Add all participants one by one. Save when done.'
-        : 'Start by clicking "+ Add Wrestler" to pick the first participant.';
-    } else if (isFFA()) {
-      tokenHint.textContent = `${tokens.length} wrestler${tokens.length===1?'':' added'} — keep adding, or save when ready.`;
-    } else if (lt==='vs') {
-      tokenHint.textContent = "Now add the opponent on the other side.";
-    } else if (lt==='ally') {
-      tokenHint.textContent = 'Add the next wrestler on this side.';
-    } else if (lt==='wrestler'||lt==='unknown') {
-      tokenHint.textContent = !hasVs()
-        ? 'Hit VS to add an opponent. Use "& Tag Partner" for a tag match. Or save now as a Promo.'
-        : 'Add more wrestlers, or save when the match is complete.';
-    }
-
-    // Save button
-    const ok = canSave();
-    saveBtn.disabled = !ok;
-    saveBtn.style.opacity = ok ? '1' : '.25';
-    saveBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
-  }
-
-  function updateAll() { updateBanner(); updateButtons(); }
-  updateAll();
-
-  document.getElementById('_am_stip')?.addEventListener('input', updateBanner);
-
-  // ── Save ──────────────────────────────────────────────────────────────────
-  saveBtn.onclick = async () => {
-    if (!canSave()) return;
-    saveBtn.textContent = 'Saving…'; saveBtn.disabled = true;
-    const matchObj = {
-      uid: 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2,5),
-      tokens,
-      matchFormat,
-      matchType: _detectMatchType(tokens, matchFormat),
-      stipulation: document.getElementById('_am_stip')?.value?.trim()||'',
-      champ: selectedChamp,
-      promoUrl: document.getElementById('_am_promo')?.value?.trim()||'',
-      eventTitle: ev.title||''
+    selectBtn.onclick = () => {
+      if (!_selectedRosterUser || !canAddWrestler()) return;
+      tokens.push({ type:'wrestler', username:_selectedRosterUser.username, name:_selectedRosterUser.display_name, avatar_url:_selectedRosterUser.avatar_url });
+      _selectedRosterUser = null;
+      renderList(pickerHeader.querySelector('#_am_search').value);
+      syncButtons();
     };
-    await _saveMatch(matchObj, ev, isExtraCard, extraIndex);
-    bg.remove();
-    document.querySelectorAll('[data-match-panel]').forEach(p => {
-      if (p.style.display !== 'none' && p.dataset.matchPanel === (ev.title||'')) {
-        _renderMatchesInPanel(p, ev, isOwnerOrAdmin, isExtraCard, extraIndex);
+    btnVs.onclick      = () => { if (!canAddVs()) return; tokens.push({type:'vs'}); syncButtons(); };
+    btnAlly.onclick    = () => { if (!canAddAlly()) return; tokens.push({type:'ally'}); syncButtons(); };
+    btnUnknown.onclick = () => { if (!canAddUnknown()) return; tokens.push({type:'unknown',name:'???'}); syncButtons(); };
+    btnUndo.onclick    = () => { tokens.pop(); syncButtons(); };
+
+    syncButtons();
+  }
+
+  // ── STEP 2: Stipulation ───────────────────────────────────────────────────
+  function renderStep2() {
+    nextBtn.textContent = 'Next →';
+    nextBtn.disabled = false;
+    nextBtn.style.opacity = '1';
+    nextBtn.onclick = () => goStep(3);
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'padding:20px;display:flex;flex-direction:column;gap:18px;';
+
+    // Match type (auto-detected)
+    const mtType = tokens.filter(t=>t.type==='wrestler'||t.type==='unknown').length;
+    const hasTag  = tokens.some(t=>t.type==='ally');
+    let detected  = '';
+    if (isFFA()) detected = mtType>=2 ? `${mtType}-Man Battle Royal` : 'Battle Royal';
+    else if (hasTag) detected = 'Tag Team Match';
+    else if (mtType===1) detected = 'Singles Match';
+    else if (mtType===2) detected = 'Singles Match';
+    else if (mtType===3) detected = 'Triple Threat Match';
+    else if (mtType===4) detected = 'Fatal Four-Way Match';
+    else if (mtType>4) detected = `${mtType}-Man Match`;
+
+    wrap.innerHTML = `
+      <div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Match Type <span style="color:rgba(200,168,75,.4);font-weight:400;text-transform:none;font-size:.58rem;">(auto-detected)</span></div>
+        <div style="padding:10px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.1);border-radius:9px;font-family:'DM Sans',sans-serif;font-size:.82rem;color:${detected?'#e8e8e8':'rgba(255,255,255,.25)'};">${detected||'—'}</div>
+      </div>
+      <div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Stipulation <span style="color:rgba(255,255,255,.18);font-weight:400;text-transform:none;">(optional)</span></div>
+        <input class="_am-input" id="_am_stip" placeholder="e.g. No Disqualification, Last Man Standing, Loser Leaves Town…" value="${window._am_stip_val||''}">
+      </div>
+      <div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Notable Promo <span style="color:rgba(255,255,255,.18);font-weight:400;text-transform:none;">(YouTube link, optional)</span></div>
+        <input class="_am-input" id="_am_promo" placeholder="https://youtube.com/…" value="${window._am_promo_val||''}">
+      </div>`;
+
+    stepWrap.appendChild(wrap);
+
+    // Save inputs across step navigation
+    wrap.querySelector('#_am_stip').oninput  = e => { window._am_stip_val  = e.target.value; };
+    wrap.querySelector('#_am_promo').oninput = e => { window._am_promo_val = e.target.value; };
+  }
+
+  // ── STEP 3: Championship ──────────────────────────────────────────────────
+  function renderStep3() {
+    nextBtn.textContent = 'Save Match';
+    nextBtn.disabled = false;
+    nextBtn.style.opacity = '1';
+    nextBtn.onclick = async () => {
+      nextBtn.disabled = true;
+      nextBtn.textContent = 'Saving…';
+      try {
+        const stip  = window._am_stip_val||'';
+        const promo = window._am_promo_val||'';
+        const mtType = tokens.filter(t=>t.type==='wrestler'||t.type==='unknown').length;
+        const hasTag  = tokens.some(t=>t.type==='ally');
+        let matchType = '';
+        if (isFFA()) matchType = mtType>=2 ? `${mtType}-Man Battle Royal` : 'Battle Royal';
+        else if (hasTag) matchType = 'Tag Team Match';
+        else if (mtType===3) matchType = 'Triple Threat Match';
+        else if (mtType===4) matchType = 'Fatal Four-Way Match';
+        else if (mtType>4) matchType = `${mtType}-Man Match`;
+        else matchType = 'Singles Match';
+        const matchObj = {
+          uid: 'mc_' + Date.now(),
+          tokens,
+          matchFormat,
+          matchType: stip ? `${matchType} — ${stip}` : matchType,
+          champ: selectedChamp,
+          promoUrl: promo,
+          eventTitle: ev.title||''
+        };
+        await _saveMatch(matchObj, ev, isExtraCard, extraIndex);
+        window._am_stip_val = ''; window._am_promo_val = '';
+        bg.remove();
+        document.querySelectorAll('[data-match-panel]').forEach(p => {
+          if (p.style.display !== 'none' && p.dataset.matchPanel === (ev.title||'')) {
+            _renderMatchesInPanel(p, ev, isOwnerOrAdmin, isExtraCard, extraIndex);
+          }
+        });
+      } catch(e) {
+        nextBtn.disabled = false; nextBtn.textContent = 'Save Match';
       }
-    });
-  };
+    };
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'padding:20px;display:flex;flex-direction:column;gap:14px;';
+
+    const activeVault = typeof _vault!=='undefined' ? _vault.getActiveItems() : [];
+    if (!activeVault.length) {
+      wrap.innerHTML = `<div style="font-family:'DM Sans',sans-serif;font-size:.75rem;color:rgba(255,255,255,.3);text-align:center;padding:24px 0;">No championships found. Create one in the Championship Vault section first.</div>`;
+    } else {
+      const lbl = document.createElement('div');
+      lbl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:8px;";
+      lbl.textContent = 'Championship on the Line';
+      wrap.appendChild(lbl);
+
+      const pills = document.createElement('div');
+      pills.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;';
+
+      const noneBtn = document.createElement('button');
+      noneBtn.textContent = 'None';
+      noneBtn.style.cssText = "padding:6px 14px;border-radius:20px;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;border:1px solid rgba(200,168,75,.4);background:rgba(200,168,75,.15);color:#c8a84b;transition:all .15s;";
+      noneBtn.onclick = () => { selectedChamp=null; syncPills(); };
+      pills.appendChild(noneBtn);
+
+      activeVault.forEach(belt => {
+        const b = document.createElement('button');
+        b.style.cssText = "padding:6px 14px;border-radius:20px;font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:rgba(255,255,255,.45);transition:all .15s;display:flex;align-items:center;gap:5px;";
+        b.innerHTML = belt.image_url ? `<img src="${belt.image_url}" style="height:16px;max-width:24px;object-fit:contain;">${belt.name}` : `🏆 ${belt.name}`;
+        b.onclick = () => { selectedChamp={beltId:belt.id,beltName:belt.name,beltImageUrl:belt.image_url||null}; syncPills(); };
+        pills.appendChild(b);
+      });
+
+      function syncPills() {
+        pills.querySelectorAll('button').forEach((b,i) => {
+          const active = i===0 ? !selectedChamp : (selectedChamp?.beltId===activeVault[i-1]?.id);
+          b.style.background  = active ? 'rgba(200,168,75,.15)' : 'rgba(255,255,255,.04)';
+          b.style.borderColor = active ? 'rgba(200,168,75,.4)'  : 'rgba(255,255,255,.12)';
+          b.style.color       = active ? '#c8a84b' : 'rgba(255,255,255,.45)';
+        });
+        pills.querySelectorAll('button')[0].style.background  = !selectedChamp ? 'rgba(200,168,75,.15)' : 'rgba(255,255,255,.04)';
+        pills.querySelectorAll('button')[0].style.borderColor = !selectedChamp ? 'rgba(200,168,75,.4)'  : 'rgba(255,255,255,.12)';
+        pills.querySelectorAll('button')[0].style.color       = !selectedChamp ? '#c8a84b' : 'rgba(255,255,255,.45)';
+      }
+
+      wrap.appendChild(pills);
+    }
+
+    stepWrap.appendChild(wrap);
+  }
+
+  // ── Start ─────────────────────────────────────────────────────────────────
+  window._am_stip_val = ''; window._am_promo_val = '';
+  goStep(1);
 }
+
 
 function renderEvent(ev, extraEvents) {
   const sec = document.getElementById('upcoming-event-section');
@@ -8911,10 +8864,6 @@ function bkStartNewMatch() {
   const se = document.getElementById('bk-save-err'); if (se) se.textContent = '';
   bkSyncChampToggle();
   bkGoStep(2);
-  // Auto-open roster picker so user immediately sees wrestlers to pick
-  _bkTab.pickerOpen = true;
-  const picker = document.getElementById('bk-roster-picker');
-  if (picker) picker.style.display = 'block';
   bkLoadRoster();
 }
 
@@ -9358,29 +9307,9 @@ async function bkUpdateShow() {
 async function bkLoadRoster() {
   const grid = document.getElementById('bk-comp-grid');
   if (!grid) return;
-  // Reuse mgmt roster cache if already loaded
-  if (typeof _mgmtRosterData !== 'undefined' && _mgmtRosterData.length > 0) {
-    _bkTab.rosterCache = [];
-    _bkTab.bookedUsernames = new Set();
-    _mgmtRosterData.forEach(function(r) {
-      var meta = (typeof _mgmtGetMgmt === 'function') ? _mgmtGetMgmt(r.id) : {};
-      if (!meta.efed_username) return;
-      _bkTab.rosterCache.push({
-        username:     meta.efed_username,
-        display_name: r.name ? r.name.replace(/ \u{1F47B}$/u, '') : meta.efed_username,
-        avatar_url:   meta.avatar_url || null,
-        rosterRowId:  null,
-        planNote:     null,
-        isGhost:      !!(r.name && r.name.endsWith(' \u{1F47B}'))
-      });
-    });
-    bkInjectGhostsIntoRosterCache();
-    bkRenderCompGrid();
-    return;
-  }
   grid.innerHTML = '<div style="grid-column:1/-1;font-size:.72rem;color:rgba(255,255,255,.2);padding:16px 0;text-align:center;font-family:"DM Sans",sans-serif;">Loading roster…</div>';
   try {
-    const rosterRows = await sbGet('roster', `efed=ilike.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id,username,plan_note`);
+    const rosterRows = await sbGet('roster', `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&select=id,username,plan_note`);
     const nonGhost = rosterRows.filter(r => !r.username.startsWith('__ghost__'));
     const ghosts   = rosterRows.filter(r => r.username.startsWith('__ghost__'));
     let uMap = {};
@@ -9850,10 +9779,6 @@ function bkSyncPreview() {
   if (!bar) return;
 
   const wrestlers = _bkTab.slots.filter(s=>s.type==='wrestler');
-
-  // Show/hide action row based on whether wrestlers have been picked
-  const actionRow = document.getElementById('bk-action-row');
-  if (actionRow) actionRow.style.display = wrestlers.length > 0 ? 'flex' : 'none';
 
   if (!_bkTab.show && !wrestlers.length) {
     bar.innerHTML = '<span id="bk-preview-empty" style="font-size:.63rem;color:rgba(255,255,255,.18);font-family:"DM Sans",sans-serif;font-style:italic;">Select a show to begin</span>';
