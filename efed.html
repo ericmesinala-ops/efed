@@ -19887,12 +19887,8 @@ async function _syncMgmtToRosterTable() {
         } catch(e) { console.warn('[syncRoster] insert failed for', newUser, e); }
       }
     }
-    // Remove real members who were deleted from mgmt roster
-    for (var exUser in existingMap) {
-      if (!hubUsernames.has(exUser)) {
-        try { await fetch(SUPABASE_URL+'/rest/v1/roster?id=eq.'+existingMap[exUser], { method:'DELETE', headers:SB_HEADERS }); } catch(e) {}
-      }
-    }
+    // NOTE: Removal from roster table is handled by the mgmt card × button and the
+    // existing removeFromRoster() flow — not here — to avoid clobbering self-joined members.
     // Refresh booking members list
     await _populateRosterMembers();
   } catch(e) { console.warn('[syncMgmtToRosterTable]', e); }
@@ -20138,7 +20134,10 @@ function _mgmtBuildRow(r) {
 
   // Delete button
   var delBtn=document.createElement('button');delBtn.className='mgmt-rr-del-btn';delBtn.title='Remove';delBtn.textContent='×';
-  delBtn.onclick=function(e){e.stopPropagation();if(!confirm('Remove "'+r.name+'" from roster?'))return;var idx=_mgmtRosterData.findIndex(function(w){return w.id===r.id;});if(idx!==-1){_mgmtRosterData.splice(idx,1);_mgmtRosterRender();}};row3.appendChild(delBtn);
+  delBtn.onclick=function(e){e.stopPropagation();if(!confirm('Remove "'+r.name+'" from roster?'))return;var idx=_mgmtRosterData.findIndex(function(w){return w.id===r.id;});if(idx!==-1){_mgmtRosterData.splice(idx,1);_mgmtRosterRender();}
+    var _delU=(_mgmtRosterMgmt[r.id]&&_mgmtRosterMgmt[r.id].efed_username||'').trim();
+    if(_delU&&typeof EFED_NAME!=='undefined'&&EFED_NAME){(async function(){try{await fetch(SUPABASE_URL+'/rest/v1/roster?efed=eq.'+encodeURIComponent(EFED_NAME)+'&username=eq.'+encodeURIComponent(_delU),{method:'DELETE',headers:SB_HEADERS});await _populateRosterMembers();}catch(e){}})();}
+  };row3.appendChild(delBtn);
   cc.appendChild(row3);
 
   card.appendChild(cc);
