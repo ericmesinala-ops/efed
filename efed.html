@@ -13131,6 +13131,10 @@ async function _ceOpen(idx, champ) {
   window._ceSelectedBeltId = champ.beltId || '';
   window._ceSelectedBeltName = champ.beltName || champ.title || '';
   window._ceSelectedBeltImg = champ.beltImageUrl || champ._liveImg || '';
+  // Ensure roster data is loaded (same guard as booking modal)
+  if (typeof mgmtRosterLoad === 'function' && (!window._mgmtRosterData || !window._mgmtRosterData.length)) {
+    await mgmtRosterLoad();
+  }
   const acc = document.getElementById('champ-edit-accordion');
   if (!acc) return;
   const isVacant = !champ.username || !!champ._vacant;
@@ -13242,8 +13246,17 @@ function _cePopulateRoster() {
   };
   el.appendChild(vacantChip);
 
-  const members=window._efedRosterMembers||[];
-  if(!members.length){el.innerHTML='<div style="font-size:.7rem;color:#5a5a6a;">No roster members yet.</div>';return;}
+  // Build member list from _mgmtRosterData (same source as booking modal — includes all wrestlers)
+  let members = [];
+  if (typeof _mgmtRosterData !== 'undefined' && _mgmtRosterData.length) {
+    members = _mgmtRosterData.map(function(r) {
+      const meta = (typeof _mgmtGetMgmt === 'function') ? _mgmtGetMgmt(r.id) : {};
+      return { username: meta.efed_username || r.id, display_name: r.name ? r.name.replace(/ 👻$/,'') : r.id, avatar_url: meta.avatar_url || null };
+    }).filter(function(r){ return r.display_name; });
+  }
+  // Fallback to _efedRosterMembers if mgmt data not loaded yet
+  if (!members.length) members = window._efedRosterMembers || [];
+  if (!members.length) { el.innerHTML += '<div style="font-size:.7rem;color:#5a5a6a;padding:8px 4px;">No roster members yet.</div>'; return; }
   members.forEach(m=>{
     const chip=document.createElement('div');
     chip.className='ce-roster-chip';chip.style.cssText='flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;padding:6px 5px;border-radius:10px;border:2px solid transparent;transition:border-color .15s,background .15s;width:62px;';
@@ -19966,6 +19979,8 @@ function _mcSubmitRepost() { mc_submit(); }
   overscroll-behavior: none; touch-action: pan-y;
   padding-bottom: env(safe-area-inset-bottom, 32px);
 }
+#efed-panel-roster { overscroll-behavior: none; }
+#mgmt-roster-list-body { overscroll-behavior: none; }
 #mgmt-mob-detail-topbar {
   position: sticky; top: 0; z-index: 1;
   display: flex; align-items: center; gap: 12px;
