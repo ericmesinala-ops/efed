@@ -2234,20 +2234,19 @@ html.day-mode #sf-inline-form { background: rgba(168,130,10,.04); border-color: 
 
 
 <div class="section" id="moveset-section" style="display:none;">
-  <div class="sec-title">Moveset</div>
+  <div class="sec-title" style="display:flex;align-items:center;justify-content:space-between;">
+    <span>Moveset</span>
+    <button id="ms-edit-btn" onclick="toggleMovesetEdit()" style="display:none;" class="ms-add-btn" title="Edit moveset">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </div>
   <div class="moveset-grid">
     <div class="moveset-col">
-      <div class="moveset-col-header sig-header" style="display:flex;align-items:center;justify-content:space-between;">
-        <span>Signatures</span>
-        <div id="ms-sig-add" class="ms-add-btn" style="display:none;" onclick="addMoveSlot('sig')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
-      </div>
+      <div class="moveset-col-header sig-header"><span>Signatures</span></div>
       <div id="ms-sig-slots"></div>
     </div>
     <div class="moveset-col">
-      <div class="moveset-col-header fin-header" style="display:flex;align-items:center;justify-content:space-between;">
-        <span>Finishers</span>
-        <div id="ms-fin-add" class="ms-add-btn ms-add-fin" style="display:none;" onclick="addMoveSlot('fin')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
-      </div>
+      <div class="moveset-col-header fin-header"><span>Finishers</span></div>
       <div id="ms-fin-slots"></div>
     </div>
   </div>
@@ -9088,11 +9087,7 @@ function _buildMoveSlot(m, type, idx, editable) {
   main.className = 'move-slot-main';
 
   if (editable) {
-    const del = document.createElement('button');
-    del.className = 'move-del-btn'; del.title = 'Remove';
-    del.innerHTML = '✕';
-    del.onclick = (e) => { e.stopPropagation(); deleteMoveSlot(type, idx); };
-    main.appendChild(del);
+    // no delete button — slots are fixed in-game
   }
 
   const num = document.createElement('div');
@@ -9189,14 +9184,12 @@ function _refreshAddButtons(data) {
 function renderMoveset(raw, editable) {
   _movesetEditable = editable;
   const data = _parseMovesetRaw(raw);
-  // Ensure at least 1 slot for owner; viewers only see filled slots
-  if (editable) {
-    if (!data.signatures || !data.signatures.length) data.signatures = [{}];
-    if (!data.finishers  || !data.finishers.length)  data.finishers  = [{}];
-  } else {
-    data.signatures = (data.signatures || []).filter(m => m.newName);
-    data.finishers  = (data.finishers  || []).filter(m => m.newName);
-  }
+  const MS_SIG = 3, MS_FIN = 3;
+  // Pad to fixed slot count
+  while ((data.signatures||[]).length < MS_SIG) { data.signatures = data.signatures||[]; data.signatures.push({}); }
+  while ((data.finishers||[]).length  < MS_FIN)  { data.finishers  = data.finishers ||[]; data.finishers.push({}); }
+  data.signatures = data.signatures.slice(0, MS_SIG);
+  data.finishers  = data.finishers.slice(0, MS_FIN);
   window._movesetData = data;
 
   const sec = document.getElementById('moveset-section');
@@ -9204,48 +9197,56 @@ function renderMoveset(raw, editable) {
   const finWrap = document.getElementById('ms-fin-slots');
   if (!sec || !sigWrap || !finWrap) return;
 
-  if (!editable && !data.signatures.length && !data.finishers.length) { sec.style.display = 'none'; return; }
+  // Hide section for viewers if no moves filled in at all
+  if (!editable) {
+    const hasSig = data.signatures.some(m => m.newName);
+    const hasFin = data.finishers.some(m => m.newName);
+    if (!hasSig && !hasFin) { sec.style.display = 'none'; return; }
+  }
   sec.style.display = '';
+
+  const msEditBtn = document.getElementById('ms-edit-btn');
+  if (msEditBtn && _isOwnProfile) msEditBtn.style.display = 'flex';
 
   sigWrap.innerHTML = '';
   finWrap.innerHTML = '';
-  (data.signatures||[]).forEach((m, i) => sigWrap.appendChild(_buildMoveSlot(m, 'sig', i, editable)));
-  (data.finishers||[]).forEach((m, i)  => finWrap.appendChild(_buildMoveSlot(m, 'fin', i, editable)));
-  _refreshAddButtons(data);
+  data.signatures.forEach((m, i) => sigWrap.appendChild(_buildMoveSlot(m, 'sig', i, editable)));
+  data.finishers.forEach((m, i)  => finWrap.appendChild(_buildMoveSlot(m, 'fin', i, editable)));
 }
 
-function addMoveSlot(type) {
-  const data = window._movesetData || { signatures:[{}], finishers:[{}] };
-  const arr = type === 'sig' ? data.signatures : data.finishers;
-  if (arr.length >= MS_MAX) return;
-  arr.push({});
-  const wrap = document.getElementById('ms-' + type + '-slots');
-  const newSlot = _buildMoveSlot({}, type, arr.length - 1, true);
-  wrap.appendChild(newSlot);
-  _refreshAddButtons(data);
-  // Focus new name field
-  setTimeout(() => newSlot.querySelector('.move-new')?.focus(), 50);
-  autosaveMoveset();
-}
-
-function deleteMoveSlot(type, idx) {
-  const data = window._movesetData || { signatures:[{}], finishers:[{}] };
-  const arr = type === 'sig' ? data.signatures : data.finishers;
-  // Always keep at least 1 slot for owner
-  if (arr.length <= 1) {
-    arr[0] = {};
-    const wrap = document.getElementById('ms-' + type + '-slots');
-    wrap.innerHTML = '';
-    wrap.appendChild(_buildMoveSlot({}, type, 0, true));
-    _refreshAddButtons(data);
+function toggleMovesetEdit() {
+  const isEditing = _movesetEditable;
+  if (isEditing) {
+    autosaveMoveset();
+    renderMoveset(window._movesetData, false);
+    document.getElementById('ms-save-fab')?.remove();
+    const btn = document.getElementById('ms-edit-btn');
+    if (btn) {
+      btn.style.borderColor = 'rgba(255,255,255,.12)';
+      btn.style.background  = '';
+      btn.title = 'Edit moveset';
+      btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    }
   } else {
-    arr.splice(idx, 1);
-    const wrap = document.getElementById('ms-' + type + '-slots');
-    wrap.innerHTML = '';
-    arr.forEach((m, i) => wrap.appendChild(_buildMoveSlot(m, type, i, true)));
-    _refreshAddButtons(data);
+    renderMoveset(window._movesetData, true);
+    const btn = document.getElementById('ms-edit-btn');
+    if (btn) {
+      btn.style.borderColor = 'rgba(255,255,255,.15)';
+      btn.style.background  = 'rgba(255,255,255,.05)';
+      btn.title = 'Cancel';
+      btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    }
+    if (!document.getElementById('ms-save-fab')) {
+      const fab = document.createElement('button');
+      fab.id = 'ms-save-fab';
+      fab.textContent = 'Save Moveset';
+      fab.style.cssText = 'position:fixed;top:72px;right:18px;z-index:9000;padding:9px 20px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:"DM Sans",sans-serif;font-size:.78rem;font-weight:700;letter-spacing:.5px;cursor:pointer;box-shadow:0 4px 18px rgba(192,0,14,.4);transition:background .15s;';
+      fab.onmouseenter = () => fab.style.background = '#e0000f';
+      fab.onmouseleave = () => fab.style.background = '#c0000e';
+      fab.onclick = () => toggleMovesetEdit();
+      document.body.appendChild(fab);
+    }
   }
-  autosaveMoveset();
 }
 
 function _moveThumbIcon() {
@@ -13723,7 +13724,10 @@ async function loadProfile() {
     }
     renderSocialLinks(ig, x, twitch, reddit, spotify, discord, facebook);
     loadCawImages(user);
-    renderMoveset(user.moveset, _isOwnProfile);
+    renderMoveset(user.moveset, false);
+    // Show edit button for own profile
+    const msEditBtn = document.getElementById('ms-edit-btn');
+    if (msEditBtn && _isOwnProfile) msEditBtn.style.display = 'flex';
     _posts.load(resolvedUser);
     loadAppearances(resolvedUser, _isOwnProfile);
     loadCareerRecords(resolvedUser, _isOwnProfile);
