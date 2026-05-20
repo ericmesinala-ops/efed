@@ -2242,11 +2242,17 @@ html.day-mode #sf-inline-form { background: rgba(168,130,10,.04); border-color: 
   </div>
   <div class="moveset-grid">
     <div class="moveset-col">
-      <div class="moveset-col-header sig-header"><span>Signatures</span></div>
+      <div class="moveset-col-header sig-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Signatures</span>
+        <div id="ms-sig-add" class="ms-add-btn" style="display:none;" onclick="addMoveSlot('sig')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+      </div>
       <div id="ms-sig-slots"></div>
     </div>
     <div class="moveset-col">
-      <div class="moveset-col-header fin-header"><span>Finishers</span></div>
+      <div class="moveset-col-header fin-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Finishers</span>
+        <div id="ms-fin-add" class="ms-add-btn ms-add-fin" style="display:none;" onclick="addMoveSlot('fin')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+      </div>
       <div id="ms-fin-slots"></div>
     </div>
   </div>
@@ -7633,6 +7639,12 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
 <!-- ── 2K SETTINGS TAB PANEL (self-contained, no iframe) ── -->
 <div class="profile-tab-panel" data-panel="records" style="min-height:80vh;">
   <div id="records-panel-inner" style="width:100%;min-height:80vh;position:relative;">
+    <div id="twoK-panel-header" style="display:none;align-items:center;justify-content:space-between;padding:12px 16px 0;">
+      <span style="font-family:'Barlow Condensed',sans-serif;font-size:.65rem;font-weight:700;letter-spacing:2px;color:rgba(255,255,255,.3);text-transform:uppercase;">2K Moveset</span>
+      <button id="_2k-edit-btn" class="ms-add-btn" onclick="if(typeof _2kToggleEdit==='function')_2kToggleEdit()" title="Edit 2K moveset" style="display:none;">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
     <div id="twoK-root" style="display:flex;flex-direction:column;min-height:80vh;height:100%;background:var(--bg-primary,#0a0a0e);"></div>
   </div>
 </div>
@@ -9087,7 +9099,11 @@ function _buildMoveSlot(m, type, idx, editable) {
   main.className = 'move-slot-main';
 
   if (editable) {
-    // no delete button — slots are fixed in-game
+    const del = document.createElement('button');
+    del.className = 'move-del-btn'; del.title = 'Remove';
+    del.innerHTML = '✕';
+    del.onclick = (e) => { e.stopPropagation(); deleteMoveSlot(type, idx); };
+    main.appendChild(del);
   }
 
   const num = document.createElement('div');
@@ -9165,10 +9181,8 @@ function _buildMoveSlot(m, type, idx, editable) {
     const img = document.createElement('img');
     img.src = m.img; img.alt = ''; img.draggable = false;
     thumbCell.appendChild(img);
-  } else {
-    return slot; // no thumb cell if viewer and no image
   }
-
+  // always append thumb cell for consistent layout
   slot.appendChild(thumbCell);
   return slot;
 }
@@ -9184,12 +9198,13 @@ function _refreshAddButtons(data) {
 function renderMoveset(raw, editable) {
   _movesetEditable = editable;
   const data = _parseMovesetRaw(raw);
-  const MS_SIG = 3, MS_FIN = 3;
-  // Pad to fixed slot count
-  while ((data.signatures||[]).length < MS_SIG) { data.signatures = data.signatures||[]; data.signatures.push({}); }
-  while ((data.finishers||[]).length  < MS_FIN)  { data.finishers  = data.finishers ||[]; data.finishers.push({}); }
-  data.signatures = data.signatures.slice(0, MS_SIG);
-  data.finishers  = data.finishers.slice(0, MS_FIN);
+  if (editable) {
+    if (!data.signatures?.length) data.signatures = [{}];
+    if (!data.finishers?.length)  data.finishers  = [{}];
+  } else {
+    data.signatures = (data.signatures||[]).filter(m => m.newName);
+    data.finishers  = (data.finishers ||[]).filter(m => m.newName);
+  }
   window._movesetData = data;
 
   const sec = document.getElementById('moveset-section');
@@ -9197,12 +9212,7 @@ function renderMoveset(raw, editable) {
   const finWrap = document.getElementById('ms-fin-slots');
   if (!sec || !sigWrap || !finWrap) return;
 
-  // Hide section for viewers if no moves filled in at all
-  if (!editable) {
-    const hasSig = data.signatures.some(m => m.newName);
-    const hasFin = data.finishers.some(m => m.newName);
-    if (!hasSig && !hasFin) { sec.style.display = 'none'; return; }
-  }
+  if (!editable && !data.signatures.length && !data.finishers.length) { sec.style.display = 'none'; return; }
   sec.style.display = '';
 
   const msEditBtn = document.getElementById('ms-edit-btn');
@@ -9212,6 +9222,39 @@ function renderMoveset(raw, editable) {
   finWrap.innerHTML = '';
   data.signatures.forEach((m, i) => sigWrap.appendChild(_buildMoveSlot(m, 'sig', i, editable)));
   data.finishers.forEach((m, i)  => finWrap.appendChild(_buildMoveSlot(m, 'fin', i, editable)));
+  _refreshAddButtons(data);
+}
+
+function addMoveSlot(type) {
+  const data = window._movesetData || { signatures:[{}], finishers:[{}] };
+  const arr = type === 'sig' ? data.signatures : data.finishers;
+  if (arr.length >= MS_MAX) return;
+  arr.push({});
+  const wrap = document.getElementById('ms-' + type + '-slots');
+  const newSlot = _buildMoveSlot({}, type, arr.length - 1, true);
+  wrap.appendChild(newSlot);
+  _refreshAddButtons(data);
+  setTimeout(() => newSlot.querySelector('.move-new')?.focus(), 50);
+  autosaveMoveset();
+}
+
+function deleteMoveSlot(type, idx) {
+  const data = window._movesetData || { signatures:[{}], finishers:[{}] };
+  const arr = type === 'sig' ? data.signatures : data.finishers;
+  if (arr.length <= 1) {
+    arr[0] = {};
+    const wrap = document.getElementById('ms-' + type + '-slots');
+    wrap.innerHTML = '';
+    wrap.appendChild(_buildMoveSlot({}, type, 0, true));
+    _refreshAddButtons(data);
+  } else {
+    arr.splice(idx, 1);
+    const wrap = document.getElementById('ms-' + type + '-slots');
+    wrap.innerHTML = '';
+    arr.forEach((m, i) => wrap.appendChild(_buildMoveSlot(m, type, i, true)));
+    _refreshAddButtons(data);
+  }
+  autosaveMoveset();
 }
 
 function toggleMovesetEdit() {
@@ -12705,6 +12748,7 @@ async function loadProfile() {
     var _2kData = {};
     var _2kUser = resolvedUser;
     var _2kIsOwn = _isOwnProfile;
+    var _2kEditMode = false;   // owner defaults to view; toggled by + button
     var _2kLoaded = false;
     var _2kDirty = false;      // true only after an unsaved edit
     var _2kSaveBtn = null;     // reference to the live save button across renders
@@ -12729,10 +12773,61 @@ async function loadProfile() {
       } catch(e) { _2kData = {}; }
       _2kDirty = false;
       _2kLoaded = true;
+      // Show edit button for own profile
+      if (_2kIsOwn) {
+        var hdr = document.getElementById('twoK-panel-header');
+        var editBtn = document.getElementById('_2k-edit-btn');
+        if (hdr) hdr.style.display = 'flex';
+        if (editBtn) editBtn.style.display = 'flex';
+      }
       _2kRender();
     }
 
-    // ── Save moveset (own profile only) ──
+    // ── Toggle edit mode ──
+    function _2kToggleEdit() {
+      _2kEditMode = !_2kEditMode;
+      if (_2kEditMode) {
+        // Show red Save FAB
+        if (!document.getElementById('_2k-save-fab')) {
+          var fab = document.createElement('button');
+          fab.id = '_2k-save-fab';
+          fab.textContent = 'Save 2K Moveset';
+          fab.style.cssText = 'position:fixed;top:72px;right:18px;z-index:9001;padding:9px 20px;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:"DM Sans",sans-serif;font-size:.78rem;font-weight:700;letter-spacing:.5px;cursor:pointer;box-shadow:0 4px 18px rgba(192,0,14,.4);transition:background .15s;';
+          fab.onmouseenter = function(){ fab.style.background='#e0000f'; };
+          fab.onmouseleave = function(){ fab.style.background='#c0000e'; };
+          fab.onclick = function() {
+            _2kSave(fab);
+            _2kEditMode = false;
+            document.getElementById('_2k-save-fab')?.remove();
+            _2kRender();
+            _2kUpdateEditBtn();
+          };
+          document.body.appendChild(fab);
+        }
+      } else {
+        document.getElementById('_2k-save-fab')?.remove();
+      }
+      _2kRender();
+      _2kUpdateEditBtn();
+    }
+
+    function _2kUpdateEditBtn() {
+      var btn = document.getElementById('_2k-edit-btn');
+      if (!btn) return;
+      if (_2kEditMode) {
+        btn.style.borderColor = 'rgba(255,255,255,.15)';
+        btn.style.background  = 'rgba(255,255,255,.05)';
+        btn.title = 'Cancel editing';
+        btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+      } else {
+        btn.style.borderColor = '';
+        btn.style.background  = '';
+        btn.title = 'Edit 2K moveset';
+        btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+      }
+    }
+
+
     async function _2kSave(btn) {
       if (!_2kIsOwn || !_2kDirty) return;
       var session = getSession(); if (!session) return;
@@ -12789,16 +12884,16 @@ async function loadProfile() {
       cell.style.cssText = 'flex:1;min-width:0;position:relative;';
       var chip = document.createElement('div');
       var hasVal = val && val.trim();
-      chip.style.cssText = 'padding:7px 10px;border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s,border-color .15s,color .15s;background:transparent;border:1px solid transparent;color:' + (hasVal ? 'var(--text-primary,#e8e8f0)' : 'rgba(255,255,255,.28)') + ';' + (active && _2kIsOwn ? 'cursor:pointer;' : 'opacity:.6;');
+      chip.style.cssText = 'padding:7px 10px;border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s,border-color .15s,color .15s;background:transparent;border:1px solid transparent;color:' + (hasVal ? 'var(--text-primary,#e8e8f0)' : 'rgba(255,255,255,.28)') + ';' + (active && _2kIsOwn && _2kEditMode ? 'cursor:pointer;' : 'opacity:.6;');
       chip.textContent = hasVal ? val : '+';
-      if (active && _2kIsOwn) {
+      if (active && _2kIsOwn && _2kEditMode) {
         chip.onmouseenter = function(){ chip.style.background='rgba(255,255,255,.06)'; chip.style.borderColor='rgba(255,255,255,.15)'; };
         chip.onmouseleave = function(){ chip.style.background='transparent'; chip.style.borderColor='transparent'; };
       }
       var inp = document.createElement('input');
       inp.type = 'text'; inp.maxLength = 36; inp.placeholder = 'Move ' + (idx+1); inp.value = val;
       inp.style.cssText = 'display:none;width:100%;padding:7px 10px;background:rgba(255,255,255,.07);border:1px solid rgba(200,168,75,.5);border-radius:5px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:var(--text-primary,#e8e8f0);outline:none;min-width:0;box-sizing:border-box;';
-      if (active && _2kIsOwn) {
+      if (active && _2kIsOwn && _2kEditMode) {
         chip.onclick = function(){ chip.style.display='none'; inp.style.display='block'; inp.focus(); inp.select(); };
         inp.oninput = function(){ _2kSet(cat, sub, slot, idx, inp.value); };
         inp.onblur = function(){
@@ -12926,7 +13021,7 @@ async function loadProfile() {
       numEl.style.cssText = 'font-family:"Barlow Condensed",sans-serif;font-size:.65rem;font-weight:700;letter-spacing:1px;color:rgba(255,255,255,.2);width:20px;flex-shrink:0;text-align:center;';
       numEl.textContent = idx + 1;
       row.appendChild(numEl);
-      if (active && _2kIsOwn) {
+      if (active && _2kIsOwn && _2kEditMode) {
         var inp = document.createElement('input');
         inp.type = 'text'; inp.maxLength = 36; inp.value = val; inp.placeholder = 'Move ' + (idx + 1);
         inp.style.cssText = 'flex:1;padding:8px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;font-family:"DM Sans",sans-serif;font-size:.82rem;color:#e8e8f0;outline:none;box-sizing:border-box;';
@@ -13021,23 +13116,6 @@ async function loadProfile() {
         primRow.appendChild(btn);
       });
       root.appendChild(primRow);
-
-      // Save bar
-      if (_2kIsOwn) {
-        var saveBar = document.createElement('div');
-        saveBar.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:0 16px;height:42px;background:rgba(10,10,14,.95);border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;';
-        var warnSpan = document.createElement('span');
-        warnSpan.style.cssText = 'font-size:.58rem;letter-spacing:1.5px;color:rgba(255,180,0,.5);font-family:"Barlow Condensed",sans-serif;font-weight:700;text-transform:uppercase;white-space:nowrap;flex:1;';
-        warnSpan.textContent = '⚠ Always Save Your Work';
-        var saveBtn = document.createElement('button');
-        saveBtn.style.cssText = 'padding:6px 14px;border-radius:6px;font-family:"DM Sans",sans-serif;font-size:.75rem;font-weight:700;border:1px solid rgba(255,255,255,.1);color:#fff;white-space:nowrap;';
-        saveBtn.textContent = 'Save';
-        saveBtn.onclick = function(){ _2kSave(saveBtn); };
-        _2kSaveBtn = saveBtn;
-        _2kSetSaveBtnState(saveBtn, _2kDirty);
-        saveBar.appendChild(warnSpan); saveBar.appendChild(saveBtn);
-        root.appendChild(saveBar);
-      }
 
       // Sub-tab row
       var subTabsForTab = null;
@@ -13272,26 +13350,6 @@ async function loadProfile() {
       primWrap.appendChild(_makePrimRow(activeTabs, true));
       if (inactiveTabs.length) primWrap.appendChild(_makePrimRow(inactiveTabs, false));
       mWrap.appendChild(primWrap);
-
-      // ── Save bar (own profile only) — red button + warning text matching management.html ──
-      if (_2kIsOwn) {
-        var saveBar = document.createElement('div');
-        saveBar.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:0 16px;height:44px;background:rgba(10,10,14,.95);border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;';
-        var warnSpan = document.createElement('span');
-        warnSpan.style.cssText = 'font-size:.58rem;letter-spacing:1.8px;color:rgba(255,180,0,.55);font-family:"Barlow Condensed",sans-serif;font-weight:700;text-transform:uppercase;white-space:nowrap;';
-        warnSpan.textContent = '⚠ Always Save Your Work';
-        var saveBtn = document.createElement('button');
-        saveBtn.style.cssText = 'padding:7px 16px;border-radius:6px;font-family:"DM Sans",sans-serif;font-size:.78rem;font-weight:700;border:1px solid rgba(255,255,255,.1);color:#fff;transition:opacity .15s;';
-        saveBtn.textContent = 'Save';
-        saveBtn.onmouseenter = function(){ if (!saveBtn.disabled) saveBtn.style.opacity='.85'; };
-        saveBtn.onmouseleave = function(){ saveBtn.style.opacity='1'; };
-        saveBtn.onclick = function(){ _2kSave(saveBtn); };
-        _2kSaveBtn = saveBtn; // keep reference so _2kSet can update it live
-        _2kSetSaveBtnState(saveBtn, _2kDirty); // start grayed unless there are pending edits
-        saveBar.appendChild(warnSpan);
-        saveBar.appendChild(saveBtn);
-        mWrap.appendChild(saveBar);
-      }
 
       // ── Content area ──
       var content = document.createElement('div');
