@@ -11623,6 +11623,17 @@ async function loadOvrRatings(profileUsername, isOwn, showOvrSetting) {
         }
         if (!targetMeta) continue;
 
+        // Fetch champions for this eFed (already in users table, no extra cost)
+        let champEntry = null;
+        try {
+          const champRows = await sbGet('users', `username=eq.${encodeURIComponent(src.ownerUsername)}&select=efed_champions_json&limit=1`);
+          const champData = Array.isArray(champRows[0]?.efed_champions_json) ? champRows[0].efed_champions_json : [];
+          // Auto-detect: match by hub username
+          champEntry = champData.find(c => !c._vacant && (c.username||'').toLowerCase() === profileUsername.toLowerCase()) || null;
+          // Manual fallback: from roster mgmt
+          if (!champEntry && targetMeta.manual_champ?.beltId) champEntry = targetMeta.manual_champ;
+        } catch(e) {}
+
         const blockHTML = _buildEfedInlineStats(targetMeta, visible, src.efedName);
         if (!blockHTML) continue;
 
@@ -11649,6 +11660,19 @@ async function loadOvrRatings(profileUsername, isOwn, showOvrSetting) {
             wrapper.dataset.efedKey = cssKey;
             wrapper.innerHTML = blockHTML;
             cardEl.appendChild(wrapper);
+
+            // Inject championship badge into efed-item header if champion
+            if (champEntry) {
+              const existingBadge = item.querySelector('.efed-champ-badge');
+              if (existingBadge) existingBadge.remove();
+              const badge = document.createElement('div');
+              badge.className = 'efed-champ-badge';
+              badge.style.cssText = 'display:flex;align-items:center;gap:7px;padding:5px 10px;background:rgba(200,168,75,.07);border:1px solid rgba(200,168,75,.2);border-radius:8px;margin:6px 14px 0;';
+              const bImg = champEntry.beltImageUrl || champEntry.beltImg || null;
+              badge.innerHTML = (bImg ? `<img src="${bImg}" style="height:24px;max-width:32px;object-fit:contain;flex-shrink:0;" onerror="this.remove()">` : '🏆 ')
+                + `<span style="font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;color:#c8a84b;">${_esc(champEntry.beltName||'Champion')}</span>`;
+              cardEl.insertBefore(badge, wrapper);
+            }
             break;
           }
         }
