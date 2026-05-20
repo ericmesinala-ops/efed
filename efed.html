@@ -13253,8 +13253,9 @@ function _cePopulateRoster() {
   if (typeof _mgmtRosterData !== 'undefined' && _mgmtRosterData.length) {
     members = _mgmtRosterData.map(function(r) {
       const meta = (typeof _mgmtGetMgmt === 'function') ? _mgmtGetMgmt(r.id) : {};
-      return { username: meta.efed_username || r.id, display_name: r.name ? r.name.replace(/ 👻$/,'') : r.id, avatar_url: meta.avatar_url || null };
-    }).filter(function(r){ return r.display_name; });
+      const rawName = r.name ? r.name.replace(/ 👻$/,'') : '';
+      return { username: meta.efed_username || r.id, display_name: rawName || meta.efed_username || '(Unnamed)', avatar_url: meta.avatar_url || null };
+    }).filter(function(r){ return r.display_name && r.display_name !== '(Unnamed)' || true; });
   }
   // Fallback to _efedRosterMembers if mgmt data not loaded yet
   if (!members.length) members = window._efedRosterMembers || [];
@@ -13273,6 +13274,12 @@ function _cePopulateRoster() {
     };
     el.appendChild(chip);
   });
+
+  // Flavor text hint
+  var hint = document.createElement('div');
+  hint.style.cssText = 'width:100%;margin-top:10px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);font-family:"DM Sans",sans-serif;font-size:.65rem;color:rgba(255,255,255,.25);line-height:1.5;font-style:italic;';
+  hint.textContent = 'Wrestler not here? Go to the Roster tab to add them first, then come back to assign the championship.';
+  if (el.parentElement) el.parentElement.appendChild(hint);
 }
 
 function _cePopulateBelts() {
@@ -13461,6 +13468,16 @@ async function _ceVacate(idx) {
   if(!oldEntry)return;
   const log=await _champCascade(oldEntry,null,beltId,oldEntry.beltName||oldEntry.title,oldEntry.beltImageUrl,null);
   _champData=_champData.filter(c=>c.beltId!==beltId);
+  // Clear manual_champ in roster for this belt
+  try {
+    if (typeof _mgmtRosterMgmt !== 'undefined') {
+      Object.keys(_mgmtRosterMgmt).forEach(function(rid) {
+        var mc = _mgmtRosterMgmt[rid]?.manual_champ;
+        if (mc && mc.beltId === beltId) { _mgmtRosterMgmt[rid].manual_champ = null; }
+      });
+      if (typeof mgmtRosterSave === 'function') mgmtRosterSave();
+    }
+  } catch(e) {}
   await _saveChampions();
   _ceClose();renderChampions();_champConfirm(log);
 }
@@ -13509,6 +13526,17 @@ async function _ceRemove(idx) {
       });
     } catch(e) { console.warn('Remove championship — banner cleanup failed:', e); }
   }
+
+  // Clear manual_champ in roster mgmt for any wrestler with this beltId
+  try {
+    if (typeof _mgmtRosterMgmt !== 'undefined') {
+      Object.keys(_mgmtRosterMgmt).forEach(function(rid) {
+        var mc = _mgmtRosterMgmt[rid]?.manual_champ;
+        if (mc && mc.beltId === beltId) { _mgmtRosterMgmt[rid].manual_champ = null; }
+      });
+      if (typeof mgmtRosterSave === 'function') mgmtRosterSave();
+    }
+  } catch(e) {}
 
   // Remove from _champData and save
   _champData = _champData.filter(c => c.beltId !== beltId);
