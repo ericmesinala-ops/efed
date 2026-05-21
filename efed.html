@@ -18689,10 +18689,12 @@ function _processCawDragFile(file, slot) {
   function atTop() { return (document.documentElement.scrollTop || document.body.scrollTop) <= 0; }
   document.addEventListener("touchstart", function(e) {
     if (!atTop()) return;
+    if (document.getElementById("mgmt-mob-detail")) return;
     startY = e.touches[0].clientY; pulling = true; triggered = false; currentPull = 0;
   }, { passive: true });
   document.addEventListener("touchmove", function(e) {
     if (!pulling || triggered) return;
+    if (document.getElementById("mgmt-mob-detail")) { pulling = false; return; }
     var dy = e.touches[0].clientY - startY;
     if (dy <= 0) { pulling = false; return; }
     currentPull = Math.min(dy * 0.45, MAX_PULL);
@@ -20630,14 +20632,27 @@ function _mgmtMobileOpenDetail(id) {
     var cv=document.createElement('div');cv.style.cssText='font-family:"Bebas Neue",sans-serif;font-size:1rem;color:'+(color||'rgba(255,255,255,.75)')+';text-align:center;';cv.textContent=val;
     c.appendChild(cl);c.appendChild(cv);return c;
   }
-  rcRow2.appendChild(_mkRC2('S-W',_sw2,'rgba(100,220,130,.9)'));
-  rcRow2.appendChild(_mkRC2('S-L',_sl2,'rgba(220,80,80,.85)'));
-  rcRow2.appendChild(_mkRC2('M-W',_mw2,'rgba(100,200,150,.8)'));
-  rcRow2.appendChild(_mkRC2('M-L',_ml2,'rgba(200,100,100,.75)'));
-  rcRow2.appendChild(_mkRC2('WIN%',_pct2!==null?(_pct2+'%'):'—','rgba(255,255,255,.5)'));
-  rcRow2.appendChild(_mkRC2('T-W',_tw2,'rgba(200,168,75,.95)'));
-  rcRow2.appendChild(_mkRC2('T-DEF',_td2,'rgba(200,168,75,.75)',true));
+  var _rcCells2={};
+  function _mkRC2w(lbl,val,color,noBorder,key){
+    var c=_mkRC2(lbl,val,color,noBorder);
+    if(key){_rcCells2[key]=c.querySelector('div:last-child');}
+    return c;
+  }
+  rcRow2.appendChild(_mkRC2w('S-W',_sw2,'rgba(100,220,130,.9)',false,'record_sw'));
+  rcRow2.appendChild(_mkRC2w('S-L',_sl2,'rgba(220,80,80,.85)',false,'record_sl'));
+  rcRow2.appendChild(_mkRC2w('M-W',_mw2,'rgba(100,200,150,.8)',false,'record_mw'));
+  rcRow2.appendChild(_mkRC2w('M-L',_ml2,'rgba(200,100,100,.75)',false,'record_ml'));
+  var _winPctCell=_mkRC2('WIN%',_pct2!==null?(_pct2+'%'):'—','rgba(255,255,255,.5)');
+  rcRow2.appendChild(_winPctCell);
+  rcRow2.appendChild(_mkRC2w('T-W',_tw2,'rgba(200,168,75,.95)',false,'record_tw'));
+  rcRow2.appendChild(_mkRC2w('T-DEF',_td2,'rgba(200,168,75,.75)',true,'record_td'));
   recBlock.appendChild(rcRow2);
+  function _updateWinPct2(){
+    var tw=(_mgmtGetMgmt(id).record_sw||0)*1+(_mgmtGetMgmt(id).record_mw||0)*1;
+    var ta=tw+(_mgmtGetMgmt(id).record_sl||0)*1+(_mgmtGetMgmt(id).record_ml||0)*1;
+    var pv=ta>0?Math.round((tw/ta)*100):null;
+    _winPctCell.querySelector('div:last-child').textContent=pv!==null?(pv+'%'):'—';
+  }
   if (editMode) {
     /* Steppers split into 2 rows so buttons don’t overlap on mobile */
     var _rcKeys1=['record_sw','record_sl','record_mw','record_ml'];
@@ -20648,13 +20663,13 @@ function _mgmtMobileOpenDetail(id) {
       keys.forEach(function(k){
         var sw=document.createElement('div');sw.style.cssText='display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;';
         var sl=document.createElement('div');sl.style.cssText='font-size:.55rem;color:rgba(255,255,255,.3);font-weight:700;letter-spacing:1px;text-transform:uppercase;';sl.textContent=_rcLabels[k];
-        var sr=document.createElement('div');sr.style.cssText='display:flex;align-items:center;gap:6px;';
-        var sm=document.createElement('button');sm.textContent='−';sm.style.cssText='width:28px;height:28px;border-radius:6px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);color:#fff;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;';
-        var sn=document.createElement('div');sn.style.cssText='min-width:24px;text-align:center;font-family:"Bebas Neue",sans-serif;font-size:1.05rem;color:#fff;';sn.textContent=parseInt(m[k]||'0')||0;
-        var sp=document.createElement('button');sp.textContent='+';sp.style.cssText=sm.style.cssText;
-        sm.onclick=function(){var v=Math.max(0,(parseInt(m[k]||'0')||0)-1);_mgmtSetMgmt(id,k,String(v));sn.textContent=v;};
-        sp.onclick=function(){var v=(parseInt(m[k]||'0')||0)+1;_mgmtSetMgmt(id,k,String(v));sn.textContent=v;};
-        sr.appendChild(sm);sr.appendChild(sn);sr.appendChild(sp);sw.appendChild(sl);sw.appendChild(sr);row.appendChild(sw);
+        var sr=document.createElement('div');sr.style.cssText='display:flex;align-items:center;gap:4px;';
+        var btnStyle='width:30px;height:30px;border-radius:6px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);color:#fff;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;';
+        var sm=document.createElement('button');sm.textContent='−';sm.style.cssText=btnStyle;
+        var sp=document.createElement('button');sp.textContent='+';sp.style.cssText=btnStyle;
+        sm.onclick=function(){var v=Math.max(0,(parseInt(_mgmtGetMgmt(id)[k]||'0')||0)-1);_mgmtSetMgmt(id,k,String(v));if(_rcCells2[k])_rcCells2[k].textContent=v;_updateWinPct2();};
+        sp.onclick=function(){var v=(parseInt(_mgmtGetMgmt(id)[k]||'0')||0)+1;_mgmtSetMgmt(id,k,String(v));if(_rcCells2[k])_rcCells2[k].textContent=v;_updateWinPct2();};
+        sr.appendChild(sm);sr.appendChild(sp);sw.appendChild(sl);sw.appendChild(sr);row.appendChild(sw);
       });
       return row;
     }
@@ -20675,6 +20690,19 @@ function _mgmtMobileOpenDetail(id) {
   if (editMode) {
     var ovrEditWrap=document.createElement('div');ovrEditWrap.style.cssText='padding:16px;border-bottom:1px solid rgba(255,255,255,.06);';
     ovrEditWrap.appendChild(_mgmtBuildOvrEdit(m,id,null));overlay.appendChild(ovrEditWrap);
+    /* Activity slider — directly under Overall in edit mode */
+    var actWrap2 = document.createElement('div'); actWrap2.className='mgmt-mob-field';
+    var actLbl2 = document.createElement('div'); actLbl2.className='mgmt-mob-field-lbl'; actLbl2.textContent='ACTIVITY';
+    var actRow = document.createElement('div'); actRow.className='mgmt-mob-act-wrap';
+    var actSlider2 = document.createElement('input'); actSlider2.type='range'; actSlider2.min='0'; actSlider2.max='4'; actSlider2.value=String(actV);
+    actSlider2.style.accentColor = _ACT_COLORS[actV];
+    var actBadge2 = document.createElement('span'); actBadge2.className='mgmt-mob-act-badge'; actBadge2.style.color=_ACT_COLORS[actV]; actBadge2.textContent=_ACT_LABELS[actV];
+    actSlider2.oninput=function(){var v=parseInt(actSlider2.value);_mgmtSetMgmt(id,'activity',String(v));actBadge2.textContent=_ACT_LABELS[v];actBadge2.style.color=_ACT_COLORS[v];actSlider2.style.accentColor=_ACT_COLORS[v];};
+    actRow.appendChild(actSlider2); actRow.appendChild(actBadge2);
+    actWrap2.appendChild(actLbl2); actWrap2.appendChild(actRow);
+    var _mobActNote=document.createElement('div');_mobActNote.style.cssText='font-size:.6rem;color:rgba(255,255,255,.2);font-family:"DM Sans",sans-serif;margin-top:5px;font-style:italic;';_mobActNote.textContent='Only you can see this status.';
+    actWrap2.appendChild(_mobActNote);
+    overlay.appendChild(actWrap2);
   } else {
     var ovrViewWrap=document.createElement('div');ovrViewWrap.style.cssText='padding:16px;border-bottom:1px solid rgba(255,255,255,.06);';
     ovrViewWrap.appendChild(_mgmtBuildOvrView(m));overlay.appendChild(ovrViewWrap);
@@ -20706,7 +20734,7 @@ function _mgmtMobileOpenDetail(id) {
   alignStatCell.appendChild(alignStatLbl);
   if (editMode) {
     var alignSel=document.createElement('select');
-    alignSel.style.cssText='font-family:"Bebas Neue",sans-serif;font-size:.85rem;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.12);outline:none;cursor:pointer;padding:2px 0;width:100%;color:'+(_aColors2[r.alignment||'']||'rgba(255,255,255,.35)')+';';
+    alignSel.style.cssText='font-family:"Bebas Neue",sans-serif;font-size:.85rem;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.12);outline:none;cursor:pointer;padding:2px 0;width:100%;text-align:center;color:'+(_aColors2[r.alignment||'']||'rgba(255,255,255,.35)')+';';
     [['','—'],['Face','Face'],['Heel','Heel'],['Tweener','Twn']].forEach(function(o){var opt=document.createElement('option');opt.value=o[0];opt.textContent=o[1];if((r.alignment||'')===o[0])opt.selected=true;alignSel.appendChild(opt);});
     alignSel.onchange=function(){var idx=_mgmtRosterData.findIndex(function(x){return x.id===id;});if(idx!==-1)_mgmtRosterData[idx].alignment=alignSel.value;alignSel.style.color=_aColors2[alignSel.value]||'rgba(255,255,255,.35)';_mgmtSetMgmt(id,'alignment',alignSel.value);};
     alignStatCell.appendChild(alignSel);
@@ -20773,23 +20801,6 @@ function _mgmtMobileOpenDetail(id) {
 
   overlay.appendChild(mkField('X / Twitter', m.twitter_handle, function(v){_mgmtSetMgmt(id,'twitter_handle',v);}, null, '@handle'));
   overlay.appendChild(mkField('Instagram', m.instagram_handle, function(v){_mgmtSetMgmt(id,'instagram_handle',v);}, null, '@handle'));
-
-  /* Activity */
-  if (editMode) {
-    var actWrap2 = document.createElement('div'); actWrap2.className='mgmt-mob-field';
-    var actLbl2 = document.createElement('div'); actLbl2.className='mgmt-mob-field-lbl'; actLbl2.textContent='ACTIVITY';
-    var actRow = document.createElement('div'); actRow.className='mgmt-mob-act-wrap';
-    var actSlider2 = document.createElement('input'); actSlider2.type='range'; actSlider2.min='0'; actSlider2.max='4'; actSlider2.value=String(actV);
-    actSlider2.style.accentColor = _ACT_COLORS[actV];
-    var actBadge2 = document.createElement('span'); actBadge2.className='mgmt-mob-act-badge'; actBadge2.style.color=_ACT_COLORS[actV]; actBadge2.textContent=_ACT_LABELS[actV];
-    actSlider2.oninput=function(){var v=parseInt(actSlider2.value);_mgmtSetMgmt(id,'activity',String(v));actBadge2.textContent=_ACT_LABELS[v];actBadge2.style.color=_ACT_COLORS[v];actSlider2.style.accentColor=_ACT_COLORS[v];};
-    actRow.appendChild(actSlider2); actRow.appendChild(actBadge2);
-    actWrap2.appendChild(actLbl2); actWrap2.appendChild(actRow);
-    var mobActPrivNote=document.createElement('div');mobActPrivNote.style.cssText='display:flex;align-items:center;gap:4px;font-size:.6rem;color:rgba(255,255,255,.22);font-family:"DM Sans",sans-serif;margin-top:5px;padding:0 16px;';
-    mobActPrivNote.innerHTML='<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Only you can see this';
-    actWrap2.appendChild(mobActPrivNote);
-    overlay.appendChild(actWrap2);
-  }
 
   /* Owner-only: notes + delete (edit mode only) */
   if (isOwner && editMode) {
@@ -21149,8 +21160,7 @@ function _mgmtDesktopRenderDetail(id) {
     var aBadge=document.createElement('span');aBadge.className='mgmt-mob-act-badge';aBadge.style.color=_ACT_COLORS[actV];aBadge.textContent=_ACT_LABELS[actV];
     aSlider.oninput=function(){var v=parseInt(aSlider.value);_mgmtSetMgmt(id,'activity',String(v));aBadge.textContent=_ACT_LABELS[v];aBadge.style.color=_ACT_COLORS[v];aSlider.style.accentColor=_ACT_COLORS[v];};
     actRow3.appendChild(aSlider);actRow3.appendChild(aBadge);actWrap3.appendChild(actLbl3);actWrap3.appendChild(actRow3);
-    var actPrivNote=document.createElement('div');actPrivNote.style.cssText='display:flex;align-items:center;gap:4px;font-size:.6rem;color:rgba(255,255,255,.22);font-family:"DM Sans",sans-serif;margin-top:6px;';
-    actPrivNote.innerHTML='<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Only you can see this';
+    var actPrivNote=document.createElement('div');actPrivNote.style.cssText='font-size:.6rem;color:rgba(255,255,255,.2);font-family:"DM Sans",sans-serif;margin-top:5px;font-style:italic;';actPrivNote.textContent='Only you can see this status.';
     actWrap3.appendChild(actPrivNote);
     wrap.appendChild(actWrap3);
   }
