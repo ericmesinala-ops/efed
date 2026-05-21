@@ -5419,10 +5419,42 @@ function renderRecords() {
     const oppAvatar = r.opponent_avatar || '';
     // Detect if any opponent slot is __multiple__
     const isMultipleMatch = Array.isArray(r.slots) && r.slots.some(s => s.username === '__multiple__');
-    // Build team-aware display name using saved slots when available
-    const matchDisplayNameRaw = _rm2MatchDisplayFromSlots(selfNameRaw, r).replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    // Style "Multiple" as italic gray in the display name
-    const matchDisplayName = matchDisplayNameRaw.replace(/\bMultiple\b/g, '<em style="color:rgba(255,255,255,.35);font-style:italic;font-weight:400;">Multiple</em>');
+    // Build match title as HTML with verified badges for each wrestler
+    const _profileOwnerUsername = resolvedUser || new URLSearchParams(location.search).get('u') || '';
+    const matchDisplayName = (function() {
+      // Build per-name HTML with verified badge using slot usernames
+      function _nameHtml(name, username) {
+        if (!name) return '';
+        var escaped = (name||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        if (!username || username === '__mystery__' || username === '__multiple__') return escaped === 'Multiple' ? '<em style="color:rgba(255,255,255,.35);font-style:italic;font-weight:400;">Multiple</em>' : escaped;
+        var h = typeof withProfileVerified === 'function' ? withProfileVerified(name, username) : escaped;
+        return h;
+      }
+      if (!Array.isArray(r.slots) || !r.slots.length) {
+        // Legacy: self vs opponents
+        var selfHtml = _nameHtml(selfNameRaw, _profileOwnerUsername);
+        var oppHtml = (r.opponents||'???').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return selfNameRaw ? (selfHtml + ' vs ' + oppHtml) : oppHtml;
+      }
+      // Teams from slots
+      var teams = [[]];
+      var teamUsernames = [[]];
+      r.slots.forEach(function(s) {
+        if (s.type === 'vs') { teams.push([]); teamUsernames.push([]); }
+        else { teams[teams.length-1].push(s.name||'???'); teamUsernames[teamUsernames.length-1].push(s.isSelf ? _profileOwnerUsername : (s.username||'')); }
+      });
+      var partners = (teams[0]||[]).filter(function(n){return n!==selfNameRaw;});
+      var partnerUsers = (teamUsernames[0]||[]).filter(function(_,i){return (teams[0]||[])[i]!==selfNameRaw;});
+      var selfHtml2 = _nameHtml(selfNameRaw, _profileOwnerUsername);
+      var partnersHtml = partners.map(function(n,i){return _nameHtml(n,partnerUsers[i]||'');}).join(' &amp; ');
+      var myTeamHtml = [selfHtml2, partnersHtml].filter(Boolean).join(' &amp; ');
+      var oppTeams = teams.slice(1);
+      var oppTeamUsers = teamUsernames.slice(1);
+      var oppTeamsHtml = oppTeams.map(function(team,ti){
+        return team.map(function(n,ni){return _nameHtml(n,oppTeamUsers[ti]?oppTeamUsers[ti][ni]||'':'');}).join(' &amp; ');
+      }).filter(Boolean).join(' vs ');
+      return oppTeamsHtml ? (myTeamHtml + ' vs ' + oppTeamsHtml) : myTeamHtml;
+    })();
     // If oppName contains "vs", use the last person's initials (e.g. "Shibata Reyes vs Zachary Chen" → ZC)
     const oppParts = oppName.split(/\s+vs\.?\s+/i);
     const lastOpp = oppParts[oppParts.length - 1].trim();

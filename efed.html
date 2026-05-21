@@ -289,6 +289,7 @@ function getEmblemSVG(designId) {
     window._verifiedOwners = _verifiedOwners;
     window._badgeMap = _badgeMap;
     window.withVerified = withVerified;
+    window._badgeSvg = _badgeSvg;
   }
 
   const SB_HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
@@ -5073,8 +5074,15 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
       }
       chip.appendChild(avEl);
       const nameEl = document.createElement('div');
-      nameEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.75rem;letter-spacing:1.5px;color:#fff;text-align:center;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
-      nameEl.textContent = label.toUpperCase();
+      nameEl.style.cssText = "display:flex;align-items:center;justify-content:center;gap:3px;max-width:80px;overflow:hidden;";
+      const nameTxt = document.createElement('span');
+      nameTxt.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.75rem;letter-spacing:1.5px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+      nameTxt.textContent = label.toUpperCase();
+      nameEl.appendChild(nameTxt);
+      if (!isUnknown && !_isGhost && tok.username) {
+        const _nb = _mgmtBadgeFor(tok.username);
+        if (_nb) { const _ns=document.createElement('span');_ns.style.cssText='flex-shrink:0;display:inline-flex;';_ns.innerHTML=_nb;nameEl.appendChild(_ns); }
+      }
       chip.appendChild(nameEl);
       partRow.appendChild(chip);
     }
@@ -7916,7 +7924,7 @@ let _ram = { username: '', displayName: '', avatarUrl: null, rosterRowId: null, 
 function openRosterActionMenu(username, displayName, avatarUrl, rosterRowId, planNote) {
   _ram = { username, displayName, avatarUrl, rosterRowId, planNote };
   const nameEl = document.getElementById('ram-name');
-  if (nameEl) nameEl.textContent = displayName;
+  if (nameEl) nameEl.innerHTML = typeof withVerified==='function' ? withVerified(displayName, username, false) : (displayName||'');
   const bg = document.getElementById('roster-action-bg');
   const card = document.getElementById('roster-action-card');
   bg.style.display = 'flex';
@@ -10969,7 +10977,8 @@ async function loadRoster() {
 
 
 function openRemoveRosterConfirm(username, displayName, rosterRowId) {
-  document.getElementById('rmr-name').textContent = displayName;
+  const rmrNameEl = document.getElementById('rmr-name');
+  if (rmrNameEl) rmrNameEl.innerHTML = typeof withVerified==='function' ? withVerified(displayName, username, false) : (displayName||'');
   const efedNameEl = document.getElementById('rmr-efed-name');
   if (efedNameEl) efedNameEl.textContent = EFED_NAME;
   document.getElementById('rmr-modal-bg').style.display = 'flex';
@@ -13456,7 +13465,7 @@ function _ceUpdateSel() {
   if(!_champEditWrestler){if(disp)disp.style.display='none';_ceUpdateSaveBtn();return;}
   if(disp)disp.style.display='flex';
   if(avEl)avEl.innerHTML=_champEditWrestler.avatarUrl?`<img src="${_champEditWrestler.avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`:((_champEditWrestler.displayName[0])||'?').toUpperCase();
-  if(nameEl){nameEl.textContent=_champEditWrestler.displayName;nameEl.style.color='#fff';nameEl.style.fontStyle='';}
+  if(nameEl){nameEl.innerHTML=typeof withVerified==='function'?withVerified(_champEditWrestler.displayName,_champEditWrestler.username||'',false):(_champEditWrestler.displayName||'');nameEl.style.color='#fff';nameEl.style.fontStyle='';}
   _ceUpdateSaveBtn();
 }
 
@@ -13896,7 +13905,7 @@ function openSetChampModal(username, displayName, avatarUrl) {
     else av.textContent = (displayName||'?')[0].toUpperCase();
   }
   const nameEl = document.getElementById('set-champ-name');
-  if (nameEl) nameEl.textContent = displayName;
+  if (nameEl) nameEl.innerHTML = typeof withVerified==='function' ? withVerified(displayName, username, false) : (displayName||'');
   // Pre-fill if already a champion
   const existing = _champData.find(c => c.username === username);
   const input = document.getElementById('set-champ-input');
@@ -19498,8 +19507,8 @@ var _rdcTarget = null; // { username, displayName, rosterRowId }
 
 function _rdcOpen(username, displayName, rosterRowId) {
   _rdcTarget = { username: username, displayName: displayName, rosterRowId: rosterRowId };
-  document.getElementById('rdc-name').textContent = displayName;
-  document.getElementById('rdc-name2').textContent = displayName;
+  document.getElementById('rdc-name').innerHTML = typeof withVerified==='function' ? withVerified(displayName, username, false) : (displayName||'');
+  document.getElementById('rdc-name2').innerHTML = typeof withVerified==='function' ? withVerified(displayName, username, false) : (displayName||'');
   document.getElementById('rdc-step1').style.display = '';
   document.getElementById('rdc-step2').style.display = 'none';
   document.getElementById('rdc-modal-bg').style.display = 'flex';
@@ -20277,6 +20286,17 @@ function _mcBuildCompactCard(match, avatarMap) {
   return d;
 }
 
+
+/* ── Badge helper: returns just the badge SVG for a hub username, badge-first so name can truncate ── */
+function _mgmtBadgeFor(efedUsername) {
+  var uL = (efedUsername||'').toLowerCase();
+  if (!uL) return '';
+  if (typeof ADMIN_USERNAME !== 'undefined' && uL === ADMIN_USERNAME) return window._badgeSvg ? window._badgeSvg('creator') : '';
+  if (window._badgeMap && window._badgeMap[uL]) return window._badgeSvg ? window._badgeSvg(window._badgeMap[uL]) : '';
+  if (window._verifiedOwners && window._verifiedOwners.has(uL)) return window._badgeSvg ? window._badgeSvg('platinum') : '';
+  return '';
+}
+
 /* ── Persistence key (per-efed, per-user) ── */
 function _mgmtRosterKey() {
   var s = typeof getSession === 'function' ? getSession() : null;
@@ -20524,7 +20544,6 @@ function _mgmtMobileRenderList() {
     var actV = parseInt(m.activity||'0')||0;
     var efedUser = (m.efed_username||'').toLowerCase();
     var isOnline   = efedUser && _mgmtOnlineSet.has(efedUser);
-    var isVerified = efedUser && window._verifiedOwners && window._verifiedOwners.has(efedUser);
     var item = document.createElement('div'); item.className = 'mgmt-mob-item';
     item.onclick = function() { _mgmtMobileOpenDetail(r.id); };
     // Avatar
@@ -20534,14 +20553,11 @@ function _mgmtMobileRenderList() {
     // Info
     var info = document.createElement('div'); info.style.cssText='flex:1;min-width:0;';
     var nm = document.createElement('div'); nm.className='mgmt-mob-name';
-    nm.style.cssText='display:flex;align-items:center;gap:5px;';
-    var nameSpan = document.createElement('span'); nameSpan.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'; nameSpan.textContent=r.name+(r.championship?' 🏆':'');
+    nm.style.cssText='display:flex;align-items:center;gap:4px;overflow:hidden;';
+    var nameSpan = document.createElement('span'); nameSpan.style.cssText='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;'; nameSpan.textContent=r.name+(r.championship?' 🏆':'');
     nm.appendChild(nameSpan);
-    if (isVerified) {
-      var vBadge=document.createElement('span');vBadge.style.cssText='display:inline-flex;align-items:center;flex-shrink:0;';
-      vBadge.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(59,130,246,.15)" stroke="#3b82f6" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      nm.appendChild(vBadge);
-    }
+    var _mBdg = efedUser ? _mgmtBadgeFor(efedUser) : '';
+    if (_mBdg) { var _mBdgEl=document.createElement('span');_mBdgEl.style.cssText='flex-shrink:0;display:inline-flex;';_mBdgEl.innerHTML=_mBdg;nm.appendChild(_mBdgEl); }
     info.appendChild(nm);
     // Activity sub — owner only
     if (isOwner) {
@@ -21002,12 +21018,11 @@ function _mgmtDesktopRenderList() {
     } else { item.appendChild(av); }
     // Info
     var info = document.createElement('div'); info.style.cssText='flex:1;min-width:0;';
-    var nm = document.createElement('div'); nm.style.cssText='font-size:.88rem;font-weight:700;color:#e8e8e8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:4px;';
+    var nm = document.createElement('div'); nm.style.cssText='font-size:.88rem;font-weight:700;color:#e8e8e8;display:flex;align-items:center;gap:4px;overflow:hidden;';
     var efedUserD = (m.efed_username||'').toLowerCase();
     var nameHtml = (r.name||'')+(r.championship?' 🏆':'');
-    if (efedUserD && window._verifiedOwners && window._verifiedOwners.has(efedUserD)) {
-      nm.innerHTML = '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+nameHtml.replace(/</g,'&lt;')+'</span><svg style="flex-shrink:0;" width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(59,130,246,.15)" stroke="#3b82f6" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    } else { nm.textContent = nameHtml; }
+    var _dBdg = efedUserD ? _mgmtBadgeFor(efedUserD) : '';
+    nm.innerHTML = '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">'+nameHtml.replace(/</g,'&lt;')+'</span>' + (_dBdg ? '<span style="flex-shrink:0;display:inline-flex;">'+_dBdg+'</span>' : '');
     info.appendChild(nm);
     if (isOwner) { var sub=document.createElement('div');sub.style.cssText='font-size:.65rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:'+_ACT_COLORS[actV]+';margin-top:2px;';sub.textContent=_ACT_LABELS[actV];info.appendChild(sub); }
     item.appendChild(info);
@@ -21772,7 +21787,7 @@ function _mgmtShowQaDrop(results, inp, drop) {
     txt.style.cssText = 'flex:1;min-width:0;';
     var dn = document.createElement('div');
     dn.style.cssText = 'font-size:.8rem;font-weight:600;color:#e8e8e8;font-family:"DM Sans",sans-serif;';
-    dn.textContent = r.display_name || r.username;
+    dn.innerHTML = typeof withVerified==='function' ? withVerified(r.display_name||r.username, r.username, false) : (r.display_name||r.username);
     var un = document.createElement('div');
     un.style.cssText = 'font-size:.7rem;color:rgba(255,255,255,.38);font-family:"DM Sans",sans-serif;';
     un.textContent = '@' + r.username;
