@@ -4235,6 +4235,7 @@ let _rivalries = [];
 let _rrIsOwn = false;
 let _rrOwnerName = '';
 let _rrOwnerAvatarUrl = '';
+let _rrProfileUsername = ''; // profile page owner's hub username for badge lookups
 
 // ── legacy stubs (kept so any existing calls don't throw) ──
 let _recordEditIdx = null;
@@ -5370,6 +5371,24 @@ function _recordChampLabel(r) {
   return '';
 }
 
+// ── Badge helper for profile page (mirrors _mgmtBadgeFor in efed.html) ──
+function _prBadgeFor(username) {
+  var uL = (username||'').toLowerCase();
+  if (!uL || uL.startsWith('__ghost__') || uL === '__mystery__' || uL === '__multiple__') return '';
+  try {
+    if (typeof CHAT_ADMIN_USERNAME !== 'undefined' && uL === CHAT_ADMIN_USERNAME) return typeof CHAT_VERIFIED_BADGE_CREATOR !== 'undefined' ? CHAT_VERIFIED_BADGE_CREATOR : '';
+    if (typeof _chatBadgeMap !== 'undefined' && _chatBadgeMap[uL]) {
+      var t = _chatBadgeMap[uL];
+      if (t === 'creator'  && typeof CHAT_VERIFIED_BADGE_CREATOR  !== 'undefined') return CHAT_VERIFIED_BADGE_CREATOR;
+      if (t === 'legend'   && typeof CHAT_VERIFIED_BADGE_LEGEND    !== 'undefined') return CHAT_VERIFIED_BADGE_LEGEND;
+      if (t === 'platinum' && typeof CHAT_VERIFIED_BADGE_PLATINUM  !== 'undefined') return CHAT_VERIFIED_BADGE_PLATINUM;
+      if (t === 'gold'     && typeof CHAT_VERIFIED_BADGE_GOLD      !== 'undefined') return CHAT_VERIFIED_BADGE_GOLD;
+    }
+    if (typeof _chatVerifiedOwners !== 'undefined' && _chatVerifiedOwners.has(uL)) return typeof CHAT_VERIFIED_BADGE_PLATINUM !== 'undefined' ? CHAT_VERIFIED_BADGE_PLATINUM : '';
+  } catch(e) {}
+  return '';
+}
+
 // ── RENDER RECORDS as avatar banners ──
 function renderRecords() {
   const list    = document.getElementById('records-list');
@@ -5420,15 +5439,16 @@ function renderRecords() {
     // Detect if any opponent slot is __multiple__
     const isMultipleMatch = Array.isArray(r.slots) && r.slots.some(s => s.username === '__multiple__');
     // Build match title as HTML with verified badges for each wrestler
-    const _profileOwnerUsername = resolvedUser || new URLSearchParams(location.search).get('u') || '';
+    const _profileOwnerUsername = _rrProfileUsername || new URLSearchParams(location.search).get('u') || '';
     const matchDisplayName = (function() {
       // Build per-name HTML with verified badge using slot usernames
       function _nameHtml(name, username) {
         if (!name) return '';
         var escaped = (name||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        if (!username || username === '__mystery__' || username === '__multiple__') return escaped === 'Multiple' ? '<em style="color:rgba(255,255,255,.35);font-style:italic;font-weight:400;">Multiple</em>' : escaped;
-        var h = typeof withProfileVerified === 'function' ? withProfileVerified(name, username) : escaped;
-        return h;
+        if (!username || username === '__mystery__' || username === '__multiple__') return name === 'Multiple' ? '<em style="color:rgba(255,255,255,.35);font-style:italic;font-weight:400;">Multiple</em>' : escaped;
+        var bdg = _prBadgeFor(username);
+        if (!bdg) return escaped;
+        return escaped + '<span style="display:inline-flex;align-items:center;vertical-align:middle;margin-left:4px;flex-shrink:0;">' + bdg + '</span>';
       }
       if (!Array.isArray(r.slots) || !r.slots.length) {
         // Legacy: self vs opponents
@@ -5708,6 +5728,7 @@ function renderRecords() {
 // ── LOAD RECORDS ──
 async function loadCareerRecords(username, isOwn) {
   _rrIsOwn = isOwn;
+  _rrProfileUsername = username || '';
   _recViewAll = false; _recPage = 0;
   const addBtn = document.getElementById('record-add-btn');
   if (addBtn) addBtn.style.display = isOwn ? 'flex' : 'none';
@@ -10093,8 +10114,16 @@ async function loadAppearances(targetUser, isOwn) {
           }
           chip.appendChild(avEl);
           const nameEl = document.createElement('div');
-          nameEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.75rem;letter-spacing:1.5px;color:#fff;text-align:center;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
-          nameEl.textContent = label.toUpperCase();
+          const _pb = !isUnknown && tok.username ? _prBadgeFor(tok.username) : '';
+          if (_pb) {
+            nameEl.style.cssText = "display:flex;align-items:center;justify-content:center;gap:3px;max-width:90px;";
+            const _nTxt=document.createElement('span');_nTxt.style.cssText="font-family:'Bebas Neue',sans-serif;font-size:.75rem;letter-spacing:1.5px;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:68px;";_nTxt.textContent=label.toUpperCase();
+            const _bEl=document.createElement('span');_bEl.style.cssText='flex-shrink:0;display:inline-flex;';_bEl.innerHTML=_pb;
+            nameEl.appendChild(_nTxt);nameEl.appendChild(_bEl);
+          } else {
+            nameEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:.75rem;letter-spacing:1.5px;color:#fff;text-align:center;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+            nameEl.textContent = label.toUpperCase();
+          }
           chip.appendChild(nameEl);
           partRow.appendChild(chip);
         }
