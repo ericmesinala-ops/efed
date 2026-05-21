@@ -462,9 +462,6 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .on-roster-status-slug.exclusive {
   background: rgba(200,168,75,.1); border: 1px solid rgba(200,168,75,.28); color: rgba(200,168,75,.85);
 }
-.on-roster-status-slug.independent {
-  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); color: rgba(255,255,255,.4);
-}
 .identity-row-icons {
   display: flex; align-items: center; gap: 8px; flex-shrink: 0;
 }
@@ -2147,6 +2144,182 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 .champ-banner-del.mobile-show:active { background: rgba(192,0,14,.85) !important; color: #fff !important; }
 </style>
 
+
+<!-- ── ACHIEVEMENTS ── -->
+<div class="section" id="achievements-section" style="display:none;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <div class="sec-title" style="margin-bottom:0;flex:1;">Achievements</div>
+    <button id="ach-add-btn" onclick="achOpenModal(null)" style="display:none;align-items:center;gap:5px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.25);border-radius:8px;color:rgba(200,168,75,.7);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;padding:5px 11px;cursor:pointer;transition:background .15s;letter-spacing:.5px;" onmouseover="this.style.background='rgba(200,168,75,.2)'" onmouseout="this.style.background='rgba(200,168,75,.1)'">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add
+    </button>
+  </div>
+  <div id="achievements-list" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"></div>
+  <div id="achievements-empty" style="display:none;font-size:.8rem;color:rgba(255,255,255,.2);font-style:italic;font-family:'DM Sans',sans-serif;">No achievements yet.</div>
+</div>
+
+<style>
+/* ── ACHIEVEMENTS ── */
+.ach-card {
+  position: relative;
+  background: linear-gradient(135deg, rgba(255,255,255,.035) 0%, rgba(255,255,255,.015) 100%);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  padding: 14px 14px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+  transition: border-color .15s, background .15s;
+  cursor: default;
+  overflow: hidden;
+}
+.ach-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: 12px;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+}
+.ach-card.rarity-legendary { border-color: rgba(200,168,75,.3); background: linear-gradient(135deg, rgba(200,168,75,.07) 0%, rgba(200,168,75,.02) 100%); }
+.ach-card.rarity-legendary::before { background: radial-gradient(circle at 20% 20%, rgba(200,168,75,.12), transparent 60%); opacity: 1; }
+.ach-card.rarity-rare { border-color: rgba(139,92,246,.28); background: linear-gradient(135deg, rgba(139,92,246,.07) 0%, rgba(139,92,246,.02) 100%); }
+.ach-card.rarity-rare::before { background: radial-gradient(circle at 20% 20%, rgba(139,92,246,.12), transparent 60%); opacity: 1; }
+.ach-card.rarity-epic { border-color: rgba(59,130,246,.28); background: linear-gradient(135deg, rgba(59,130,246,.07) 0%, rgba(59,130,246,.02) 100%); }
+.ach-card.rarity-epic::before { background: radial-gradient(circle at 20% 20%, rgba(59,130,246,.12), transparent 60%); opacity: 1; }
+.ach-card-icon {
+  font-size: 1.5rem; line-height: 1; margin-bottom: 2px; position: relative; z-index: 1;
+}
+.ach-card-title {
+  font-family: 'Bebas Neue', sans-serif; font-size: .95rem; letter-spacing: 1.5px;
+  color: #e8e8e8; line-height: 1.1; position: relative; z-index: 1;
+}
+.ach-card.rarity-legendary .ach-card-title { color: #c8a84b; }
+.ach-card.rarity-rare .ach-card-title { color: rgba(167,139,250,.9); }
+.ach-card.rarity-epic .ach-card-title { color: rgba(96,165,250,.9); }
+.ach-card-desc {
+  font-family: 'DM Sans', sans-serif; font-size: .68rem; color: rgba(255,255,255,.45);
+  line-height: 1.45; position: relative; z-index: 1;
+}
+.ach-card-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 4px; position: relative; z-index: 1;
+}
+.ach-card-rarity {
+  font-family: 'DM Sans', sans-serif; font-size: .55rem; font-weight: 700;
+  letter-spacing: 1.2px; text-transform: uppercase; opacity: .5;
+}
+.ach-card-date {
+  font-family: 'DM Sans', sans-serif; font-size: .58rem; color: rgba(255,255,255,.22);
+}
+.ach-card-edit-btn {
+  position: absolute; top: 8px; right: 8px;
+  background: none; border: none; padding: 4px; cursor: pointer;
+  color: rgba(255,255,255,.0); transition: color .15s; border-radius: 5px; z-index: 2;
+}
+.ach-card:hover .ach-card-edit-btn { color: rgba(255,255,255,.35); }
+@media (max-width: 520px) {
+  #achievements-list { grid-template-columns: 1fr; }
+}
+
+/* ── ACHIEVEMENT MODAL ── */
+#ach-modal-bg {
+  display: none; position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,.75); backdrop-filter: blur(8px);
+  align-items: center; justify-content: center; padding: 20px;
+}
+#ach-modal-bg.open { display: flex; }
+#ach-modal {
+  background: #111118; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 16px; padding: 22px 20px 18px;
+  width: 100%; max-width: 360px; box-shadow: 0 24px 64px rgba(0,0,0,.9);
+}
+.ach-modal-title {
+  font-family: 'Bebas Neue', sans-serif; font-size: 1.1rem; letter-spacing: 2px;
+  color: #e8e8e8; margin-bottom: 16px;
+}
+.ach-modal-row { margin-bottom: 12px; }
+.ach-modal-lbl {
+  font-family: 'DM Sans', sans-serif; font-size: .6rem; font-weight: 700;
+  letter-spacing: 1px; text-transform: uppercase; color: rgba(255,255,255,.3);
+  margin-bottom: 5px;
+}
+.ach-modal-inp {
+  width: 100%; box-sizing: border-box;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px; padding: 9px 11px;
+  color: #e8e8e8; font-family: 'DM Sans', sans-serif; font-size: .85rem;
+  outline: none; transition: border-color .15s;
+}
+.ach-modal-inp:focus { border-color: rgba(200,168,75,.4); }
+.ach-modal-sel {
+  width: 100%; box-sizing: border-box;
+  background: #0e0e12; border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px; padding: 9px 11px;
+  color: #e8e8e8; font-family: 'DM Sans', sans-serif; font-size: .85rem;
+  outline: none; cursor: pointer; -webkit-appearance: none; appearance: none;
+  transition: border-color .15s;
+}
+.ach-modal-sel:focus { border-color: rgba(200,168,75,.4); }
+.ach-icon-row {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+}
+.ach-icon-opt {
+  width: 36px; height: 36px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1);
+  background: rgba(255,255,255,.04); display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; cursor: pointer; transition: border-color .15s, background .15s;
+}
+.ach-icon-opt:hover, .ach-icon-opt.selected { border-color: rgba(200,168,75,.5); background: rgba(200,168,75,.12); }
+</style>
+
+<!-- Achievement Modal -->
+<div id="ach-modal-bg" onclick="if(event.target===this)achCloseModal()">
+  <div id="ach-modal">
+    <div class="ach-modal-title" id="ach-modal-heading">New Achievement</div>
+    <div class="ach-modal-row">
+      <div class="ach-modal-lbl">Icon</div>
+      <div class="ach-icon-row" id="ach-icon-row">
+        <div class="ach-icon-opt" data-icon="🏆" onclick="achSelectIcon(this)">🏆</div>
+        <div class="ach-icon-opt" data-icon="⚡" onclick="achSelectIcon(this)">⚡</div>
+        <div class="ach-icon-opt" data-icon="🔥" onclick="achSelectIcon(this)">🔥</div>
+        <div class="ach-icon-opt" data-icon="👑" onclick="achSelectIcon(this)">👑</div>
+        <div class="ach-icon-opt" data-icon="⭐" onclick="achSelectIcon(this)">⭐</div>
+        <div class="ach-icon-opt" data-icon="🎯" onclick="achSelectIcon(this)">🎯</div>
+        <div class="ach-icon-opt" data-icon="💎" onclick="achSelectIcon(this)">💎</div>
+        <div class="ach-icon-opt" data-icon="🛡️" onclick="achSelectIcon(this)">🛡️</div>
+        <div class="ach-icon-opt" data-icon="⚔️" onclick="achSelectIcon(this)">⚔️</div>
+        <div class="ach-icon-opt" data-icon="🎖️" onclick="achSelectIcon(this)">🎖️</div>
+        <div class="ach-icon-opt" data-icon="🌟" onclick="achSelectIcon(this)">🌟</div>
+        <div class="ach-icon-opt" data-icon="🏅" onclick="achSelectIcon(this)">🏅</div>
+      </div>
+    </div>
+    <div class="ach-modal-row">
+      <div class="ach-modal-lbl">Title</div>
+      <input id="ach-inp-title" class="ach-modal-inp" type="text" maxlength="40" placeholder="e.g. Grand Slam Champion">
+    </div>
+    <div class="ach-modal-row">
+      <div class="ach-modal-lbl">Description</div>
+      <textarea id="ach-inp-desc" class="ach-modal-inp" rows="2" maxlength="120" placeholder="What makes this special…" style="resize:none;"></textarea>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div class="ach-modal-row" style="margin-bottom:0;">
+        <div class="ach-modal-lbl">Rarity</div>
+        <select id="ach-inp-rarity" class="ach-modal-sel">
+          <option value="standard" style="background:#0e0e12;">Standard</option>
+          <option value="epic" style="background:#0e0e12;">Epic</option>
+          <option value="rare" style="background:#0e0e12;">Rare</option>
+          <option value="legendary" style="background:#0e0e12;">Legendary</option>
+        </select>
+      </div>
+      <div class="ach-modal-row" style="margin-bottom:0;">
+        <div class="ach-modal-lbl">Year</div>
+        <input id="ach-inp-date" class="ach-modal-inp" type="text" maxlength="4" placeholder="2025" inputmode="numeric">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:18px;">
+      <button onclick="achCloseModal()" style="flex:1;padding:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:9px;color:rgba(255,255,255,.45);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Cancel</button>
+      <button id="ach-delete-btn" onclick="achDelete()" style="display:none;padding:10px 14px;background:rgba(192,0,14,.1);border:1px solid rgba(192,0,14,.2);border-radius:9px;color:rgba(255,100,100,.5);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;">Delete</button>
+      <button onclick="achSave()" style="flex:2;padding:10px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:9px;color:#c8a84b;font-family:'Bebas Neue',sans-serif;font-size:.95rem;letter-spacing:1.5px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='rgba(200,168,75,.25)'" onmouseout="this.style.background='rgba(200,168,75,.15)'">Save</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── MY EFEDS (Part of / Roster) ── -->
 <div class="section">
@@ -10931,6 +11104,125 @@ async function autosaveBio(el) {
   }
 }
 
+// ── ACHIEVEMENTS ──────────────────────────────────────────────────────────────
+let _achievements = [];
+let _achEditIdx = null;
+let _achSelectedIcon = '🏆';
+let _achIsOwn = false;
+
+async function loadAchievements(targetUser, isOwn) {
+  _achIsOwn = isOwn;
+  const sec = document.getElementById('achievements-section');
+  const addBtn = document.getElementById('ach-add-btn');
+  if (!sec) return;
+  if (addBtn) addBtn.style.display = isOwn ? 'flex' : 'none';
+  try {
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(targetUser)}&select=profile_achievements`);
+    _achievements = Array.isArray(rows[0]?.profile_achievements) ? rows[0].profile_achievements : [];
+  } catch(e) { _achievements = []; }
+  renderAchievements();
+}
+
+function renderAchievements() {
+  const sec = document.getElementById('achievements-section');
+  const list = document.getElementById('achievements-list');
+  const empty = document.getElementById('achievements-empty');
+  if (!sec || !list) return;
+  if (!_achievements.length && !_achIsOwn) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  if (!_achievements.length) {
+    list.innerHTML = ''; if (empty) empty.style.display = 'block'; return;
+  }
+  if (empty) empty.style.display = 'none';
+  const _rarityColor = { legendary: '#c8a84b', rare: 'rgba(167,139,250,.85)', epic: 'rgba(96,165,250,.85)', standard: 'rgba(255,255,255,.45)' };
+  list.innerHTML = '';
+  _achievements.forEach((a, i) => {
+    const card = document.createElement('div');
+    card.className = 'ach-card' + (a.rarity && a.rarity !== 'standard' ? ' rarity-' + a.rarity : '');
+    // Edit button (owner only)
+    if (_achIsOwn) {
+      const editBtn = document.createElement('button');
+      editBtn.className = 'ach-card-edit-btn';
+      editBtn.title = 'Edit';
+      editBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+      editBtn.onclick = (e) => { e.stopPropagation(); achOpenModal(i); };
+      card.appendChild(editBtn);
+    }
+    const iconEl = document.createElement('div'); iconEl.className = 'ach-card-icon'; iconEl.textContent = a.icon || '🏆'; card.appendChild(iconEl);
+    const titleEl = document.createElement('div'); titleEl.className = 'ach-card-title'; titleEl.textContent = a.title || ''; card.appendChild(titleEl);
+    if (a.description) { const descEl = document.createElement('div'); descEl.className = 'ach-card-desc'; descEl.textContent = a.description; card.appendChild(descEl); }
+    const footer = document.createElement('div'); footer.className = 'ach-card-footer';
+    const rarityEl = document.createElement('div'); rarityEl.className = 'ach-card-rarity';
+    rarityEl.style.color = _rarityColor[a.rarity] || _rarityColor.standard;
+    rarityEl.textContent = a.rarity ? a.rarity.charAt(0).toUpperCase() + a.rarity.slice(1) : 'Standard';
+    footer.appendChild(rarityEl);
+    if (a.date) { const dateEl = document.createElement('div'); dateEl.className = 'ach-card-date'; dateEl.textContent = a.date; footer.appendChild(dateEl); }
+    card.appendChild(footer);
+    list.appendChild(card);
+  });
+}
+
+function achOpenModal(idx) {
+  _achEditIdx = idx;
+  const heading = document.getElementById('ach-modal-heading');
+  const delBtn = document.getElementById('ach-delete-btn');
+  const a = idx !== null ? _achievements[idx] : {};
+  if (heading) heading.textContent = idx !== null ? 'Edit Achievement' : 'New Achievement';
+  if (delBtn) delBtn.style.display = idx !== null ? 'block' : 'none';
+  document.getElementById('ach-inp-title').value = a.title || '';
+  document.getElementById('ach-inp-desc').value = a.description || '';
+  document.getElementById('ach-inp-date').value = a.date || '';
+  document.getElementById('ach-inp-rarity').value = a.rarity || 'standard';
+  _achSelectedIcon = a.icon || '🏆';
+  document.querySelectorAll('.ach-icon-opt').forEach(el => {
+    el.classList.toggle('selected', el.dataset.icon === _achSelectedIcon);
+  });
+  document.getElementById('ach-modal-bg').classList.add('open');
+}
+
+function achCloseModal() {
+  document.getElementById('ach-modal-bg').classList.remove('open');
+}
+
+function achSelectIcon(el) {
+  _achSelectedIcon = el.dataset.icon;
+  document.querySelectorAll('.ach-icon-opt').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+async function achSave() {
+  const title = document.getElementById('ach-inp-title').value.trim();
+  if (!title) { document.getElementById('ach-inp-title').style.borderColor = '#c0000e'; setTimeout(() => { document.getElementById('ach-inp-title').style.borderColor = ''; }, 1200); return; }
+  const entry = {
+    id: (_achEditIdx !== null && _achievements[_achEditIdx]?.id) ? _achievements[_achEditIdx].id : Date.now().toString(36),
+    icon: _achSelectedIcon,
+    title,
+    description: document.getElementById('ach-inp-desc').value.trim(),
+    rarity: document.getElementById('ach-inp-rarity').value,
+    date: document.getElementById('ach-inp-date').value.trim().slice(0,4)
+  };
+  if (_achEditIdx !== null) { _achievements[_achEditIdx] = entry; }
+  else { _achievements.push(entry); }
+  achCloseModal();
+  await achPersist();
+}
+
+async function achDelete() {
+  if (_achEditIdx === null) return;
+  if (!confirm('Delete this achievement?')) return;
+  _achievements.splice(_achEditIdx, 1);
+  achCloseModal();
+  await achPersist();
+}
+
+async function achPersist() {
+  const session = getSession(); if (!session) return;
+  renderAchievements();
+  try {
+    await sbUpdate('users', { profile_achievements: _achievements }, `username=eq.${encodeURIComponent(session.username)}`);
+  } catch(e) { showToast('Could not save achievements.'); }
+}
+
 function renderChampionships(championships) {
   const sec = document.getElementById('title-section');
   const display = document.getElementById('championships-display');
@@ -12595,6 +12887,7 @@ async function _loadPublicProfile(username) {
     loadRivalries(username, false);
     loadSocialFeed(username, false);
     loadTrophyCase(username);
+    loadAchievements(username, false);
     loadFeaturedVideos(username);
     // Voice Promos (visitor view)
     try { await _vp.load(username, false, {}); } catch(e) {}
@@ -13757,8 +14050,8 @@ async function loadProfile() {
       if (ownerData && (ownerData.is_efed_owner || ownerData.role === 'owner') && ownerData.promo_name) {
         _ownerEfedName = ownerData.promo_name;
         _atrTargetUsername = resolvedUser;
-        // Check if already on roster, fetch plan_note for status_exclusive
-        const onRoster = await sbGet('roster', `efed=eq.${encodeURIComponent(_ownerEfedName)}&username=eq.${encodeURIComponent(resolvedUser)}&select=id,status,plan_note`);
+        // Check if already on roster
+        const onRoster = await sbGet('roster', `efed=eq.${encodeURIComponent(_ownerEfedName)}&username=eq.${encodeURIComponent(resolvedUser)}&select=id,status`);
         const addBtn = document.getElementById('add-to-roster-btn');
         if (addBtn) {
           if (onRoster.length) {
@@ -13766,15 +14059,23 @@ async function loadProfile() {
             const badge = document.getElementById('on-roster-badge');
             if (badge) badge.classList.add('visible');
             addBtn.style.display = 'none';
-            // Status slug — Exclusive or Independent — visible to everyone
+            // Status: read from fsw_management_data (where status_exclusive is actually stored)
             const slug = document.getElementById('on-roster-status-slug');
             if (slug) {
-              let pn = {}; try { pn = typeof onRoster[0].plan_note === 'string' ? JSON.parse(onRoster[0].plan_note) : (onRoster[0].plan_note || {}); } catch(e) {}
-              const isExclusive = !!(pn.status_exclusive);
-              const _acr = (ownerData.acronym || '').trim() || _ownerEfedName;
-              const dot = `<span style="width:5px;height:5px;border-radius:50%;flex-shrink:0;background:${isExclusive?'#c8a84b':'rgba(255,255,255,.35)'};display:inline-block;"></span>`;
-              slug.innerHTML = dot + (isExclusive ? ('Exclusive — ' + _acr) : 'Independent');
-              slug.className = 'on-roster-status-slug visible ' + (isExclusive ? 'exclusive' : 'independent');
+              try {
+                const mgmtRows = await sbGet('fsw_management_data', `username=eq.${encodeURIComponent(session.username)}&limit=1`);
+                const rosterMgmt = mgmtRows[0]?.roster_mgmt || {};
+                // Find the entry whose efed_username matches the profile being viewed
+                const mgmtEntry = Object.values(rosterMgmt).find(e => (e.efed_username||'').toLowerCase() === resolvedUser.toLowerCase());
+                const isExclusive = !!(mgmtEntry?.status_exclusive);
+                if (isExclusive) {
+                  const _acr = (ownerData.acronym || '').trim() || _ownerEfedName;
+                  const dot = `<span style="width:5px;height:5px;border-radius:50%;flex-shrink:0;background:#c8a84b;display:inline-block;"></span>`;
+                  slug.innerHTML = dot + 'Exclusive — ' + _acr;
+                  slug.className = 'on-roster-status-slug visible exclusive';
+                }
+                // If Independent: show nothing (no slug)
+              } catch(e2) {}
             }
           } else {
             addBtn.style.display = 'flex';
@@ -13808,7 +14109,7 @@ async function loadProfile() {
   try {
     let users;
     try {
-      users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,spotify_handle,discord_handle,facebook_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,age,hometown,alignment,faction,entrance_music,moveset,points,credits,hours_watched,is_efed_owner,show_ovr_ratings`);
+      users = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=username,display_name,is_verified,role,promo_name,ig_handle,x_handle,twitch_channel,reddit_handle,spotify_handle,discord_handle,facebook_handle,auto_stream,open_for_signings,bio,title_name,title_efed,title_date_won,championships,nickname,height,weight,age,hometown,alignment,faction,entrance_music,moveset,points,credits,hours_watched,is_efed_owner,show_ovr_ratings,profile_achievements`);
     } catch(e) {
       // One or more columns may not exist yet — progressively fall back
       const missing = ['spotify_handle','discord_handle','facebook_handle','height','weight','hometown','nickname','alignment','faction','entrance_music','moveset'];
@@ -13905,6 +14206,7 @@ async function loadProfile() {
     loadRivalries(resolvedUser, _isOwnProfile);
     loadSocialFeed(resolvedUser, _isOwnProfile);
     loadTrophyCase(resolvedUser);
+    loadAchievements(resolvedUser, _isOwnProfile);
     // ── Voice Promos ──
     try {
       const cdRow = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=vp_cooldown`);
