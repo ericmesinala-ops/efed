@@ -20288,6 +20288,23 @@ function _mcBuildCompactCard(match, avatarMap) {
 
 
 /* ── Badge helper: returns just the badge SVG for a hub username, badge-first so name can truncate ── */
+/* ── Shared owner-only lock icon SVG ── */
+var _MGMT_LOCK_SVG = '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+
+/* ── Builds the subtle owner-only legend strip ── */
+function _mgmtOwnerLegend() {
+  var leg = document.createElement('div');
+  leg.style.cssText = 'display:flex;align-items:center;gap:5px;margin-top:24px;padding:8px 12px;border-radius:7px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);';
+  var lIcon = document.createElement('span');
+  lIcon.style.cssText = 'color:rgba(255,255,255,.22);flex-shrink:0;display:inline-flex;';
+  lIcon.innerHTML = _MGMT_LOCK_SVG;
+  var lText = document.createElement('span');
+  lText.style.cssText = 'font-family:"DM Sans",sans-serif;font-size:.58rem;color:rgba(255,255,255,.2);font-style:italic;line-height:1.4;';
+  lText.textContent = 'Fields marked with a lock are visible only to you (the eFed owner) — they are never shown to roster members or the public.';
+  leg.appendChild(lIcon); leg.appendChild(lText);
+  return leg;
+}
+
 function _mgmtBadgeFor(efedUsername) {
   var uL = (efedUsername||'').toLowerCase();
   if (!uL) return '';
@@ -20429,7 +20446,7 @@ async function mgmtRosterSave() {
 
 /* ── Helper: get/set mgmt object ── */
 function _mgmtGetMgmt(id) {
-  if (!_mgmtRosterMgmt[id]) _mgmtRosterMgmt[id] = { downloaded:false, tags:'', rating:'', contact:'', twitter_handle:'', instagram_handle:'', nickname:'', weight:'', height:'', age:'', hometown:'', faction:'', created:false, entrance_link:'', notes:'', efed_username:'', avatar_url:'', activity:'0', mic:'', in_ring:'', look:'', selling:'', member_since:'', hashtag1:'', hashtag2:'', hashtag3:'', debut_show:'', card_number:'' };
+  if (!_mgmtRosterMgmt[id]) _mgmtRosterMgmt[id] = { downloaded:false, tags:'', rating:'', contact:'', twitter_handle:'', instagram_handle:'', nickname:'', weight:'', height:'', age:'', hometown:'', faction:'', created:false, entrance_link:'', notes:'', efed_username:'', avatar_url:'', activity:'0', mic:'', in_ring:'', look:'', selling:'', member_since:'', hashtag1:'', hashtag2:'', hashtag3:'', debut_show:'', card_number:'', downloaded_caw:false };
   return _mgmtRosterMgmt[id];
 }
 function _mgmtSetMgmt(id, field, val) { _mgmtGetMgmt(id)[field] = val; }
@@ -20863,7 +20880,7 @@ function _mgmtMobileOpenDetail(id) {
     var mobHtWrap=document.createElement('div');mobHtWrap.className='mgmt-mob-field';
     var mobHtLbl=document.createElement('div');mobHtLbl.className='mgmt-mob-field-lbl';mobHtLbl.textContent='HASHTAGS';
     var mobHtOnlyYou=document.createElement('div');mobHtOnlyYou.style.cssText='display:flex;align-items:center;gap:3px;font-size:.58rem;color:rgba(255,255,255,.2);font-family:"DM Sans",sans-serif;margin-top:3px;';
-    mobHtOnlyYou.innerHTML='<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Only you can see this';
+    mobHtOnlyYou.innerHTML=_MGMT_LOCK_SVG+'Only you can see this';
     mobHtWrap.appendChild(mobHtLbl);
     if (editMode) {
       var mobHtRow=document.createElement('div');mobHtRow.style.cssText='display:flex;gap:8px;';
@@ -20941,14 +20958,34 @@ function _mgmtMobileOpenDetail(id) {
     overlay.appendChild(msViewWrap);
   }
 
-  /* Owner-only: notes + delete (edit mode only) */
+  /* Owner-only: notes + downloaded CAW + legend */
   if (isOwner && editMode) {
     var notesWrap = document.createElement('div'); notesWrap.className='mgmt-mob-field';
+    var notesHdr = document.createElement('div'); notesHdr.style.cssText='display:flex;align-items:center;gap:5px;';
     var notesLbl = document.createElement('div'); notesLbl.className='mgmt-mob-field-lbl'; notesLbl.textContent='NOTES';
+    var notesLockEl = document.createElement('span'); notesLockEl.style.cssText='color:rgba(255,255,255,.18);display:inline-flex;'; notesLockEl.innerHTML=_MGMT_LOCK_SVG;
+    notesHdr.appendChild(notesLbl); notesHdr.appendChild(notesLockEl);
     var notesTa = document.createElement('textarea'); notesTa.className='mgmt-mob-inp'; notesTa.rows=4; notesTa.value=m.notes||''; notesTa.placeholder='Private notes about this wrestler…'; notesTa.style.cssText='resize:vertical;width:100%;box-sizing:border-box;';
     notesTa.oninput=function(){_mgmtSetMgmt(id,'notes',notesTa.value);};
-    notesWrap.appendChild(notesLbl); notesWrap.appendChild(notesTa);
-    /* Delete icon button — right-aligned, below notes */
+    notesWrap.appendChild(notesHdr); notesWrap.appendChild(notesTa);
+    overlay.appendChild(notesWrap);
+
+    /* Downloaded Updated CAW checkbox */
+    var cawMobWrap=document.createElement('div');cawMobWrap.style.cssText='padding:12px 16px;display:flex;align-items:center;gap:10px;';
+    var cawMobChk=document.createElement('input');cawMobChk.type='checkbox';cawMobChk.id='mob-caw-chk-'+id;cawMobChk.checked=!!(m.downloaded_caw);
+    cawMobChk.style.cssText='width:16px;height:16px;accent-color:#c8a84b;cursor:pointer;flex-shrink:0;';
+    cawMobChk.onchange=function(){_mgmtSetMgmt(id,'downloaded_caw',cawMobChk.checked);};
+    var cawMobLblWrap=document.createElement('div');cawMobLblWrap.style.cssText='display:flex;flex-direction:column;gap:2px;';
+    var cawMobLbl=document.createElement('label');cawMobLbl.htmlFor='mob-caw-chk-'+id;cawMobLbl.style.cssText='font-family:"DM Sans",sans-serif;font-size:.85rem;font-weight:600;color:rgba(255,255,255,.65);cursor:pointer;';cawMobLbl.textContent='Downloaded Updated CAW';
+    var cawMobSub=document.createElement('div');cawMobSub.style.cssText='display:flex;align-items:center;gap:3px;font-size:.6rem;color:rgba(255,255,255,.2);font-family:"DM Sans",sans-serif;';cawMobSub.innerHTML=_MGMT_LOCK_SVG+'Only you can see this';
+    cawMobLblWrap.appendChild(cawMobLbl);cawMobLblWrap.appendChild(cawMobSub);
+    cawMobWrap.appendChild(cawMobChk);cawMobWrap.appendChild(cawMobLblWrap);
+    overlay.appendChild(cawMobWrap);
+
+    /* Legend */
+    var mobLeg = _mgmtOwnerLegend(); mobLeg.style.margin='8px 16px 24px'; overlay.appendChild(mobLeg);
+
+    /* Delete button */
     var delRow = document.createElement('div'); delRow.style.cssText='display:flex;justify-content:flex-end;padding:10px 16px 32px;';
     var delIconBtn = document.createElement('button');
     delIconBtn.style.cssText='background:rgba(192,0,14,.08);border:1px solid rgba(192,0,14,.25);border-radius:9px;color:rgba(255,100,100,.5);padding:9px 13px;cursor:pointer;display:flex;align-items:center;gap:6px;font-family:"DM Sans",sans-serif;font-size:.72rem;font-weight:700;transition:all .15s;';
@@ -20963,8 +21000,31 @@ function _mgmtMobileOpenDetail(id) {
       _mgmtMobileBack();
     };
     delRow.appendChild(delIconBtn);
-    overlay.appendChild(notesWrap);
     overlay.appendChild(delRow);
+  } else if (isOwner) {
+    /* View mode: plain text notes */
+    var mobNotesViewWrap=document.createElement('div');mobNotesViewWrap.className='mgmt-mob-field';
+    var mobNotesViewHdr=document.createElement('div');mobNotesViewHdr.style.cssText='display:flex;align-items:center;gap:5px;';
+    var mobNotesViewLbl=document.createElement('div');mobNotesViewLbl.className='mgmt-mob-field-lbl';mobNotesViewLbl.textContent='NOTES';
+    var mobNotesLockEl=document.createElement('span');mobNotesLockEl.style.cssText='color:rgba(255,255,255,.18);display:inline-flex;';mobNotesLockEl.innerHTML=_MGMT_LOCK_SVG;
+    mobNotesViewHdr.appendChild(mobNotesViewLbl);mobNotesViewHdr.appendChild(mobNotesLockEl);
+    var mobNotesViewTxt=document.createElement('div');mobNotesViewTxt.style.cssText='font-family:"DM Sans",sans-serif;font-size:.85rem;color:rgba(255,255,255,.55);line-height:1.6;white-space:pre-wrap;word-break:break-word;margin-top:6px;';
+    mobNotesViewTxt.textContent=m.notes||'—';
+    mobNotesViewWrap.appendChild(mobNotesViewHdr);mobNotesViewWrap.appendChild(mobNotesViewTxt);
+    overlay.appendChild(mobNotesViewWrap);
+
+    /* Downloaded CAW — view mode */
+    var cawVWrap=document.createElement('div');cawVWrap.style.cssText='padding:10px 16px;display:flex;align-items:center;gap:10px;';
+    var cawVIcon=document.createElement('div');cawVIcon.style.cssText='width:16px;height:16px;border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:'+(m.downloaded_caw?'rgba(200,168,75,.2)':'rgba(255,255,255,.05)')+';border:1px solid '+(m.downloaded_caw?'rgba(200,168,75,.4)':'rgba(255,255,255,.12)')+';';
+    cawVIcon.innerHTML=m.downloaded_caw?'<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':'';
+    var cawVTxt=document.createElement('div');cawVTxt.style.cssText='display:flex;flex-direction:column;gap:2px;';
+    var cawVLbl=document.createElement('div');cawVLbl.style.cssText='font-family:"DM Sans",sans-serif;font-size:.85rem;font-weight:600;color:'+(m.downloaded_caw?'rgba(200,168,75,.8)':'rgba(255,255,255,.3)')+';';cawVLbl.textContent='Downloaded Updated CAW';
+    var cawVSub=document.createElement('div');cawVSub.style.cssText='display:flex;align-items:center;gap:3px;font-size:.6rem;color:rgba(255,255,255,.2);font-family:"DM Sans",sans-serif;';cawVSub.innerHTML=_MGMT_LOCK_SVG+'Only you can see this';
+    cawVTxt.appendChild(cawVLbl);cawVTxt.appendChild(cawVSub);cawVWrap.appendChild(cawVIcon);cawVWrap.appendChild(cawVTxt);
+    overlay.appendChild(cawVWrap);
+
+    /* Legend */
+    var mobLegV = _mgmtOwnerLegend(); mobLegV.style.margin='8px 16px 32px'; overlay.appendChild(mobLegV);
   }
 
   document.body.appendChild(overlay);
@@ -21440,7 +21500,7 @@ function _mgmtDesktopRenderDetail(id) {
     var htHdr=document.createElement('div');htHdr.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px;';
     var htLbl=document.createElement('div');htLbl.style.cssText='font-size:.52rem;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,.3);';htLbl.textContent='HASHTAGS';
     var htOnlyYou=document.createElement('div');htOnlyYou.style.cssText='display:flex;align-items:center;gap:3px;font-size:.52rem;color:rgba(255,255,255,.18);font-family:"DM Sans",sans-serif;margin-left:auto;white-space:nowrap;';
-    htOnlyYou.innerHTML='<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Only you can see this';
+    htOnlyYou.innerHTML=_MGMT_LOCK_SVG+'Only you can see this';
     htHdr.appendChild(htLbl);htHdr.appendChild(htOnlyYou);htWrap.appendChild(htHdr);
     if (editMode) {
       var htRow=document.createElement('div');htRow.style.cssText='display:flex;gap:8px;flex-wrap:wrap;';
@@ -21508,21 +21568,47 @@ function _mgmtDesktopRenderDetail(id) {
   /* — Notes — */
   if (editMode) {
     var nw=document.createElement('div');nw.style.cssText='margin-bottom:8px;';
-    var nl=document.createElement('div');nl.style.cssText='font-size:.52rem;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:8px;';nl.textContent='NOTES';
+    var nlHdr=document.createElement('div');nlHdr.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:8px;';
+    var nl=document.createElement('div');nl.style.cssText='font-size:.52rem;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,.3);';nl.textContent='NOTES';
+    var nlLock=document.createElement('span');nlLock.style.cssText='color:rgba(255,255,255,.18);display:inline-flex;';nlLock.innerHTML=_MGMT_LOCK_SVG;
+    nlHdr.appendChild(nl);nlHdr.appendChild(nlLock);
     var nta=document.createElement('textarea');nta.className='mgmt-mob-inp';nta.rows=3;nta.value=m.notes||'';nta.placeholder='Private notes…';nta.style.resize='vertical';nta.oninput=function(){_mgmtSetMgmt(id,'notes',nta.value);};
-    nw.appendChild(nl);nw.appendChild(nta);wrap.appendChild(nw);
+    nw.appendChild(nlHdr);nw.appendChild(nta);wrap.appendChild(nw);
+
+    /* — Downloaded Updated CAW checkbox (owner-only) — */
+    if (isOwner) {
+      var cawWrap=document.createElement('div');cawWrap.style.cssText='margin-bottom:16px;display:flex;align-items:center;gap:10px;';
+      var cawChk=document.createElement('input');cawChk.type='checkbox';cawChk.id='caw-chk-'+id;cawChk.checked=!!(m.downloaded_caw);
+      cawChk.style.cssText='width:15px;height:15px;accent-color:#c8a84b;cursor:pointer;flex-shrink:0;';
+      cawChk.onchange=function(){_mgmtSetMgmt(id,'downloaded_caw',cawChk.checked);};
+      var cawLblWrap=document.createElement('div');cawLblWrap.style.cssText='display:flex;flex-direction:column;gap:2px;';
+      var cawLbl=document.createElement('label');cawLbl.htmlFor='caw-chk-'+id;cawLbl.style.cssText='font-family:"DM Sans",sans-serif;font-size:.8rem;font-weight:600;color:rgba(255,255,255,.65);cursor:pointer;';cawLbl.textContent='Downloaded Updated CAW';
+      var cawSub=document.createElement('div');cawSub.style.cssText='display:flex;align-items:center;gap:3px;font-size:.58rem;color:rgba(255,255,255,.2);font-family:"DM Sans",sans-serif;';cawSub.innerHTML=_MGMT_LOCK_SVG+'Only you can see this';
+      cawLblWrap.appendChild(cawLbl);cawLblWrap.appendChild(cawSub);
+      cawWrap.appendChild(cawChk);cawWrap.appendChild(cawLblWrap);wrap.appendChild(cawWrap);
+    }
   } else if (isOwner) {
     /* Notes visible in view mode — owner only, lock icon */
     var nwView=document.createElement('div');nwView.style.cssText='margin-bottom:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:20px;';
     var nlViewHdr=document.createElement('div');nlViewHdr.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:8px;';
     var nlViewLbl=document.createElement('div');nlViewLbl.style.cssText='font-size:.52rem;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,.3);';nlViewLbl.textContent='NOTES';
-    var lockNote=document.createElement('div');lockNote.style.cssText='display:flex;align-items:center;gap:4px;font-size:.55rem;color:rgba(255,255,255,.18);font-family:"DM Sans",sans-serif;margin-left:auto;';
-    lockNote.innerHTML='<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Only you can see this';
+    var lockNote=document.createElement('span');lockNote.style.cssText='color:rgba(255,255,255,.18);display:inline-flex;';lockNote.innerHTML=_MGMT_LOCK_SVG;
     nlViewHdr.appendChild(nlViewLbl);nlViewHdr.appendChild(lockNote);
-    var ntaView=document.createElement('textarea');ntaView.className='mgmt-mob-inp';ntaView.rows=3;ntaView.value=m.notes||'';ntaView.placeholder='Private notes…';ntaView.style.cssText='resize:vertical;width:100%;box-sizing:border-box;';
-    ntaView.oninput=function(){_mgmtSetMgmt(id,'notes',ntaView.value);};
+    var ntaView=document.createElement('div');ntaView.style.cssText='font-family:"DM Sans",sans-serif;font-size:.82rem;color:rgba(255,255,255,.55);line-height:1.6;white-space:pre-wrap;word-break:break-word;';
+    ntaView.textContent=m.notes||'—';
     nwView.appendChild(nlViewHdr);nwView.appendChild(ntaView);wrap.appendChild(nwView);
+
+    /* — Downloaded Updated CAW — view mode — */
+    var cawViewWrap=document.createElement('div');cawViewWrap.style.cssText='margin-top:12px;display:flex;align-items:center;gap:10px;';
+    var cawViewIcon=document.createElement('div');cawViewIcon.style.cssText='width:16px;height:16px;border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:'+(m.downloaded_caw?'rgba(200,168,75,.2)':'rgba(255,255,255,.05)')+';border:1px solid '+(m.downloaded_caw?'rgba(200,168,75,.4)':'rgba(255,255,255,.12)')+';';
+    cawViewIcon.innerHTML=m.downloaded_caw?'<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#c8a84b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':'';
+    var cawViewTxt=document.createElement('div');cawViewTxt.style.cssText='display:flex;flex-direction:column;gap:2px;';
+    var cawViewLbl=document.createElement('div');cawViewLbl.style.cssText='font-family:"DM Sans",sans-serif;font-size:.8rem;color:'+(m.downloaded_caw?'rgba(200,168,75,.8)':'rgba(255,255,255,.3)')+';font-weight:600;';cawViewLbl.textContent='Downloaded Updated CAW';
+    var cawViewSub=document.createElement('div');cawViewSub.style.cssText='display:flex;align-items:center;gap:3px;font-size:.58rem;color:rgba(255,255,255,.2);font-family:"DM Sans",sans-serif;';cawViewSub.innerHTML=_MGMT_LOCK_SVG+'Only you can see this';
+    cawViewTxt.appendChild(cawViewLbl);cawViewTxt.appendChild(cawViewSub);cawViewWrap.appendChild(cawViewIcon);cawViewWrap.appendChild(cawViewTxt);wrap.appendChild(cawViewWrap);
   }
+
+  if (isOwner) { wrap.appendChild(_mgmtOwnerLegend()); }
 
   if (editMode) {
     // ── Danger zone ──
