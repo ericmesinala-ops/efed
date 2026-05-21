@@ -1857,6 +1857,12 @@ html.day-mode .settings-toggle-track { background: rgba(0,0,0,.15); }
         <button class="sidebar-btn" onclick="switchView('storyline',event)">Notes</button>
         <button class="sidebar-btn" onclick="switchView('promos',event)">Dynamics</button>
       </div>
+
+      <!-- ── ADMIN ONLY ── -->
+      <div id="sidebar-admin-section" style="display:none;">
+        <span class="sidebar-label">Admin</span>
+        <button class="sidebar-btn" onclick="switchView('badges',event)">Badges</button>
+      </div>
     </div>
 
     <!-- Main content -->
@@ -2145,6 +2151,8 @@ function initNav() {
   if ((session.username||'').toLowerCase() === ADMIN_USERNAME) {
     const adminBtn = document.getElementById('admin-panel-btn');
     if (adminBtn) adminBtn.style.display = 'flex';
+    const adminSidebar = document.getElementById('sidebar-admin-section');
+    if (adminSidebar) adminSidebar.style.display = '';
   }
   sbGet('users','username=eq.'+encodeURIComponent(session.username)+'&select=display_name,avatar_url,promo_name,promo_logo,is_efed_owner,role').then(rows => {
     if (!rows || !rows[0]) return;
@@ -2790,6 +2798,7 @@ function switchView(view, event) {
   else if (view === 'efed_storylines') renderEfedStorylines();
   else if (view === 'storyline') renderStoryline();
   else if (view === 'promos')    renderPromos();
+  else if (view === 'badges')    renderBadgesView();
   // Legacy: redirect show view to moveset
   else if (view === 'show')      renderMoveset();
 }
@@ -7812,6 +7821,90 @@ function mobSyncProgress() {
   if (!fill) return;
   const orig = document.getElementById('progressBar');
   if (orig) fill.style.width = orig.style.width || '0%';
+}
+
+/* ═══════════════════════════════════════════
+   ADMIN — BADGE MANAGEMENT VIEW
+═══════════════════════════════════════════ */
+const _BADGE_COLORS = { gold: '#c8a84b', platinum: '#a8bcd4', legend: '#b46ee0', creator: '#c0000e' };
+const _BADGE_OPTIONS = [
+  { value: '',         label: '— No badge' },
+  { value: 'gold',     label: '⬤ Gold' },
+  { value: 'platinum', label: '⬤ Platinum' },
+  { value: 'legend',   label: '⬤ Legend' },
+];
+
+async function renderBadgesView() {
+  const area = document.getElementById('mainArea');
+  area.innerHTML = '<div style="padding:24px;color:var(--text-tertiary);font-style:italic;font-size:.85rem;">Loading users…</div>';
+
+  let rows = [];
+  try {
+    rows = await sbGet('users', 'select=username,display_name,verified_badge&order=username.asc&limit=500');
+  } catch(e) {
+    area.innerHTML = '<div style="padding:24px;color:#e84040;font-size:.85rem;">Failed to load users.</div>';
+    return;
+  }
+
+  let html = `
+<div style="padding:20px 24px;">
+  <div style="font-family:'Bebas Neue',sans-serif;font-size:1.05rem;letter-spacing:3px;color:rgba(255,255,255,.4);margin-bottom:4px;">VERIFIED BADGES</div>
+  <div style="font-size:.72rem;color:rgba(255,255,255,.3);margin-bottom:16px;font-style:italic;">Changes save instantly. Creator badge is locked to your account.</div>
+  <input id="badge-search-input" placeholder="Search by username…" oninput="filterBadgeRows(this.value)"
+    style="width:100%;max-width:340px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:6px;padding:8px 12px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.83rem;margin-bottom:14px;outline:none;">
+  <div id="badge-user-list" style="display:flex;flex-direction:column;gap:5px;max-height:calc(100vh - 240px);overflow-y:auto;padding-right:4px;">`;
+
+  rows.forEach(u => {
+    const uname = (u.username || '').toLowerCase();
+    const dname = _esc(u.display_name || u.username || '');
+    const current = u.verified_badge || '';
+    const isAdmin = uname === ADMIN_USERNAME;
+    const dotColor = _BADGE_COLORS[current] || 'rgba(255,255,255,.12)';
+
+    const opts = _BADGE_OPTIONS.map(o =>
+      `<option value="${_esc(o.value)}"${o.value === current ? ' selected' : ''}>${o.label}</option>`
+    ).join('');
+
+    html += `
+    <div class="badge-row-item" data-uname="${_esc(uname)}"
+      style="display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:9px 14px;transition:background .15s;">
+      <div style="width:9px;height:9px;border-radius:50%;background:${dotColor};flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.1);"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:.83rem;font-weight:600;color:#e8e8e8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${dname}${isAdmin ? '&nbsp;<span style="font-size:.62rem;color:var(--gold);letter-spacing:.5px;">YOU</span>' : ''}</div>
+        <div style="font-size:.68rem;color:rgba(255,255,255,.35);">@${_esc(u.username || '')}</div>
+      </div>
+      ${isAdmin
+        ? `<div style="font-size:.7rem;color:rgba(192,0,14,.7);font-style:italic;">creator (locked)</div>`
+        : `<select onchange="saveBadge('${_esc(u.username || '')}', this)"
+            style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.13);border-radius:5px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.77rem;padding:5px 8px;cursor:pointer;outline:none;">
+            ${opts}
+           </select>`
+      }
+    </div>`;
+  });
+
+  html += `</div></div>`;
+  area.innerHTML = html;
+}
+
+function filterBadgeRows(q) {
+  const lower = (q || '').toLowerCase();
+  document.querySelectorAll('.badge-row-item').forEach(el => {
+    el.style.display = (!lower || el.dataset.uname.includes(lower)) ? '' : 'none';
+  });
+}
+
+async function saveBadge(username, selectEl) {
+  const val = selectEl.value;
+  const row = selectEl.closest('.badge-row-item');
+  const dot = row ? row.querySelector('div[style*="border-radius:50%"]') : null;
+  try {
+    await sbPatch('users', 'username=eq.' + encodeURIComponent(username), { verified_badge: val || null });
+    if (dot) dot.style.background = _BADGE_COLORS[val] || 'rgba(255,255,255,.12)';
+    showToast(val ? '\u2713 ' + val.charAt(0).toUpperCase() + val.slice(1) + ' badge saved for @' + username : 'Badge removed from @' + username);
+  } catch(e) {
+    showToast('Error saving badge');
+  }
 }
 </script>
 <script>

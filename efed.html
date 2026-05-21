@@ -228,20 +228,36 @@ function getEmblemSVG(designId) {
   }
 
   // ── VERIFIED BADGE SYSTEM ──
-  const VERIFIED_BADGE_GOLD = `<svg title="Admin" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.15)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  const VERIFIED_BADGE_BLUE  = `<svg title="Verified eFed Owner" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(59,130,246,.15)" stroke="#3b82f6" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  const _verifiedOwners = new Set(); // blue — efed owners with 10+ real roster members
+  const VERIFIED_BADGE_GOLD     = `<svg title="Gold — Verified" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.18)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const VERIFIED_BADGE_PLATINUM = `<svg title="Platinum — Verified eFed Owner" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,210,230,.18)" stroke="#a8bcd4" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#b0c4d8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const VERIFIED_BADGE_LEGEND   = `<svg title="Legend" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(180,100,220,.18)" stroke="#b46ee0" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#b46ee0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const VERIFIED_BADGE_CREATOR  = `<svg title="Site Creator" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(192,0,14,.15)" stroke="#c0000e" stroke-width="1.8"/><path d="M7 13.5l1.5-4 3.5 2 3.5-2 1.5 4" stroke="#c0000e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 13.5h10" stroke="#c0000e" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+  const VERIFIED_BADGE_BLUE = VERIFIED_BADGE_PLATINUM; // legacy alias
+  const _verifiedOwners = new Set(); // legacy — auto-platinum for 10+ roster owners
+  const _badgeMap = {}; // username.toLowerCase() → 'gold'|'platinum'|'legend'|'creator'
+  function _badgeSvg(type) {
+    if (type === 'creator')  return VERIFIED_BADGE_CREATOR;
+    if (type === 'legend')   return VERIFIED_BADGE_LEGEND;
+    if (type === 'platinum') return VERIFIED_BADGE_PLATINUM;
+    if (type === 'gold')     return VERIFIED_BADGE_GOLD;
+    return '';
+  }
 
   function withVerified(displayName, username, useAdminLabel = true) {
     if (!username) return _esc(displayName || '');
     const uLower = username.toLowerCase();
     if (uLower === ADMIN_USERNAME) {
       const name = _esc(useAdminLabel ? 'Admin' : (displayName || username));
-      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_GOLD}</span>`;
+      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_CREATOR}</span>`;
+    }
+    const manualBadge = _badgeMap[uLower];
+    if (manualBadge) {
+      const name = _esc(displayName || username);
+      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${_badgeSvg(manualBadge)}</span>`;
     }
     if (_verifiedOwners.has(uLower)) {
       const name = _esc(displayName || username);
-      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_BLUE}</span>`;
+      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_PLATINUM}</span>`;
     }
     return _esc(displayName || username);
   }
@@ -249,6 +265,11 @@ function getEmblemSVG(designId) {
   async function loadVerifiedUsers() {
     _verifiedOwners.clear();
     try {
+      // Load manually assigned badges
+      const badgeRows = await sbGet('users', 'select=username,verified_badge&verified_badge=not.is.null');
+      badgeRows.forEach(u => { if (u.username && u.verified_badge) _badgeMap[u.username.toLowerCase()] = u.verified_badge; });
+
+      // Legacy auto-platinum: efed owners with 10+ real roster members
       const [efedOwners, roleOwners] = await Promise.all([
         sbGet('users', 'select=username,promo_name&is_efed_owner=eq.true'),
         sbGet('users', 'select=username,promo_name&role=eq.owner')
@@ -256,6 +277,7 @@ function getEmblemSVG(designId) {
       const ownerMap = {};
       [...efedOwners, ...roleOwners].forEach(u => { if (u.username) ownerMap[u.username.toLowerCase()] = u; });
       await Promise.all(Object.keys(ownerMap).map(async uLower => {
+        if (_badgeMap[uLower]) return; // manual badge takes priority
         const u = ownerMap[uLower];
         if (!u.promo_name) return;
         try {
@@ -265,7 +287,8 @@ function getEmblemSVG(designId) {
       }));
     } catch(e) {}
     window._verifiedOwners = _verifiedOwners;
-    window.withVerified    = withVerified;
+    window._badgeMap = _badgeMap;
+    window.withVerified = withVerified;
   }
 
   const SB_HEADERS = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };

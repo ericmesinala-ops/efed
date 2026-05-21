@@ -63,28 +63,44 @@
   });
 
   // ── VERIFIED BADGES ──
-  const VERIFIED_BADGE_GOLD = `<svg title="Admin" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.15)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  const VERIFIED_BADGE_BLUE = `<svg title="Verified eFed Owner" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(59,130,246,.15)" stroke="#3b82f6" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#3b82f6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const VERIFIED_BADGE_GOLD     = `<svg title="Gold — Verified" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,168,75,.18)" stroke="#c8a84b" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#c8a84b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const VERIFIED_BADGE_PLATINUM = `<svg title="Platinum — Verified eFed Owner" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(200,210,230,.18)" stroke="#a8bcd4" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#b0c4d8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const VERIFIED_BADGE_LEGEND   = `<svg title="Legend" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(180,100,220,.18)" stroke="#b46ee0" stroke-width="1.8"/><path d="M8.5 12l2.5 2.5 4.5-5" stroke="#b46ee0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const VERIFIED_BADGE_CREATOR  = `<svg title="Site Creator" style="display:inline-block;vertical-align:middle;flex-shrink:0;" width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(192,0,14,.15)" stroke="#c0000e" stroke-width="1.8"/><path d="M7 13.5l1.5-4 3.5 2 3.5-2 1.5 4" stroke="#c0000e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 13.5h10" stroke="#c0000e" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+  const VERIFIED_BADGE_BLUE = VERIFIED_BADGE_PLATINUM; // legacy alias
   const VERIFIED_BADGE = VERIFIED_BADGE_GOLD; // legacy alias
   function _esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   const _verifiedUsers = new Set([ADMIN_USERNAME]);
-  const _verifiedOwners = new Set(); // blue checkmark — efed owners with 10+ real roster members
+  const _verifiedOwners = new Set(); // legacy — auto-platinum for 10+ roster owners
+  const _badgeMap = {}; // username.toLowerCase() → 'gold'|'platinum'|'legend'|'creator'
+  function _badgeSvg(type) {
+    if (type === 'creator')  return VERIFIED_BADGE_CREATOR;
+    if (type === 'legend')   return VERIFIED_BADGE_LEGEND;
+    if (type === 'platinum') return VERIFIED_BADGE_PLATINUM;
+    if (type === 'gold')     return VERIFIED_BADGE_GOLD;
+    return '';
+  }
   function isVerifiedUser(username) {
     if (!username) return false;
-    return _verifiedUsers.has(username.toLowerCase()) || _verifiedOwners.has(username.toLowerCase());
+    const u = username.toLowerCase();
+    return u === ADMIN_USERNAME || !!_badgeMap[u] || _verifiedOwners.has(u);
   }
 
   function withVerified(displayName, username, useAdminLabel = true) {
     if (!username) return _esc(displayName || '');
     const uLower = username.toLowerCase();
-    const isAdmin = uLower === ADMIN_USERNAME;
-    if (isAdmin) {
+    if (uLower === ADMIN_USERNAME) {
       const name = _esc(useAdminLabel ? 'Admin' : (displayName || username));
-      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_GOLD}</span>`;
+      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_CREATOR}</span>`;
+    }
+    const manualBadge = _badgeMap[uLower];
+    if (manualBadge) {
+      const name = _esc(displayName || username);
+      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${_badgeSvg(manualBadge)}</span>`;
     }
     if (_verifiedOwners.has(uLower)) {
       const name = _esc(displayName || username);
-      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_BLUE}</span>`;
+      return `<span style="display:inline-flex;align-items:center;gap:4px;">${name}${VERIFIED_BADGE_PLATINUM}</span>`;
     }
     return _esc(displayName || username);
   }
@@ -13493,21 +13509,21 @@ async function checkUnreadNotifications() {
 async function loadVerifiedUsers() {
   _verifiedUsers.add(ADMIN_USERNAME);
   try {
-    // Get all potential owners (is_efed_owner OR role=owner)
+    // Load manually assigned badges
+    const badgeRows = await sbGet('users', 'select=username,verified_badge&verified_badge=not.is.null');
+    badgeRows.forEach(u => { if (u.username && u.verified_badge) _badgeMap[u.username.toLowerCase()] = u.verified_badge; });
+
+    // Legacy auto-platinum: efed owners with 10+ real roster members
     const [efedOwners, roleOwners] = await Promise.all([
       sbGet('users', 'select=username,promo_name&is_efed_owner=eq.true'),
       sbGet('users', 'select=username,promo_name&role=eq.owner')
     ]);
-    // Merge, deduplicate
     const ownerMap = {};
-    [...efedOwners, ...roleOwners].forEach(u => {
-      if (u.username) ownerMap[u.username.toLowerCase()] = u;
-    });
+    [...efedOwners, ...roleOwners].forEach(u => { if (u.username) ownerMap[u.username.toLowerCase()] = u; });
     const ownerUsernames = Object.keys(ownerMap);
     if (!ownerUsernames.length) return;
-
-    // For each owner, count real (non-ghost) approved roster members
     await Promise.all(ownerUsernames.map(async uLower => {
+      if (_badgeMap[uLower]) return; // manual badge takes priority
       const u = ownerMap[uLower];
       if (!u.promo_name) return;
       try {
