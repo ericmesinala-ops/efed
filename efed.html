@@ -300,6 +300,16 @@ function getEmblemSVG(designId) {
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   }
+  // ── Request cache: deduplicates identical sbGet calls within same page load ──
+  const _sbCache = new Map();
+  function sbGetCached(table, filters='', ttlMs=30000) {
+    const key = table+'|'+filters;
+    const hit = _sbCache.get(key);
+    if (hit) return hit.promise;
+    const promise = sbGet(table, filters).finally(() => { setTimeout(()=>_sbCache.delete(key), ttlMs); });
+    _sbCache.set(key, { promise });
+    return promise;
+  }
   async function sbInsert(table, data) {
     const headers = { ...SB_HEADERS, 'Prefer': 'return=representation' };
     const r = await fetch(SUPABASE_URL+'/rest/v1/'+table, { method:'POST', headers, body:JSON.stringify(data) });
@@ -3949,7 +3959,7 @@ async function handleMyEfedClick() {
   try {
     const [userRows, rosterRows] = await Promise.all([
       sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role,promo_logo`),
-      sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
+      sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
     ]);
     const user = userRows[0];
     const efeds = [], seen = new Set();
@@ -7196,7 +7206,7 @@ async function loadProfile() {
   // If no ?e= param, fetch promo_name from DB (owner visiting their own page)
   if (!EFED_NAME && session) {
     try {
-      const me = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
+      const me = await sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
       if (me[0]?.promo_name && (me[0].is_efed_owner || me[0].role === 'owner')) {
         EFED_NAME = me[0].promo_name;
       }
@@ -14989,7 +14999,7 @@ async function submitClaim() {
 
   try {
     // Check user doesn't already own a different eFed
-    const meRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
+    const meRows = await sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
     const me = meRows[0];
     if (!me) { msg.textContent = 'Account not found.'; msg.style.color = '#ff6b6b'; btn.disabled = false; btn.textContent = 'Claim this eFed'; return; }
     if (!(me.is_efed_owner || me.role === 'owner') || session.username.toLowerCase() === ADMIN_USERNAME) { msg.textContent = 'Only eFed owners can claim pages.'; msg.style.color = '#ff6b6b'; btn.disabled = false; btn.textContent = 'Claim this eFed'; return; }
@@ -19959,8 +19969,8 @@ function openMatchRepostModal(match, avatarMap) {
     prev.appendChild(cardEl);
   }
   // Build pills
-  sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`)
-    .then(uRows => sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`).then(rRows => {
+  sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`)
+    .then(uRows => sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`).then(rRows => {
       const u = uRows[0];
       const efeds = [];
       if ((u?.is_efed_owner||u?.role==='owner') && u?.promo_name) efeds.push(u.promo_name);

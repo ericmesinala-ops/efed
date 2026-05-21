@@ -114,6 +114,18 @@
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   }
+  // ── Request cache: deduplicates identical sbGet calls within the same page load ──
+  const _sbCache = new Map();
+  function sbGetCached(table, filters = '', ttlMs = 30000) {
+    const key = table + '|' + filters;
+    const hit = _sbCache.get(key);
+    if (hit) return hit.promise;
+    const promise = sbGet(table, filters).finally(() => {
+      setTimeout(() => _sbCache.delete(key), ttlMs);
+    });
+    _sbCache.set(key, { promise });
+    return promise;
+  }
   async function sbInsert(table, data) {
     const headers = { ...SB_HEADERS, 'Prefer': 'return=representation' };
     const r = await fetch(SUPABASE_URL + '/rest/v1/' + table, { method: 'POST', headers, body: JSON.stringify(data) });
@@ -5886,7 +5898,7 @@ function _loadMobDashFeed() {
 async function _loadDashEfedFeedInto(body, session) {
   body.innerHTML = '<div class="_load-wrap"></div>';
   try {
-    const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`);
+    const rosterRows = await sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`);
     const myEfeds = new Set(rosterRows.map(r => r.efed).filter(Boolean));
     if (session.promo_name || session.promoName) myEfeds.add(session.promo_name || session.promoName);
     if (!myEfeds.size) { body.innerHTML = '<div class="dash-empty">Join an eFed to see its feed.</div>'; return; }
@@ -6013,7 +6025,7 @@ async function _loadDashMyShows(session) {
   body.innerHTML = '<div class="_load-wrap"></div>';
   try {
     // Get efeds the user belongs to
-    const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`);
+    const rosterRows = await sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`);
     const myEfeds = new Set(rosterRows.map(r => r.efed).filter(Boolean));
     if (session.promo_name || session.promoName) myEfeds.add(session.promo_name || session.promoName);
     if (!myEfeds.size) { body.innerHTML = '<div class="dash-empty">You\'re not on any eFed roster yet.</div>'; return; }
@@ -6151,7 +6163,7 @@ async function _loadDashEfedFeed(session) {
   body.innerHTML = '<div class="_load-wrap"></div>';
   try {
     // Get user's eFeds
-    const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`);
+    const rosterRows = await sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`);
     const myEfeds = new Set(rosterRows.map(r => r.efed).filter(Boolean));
     if (session.promo_name || session.promoName) myEfeds.add(session.promo_name || session.promoName);
     if (!myEfeds.size) { body.innerHTML = '<div class="dash-empty">Join an eFed to see its feed.</div>'; return; }
@@ -6682,7 +6694,7 @@ window._matchWatchlistUids = new Set();
 async function _initMatchWatchlistUids(session) {
   if (!session) return;
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`);
+    const rows = await sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`, 5000);
     const wl = rows[0]?.match_watchlist_json;
     window._matchWatchlistUids = new Set(Array.isArray(wl) ? wl.map(m => m.matchUid).filter(Boolean) : []);
     _loadDashMatchWatchlist(session);
@@ -6716,7 +6728,7 @@ async function _toggleMatchWatchlist(match, btnEl) {
   const wasWl = window._matchWatchlistUids.has(uid);
   const _wlSvg = (f) => `<span style="font-size:15px;line-height:1;opacity:${f?1:.4};filter:${f?'drop-shadow(0 0 5px rgba(200,168,75,.9))':'none'};">🔖</span>`;
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`);
+    const rows = await sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`, 5000);
     let wl = Array.isArray(rows[0]?.match_watchlist_json) ? rows[0].match_watchlist_json : [];
     if (wasWl) { wl = wl.filter(m => m.matchUid !== uid); window._matchWatchlistUids.delete(uid); }
     else {
@@ -6744,7 +6756,7 @@ async function _loadDashMatchWatchlist(session) {
   if (!session) { body.innerHTML = '<div class="dash-empty">Sign in to use Match Watchlist.</div>'; return; }
   body.innerHTML = '<div class="dash-empty">Loading\u2026</div>';
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`);
+    const rows = await sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`, 5000);
     const wl = Array.isArray(rows[0]?.match_watchlist_json) ? rows[0].match_watchlist_json : [];
     if (!wl.length) { body.innerHTML = '<div class="dash-empty">No matches on your watchlist yet.<br><span style="font-size:.7rem;opacity:.5;">Browse eFed schedule pages and tap \u{1F516} on any match.</span></div>'; return; }
     const ownerUs = [...new Set(wl.map(m => m.ownerUsername).filter(Boolean))];
@@ -9306,7 +9318,7 @@ async function loadMyEfedBtn() {
   if (!btn) return;
   try {
     const [userRows, rosterRows] = await Promise.all([
-      sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
+      sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
       sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&select=efed,status`)
     ]);
     const user = userRows[0];
@@ -11648,8 +11660,8 @@ async function submitRepost() {
     const { match } = window._repostMatchData;
     try {
       const [userRows, rosterRows] = await Promise.all([
-        sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
-        sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
+        sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
+        sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
       ]);
       const u = userRows[0];
       const myEfeds = [];
@@ -11686,8 +11698,8 @@ async function submitRepost() {
 
     // Get user's own eFeds (owned + approved roster)
     const [userRows, rosterRows] = await Promise.all([
-      sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
-      sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
+      sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
+      sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
     ]);
     const u = userRows[0];
     const myEfeds = [];
@@ -14445,7 +14457,7 @@ async function buildChatRooms() {
       } else {
         // Owner: their room. Roster member: each eFed they're on.
         const [userRows, rosterRows] = await Promise.all([
-          sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
+          sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
           sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&select=efed`)
         ]);
         const user = userRows[0];
@@ -16392,7 +16404,7 @@ async function openCreateEfedModal() {
   if (!session) { showToast('Please log in first.'); return; }
   // Server-side ownership check — one eFed per account
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
+    const rows = await sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
     const user = rows[0];
     if (user?.is_efed_owner || user?.role === 'owner') {
       showToast('You already have an eFed page. Only one eFed per account is allowed.');
@@ -16506,7 +16518,7 @@ async function createEfedSubmit() {
       }
     }
     // Final server-side guard — never overwrite an existing eFed owner
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
+    const rows = await sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
     const existingUser = rows[0];
     if (existingUser?.is_efed_owner || existingUser?.role === 'owner') {
       document.getElementById('create-efed-loading').style.display = 'none';
@@ -16681,7 +16693,7 @@ async function refreshSettingsOwnerItems() {
   const session = getSession();
   if (!session) return;
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
+    const rows = await sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=is_efed_owner,role,promo_name`);
     const user = rows[0];
     const isOwner = !!(user?.is_efed_owner || user?.role === 'owner');
     // Hide "Add an eFed Page" if user already owns one — one eFed per account
@@ -16707,7 +16719,7 @@ async function handleMyEfedClick() {
   try {
     const [userRows, rosterRows] = await Promise.all([
       sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role,promo_logo`),
-      sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
+      sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
     ]);
     const user = userRows[0];
     const efeds = [];
@@ -17689,8 +17701,8 @@ function openMatchRepostModal(match, avatarMap) {
     prev.appendChild(cardEl);
   }
   // Build pills
-  sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`)
-    .then(uRows => sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`).then(rRows => {
+  sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`)
+    .then(uRows => sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`).then(rRows => {
       const u = uRows[0];
       const efeds = [];
       if ((u?.is_efed_owner||u?.role==='owner') && u?.promo_name) efeds.push(u.promo_name);

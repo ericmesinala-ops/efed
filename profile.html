@@ -199,6 +199,16 @@ function getEmblemSVG(designId) {
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   }
+  // ── Request cache: deduplicates identical sbGet calls within same page load ──
+  const _sbCache = new Map();
+  function sbGetCached(table, filters='', ttlMs=30000) {
+    const key = table+'|'+filters;
+    const hit = _sbCache.get(key);
+    if (hit) return hit.promise;
+    const promise = sbGet(table, filters).finally(() => { setTimeout(()=>_sbCache.delete(key), ttlMs); });
+    _sbCache.set(key, { promise });
+    return promise;
+  }
   async function sbDelete(table, filters) {
     const headers = { ...SB_HEADERS, 'Prefer': 'return=representation' };
     const r = await fetch(SUPABASE_URL+'/rest/v1/'+table+'?'+filters, { method: 'DELETE', headers });
@@ -8547,8 +8557,8 @@ const _posts = (() => {
     const session = getSession(); if (!session) return (_myEfeds = []);
     try {
       const [userRows, rosterRows] = await Promise.all([
-        sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
-        sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
+        sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
+        sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
       ]);
       const u = userRows[0];
       const efeds = [];
@@ -9956,7 +9966,7 @@ async function handleMyEfedClick() {
   try {
     const [userRows, rosterRows] = await Promise.all([
       sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role,promo_logo`),
-      sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
+      sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
     ]);
     const user = userRows[0];
     const efeds = [], seen = new Set();
@@ -10036,7 +10046,7 @@ async function _initMatchWatchlistUids() {
   const session = typeof getSession === 'function' ? getSession() : null;
   if (!session) return;
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`);
+    const rows = await sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`, 5000);
     const wl = rows[0]?.match_watchlist_json;
     window._matchWatchlistUids = new Set(Array.isArray(wl) ? wl.map(m => m.matchUid).filter(Boolean) : []);
   } catch(e) {}
@@ -10050,7 +10060,7 @@ async function _profileToggleWatchlist(match, btnEl) {
   const wasWl = window._matchWatchlistUids.has(uid);
   const _wSvg = (f) => `<span style="font-size:15px;line-height:1;opacity:${f?1:.4};filter:${f?'drop-shadow(0 0 5px rgba(200,168,75,.9))':'none'};">🔖</span>`;
   try {
-    const rows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`);
+    const rows = await sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=match_watchlist_json`, 5000);
     let wl = Array.isArray(rows[0]?.match_watchlist_json) ? rows[0].match_watchlist_json : [];
     if (wasWl) { wl = wl.filter(m => m.matchUid !== uid); window._matchWatchlistUids.delete(uid); }
     else {
@@ -19618,8 +19628,8 @@ function openMatchRepostModal(match, avatarMap) {
     prev.appendChild(cardEl);
   }
   // Build pills
-  sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`)
-    .then(uRows => sbGet('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`).then(rRows => {
+  sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`)
+    .then(uRows => sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`).then(rRows => {
       const u = uRows[0];
       const efeds = [];
       if ((u?.is_efed_owner||u?.role==='owner') && u?.promo_name) efeds.push(u.promo_name);
