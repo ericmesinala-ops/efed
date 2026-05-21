@@ -2159,9 +2159,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 <div class="section" id="achievements-section" style="display:none;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
     <div class="sec-title" style="margin-bottom:0;flex:1;">Achievements</div>
-    <button id="ach-add-btn" onclick="achOpenModal(null)" style="display:none;align-items:center;gap:5px;background:rgba(200,168,75,.1);border:1px solid rgba(200,168,75,.25);border-radius:8px;color:rgba(200,168,75,.7);font-family:'DM Sans',sans-serif;font-size:.7rem;font-weight:700;padding:5px 11px;cursor:pointer;transition:background .15s;letter-spacing:.5px;" onmouseover="this.style.background='rgba(200,168,75,.2)'" onmouseout="this.style.background='rgba(200,168,75,.1)'">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add
-    </button>
+    <div id="ach-add-btn" onclick="achOpenModal(null)" class="ms-add-btn" style="display:none;" title="Add achievement"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
   </div>
   <div id="achievements-list" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"></div>
   <div id="achievements-empty" style="display:none;font-size:.8rem;color:rgba(255,255,255,.2);font-style:italic;font-family:'DM Sans',sans-serif;">No achievements yet.</div>
@@ -2201,7 +2199,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
   font-family: 'Bebas Neue', sans-serif; font-size: .95rem; letter-spacing: 1.5px;
   color: #e8e8e8; line-height: 1.1; position: relative; z-index: 1;
 }
-.ach-card.rarity-legendary .ach-card-title { color: #c8a84b; }
+#ach-add-btn { opacity: 1 !important; }
 .ach-card.rarity-rare .ach-card-title { color: rgba(167,139,250,.9); }
 .ach-card.rarity-epic .ach-card-title { color: rgba(96,165,250,.9); }
 .ach-card-desc {
@@ -14051,8 +14049,6 @@ async function loadProfile() {
     document.getElementById('profile-av-box').style.cursor = 'default';
     document.getElementById('profile-av-box').classList.remove('owner-av');
 
-    // Submitted videos and bookmarks are owner-only — admin cannot see them
-
     // Show "Add to Roster" button if the viewer is an eFed owner
     try {
       const ownerRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role,acronym`);
@@ -14060,36 +14056,11 @@ async function loadProfile() {
       if (ownerData && (ownerData.is_efed_owner || ownerData.role === 'owner') && ownerData.promo_name) {
         _ownerEfedName = ownerData.promo_name;
         _atrTargetUsername = resolvedUser;
-        // Check if already on roster
         const onRoster = await sbGet('roster', `efed=eq.${encodeURIComponent(_ownerEfedName)}&username=eq.${encodeURIComponent(resolvedUser)}&select=id,status`);
         const addBtn = document.getElementById('add-to-roster-btn');
         if (addBtn) {
-          if (onRoster.length) {
-            // Person icon badge — visible to everyone
-            const badge = document.getElementById('on-roster-badge');
-            if (badge) badge.classList.add('visible');
-            addBtn.style.display = 'none';
-            // Status: read from fsw_management_data (where status_exclusive is actually stored)
-            const slug = document.getElementById('on-roster-status-slug');
-            if (slug) {
-              try {
-                const mgmtRows = await sbGet('fsw_management_data', `username=eq.${encodeURIComponent(session.username)}&limit=1`);
-                const rosterMgmt = mgmtRows[0]?.roster_mgmt || {};
-                // Find the entry whose efed_username matches the profile being viewed
-                const mgmtEntry = Object.values(rosterMgmt).find(e => (e.efed_username||'').toLowerCase() === resolvedUser.toLowerCase());
-                const isExclusive = !!(mgmtEntry?.status_exclusive);
-                if (isExclusive) {
-                  const _acr = (ownerData.acronym || '').trim() || _ownerEfedName;
-                  const dot = `<span style="width:5px;height:5px;border-radius:50%;flex-shrink:0;background:#c8a84b;display:inline-block;"></span>`;
-                  slug.innerHTML = dot + 'Exclusive — ' + _acr;
-                  slug.className = 'on-roster-status-slug visible exclusive';
-                }
-                // If Independent: show nothing (no slug)
-              } catch(e2) {}
-            }
-          } else {
-            addBtn.style.display = 'flex';
-          }
+          if (onRoster.length) { addBtn.style.display = 'none'; }
+          else { addBtn.style.display = 'flex'; }
         }
       }
     } catch(e) {}
@@ -14166,6 +14137,32 @@ async function loadProfile() {
     const _but = document.getElementById('banner-username-tag');
     if (_but) { _but.textContent = '@' + uname; _but.style.display = ''; }
     document.getElementById('profile-av-initial').textContent = name[0].toUpperCase();
+
+    // ── Person icon badge + Exclusive slug — runs for ALL viewers ──
+    // Check if this user is on any approved roster, then fetch owner's mgmt data for status
+    (async () => {
+      try {
+        const rosterRows = await sbGet('roster', `username=eq.${encodeURIComponent(resolvedUser)}&status=eq.approved&select=efed&limit=1`);
+        if (!rosterRows.length) return;
+        const badge = document.getElementById('on-roster-badge');
+        if (badge) badge.classList.add('visible');
+        // Get efed owner's acronym + mgmt data for status_exclusive
+        const efedName = rosterRows[0].efed;
+        const ownerUserRows = await sbGet('users', `promo_name=ilike.${encodeURIComponent(efedName)}&select=username,acronym&limit=1`);
+        const ownerUser = ownerUserRows[0];
+        if (!ownerUser) return;
+        const mgmtRows = await sbGet('fsw_management_data', `username=eq.${encodeURIComponent(ownerUser.username)}&select=roster_mgmt&limit=1`);
+        const rosterMgmt = mgmtRows[0]?.roster_mgmt || {};
+        const mgmtEntry = Object.values(rosterMgmt).find(e => (e.efed_username||'').toLowerCase() === resolvedUser.toLowerCase());
+        if (!mgmtEntry?.status_exclusive) return;
+        const slug = document.getElementById('on-roster-status-slug');
+        if (!slug) return;
+        const _acr = (ownerUser.acronym||'').trim() || efedName;
+        const dot = `<span style="width:5px;height:5px;border-radius:50%;flex-shrink:0;background:#c8a84b;display:inline-block;"></span>`;
+        slug.innerHTML = dot + 'Exclusive — ' + _acr;
+        slug.className = 'on-roster-status-slug visible exclusive';
+      } catch(e) {}
+    })();
     if (user.avatar_url) setAvatar(user.avatar_url, _isOwnProfile);
     // Load saved banner
     if (user.avatar_banner) {
