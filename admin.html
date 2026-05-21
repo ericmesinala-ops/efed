@@ -221,6 +221,7 @@ html.day-mode .nav-tv-svg--day { display: inline; }
     <button class="tab-btn" onclick="switchTab('pending', this)">Pending</button>
     <button class="tab-btn" onclick="switchTab('flagged', this)">Flagged</button>
     <button class="tab-btn" onclick="switchTab('users', this)">Users</button>
+    <button class="tab-btn" onclick="switchTab('badges', this)">🏅 Badges</button>
     <button class="tab-btn" onclick="switchTab('broadcast', this)">📢 Broadcast</button>
     <button class="tab-btn" onclick="switchTab('invites', this)">🎟️ Invite Codes</button>
     <button class="tab-btn" onclick="switchTab('temppass', this)">🔑 Temp Password</button>
@@ -262,6 +263,19 @@ html.day-mode .nav-tv-svg--day { display: inline; }
         <input class="input-field" id="user-search" placeholder="Search…" style="max-width:200px;padding:7px 12px;" oninput="filterUsers(this.value)">
       </div>
       <div id="users-list"><div class="empty"><div class="empty-icon">⏳</div>Loading…</div></div>
+    </div>
+  </div>
+
+
+  <!-- BADGES -->
+  <div class="tab-panel" id="tab-badges">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+        <div class="card-title" style="margin-bottom:0;"><div class="dot" style="background:var(--gold);"></div>Verified Badges</div>
+        <input class="input-field" id="badge-search" placeholder="Search username..." style="max-width:200px;padding:7px 12px;" oninput="filterBadgeRows(this.value)">
+      </div>
+      <div style="font-size:.78rem;color:var(--muted);margin-bottom:16px;">Changes save instantly. Your Creator badge is locked and cannot be changed here.</div>
+      <div id="badges-list"><div class="empty"><div class="empty-icon">loading</div>Loading...</div></div>
     </div>
   </div>
 
@@ -731,6 +745,65 @@ async function sbDelete(table,filters) { const r=await fetch(SUPABASE_URL+'/rest
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function toast(msg,dur=3000){const t=document.getElementById('admin-toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),dur);}
 
+/* ── BADGE MANAGEMENT ── */
+const ADMIN_USERNAME_BADGES = 'derrick_maximus';
+const _BADGE_COLORS = { gold:'#c8a84b', platinum:'#a8bcd4', legend:'#b46ee0', creator:'#c0000e' };
+const _BADGE_LABELS = { gold:'⬤ Gold', platinum:'⬤ Platinum', legend:'⬤ Legend', creator:'Creator (locked)' };
+const _BADGE_OPTS = [
+  {value:'',     label:'— No badge'},
+  {value:'gold', label:'⬤ Gold'},
+  {value:'platinum', label:'⬤ Platinum'},
+  {value:'legend',   label:'⬤ Legend'},
+];
+
+async function loadBadges() {
+  const list = document.getElementById('badges-list');
+  list.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
+  try {
+    const rows = await sbGet('users', 'select=username,display_name,verified_badge&order=username.asc&limit=500');
+    if (!rows.length) { list.innerHTML = '<div class="empty"><div class="empty-icon">👤</div>No users found.</div>'; return; }
+    list.innerHTML = rows.map(u => {
+      const uname = (u.username || '').toLowerCase();
+      const dname = esc(u.display_name || u.username || '');
+      const current = u.verified_badge || '';
+      const isMe = uname === ADMIN_USERNAME_BADGES;
+      const dot = _BADGE_COLORS[current] || 'rgba(255,255,255,.12)';
+      const opts = _BADGE_OPTS.map(o => `<option value="${esc(o.value)}"${o.value===current?' selected':''}>${o.label}</option>`).join('');
+      return `<div class="badge-row-item log-table" data-uname="${esc(uname)}" style="display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid rgba(255,255,255,.04);">
+        <div style="width:9px;height:9px;border-radius:50%;background:${dot};flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.1);"></div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:.88rem;font-weight:600;color:#e8e8e8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${dname}${isMe?' <span style="font-size:.62rem;color:var(--gold);letter-spacing:.5px;margin-left:4px;">YOU</span>':''}</div>
+          <div style="font-size:.7rem;color:var(--muted);">@${esc(u.username||'')}</div>
+        </div>
+        ${isMe
+          ? `<span style="font-size:.72rem;color:rgba(192,0,14,.7);font-style:italic;">creator (locked)</span>`
+          : `<select onchange="saveBadge('${esc(u.username||'')}',this)" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:5px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.78rem;padding:5px 8px;cursor:pointer;outline:none;">${opts}</select>`
+        }
+      </div>`;
+    }).join('');
+  } catch(e) {
+    list.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div>Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function filterBadgeRows(q) {
+  const lower = (q||'').toLowerCase();
+  document.querySelectorAll('.badge-row-item').forEach(el => {
+    el.style.display = (!lower || el.dataset.uname.includes(lower)) ? '' : 'none';
+  });
+}
+
+async function saveBadge(username, selectEl) {
+  const val = selectEl.value;
+  const row = selectEl.closest('.badge-row-item');
+  const dot = row && row.querySelector('div[style*="border-radius:50%"]');
+  try {
+    await sbUpdate('users', {verified_badge: val || null}, 'username=eq.'+encodeURIComponent(username));
+    if (dot) dot.style.background = _BADGE_COLORS[val] || 'rgba(255,255,255,.12)';
+    toast(val ? `✓ ${val.charAt(0).toUpperCase()+val.slice(1)} badge set for @${username}` : `Badge removed from @${username}`);
+  } catch(e) { toast('Error: '+e.message); }
+}
+
 function switchTab(name, btn) {
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
@@ -747,6 +820,7 @@ function switchTab(name, btn) {
   if(name==='invites') loadExistingCodes();
   if(name==='scanner') { loadScanLog(); checkScanLock('a'); checkScanLock('b'); updateCostPreview(); _updateNextScanIndicator(); }
   if(name==='banned') { loadBannedLinks(); }
+  if(name==='badges') { loadBadges(); }
   if(name==='maintenance') loadMaintenanceAlerts();
 }
 
