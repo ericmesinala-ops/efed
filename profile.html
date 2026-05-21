@@ -472,32 +472,7 @@ nav.scrolled { background: rgba(7,7,10,.99); }
 .on-roster-status-slug.exclusive {
   background: rgba(200,168,75,.1); border: 1px solid rgba(200,168,75,.28); color: rgba(200,168,75,.85);
 }
-.owner-efed-chip {
-  display: none; flex-direction: column; align-items: center; gap: 3px;
-  flex-shrink: 0; cursor: pointer; text-decoration: none;
-  transition: opacity .15s, transform .15s;
-}
-.owner-efed-chip:hover { opacity: .8; transform: translateY(-1px); }
-.owner-efed-chip.visible { display: inline-flex; }
-.owner-efed-chip-avatar {
-  width: 26px; height: 26px; border-radius: 50%;
-  border: 1.5px solid rgba(200,168,75,.6);
-  background: #1a1600;
-  overflow: hidden; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; box-shadow: 0 0 0 2px rgba(200,168,75,.12);
-}
-.owner-efed-chip-avatar img {
-  width: 100%; height: 100%; object-fit: cover; border-radius: 50%;
-}
-.owner-efed-chip-fallback {
-  font-family: 'Bebas Neue', sans-serif; font-size: .7rem;
-  color: #c8a84b; line-height: 1; letter-spacing: .5px;
-}
-.owner-efed-chip-label {
-  font-family: 'DM Sans', sans-serif; font-size: .5rem; font-weight: 800;
-  letter-spacing: 1.2px; text-transform: uppercase; color: rgba(200,168,75,.7);
-  line-height: 1; white-space: nowrap;
-}
+
 .identity-row-icons {
   display: flex; align-items: center; gap: 8px; flex-shrink: 0;
 }
@@ -509,6 +484,15 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   transition: background .15s, color .15s, border-color .15s; flex-shrink: 0;
 }
 .identity-social-icon:hover { background: rgba(255,255,255,.1); color: #fff; border-color: rgba(255,255,255,.25); }
+.identity-social-icon--owner {
+  border-color: rgba(200,168,75,.6) !important;
+  background: rgba(200,168,75,.08) !important;
+  overflow: hidden; padding: 0;
+}
+.identity-social-icon--owner:hover { border-color: rgba(200,168,75,1) !important; background: rgba(200,168,75,.18) !important; }
+.identity-social-icon--owner img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.identity-social-icon--owner-fallback { font-family: 'Bebas Neue', sans-serif; font-size: .75rem; color: #c8a84b; line-height: 1; }
+html.day-mode .identity-social-icon--owner { border-color: rgba(168,130,10,.5) !important; background: rgba(168,130,10,.08) !important; }
 
 /* ── STATS ── */
 .stats-bar { background: #0c0c0f; border-bottom: 1px solid var(--border); }
@@ -1676,7 +1660,7 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
 <!-- ── IDENTITY (NAME) ROW ── -->
 <div class="identity-row" id="identity-row" style="align-items:flex-start;padding-top:12px;padding-bottom:12px;">
   <div style="flex:1;min-width:0;">
-    <div class="identity-row-name" id="identity-row-name" style="margin-bottom:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">—<span class="on-roster-badge" id="on-roster-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="on-roster-status-slug" id="on-roster-status-slug"></span><a class="owner-efed-chip" id="owner-efed-chip" href="#"></a></div>
+    <div class="identity-row-name" id="identity-row-name" style="margin-bottom:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">—<span class="on-roster-badge" id="on-roster-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="on-roster-status-slug" id="on-roster-status-slug"></span></div>
     <div id="identity-row-username" style="font-size:.68rem;color:rgba(255,255,255,.28);letter-spacing:.5px;font-family:'DM Sans',sans-serif;font-weight:400;"></div>
   </div>
   <div class="identity-row-icons" id="identity-row-icons" style="align-self:center;"></div>
@@ -12229,11 +12213,29 @@ function copyProfileLink() {
   }
 }
 
-function renderSocialLinks(ig, x, twitch, reddit, spotify, discord, facebook) {
+async function renderSocialLinks(ig, x, twitch, reddit, spotify, discord, facebook, username) {
   const iconsRow = document.getElementById('identity-row-icons');
   if (!iconsRow) return;
 
   const shareBtn = `<button class="identity-social-icon" id="profile-share-btn" title="Copy profile link" onclick="copyProfileLink()" style="cursor:pointer;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></button>`;
+
+  // ── Owner circle: fetch first, prepend as leftmost icon ──
+  let ownerCircle = '';
+  if (username) {
+    try {
+      const oc = await sbGet('users', `username=eq.${encodeURIComponent(username)}&select=promo_name,is_efed_owner,role,acronym,promo_logo&limit=1`);
+      const o = oc[0];
+      if (o && (o.is_efed_owner || o.role === 'owner') && o.promo_name) {
+        const _label = (o.acronym || '').trim() || o.promo_name;
+        const _initial = _label.charAt(0).toUpperCase();
+        const _inner = o.promo_logo
+          ? `<img src="${o.promo_logo}" alt="${_label}" loading="lazy" onerror="this.style.display='none';this.parentNode.innerHTML+='<span class=\\'identity-social-icon--owner-fallback\\'>${_initial}</span>'">`
+          : `<span class="identity-social-icon--owner-fallback">${_initial}</span>`;
+        ownerCircle = `<a class="identity-social-icon identity-social-icon--owner" href="efed.html?e=${encodeURIComponent(o.promo_name)}" title="Owner of ${_label}">${_inner}</a>`;
+      }
+    } catch(e) {}
+  }
+
   if (iconsRow) {
     const all = [
       ig       ? `<a class="identity-social-icon" href="https://instagram.com/${ig}" target="_blank" rel="noopener" title="@${ig}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg></a>` : '',
@@ -12244,7 +12246,7 @@ function renderSocialLinks(ig, x, twitch, reddit, spotify, discord, facebook) {
       discord  ? `<a class="identity-social-icon" href="https://discord.com/users/${discord}" target="_blank" rel="noopener" title="${discord}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.8 19.8 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.11 13.11 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg></a>` : '',
       twitch   ? `<a class="identity-social-icon" href="${twitch.startsWith('http') ? twitch : 'https://'+twitch}" target="_blank" rel="noopener" title="${twitch}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></a>` : '',
     ].filter(Boolean).slice(0, 5);
-    iconsRow.innerHTML = all.join('') + shareBtn;
+    iconsRow.innerHTML = ownerCircle + all.join('') + shareBtn;
   }
   // legacy compat
   const wrap = document.getElementById('profile-social-links');
@@ -12418,7 +12420,7 @@ async function saveEditProfile() {
     }
     const navImg = document.getElementById('nav-avatar-img');
     if (!navImg || navImg.style.display === 'none') { var _ni=document.getElementById('nav-initials'); if(_ni){_ni.style.display='flex';_ni.style.alignItems='center';_ni.style.justifyContent='center';_ni.innerHTML='<svg width="20" height="17" viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="18" width="110" height="72" rx="8" fill="#b0b0b8" stroke="#d0d0d8" stroke-width="1.5"/><rect x="12" y="24" width="96" height="58" rx="5" fill="#7a7a84" stroke="#a0a0aa" stroke-width="1"/><rect x="15" y="27" width="90" height="52" fill="#686870"/><line x1="38" y1="18" x2="22" y2="3" stroke="#c8c8d0" stroke-width="2.5" stroke-linecap="round"/><line x1="82" y1="18" x2="98" y2="3" stroke="#c8c8d0" stroke-width="2.5" stroke-linecap="round"/><rect x="5" y="84" width="110" height="6" fill="#9a9aa2"/><circle cx="100" cy="87" r="2.2" fill="#c0000e" opacity=".9"/><rect x="28" y="90" width="10" height="8" rx="2" fill="#8a8a92"/><rect x="82" y="90" width="10" height="8" rx="2" fill="#8a8a92"/></svg>';} }
-    renderSocialLinks(ig, x, twitch, reddit, spotify, discord, facebook);
+    renderSocialLinks(ig, x, twitch, reddit, spotify, discord, facebook, session.username);
     const activeMsg = isLinks ? linksMsg : nameMsg;
     if (activeMsg) { activeMsg.textContent = 'Saved!'; activeMsg.style.color = '#4caf64'; }
     setTimeout(closeEditModal, 800);
@@ -12915,7 +12917,7 @@ async function _loadPublicProfile(username) {
     const spotify  = (user.spotify_handle  || '').replace(/^user\//i,'');
     const discord  = (user.discord_handle  || '').replace('@','');
     const facebook = (user.facebook_handle || '').replace('@','');
-    renderSocialLinks(ig, x, tw, reddit, spotify, discord, facebook);
+    renderSocialLinks(ig, x, tw, reddit, spotify, discord, facebook, username);
     loadCawImages(user);
     renderMoveset(user.moveset, false);
     _posts.load(username);
@@ -14112,7 +14114,7 @@ async function loadProfile() {
       setIdentityName(_cachedName, session.username);
       document.getElementById('profile-av-initial').textContent = _cachedName[0].toUpperCase();
       if (session.avatarUrl) setAvatar(session.avatarUrl);
-      if (session.igHandle || session.xHandle) renderSocialLinks(session.igHandle || '', session.xHandle || '', '', '', '', '', '');
+      if (session.igHandle || session.xHandle) renderSocialLinks(session.igHandle || '', session.xHandle || '', '', '', '', '', '', session.username);
     }
   }
   let user = null;
@@ -14192,26 +14194,6 @@ async function loadProfile() {
         slug.className = 'on-roster-status-slug visible exclusive';
       } catch(e) {}
     })();
-
-    // ── Owner eFed chip — visible to all viewers ──
-    // Shows the eFed's promo logo (or initial fallback) as a small avatar with "OWNER" label
-    (async () => {
-      try {
-        const ownerCheck = await sbGet('users', `username=eq.${encodeURIComponent(resolvedUser)}&select=promo_name,is_efed_owner,role,acronym,promo_logo&limit=1`);
-        const oc = ownerCheck[0];
-        if (!oc || !(oc.is_efed_owner || oc.role === 'owner') || !oc.promo_name) return;
-        const chip = document.getElementById('owner-efed-chip');
-        if (!chip) return;
-        const _label = (oc.acronym || '').trim() || oc.promo_name;
-        const _initial = _label.charAt(0).toUpperCase();
-        const avatarInner = oc.promo_logo
-          ? `<img src="${oc.promo_logo}" alt="${_label}" loading="lazy" onerror="this.parentNode.innerHTML='<span class=\\'owner-efed-chip-fallback\\'>${_initial}</span>'">`
-          : `<span class="owner-efed-chip-fallback">${_initial}</span>`;
-        chip.href = `efed.html?e=${encodeURIComponent(oc.promo_name)}`;
-        chip.innerHTML = `<div class="owner-efed-chip-avatar">${avatarInner}</div><div class="owner-efed-chip-label">Owner</div>`;
-        chip.className = 'owner-efed-chip visible';
-      } catch(e) {}
-    })();
     if (user.avatar_url) setAvatar(user.avatar_url, _isOwnProfile);
     // Load saved banner
     if (user.avatar_banner) {
@@ -14250,7 +14232,7 @@ async function loadProfile() {
       session.igHandle = ig; session.xHandle = x;
       localStorage.setItem('efed_session', JSON.stringify(session));
     }
-    renderSocialLinks(ig, x, twitch, reddit, spotify, discord, facebook);
+    renderSocialLinks(ig, x, twitch, reddit, spotify, discord, facebook, resolvedUser);
     loadCawImages(user);
     renderMoveset(user.moveset, false);
     // Show edit button for own profile
@@ -17044,11 +17026,9 @@ function setIdentityName(displayName, username) {
   el._badgeName = displayName; el._badgeUsername = username;
   const rosterBadge = el.querySelector('.on-roster-badge');
   const statusSlug = el.querySelector('.on-roster-status-slug');
-  const ownerSlug = el.querySelector('.owner-efed-chip');
   el.innerHTML = withProfileVerified(displayName, username);
   if (rosterBadge) el.appendChild(rosterBadge);
   if (statusSlug) el.appendChild(statusSlug);
-  if (ownerSlug) el.appendChild(ownerSlug);
 }
 function withChatVerified(displayName, username) {
   if (!username) return chatEsc(displayName || '');
