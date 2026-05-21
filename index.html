@@ -7305,7 +7305,7 @@ function makeCard(v) {
 
   return el;
 }// ── COMMUNITY VIDEOS ──
-function sbGetWithTimeout(table, filters, ms = 5000) {
+function sbGetWithTimeout(table, filters, ms = 12000) {
   return Promise.race([
     sbGet(table, filters),
     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
@@ -7600,8 +7600,17 @@ async function initHub() {
   try {
     // ── PHASE 1: fetch first 60 videos immediately so the page renders fast ──
     const FIRST_PAGE = 60;
-    const firstPage = await sbGetWithTimeout('submissions',
-      `status=eq.approved&order=submitted_at.desc&select=url,show_name,efed,date,date_ms,submitted_at,submitted_by,thumb_url,tags&limit=${FIRST_PAGE}`, 8000);
+    let firstPage = [];
+    try {
+      firstPage = await sbGetWithTimeout('submissions',
+        `status=eq.approved&order=submitted_at.desc&select=url,show_name,efed,date,date_ms,submitted_at,submitted_by,thumb_url,tags&limit=${FIRST_PAGE}`, 10000);
+    } catch(fetchErr) {
+      console.warn('Phase 1 fetch slow/failed, rendering with hardcoded videos:', fetchErr);
+      buildPills(); renderGrid(); loadUpcomingRow(); loadDashboard(); loadWatchlistRow();
+      loadEfedOwnerRow(); buildHeroDots(); loadSlide(); loadMostViewed(videos);
+      loadHLRShows(videos); loadRecentlyAdded(videos); loadSpotlight(videos);
+      loadBestMatches(videos); loadShowcaseRow(videos); loadPromosRow(videos); loadPodcastRow(videos);
+    }
     let subs = firstPage;
     const dbApprovedUrls = new Set(subs.map(s => s.url));
     // Remove hardcoded videos that were submitted to DB but later deleted
@@ -7643,7 +7652,7 @@ async function initHub() {
 
   // Fetch upcoming submissions
   try {
-    const upSubs = await sbGetWithTimeout('submissions', 'status=eq.upcoming&order=date_ms.asc');
+    const upSubs = await sbGetWithTimeout('submissions', 'status=eq.upcoming&order=date_ms.asc&select=url,show_name,efed,date,date_ms,submitted_by,thumb_url&limit=50', 10000);
     upcomingVideos = upSubs.map(s => ({
       url: s.url,
       show: s.show_name || '',
