@@ -442,15 +442,29 @@ nav.scrolled { background: rgba(7,7,10,.99); }
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .on-roster-badge {
-  display: none; align-items: center; gap: 4px;
-  padding: 3px 8px; border-radius: 20px;
-  background: rgba(76,175,100,.12); border: 1px solid rgba(76,175,100,.3);
-  color: #4caf64; font-family: 'DM Sans', sans-serif;
-  font-size:.65rem; font-weight: 700; letter-spacing: .8px;
-  text-transform: uppercase; white-space: nowrap; flex-shrink: 0;
+  display: none; align-items: center; gap: 5px;
+  padding: 2px 8px 2px 6px; border-radius: 20px;
+  background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.28);
+  color: #4ade80; font-family: 'DM Sans', sans-serif;
+  font-size:.62rem; font-weight: 700; letter-spacing: .5px;
+  white-space: nowrap; flex-shrink: 0;
   vertical-align: middle; line-height: 1;
 }
 .on-roster-badge.visible { display: inline-flex; }
+.on-roster-status-slug {
+  display: none; align-items: center; gap: 4px;
+  padding: 2px 9px 2px 7px; border-radius: 20px;
+  font-family: 'DM Sans', sans-serif; font-size: .62rem; font-weight: 700;
+  letter-spacing: .5px; white-space: nowrap; flex-shrink: 0;
+  vertical-align: middle; line-height: 1;
+}
+.on-roster-status-slug.visible { display: inline-flex; }
+.on-roster-status-slug.exclusive {
+  background: rgba(200,168,75,.1); border: 1px solid rgba(200,168,75,.28); color: rgba(200,168,75,.85);
+}
+.on-roster-status-slug.independent {
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); color: rgba(255,255,255,.4);
+}
 .identity-row-icons {
   display: flex; align-items: center; gap: 8px; flex-shrink: 0;
 }
@@ -1629,7 +1643,7 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
 <!-- ── IDENTITY (NAME) ROW ── -->
 <div class="identity-row" id="identity-row" style="align-items:flex-start;padding-top:12px;padding-bottom:12px;">
   <div style="flex:1;min-width:0;">
-    <div class="identity-row-name" id="identity-row-name" style="margin-bottom:2px;">—<span class="on-roster-badge" id="on-roster-badge"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>On Roster</span></div>
+    <div class="identity-row-name" id="identity-row-name" style="margin-bottom:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">—<span class="on-roster-badge" id="on-roster-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="on-roster-status-slug" id="on-roster-status-slug"></span></div>
     <div id="identity-row-username" style="font-size:.68rem;color:rgba(255,255,255,.28);letter-spacing:.5px;font-family:'DM Sans',sans-serif;font-weight:400;"></div>
   </div>
   <div class="identity-row-icons" id="identity-row-icons" style="align-self:center;"></div>
@@ -5448,7 +5462,7 @@ function renderRecords() {
         if (!username || username === '__mystery__' || username === '__multiple__') return name === 'Multiple' ? '<em style="color:rgba(255,255,255,.35);font-style:italic;font-weight:400;">Multiple</em>' : escaped;
         var bdg = _prBadgeFor(username);
         if (!bdg) return escaped;
-        return escaped + '<span style="display:inline-flex;align-items:center;vertical-align:middle;margin-left:4px;flex-shrink:0;">' + bdg + '</span><span style="display:inline-flex;width:4px;"></span>';
+        return escaped + '<span style="display:inline-flex;align-items:center;vertical-align:middle;margin-left:4px;flex-shrink:0;">' + bdg + '</span>';
       }
       if (!Array.isArray(r.slots) || !r.slots.length) {
         // Legacy: self vs opponents
@@ -13738,22 +13752,32 @@ async function loadProfile() {
 
     // Show "Add to Roster" button if the viewer is an eFed owner
     try {
-      const ownerRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`);
+      const ownerRows = await sbGet('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role,acronym`);
       const ownerData = ownerRows[0];
       if (ownerData && (ownerData.is_efed_owner || ownerData.role === 'owner') && ownerData.promo_name) {
         _ownerEfedName = ownerData.promo_name;
         _atrTargetUsername = resolvedUser;
-        // Check if already on roster
-        const onRoster = await sbGet('roster', `efed=eq.${encodeURIComponent(_ownerEfedName)}&username=eq.${encodeURIComponent(resolvedUser)}&select=id,status`);
+        // Check if already on roster, fetch plan_note for status_exclusive
+        const onRoster = await sbGet('roster', `efed=eq.${encodeURIComponent(_ownerEfedName)}&username=eq.${encodeURIComponent(resolvedUser)}&select=id,status,plan_note`);
         const addBtn = document.getElementById('add-to-roster-btn');
         if (addBtn) {
           if (onRoster.length) {
-            // Show small badge beside name, hide the add button
+            // Person icon badge — visible to everyone
             const badge = document.getElementById('on-roster-badge');
             if (badge) badge.classList.add('visible');
             addBtn.style.display = 'none';
+            // Status slug — Exclusive or Independent — visible to everyone
+            const slug = document.getElementById('on-roster-status-slug');
+            if (slug) {
+              let pn = {}; try { pn = typeof onRoster[0].plan_note === 'string' ? JSON.parse(onRoster[0].plan_note) : (onRoster[0].plan_note || {}); } catch(e) {}
+              const isExclusive = !!(pn.status_exclusive);
+              const _acr = (ownerData.acronym || '').trim() || _ownerEfedName;
+              const dot = `<span style="width:5px;height:5px;border-radius:50%;flex-shrink:0;background:${isExclusive?'#c8a84b':'rgba(255,255,255,.35)'};display:inline-block;"></span>`;
+              slug.innerHTML = dot + (isExclusive ? ('Exclusive — ' + _acr) : 'Independent');
+              slug.className = 'on-roster-status-slug visible ' + (isExclusive ? 'exclusive' : 'independent');
+            }
           } else {
-          addBtn.style.display = 'flex';
+            addBtn.style.display = 'flex';
           }
         }
       }
@@ -16661,8 +16685,10 @@ function setIdentityName(displayName, username) {
   if (!el) return;
   el._badgeName = displayName; el._badgeUsername = username;
   const rosterBadge = el.querySelector('.on-roster-badge');
+  const statusSlug = el.querySelector('.on-roster-status-slug');
   el.innerHTML = withProfileVerified(displayName, username);
   if (rosterBadge) el.appendChild(rosterBadge);
+  if (statusSlug) el.appendChild(statusSlug);
 }
 function withChatVerified(displayName, username) {
   if (!username) return chatEsc(displayName || '');
