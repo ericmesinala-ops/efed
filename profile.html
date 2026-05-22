@@ -556,6 +556,11 @@ html.day-mode .sec-help-tip { background: #fff !important; border-color: rgba(0,
 .caw-slot:hover .caw-plus { opacity: .6; }
 .caw-slot.empty:hover .caw-hover { display: none; }
 .caw-slot.empty:hover .caw-plus { opacity: .7; }
+/* On touch, hover overlay is shown via JS inline style — don't override it */
+@media (hover: none) {
+  .caw-slot:hover .caw-hover { display: none; }
+  .caw-slot .caw-hover[style*="flex"] { display: flex !important; }
+}
 
 /* ── EFED LIST ── */
 .efed-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; cursor: pointer; transition: opacity .15s, border-color .15s; background: rgba(255,255,255,.02); margin-bottom: 0; }
@@ -3455,6 +3460,7 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
       <div class="stat-lbl">Defenses</div>
     </div>
   </div>
+  <div style="font-family:'DM Sans',sans-serif;font-size:.65rem;color:rgba(255,255,255,.22);text-align:center;padding:6px 0 2px;letter-spacing:.3px;">Combined record across all eFeds</div>
 </div>
 
 <!-- ── TROPHY CASE ── -->
@@ -3506,7 +3512,7 @@ html.day-mode .ht-add-btn:hover { background: rgba(168,130,10,.1); border-color:
   <!-- List view -->
   <div id="rec-list-view">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;position:relative;">
-      <div class="sec-title" id="records-section-title" style="margin-bottom:0;flex:1;">Match History</div>
+      <div style="display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;"><div class="sec-title" id="records-section-title" style="margin-bottom:0;">Match History</div><div style="font-family:'DM Sans',sans-serif;font-size:.62rem;color:rgba(255,255,255,.22);letter-spacing:.2px;">Overall stats reflect the matches logged here</div></div>
       <button id="record-add-btn" onclick="recAddNew()" title="Add match" style="display:none;" class="tc-add-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
     </div>
     <div id="records-list"></div>
@@ -8049,6 +8055,7 @@ async function loadTrophyCase(targetUser) { return _tc.load(targetUser); }
 <div id="ach-modal-bg" onclick="if(event.target===this)achCloseModal()">
   <div id="ach-modal">
     <div class="ach-modal-title" id="ach-modal-heading">New Achievement</div>
+    <div id="ach-modal-flavor" style="font-family:'DM Sans',sans-serif;font-size:.68rem;color:rgba(255,255,255,.3);line-height:1.5;margin-bottom:14px;margin-top:-8px;">For awards, milestones &amp; career highlights. Championships &amp; title reigns can be added separately from the Career tab.</div>
     <div class="ach-modal-row">
       <div class="ach-modal-lbl">Icon</div>
       <div class="ach-icon-row" id="ach-icon-row">
@@ -8805,6 +8812,9 @@ const _posts = (() => {
       const bg  = document.getElementById('post-modal-bg');
       if (nav && bg) bg.style.top = nav.offsetHeight + 'px';
     }
+    // Prevent pull-to-refresh dragging the page out from under the modal
+    document.body.style.overscrollBehavior = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
     document.getElementById('post-modal-bg').classList.add('open');
     document.getElementById('pm-text').focus();
     _buildPmStamp(document.getElementById('pm-stamp-picker'),document.getElementById('pm-text'));
@@ -8937,6 +8947,8 @@ const _posts = (() => {
   }
   function closeModal(){
     document.getElementById('post-modal-bg').classList.remove('open');
+    document.body.style.overscrollBehavior = '';
+    document.documentElement.style.overscrollBehavior = '';
     _resetModal();
   }
   function _resetModal(){
@@ -9106,6 +9118,8 @@ const _posts = (() => {
       const bg  = document.getElementById('post-modal-bg');
       if (nav && bg) bg.style.top = nav.offsetHeight + 'px';
     }
+    document.body.style.overscrollBehavior = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
     document.getElementById('post-modal-bg').classList.add('open');
     document.getElementById('pm-text').focus();_buildPmStamp(document.getElementById('pm-stamp-picker'),document.getElementById('pm-text'));
   }
@@ -9948,6 +9962,35 @@ function cawSlotClick(slot) {
     : targetUser.toLowerCase() === session?.username?.toLowerCase();
   const imgEl = document.getElementById('caw-img-' + slot);
   const hasImage = imgEl && imgEl.style.display !== 'none' && imgEl.src;
+
+  // On touch devices: unlocked = show hover overlay (replace/delete); locked = lightbox
+  if (window.matchMedia('(hover: none)').matches && isOwn && hasImage) {
+    if (!_galDragLocked) {
+      const hoverEl = document.getElementById('caw-hover-' + slot);
+      if (hoverEl) {
+        // Toggle: if already showing, close it; else show it and close on next outside tap
+        if (hoverEl.style.display === 'flex') {
+          hoverEl.style.display = 'none';
+        } else {
+          // Hide any other open hovers
+          [1,2,3,4].forEach(s => {
+            const h = document.getElementById('caw-hover-' + s);
+            if (h && s !== slot) h.style.display = 'none';
+          });
+          hoverEl.style.display = 'flex';
+          setTimeout(() => document.addEventListener('click', function _hClose(e) {
+            const slotEl = document.getElementById('caw-slot-' + slot);
+            if (!slotEl?.contains(e.target)) { hoverEl.style.display = 'none'; }
+            document.removeEventListener('click', _hClose);
+          }, { once: true }), 50);
+        }
+        return;
+      }
+    }
+    // Locked on mobile: lightbox only
+    if (hasImage) { openLightbox(imgEl.src); return; }
+  }
+
   if (hasImage) { openLightbox(imgEl.src); return; }
   if (!hasImage && isOwn) triggerCawUpload(slot);
 }
@@ -11520,6 +11563,8 @@ async function achOpenModal(idx) {
   _achIsEfedOwnerMode = !_achIsOwn && !!isOwnEfed;
 
   if (heading) heading.textContent = _achIsEfedOwnerMode ? 'Edit Achievement (eFed Owner)' : (idx !== null ? 'Edit Achievement' : 'New Achievement');
+  const flavorEl = document.getElementById('ach-modal-flavor');
+  if (flavorEl) flavorEl.style.display = _achIsEfedOwnerMode ? 'none' : '';
 
   // Delete: only for wrestler on own profile (not eFed owner)
   if (delBtn) delBtn.style.display = (idx !== null && _achIsOwn) ? 'block' : 'none';
@@ -12064,7 +12109,9 @@ function populateBioStrip(user, editable) {
       if (editable) { valEl.textContent = '—'; valEl.classList.add('empty'); valEl.removeAttribute('data-align'); if (cell) cell.style.display = 'flex'; }
       else { if (cell) cell.style.display = 'none'; }
     } else {
-      if (f === 'weight') { setWeightDisplay(valEl, val); } else { valEl.textContent = val; }
+      if (f === 'weight') { setWeightDisplay(valEl, val); }
+      else if (f === 'height') { setHeightDisplay(valEl, val); }
+      else { valEl.textContent = val; }
       valEl.classList.remove('empty');
       if (f === 'alignment') { valEl.setAttribute('data-align', val); } else { valEl.removeAttribute('data-align'); }
       if (cell) cell.style.display = 'flex';
@@ -12312,8 +12359,20 @@ function setWeightDisplay(el, val) {
   }
 }
 
+function setHeightDisplay(el, val) {
+  if (!val) { el.textContent = '—'; return; }
+  // Normalize: strip trailing " or in/inches, collapse to x'y format
+  let v = val.trim().replace(/"+$/, '').replace(/\s*in(ches?)?$/i, '').trim();
+  // Already correct format x'y or x'yy
+  if (/^\d'\d{1,2}$/.test(v)) { el.textContent = v; return; }
+  // Handle x ft y / x'y" / x foot y etc
+  const ftIn = v.match(/^(\d)\s*(?:ft|foot|feet|'|′)\s*(\d{1,2})/i);
+  if (ftIn) { el.textContent = ftIn[1] + "'" + ftIn[2]; return; }
+  // Fallback: show as-is
+  el.textContent = v;
+}
+
 function bioStripEdit(field) {
-  // Find the row containing this field
   const rowMap = { height:'bio-row-1', weight:'bio-row-1', age:'bio-row-1', hometown:'bio-row-1', nickname:'bio-row-2', alignment:'bio-row-2', faction:'bio-row-2' };
   const row = document.getElementById(rowMap[field]);
   if (!row || !row.classList.contains('editable')) return;
@@ -12324,7 +12383,8 @@ function bioStripEdit(field) {
 
   const save = async (newVal) => {
     const trimmed = newVal.trim();
-    if (field === 'weight' && trimmed) { setWeightDisplay(valEl, trimmed); } else { valEl.textContent = trimmed || '—'; }
+    if (field === 'weight' && trimmed) { setWeightDisplay(valEl, trimmed); }
+    else { valEl.textContent = trimmed || '—'; }
     valEl.classList.toggle('empty', !trimmed);
     if (field === 'alignment') { trimmed ? valEl.setAttribute('data-align', trimmed) : valEl.removeAttribute('data-align'); }
     try {
@@ -12345,6 +12405,58 @@ function bioStripEdit(field) {
     });
     valEl.textContent = ''; valEl.appendChild(sel); sel.focus();
     sel.onchange = () => save(sel.value); sel.onblur = () => save(sel.value);
+
+  } else if (field === 'height') {
+    // Two inputs: feet (1 digit) + inches (1-2 digits) → saves as "5'11" or "6'1"
+    const hMatch = current.match(/^(\d+)'(\d{1,2})$/);
+    const curFt = hMatch ? hMatch[1] : '';
+    const curIn = hMatch ? hMatch[2] : '';
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;align-items:center;gap:3px;';
+
+    const ftInput = document.createElement('input');
+    ftInput.className = 'bio-cell-input';
+    ftInput.value = curFt; ftInput.maxLength = 1; ftInput.inputMode = 'numeric';
+    ftInput.placeholder = '5';
+    ftInput.style.cssText = 'width:26px;text-align:center;padding:2px 3px;';
+
+    const sep = document.createElement('span');
+    sep.textContent = "'";
+    sep.style.cssText = 'color:rgba(255,255,255,.5);font-family:"Bebas Neue",sans-serif;font-size:1.1rem;line-height:1;flex-shrink:0;';
+
+    const inInput = document.createElement('input');
+    inInput.className = 'bio-cell-input';
+    inInput.value = curIn; inInput.maxLength = 2; inInput.inputMode = 'numeric';
+    inInput.placeholder = '11';
+    inInput.style.cssText = 'width:32px;text-align:center;padding:2px 3px;';
+
+    ftInput.oninput = () => { ftInput.value = ftInput.value.replace(/\D/g,'').slice(0,1); };
+    inInput.oninput = () => { inInput.value = inInput.value.replace(/\D/g,'').slice(0,2); };
+
+    ftInput.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); inInput.focus(); return; }
+      if (e.key === 'Escape') { valEl.innerHTML = ''; valEl.textContent = current || '—'; valEl.classList.toggle('empty', !current); return; }
+      if (/^\d$/.test(e.key) && ftInput.value.length >= 1) setTimeout(() => inInput.focus(), 0);
+    };
+    inInput.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); inInput.blur(); return; }
+      if (e.key === 'Escape') { valEl.innerHTML = ''; valEl.textContent = current || '—'; valEl.classList.toggle('empty', !current); }
+    };
+
+    const doSave = () => {
+      const ft = ftInput.value.replace(/\D/g,'').slice(0,1);
+      const ins = inInput.value.replace(/\D/g,'').slice(0,2);
+      valEl.innerHTML = '';
+      save(ft ? (ins !== '' ? ft+"'"+ins : ft+"'0") : '');
+    };
+    inInput.onblur = doSave;
+    ftInput.onblur = (e) => { if (e.relatedTarget !== inInput) doSave(); };
+
+    wrap.appendChild(ftInput); wrap.appendChild(sep); wrap.appendChild(inInput);
+    valEl.textContent = ''; valEl.appendChild(wrap);
+    ftInput.focus(); ftInput.select();
+
   } else {
     const input = document.createElement('input');
     input.className = 'bio-cell-input'; input.value = current;
@@ -12352,18 +12464,16 @@ function bioStripEdit(field) {
     input.maxLength = maxLens[field] || 20;
     valEl.textContent = ''; valEl.appendChild(input);
     input.focus(); input.select();
-    if (field === 'weight') input.placeholder = 'e.g. 228';
-    if (field === 'height') input.placeholder = "e.g. 6'1\"";
+    if (field === 'weight') { input.placeholder = 'e.g. 226'; input.maxLength = 3; input.inputMode = 'numeric'; }
     if (field === 'age') { input.placeholder = 'e.g. 28'; input.inputMode = 'numeric'; }
     input.onfocus = () => {
-      if (field === 'weight') input.placeholder = 'e.g. 228';
-      if (field === 'height') input.placeholder = "e.g. 6'1\"";
+      if (field === 'weight') input.placeholder = 'e.g. 226';
       if (field === 'age') input.placeholder = 'e.g. 28';
     };
+    input.oninput = () => {
+      if (field === 'weight') input.value = input.value.replace(/\D/g,'').slice(0,3);
+    };
     input.onblur = () => {
-      if (field === 'weight') input.placeholder = '';
-      if (field === 'height') input.placeholder = '';
-      if (field === 'age') input.placeholder = '';
       let val = input.value.trim();
       if (field === 'weight' && val && /^\d+(\.\d+)?$/.test(val)) val = val + ' lbs';
       if (field === 'age' && val) val = val.replace(/\D/g,'').slice(0,3);
