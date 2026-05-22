@@ -2231,8 +2231,10 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
     <div class="sec-title" style="margin-bottom:0;flex:1;">🏆 Title Status</div>
   </div>
   <div id="championships-display" style="display:flex;flex-direction:column;gap:10px;"></div>
-  <div id="title-verified-legend" style="display:none;font-size:.68rem;color:#6a6a7a;letter-spacing:.3px;margin-top:10px;line-height:1.8;">
-    <span style="color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.65rem;">✓</span> Verified by eFed owner
+  <div id="title-verified-legend" style="display:none;margin-top:8px;">
+    <span class="ach-verified-badge" style="font-size:.52rem;">
+      <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> Verified by eFed owner
+    </span>
   </div>
 </div>
 <style>
@@ -7486,7 +7488,7 @@ const _tc = (() => {
     noteEl.style.cssText = 'font-size:.65rem;color:#6a6a7a;letter-spacing:.3px;margin-top:10px;line-height:1.8;';
     const hasVerified = _items.some(i => i.source === 'owner');
     noteEl.style.display = hasVerified ? 'block' : 'none';
-    noteEl.innerHTML = '<span style="color:#c8a84b;">✓</span> Verified by eFed owner';
+    noteEl.innerHTML = '<span class="ach-verified-badge" style="font-size:.52rem;"><svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> Verified by eFed owner</span>';
 
     _updateChevrons();
   }
@@ -11849,6 +11851,12 @@ async function achSave() {
   achCloseModal();
   await achPersist();
 
+  // Owner validation popup
+  if (_achIsEfedOwnerMode) {
+    _achShowValidatedPopup(title);
+    return;
+  }
+
   // Notify eFed owner + show success popup when wrestler tags an eFed
   if (!_achIsEfedOwnerMode && efedValue) {
     try {
@@ -11924,6 +11932,46 @@ function _achShowSuccessPopup(isNew, efedName, achTitle) {
   }, 4500);
 }
 
+function _achShowValidatedPopup(achTitle) {
+  const existing = document.getElementById('ach-success-popup');
+  if (existing) existing.remove();
+  const popup = document.createElement('div');
+  popup.id = 'ach-success-popup';
+  popup.style.cssText = `
+    position:fixed; bottom:28px; left:50%; transform:translateX(-50%) translateY(20px);
+    z-index:99999; background:#111118; border:1px solid rgba(200,168,75,.45);
+    border-radius:14px; padding:16px 20px 14px; max-width:320px; width:calc(100% - 40px);
+    box-shadow:0 16px 48px rgba(0,0,0,.7), 0 0 0 1px rgba(200,168,75,.12);
+    font-family:'DM Sans',sans-serif; opacity:0;
+    transition:opacity .25s ease, transform .25s ease;
+  `;
+  popup.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span class="ach-verified-badge" style="font-size:.6rem;flex-shrink:0;padding:3px 8px;">
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> Verified
+      </span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:2px;color:#e8e8e8;margin-bottom:3px;">Achievement Validated!</div>
+        <div style="font-size:.73rem;color:rgba(255,255,255,.5);line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><strong style="color:rgba(255,255,255,.75);">${_esc(achTitle)}</strong> is now verified.</div>
+      </div>
+      <button onclick="document.getElementById('ach-success-popup').remove()" style="background:none;border:none;color:rgba(255,255,255,.25);font-size:.9rem;cursor:pointer;padding:0;flex-shrink:0;transition:color .15s;" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.25)'">✕</button>
+    </div>
+  `;
+  document.body.appendChild(popup);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      popup.style.opacity = '1';
+      popup.style.transform = 'translateX(-50%) translateY(0)';
+    });
+  });
+  setTimeout(() => {
+    if (!popup.parentNode) return;
+    popup.style.opacity = '0';
+    popup.style.transform = 'translateX(-50%) translateY(10px)';
+    setTimeout(() => popup.remove(), 300);
+  }, 3500);
+}
+
 async function achDelete() {
   if (_achEditIdx === null || !_achIsOwn) return; // only wrestler can delete
   if (!confirm('Delete this achievement?')) return;
@@ -11968,7 +12016,9 @@ function renderChampionships(championships) {
     const verified = !!c.belt_img;
     // Small checkmark matching trophy case style
     const checkmark = verified
-      ? `<span style="font-family:'DM Sans',sans-serif;font-size:.65rem;font-weight:700;color:#c8a84b;vertical-align:middle;margin-right:4px;letter-spacing:0;">✓</span>`
+      ? `<span class="ach-verified-badge" style="margin-right:6px;vertical-align:middle;font-size:.5rem;">
+           <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> Verified
+         </span>`
       : '';
     // Owner-only delete button — cascade is primary, this is backup
     const delBtn = _isOwnProfile
@@ -12460,7 +12510,7 @@ function bioStripEdit(field) {
   } else {
     const input = document.createElement('input');
     input.className = 'bio-cell-input'; input.value = current;
-    const maxLens = { hometown:40, nickname:45, faction:40, age:3 };
+    const maxLens = { hometown:40, nickname:45, faction:40, age:2 };
     input.maxLength = maxLens[field] || 20;
     valEl.textContent = ''; valEl.appendChild(input);
     input.focus(); input.select();
@@ -12476,7 +12526,7 @@ function bioStripEdit(field) {
     input.onblur = () => {
       let val = input.value.trim();
       if (field === 'weight' && val && /^\d+(\.\d+)?$/.test(val)) val = val + ' lbs';
-      if (field === 'age' && val) val = val.replace(/\D/g,'').slice(0,3);
+      if (field === 'age' && val) val = val.replace(/\D/g,'').slice(0,2);
       save(val);
     };
     input.onkeydown = (e) => {
