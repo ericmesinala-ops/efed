@@ -19,6 +19,12 @@
 <title>eFed — EFED Hub</title>
 <script src="stamps.js"></script>
 <script>
+const _CLOUDINARY_CLOUD='dfjiope4m',_CLOUDINARY_PRESET='efed_hub';
+async function _uploadToCloudinary(file,folder){
+  const fd=new FormData();fd.append('file',file);fd.append('upload_preset',_CLOUDINARY_PRESET);fd.append('folder','efed_hub/'+folder);
+  const res=await fetch(`https://api.cloudinary.com/v1_1/${_CLOUDINARY_CLOUD}/image/upload`,{method:'POST',body:fd});
+  const d=await res.json();if(!d.secure_url)throw new Error('Cloudinary upload failed');return d.secure_url;
+}
 // ── EMBLEM DESIGNS (shared) ──────────────────────────────────────────────
 const EMBLEM_OWNER_SVG = `<svg viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg"><circle cx="27" cy="27" r="25" fill="#1a1a00" stroke="#c8a84b" stroke-width="2.5"/><circle cx="27" cy="27" r="21" fill="#2a2000" stroke="#e8c86a" stroke-width="1"/><circle cx="27" cy="27" r="17" fill="#3a2c00"/><polygon points="27,10 30,19 39.5,19.5 32.5,25.5 35,35 27,29.5 19,35 21.5,25.5 14.5,19.5 24,19" fill="#c8a84b" stroke="#e8c86a" stroke-width=".5"/><circle cx="27" cy="27" r="5" fill="#1a1a00"/><circle cx="27" cy="27" r="3" fill="#c8a84b"/><polygon points="27,5 29,10 34,7 31,12 37,11 33,15.5" fill="#e8c86a" opacity=".7"/><polygon points="27,5 25,10 20,7 23,12 17,11 21,15.5" fill="#e8c86a" opacity=".7"/></svg>`;
 
@@ -5089,6 +5095,43 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
     rightMeta.insertBefore(fireBadge, rightMeta.firstChild);
   }
   topBar.appendChild(rightMeta);
+  // ── Image carousel chevron row (above FSW bar) ──
+  const _mcImgs = Array.isArray(match.images) ? match.images : [];
+  let _mcIdx = 0;
+  const _mcChevRow = document.createElement('div');
+  _mcChevRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:14px;padding:6px 0;background:#07070a;border-bottom:1px solid rgba(255,255,255,.04);';
+  if (_mcImgs.length > 0) {
+    const _mcPrev = document.createElement('button');
+    _mcPrev.innerHTML = '&#8249;';
+    _mcPrev.style.cssText = 'width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;line-height:1;padding:0;flex-shrink:0;';
+    const _mcNext = document.createElement('button');
+    _mcNext.innerHTML = '&#8250;';
+    _mcNext.style.cssText = _mcPrev.style.cssText;
+    const _mcDotsWrap = document.createElement('div');
+    _mcDotsWrap.style.cssText = 'display:flex;gap:5px;align-items:center;';
+    const _mcDots = _mcImgs.map((_,i) => {
+      const d = document.createElement('div');
+      d.style.cssText = i===0 ? 'width:14px;height:5px;border-radius:3px;background:#c8a84b;transition:all .2s;' : 'width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.2);transition:all .2s;';
+      _mcDotsWrap.appendChild(d);
+      return d;
+    });
+    function _mcUpdateDots() {
+      _mcDots.forEach((d,i) => { d.style.background=i===_mcIdx?'#c8a84b':'rgba(255,255,255,.2)'; d.style.width=i===_mcIdx?'14px':'5px'; d.style.borderRadius=i===_mcIdx?'3px':'50%'; });
+    }
+    function _mcGoTo(idx) {
+      _mcIdx=(idx+_mcImgs.length)%_mcImgs.length;
+      if(_mcTrack) _mcTrack.style.transform=`translateX(-${_mcIdx*100}%)`;
+      _mcUpdateDots();
+    }
+    _mcPrev.onclick = (e) => { e.stopPropagation(); _mcGoTo(_mcIdx-1); };
+    _mcNext.onclick = (e) => { e.stopPropagation(); _mcGoTo(_mcIdx+1); };
+    _mcChevRow.appendChild(_mcPrev);
+    _mcChevRow.appendChild(_mcDotsWrap);
+    _mcChevRow.appendChild(_mcNext);
+    wrap.appendChild(_mcChevRow);
+  }
+  let _mcTrack = null;
+
   wrap.appendChild(topBar);
 
   // Participant row
@@ -5141,6 +5184,26 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
     }
   });
   wrap.appendChild(partRow);
+
+  // ── Image carousel (between names and bottom bar) ──
+  if (_mcImgs.length > 0) {
+    const _mcCarousel = document.createElement('div');
+    _mcCarousel.style.cssText = 'overflow:hidden;border-top:1px solid rgba(255,255,255,.05);';
+    _mcTrack = document.createElement('div');
+    _mcTrack.style.cssText = 'display:flex;transition:transform .3s ease;';
+    _mcImgs.forEach((img) => {
+      const slide = document.createElement('div');
+      slide.style.cssText = 'min-width:100%;';
+      const im = document.createElement('img');
+      im.src = img.url || img;
+      im.style.cssText = `width:100%;height:200px;object-fit:cover;object-position:${img.pos||'50% 50%'};display:block;`;
+      im.onerror = () => { slide.style.display='none'; };
+      slide.appendChild(im);
+      _mcTrack.appendChild(slide);
+    });
+    _mcCarousel.appendChild(_mcTrack);
+    wrap.appendChild(_mcCarousel);
+  }
 
   // Bottom strip — champ + promo + watchlist (stip moved to top bar)
   const hasStip = !!match.stipulation;
@@ -5815,6 +5878,12 @@ function _openEditMatchDetailsModal(match, ev, isExtraCard, extraIndex, onSave) 
           </div>
         </div>
       </div>
+      <div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:6px;">Match Images <span style="font-weight:400;text-transform:none;letter-spacing:0;opacity:.5;font-size:.58rem;">up to 3, optional</span></div>
+        <div id="_emd_imgs_list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;"></div>
+        <button id="_emd_add_img_btn" style="width:100%;padding:9px 0;background:rgba(255,255,255,.03);border:1px dashed rgba(255,255,255,.12);border-radius:9px;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.72rem;cursor:pointer;transition:border-color .15s;">+ Add Image</button>
+        <input id="_emd_img_file" type="file" accept="image/*" style="display:none;">
+      </div>
       <div style="display:flex;gap:8px;margin-top:4px;">
         <button id="_emd_cancel" style="flex:1;padding:11px 0;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.8rem;cursor:pointer;">Cancel</button>
         <button id="_emd_save" style="flex:1;padding:11px 0;background:#c0000e;border:none;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;">Save Changes</button>
@@ -5830,6 +5899,66 @@ function _openEditMatchDetailsModal(match, ev, isExtraCard, extraIndex, onSave) 
   const _heatLabels = ['Off','Mild 🔥','Warm 🔥','Hot 🔥','Intense 🔥','Max Heat 🔥'];
   function _updateHeatLbl() { if(_heatLbl) _heatLbl.textContent = '— ' + (_heatLabels[parseInt(_heatSlider?.value)||0]||''); }
   if (_heatSlider) { _heatSlider.addEventListener('input', _updateHeatLbl); _updateHeatLbl(); }
+
+  // ── Match images state ──
+  let _emdImages = (match.images||[]).map(img => typeof img==='string'?{url:img,pos:'50% 50%'}:{...img});
+  const _emdImgsList = box.querySelector('#_emd_imgs_list');
+  const _emdAddBtn = box.querySelector('#_emd_add_img_btn');
+  const _emdFileInp = box.querySelector('#_emd_img_file');
+
+  function _emdRenderImgs() {
+    _emdImgsList.innerHTML = '';
+    _emdImages.forEach((img, i) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'position:relative;width:100%;height:100px;border-radius:9px;overflow:hidden;border:1px solid rgba(255,255,255,.1);cursor:grab;';
+      const im = document.createElement('img');
+      im.src = img.url;
+      im.style.cssText = `width:100%;height:100%;object-fit:cover;object-position:${img.pos||'50% 50%'};display:block;pointer-events:none;`;
+      row.appendChild(im);
+      // drag hint
+      const hint = document.createElement('div');
+      hint.textContent = 'drag to reposition';
+      hint.style.cssText = 'position:absolute;bottom:5px;right:7px;font-family:'DM Sans',sans-serif;font-size:.5rem;color:rgba(255,255,255,.5);background:rgba(0,0,0,.55);border-radius:4px;padding:2px 6px;pointer-events:none;';
+      row.appendChild(hint);
+      // delete btn
+      const del = document.createElement('button');
+      del.innerHTML = '✕';
+      del.style.cssText = 'position:absolute;top:6px;right:7px;background:rgba(0,0,0,.6);border:1px solid rgba(255,70,70,.3);border-radius:4px;color:rgba(255,100,100,.8);font-size:.6rem;cursor:pointer;padding:2px 6px;';
+      del.onclick = (e) => { e.stopPropagation(); _emdImages.splice(i,1); _emdRenderImgs(); _emdAddBtn.style.display=_emdImages.length<3?'block':'none'; };
+      row.appendChild(del);
+      // drag to reposition
+      let _dragging=false,_sX=0,_sY=0,_sPX=50,_sPY=50;
+      const _cur=img.pos||'50% 50%';const _pm=_cur.match(/([\d.]+)%\s+([\d.]+)%/);
+      let _pX=_pm?parseFloat(_pm[1]):50,_pY=_pm?parseFloat(_pm[2]):50;
+      function _applyPos(){const p=`${_pX.toFixed(1)}% ${_pY.toFixed(1)}%`;im.style.objectPosition=p;_emdImages[i].pos=p;}
+      function _onDown(e){e.preventDefault();_dragging=true;const pt=e.touches?e.touches[0]:e;_sX=pt.clientX;_sY=pt.clientY;_sPX=_pX;_sPY=_pY;row.style.cursor='grabbing';hint.style.display='none';}
+      function _onMove(e){if(!_dragging)return;e.preventDefault();const pt=e.touches?e.touches[0]:e;const rect=row.getBoundingClientRect();_pX=Math.max(0,Math.min(100,_sPX-(pt.clientX-_sX)/rect.width*100));_pY=Math.max(0,Math.min(100,_sPY-(pt.clientY-_sY)/rect.height*100));_applyPos();}
+      function _onUp(){if(!_dragging)return;_dragging=false;row.style.cursor='grab';hint.style.display='';}
+      row.addEventListener('mousedown',_onDown);
+      document.addEventListener('mousemove',_onMove);
+      document.addEventListener('mouseup',_onUp);
+      row.addEventListener('touchstart',_onDown,{passive:false});
+      document.addEventListener('touchmove',_onMove,{passive:false});
+      document.addEventListener('touchend',_onUp);
+      _emdImgsList.appendChild(row);
+    });
+    _emdAddBtn.style.display = _emdImages.length < 3 ? 'block' : 'none';
+  }
+  _emdRenderImgs();
+
+  let _emdUploading = false;
+  _emdAddBtn.onclick = () => { if(!_emdUploading) _emdFileInp.click(); };
+  _emdFileInp.onchange = async () => {
+    const file = _emdFileInp.files[0]; if(!file) return;
+    _emdFileInp.value=''; _emdUploading=true;
+    _emdAddBtn.textContent='Uploading…'; _emdAddBtn.style.opacity='.5';
+    try {
+      const url = await _uploadToCloudinary(file,'match_images');
+      _emdImages.push({url,pos:'50% 50%'});
+      _emdRenderImgs();
+    } catch(e) { alert('Upload failed'); }
+    _emdUploading=false; _emdAddBtn.textContent='+ Add Image'; _emdAddBtn.style.opacity='1';
+  };
 
   // Championship pills
   let selectedChamp = match.champ || null;
@@ -5869,6 +5998,7 @@ function _openEditMatchDetailsModal(match, ev, isExtraCard, extraIndex, onSave) 
     match.promoUrl = box.querySelector('#_emd_promo').value.trim();
     match.champ = selectedChamp;
     match.rivalry = parseInt(box.querySelector('#_emd_rivalry')?.value || '0') || 0;
+    match.images = _emdImages.filter(img=>img.url);
     // Save to event
     const session = getSession(); if (!session) return;
     const matchesRef = isExtraCard ? (window._efedExtraEvents||[])[extraIndex] : window._efedPrimaryEvent;
