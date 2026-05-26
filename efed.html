@@ -6115,6 +6115,7 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
     if (n === 1) renderStep1();
     else if (n === 2) renderStep2();
     else if (n === 3) renderStep3();
+    else if (n === 4) renderStep4();
   }
 
   hdr.querySelector('#_am_back').onclick = () => goStep(currentStep - 1);
@@ -6438,45 +6439,10 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
 
   // ── STEP 3: Championship ──────────────────────────────────────────────────
   function renderStep3() {
-    nextBtn.textContent = 'Save Match';
+    nextBtn.textContent = 'Next →';
     nextBtn.disabled = false;
     nextBtn.style.opacity = '1';
-    nextBtn.onclick = async () => {
-      nextBtn.disabled = true;
-      nextBtn.textContent = 'Saving…';
-      try {
-        const stip  = window._am_stip_val||'';
-        const promo = window._am_promo_val||'';
-        const mtType = tokens.filter(t=>t.type==='wrestler'||t.type==='unknown').length;
-        const hasTag  = tokens.some(t=>t.type==='ally');
-        let matchType = '';
-        if (isFFA()) matchType = mtType>=2 ? `${mtType}-Man Battle Royal` : 'Battle Royal';
-        else if (hasTag) matchType = 'Tag Team Match';
-        else if (mtType===3) matchType = 'Triple Threat Match';
-        else if (mtType===4) matchType = 'Fatal Four-Way Match';
-        else if (mtType>4) matchType = `${mtType}-Man Match`;
-        else matchType = 'Singles Match';
-        const matchObj = {
-          uid: 'mc_' + Date.now(),
-          tokens,
-          matchFormat,
-          matchType: stip ? `${matchType} — ${stip}` : matchType,
-          champ: selectedChamp,
-          promoUrl: promo,
-          eventTitle: ev.title||''
-        };
-        await _saveMatch(matchObj, ev, isExtraCard, extraIndex);
-        window._am_stip_val = ''; window._am_promo_val = '';
-        bg.remove();
-        document.querySelectorAll('[data-match-panel]').forEach(p => {
-          if (p.style.display !== 'none' && p.dataset.matchPanel === (ev.title||'')) {
-            _renderMatchesInPanel(p, ev, isOwnerOrAdmin, isExtraCard, extraIndex);
-          }
-        });
-      } catch(e) {
-        nextBtn.disabled = false; nextBtn.textContent = 'Save Match';
-      }
-    };
+    nextBtn.onclick = () => goStep(4);
 
     const wrap = document.createElement('div');
     wrap.style.cssText = 'padding:20px;display:flex;flex-direction:column;gap:14px;';
@@ -6521,6 +6487,138 @@ function _openAddMatchModal(ev, isExtraCard, extraIndex, isOwnerOrAdmin) {
 
       wrap.appendChild(pills);
     }
+
+    stepWrap.appendChild(wrap);
+  }
+
+  // ── STEP 4: Images ───────────────────────────────────────────────────────
+  let _amImages = [];
+  function renderStep4() {
+    nextBtn.textContent = 'Save Match';
+    nextBtn.disabled = false;
+    nextBtn.style.opacity = '1';
+    nextBtn.onclick = async () => {
+      nextBtn.disabled = true;
+      nextBtn.textContent = 'Saving…';
+      try {
+        const stip  = window._am_stip_val||'';
+        const promo = window._am_promo_val||'';
+        const mtType = tokens.filter(t=>t.type==='wrestler'||t.type==='unknown').length;
+        const hasTag  = tokens.some(t=>t.type==='ally');
+        let matchType = '';
+        if (isFFA()) matchType = mtType>=2 ? `${mtType}-Man Battle Royal` : 'Battle Royal';
+        else if (hasTag) matchType = 'Tag Team Match';
+        else if (mtType===3) matchType = 'Triple Threat Match';
+        else if (mtType===4) matchType = 'Fatal Four-Way Match';
+        else if (mtType>4) matchType = `${mtType}-Man Match`;
+        else matchType = 'Singles Match';
+        const matchObj = {
+          uid: 'mc_' + Date.now(),
+          tokens,
+          matchFormat,
+          matchType: stip ? `${matchType} — ${stip}` : matchType,
+          champ: selectedChamp,
+          promoUrl: promo,
+          eventTitle: ev.title||'',
+          images: _amImages.filter(img=>img.url)
+        };
+        await _saveMatch(matchObj, ev, isExtraCard, extraIndex);
+        window._am_stip_val = ''; window._am_promo_val = '';
+        bg.remove();
+        document.querySelectorAll('[data-match-panel]').forEach(p => {
+          if (p.style.display !== 'none' && p.dataset.matchPanel === (ev.title||'')) {
+            _renderMatchesInPanel(p, ev, isOwnerOrAdmin, isExtraCard, extraIndex);
+          }
+        });
+      } catch(e) {
+        nextBtn.disabled = false; nextBtn.textContent = 'Save Match';
+      }
+    };
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'padding:20px;display:flex;flex-direction:column;gap:14px;';
+
+    const lbl = document.createElement('div');
+    lbl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.62rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:2px;";
+    lbl.textContent = 'Match Images';
+    const sub = document.createElement('div');
+    sub.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.62rem;color:rgba(255,255,255,.2);margin-bottom:8px;";
+    sub.textContent = 'Upload up to 3 images (optional). Posters, match graphics, etc.';
+    wrap.appendChild(lbl);
+    wrap.appendChild(sub);
+
+    const imgList = document.createElement('div');
+    imgList.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
+    wrap.appendChild(imgList);
+
+    const addBtn = document.createElement('button');
+    addBtn.style.cssText = "width:100%;padding:11px 0;background:rgba(255,255,255,.03);border:1px dashed rgba(255,255,255,.12);border-radius:10px;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;font-size:.75rem;cursor:pointer;transition:border-color .15s;";
+    addBtn.textContent = '+ Add Image';
+    addBtn.onmouseover = () => addBtn.style.borderColor = 'rgba(200,168,75,.3)';
+    addBtn.onmouseout  = () => addBtn.style.borderColor = 'rgba(255,255,255,.12)';
+    wrap.appendChild(addBtn);
+
+    const fileInp = document.createElement('input');
+    fileInp.type = 'file'; fileInp.accept = 'image/*'; fileInp.style.display = 'none';
+    wrap.appendChild(fileInp);
+
+    function renderImgList() {
+      imgList.innerHTML = '';
+      _amImages.forEach((img, i) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'position:relative;width:100%;height:360px;border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,.1);cursor:grab;';
+        const im = document.createElement('img');
+        im.src = img.url;
+        im.style.cssText = `width:100%;height:100%;object-fit:cover;object-position:${img.pos||'50% 50%'};display:block;pointer-events:none;`;
+        row.appendChild(im);
+        const hint = document.createElement('div');
+        hint.style.cssText = "position:absolute;bottom:8px;right:10px;font-family:'DM Sans',sans-serif;font-size:.52rem;color:rgba(255,255,255,.5);background:rgba(0,0,0,.55);border-radius:4px;padding:3px 7px;pointer-events:none;";
+        hint.textContent = 'drag to reposition';
+        row.appendChild(hint);
+        const del = document.createElement('button');
+        del.innerHTML = '✕';
+        del.style.cssText = 'position:absolute;top:8px;right:9px;background:rgba(0,0,0,.6);border:1px solid rgba(255,70,70,.3);border-radius:5px;color:rgba(255,100,100,.8);font-size:.65rem;cursor:pointer;padding:3px 8px;';
+        del.onclick = (e) => { e.stopPropagation(); _amImages.splice(i,1); renderImgList(); addBtn.style.display=_amImages.length<3?'block':'none'; };
+        row.appendChild(del);
+        // drag to reposition
+        let _dr=false,_sX=0,_sY=0,_sPX=50,_sPY=50;
+        const _c=img.pos||'50% 50%';const _m=_c.match(/([\d.]+)%\s+([\d.]+)%/);
+        let _pX=_m?parseFloat(_m[1]):50,_pY=_m?parseFloat(_m[2]):50;
+        function _ap(){const p=`${_pX.toFixed(1)}% ${_pY.toFixed(1)}%`;im.style.objectPosition=p;_amImages[i].pos=p;}
+        function _dn(e){e.preventDefault();_dr=true;const pt=e.touches?e.touches[0]:e;_sX=pt.clientX;_sY=pt.clientY;_sPX=_pX;_sPY=_pY;row.style.cursor='grabbing';hint.style.display='none';}
+        function _mv(e){if(!_dr)return;e.preventDefault();const pt=e.touches?e.touches[0]:e;const r=row.getBoundingClientRect();_pX=Math.max(0,Math.min(100,_sPX-(pt.clientX-_sX)/r.width*100));_pY=Math.max(0,Math.min(100,_sPY-(pt.clientY-_sY)/r.height*100));_ap();}
+        function _up(){if(!_dr)return;_dr=false;row.style.cursor='grab';hint.style.display='';}
+        row.addEventListener('mousedown',_dn);
+        document.addEventListener('mousemove',_mv);
+        document.addEventListener('mouseup',_up);
+        row.addEventListener('touchstart',_dn,{passive:false});
+        document.addEventListener('touchmove',_mv,{passive:false});
+        document.addEventListener('touchend',_up);
+        imgList.appendChild(row);
+      });
+      addBtn.style.display = _amImages.length < 3 ? 'block' : 'none';
+    }
+    renderImgList();
+
+    let _uploading = false;
+    addBtn.onclick = () => { if (!_uploading) fileInp.click(); };
+    fileInp.onchange = async () => {
+      const file = fileInp.files[0]; if (!file) return;
+      fileInp.value = ''; _uploading = true;
+      addBtn.textContent = 'Uploading…'; addBtn.style.opacity = '.5';
+      try {
+        const url = await _uploadToCloudinary(file, 'match_images');
+        _amImages.push({url, pos:'50% 50%'});
+        renderImgList();
+      } catch(e) { alert('Upload failed'); }
+      _uploading = false; addBtn.textContent = '+ Add Image'; addBtn.style.opacity = '1';
+    };
+
+    // Skip hint
+    const skipHint = document.createElement('div');
+    skipHint.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.6rem;color:rgba(255,255,255,.18);text-align:center;margin-top:4px;";
+    skipHint.textContent = 'No image? Just hit Save Match to continue.';
+    wrap.appendChild(skipHint);
 
     stepWrap.appendChild(wrap);
   }
