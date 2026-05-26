@@ -2618,7 +2618,12 @@ html.day-mode #sf-inline-form { background: rgba(168,130,10,.04); border-color: 
 
 
 <div class="section" id="moveset-section" style="display:none;">
-  <div class="sec-title" style="margin-bottom:14px;">Moveset</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <div class="sec-title" style="margin-bottom:0;">Moveset</div>
+    <button id="ms-toggle-btn" class="rr-add-btn" style="display:none;" onclick="toggleMovesetEditMode()" title="Edit moveset">
+      <svg id="ms-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </div>
   <div class="moveset-grid">
     <div class="moveset-col">
       <div class="moveset-col-header sig-header">Signatures</div>
@@ -2636,6 +2641,9 @@ html.day-mode #sf-inline-form { background: rgba(168,130,10,.04); border-color: 
         Add Finisher
       </button>
     </div>
+  </div>
+  <div id="ms-save-bar" style="display:none;margin-top:12px;text-align:right;">
+    <button onclick="saveMovesetManual()" style="padding:8px 22px;background:rgba(192,0,14,.85);border:1px solid rgba(192,0,14,.5);border-radius:9px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:700;letter-spacing:.8px;cursor:pointer;transition:background .15s;">Save</button>
   </div>
 </div>
 <style>
@@ -9841,32 +9849,58 @@ function handleCawFile(event) {
 const MS_MAX = 3;
 let _movesetEditable = false;
 let _movesetIsOwn    = false;
+// Tracks whether the inline edit mode (toggled by + / - button) is active
+let _movesetEditMode = false;
 
 function _parseMovesetRaw(raw) {
   try { return raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : {}; } catch(e) { return {}; }
 }
 
-// Autosave — debounced 800ms, no FAB needed
+// Collect current slot data from DOM without saving
+function _collectMovesetData() {
+  const built = { signatures: [], finishers: [] };
+  document.querySelectorAll('#ms-sig-slots .move-slot').forEach(slot => {
+    built.signatures.push({
+      newName:  slot.querySelector('.move-new')?.textContent?.trim() || '',
+      original: slot.querySelector('.move-original')?.textContent?.trim() || '',
+      img:      slot.dataset.img || ''
+    });
+  });
+  document.querySelectorAll('#ms-fin-slots .move-slot').forEach(slot => {
+    built.finishers.push({
+      newName:  slot.querySelector('.move-new')?.textContent?.trim() || '',
+      original: slot.querySelector('.move-original')?.textContent?.trim() || '',
+      img:      slot.dataset.img || ''
+    });
+  });
+  return built;
+}
+
+// Manual save triggered by the red Save button
+async function saveMovesetManual() {
+  const session = getSession(); if (!session) return;
+  const built = _collectMovesetData();
+  window._movesetData = built;
+  const saveBar = document.getElementById('ms-save-bar');
+  const btn = saveBar?.querySelector('button');
+  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ moveset: built })
+    });
+    if (btn) { btn.textContent = 'Saved!'; setTimeout(() => { btn.textContent = 'Save'; btn.disabled = false; }, 1200); }
+  } catch(e) {
+    if (btn) { btn.textContent = 'Save'; btn.disabled = false; }
+  }
+}
+
+// Legacy autosave kept for upload-triggered saves only
 let _movesetSaveTimer = null;
 function _movesetAutosave() {
   clearTimeout(_movesetSaveTimer);
   _movesetSaveTimer = setTimeout(async () => {
     const session = getSession(); if (!session) return;
-    const built = { signatures: [], finishers: [] };
-    document.querySelectorAll('#ms-sig-slots .move-slot').forEach(slot => {
-      built.signatures.push({
-        newName:  slot.querySelector('.move-new')?.textContent?.trim() || '',
-        original: slot.querySelector('.move-original')?.textContent?.trim() || '',
-        img:      slot.dataset.img || ''
-      });
-    });
-    document.querySelectorAll('#ms-fin-slots .move-slot').forEach(slot => {
-      built.finishers.push({
-        newName:  slot.querySelector('.move-new')?.textContent?.trim() || '',
-        original: slot.querySelector('.move-original')?.textContent?.trim() || '',
-        img:      slot.dataset.img || ''
-      });
-    });
+    const built = _collectMovesetData();
     window._movesetData = built;
     try {
       await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
@@ -9887,14 +9921,13 @@ function _buildMoveSlot(m, type, idx, editable) {
   const main = document.createElement('div');
   main.className = 'move-slot-main';
 
-  // Delete button — only in editable mode
-  if (editable) {
-    const del = document.createElement('button');
-    del.className = 'move-del-btn'; del.title = 'Remove';
-    del.innerHTML = '✕';
-    del.onclick = (e) => { e.stopPropagation(); deleteMoveSlot(type, idx); };
-    main.appendChild(del);
-  }
+  // Delete button — always built in edit-mode; hidden in view mode via CSS/display
+  const del = document.createElement('button');
+  del.className = 'move-del-btn'; del.title = 'Remove';
+  del.innerHTML = '✕';
+  del.style.display = editable ? '' : 'none';
+  del.onclick = (e) => { e.stopPropagation(); deleteMoveSlot(type, idx); };
+  main.appendChild(del);
 
   const num = document.createElement('div');
   num.className = 'move-slot-num';
@@ -9911,10 +9944,8 @@ function _buildMoveSlot(m, type, idx, editable) {
 
   if (editable) {
     newEl.contentEditable = 'true'; newEl.spellcheck = false;
-    newEl.addEventListener('input', _movesetAutosave);
     newEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); origEl.focus(); } });
     origEl.contentEditable = 'true'; origEl.spellcheck = false;
-    origEl.addEventListener('input', _movesetAutosave);
     origEl.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
   }
 
@@ -9995,38 +10026,116 @@ function _refreshAddButtons(data) {
   if (finAdd) finAdd.style.display = (data.finishers||[]).length  < MS_MAX ? 'flex' : 'none';
 }
 
+// Called by the +/- toggle button
+function toggleMovesetEditMode() {
+  _movesetEditMode = !_movesetEditMode;
+  _applyMovesetEditMode(_movesetEditMode);
+}
+
+function _applyMovesetEditMode(on) {
+  _movesetEditMode = on;
+  const toggleBtn  = document.getElementById('ms-toggle-btn');
+  const toggleIcon = document.getElementById('ms-toggle-icon');
+  const saveBar    = document.getElementById('ms-save-bar');
+
+  // Switch icon: minus when active, plus when inactive
+  if (toggleIcon) {
+    if (on) {
+      toggleIcon.innerHTML = '<line x1="5" y1="12" x2="19" y2="12"/>';
+    } else {
+      toggleIcon.innerHTML = '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>';
+    }
+  }
+  // Style toggle button as solid gold circle when active
+  if (toggleBtn) {
+    if (on) {
+      toggleBtn.style.background = 'rgba(200,168,75,.18)';
+      toggleBtn.style.borderColor = 'rgba(200,168,75,.8)';
+      toggleBtn.style.borderStyle = 'solid';
+      toggleBtn.style.color = '#c8a84b';
+    } else {
+      toggleBtn.style.background = '';
+      toggleBtn.style.borderColor = '';
+      toggleBtn.style.borderStyle = '';
+      toggleBtn.style.color = '';
+    }
+  }
+  // Show/hide save bar
+  if (saveBar) saveBar.style.display = on ? 'block' : 'none';
+
+  // Re-render slots with editable state
+  const data = window._movesetData || { signatures:[], finishers:[] };
+  const sigWrap = document.getElementById('ms-sig-slots');
+  const finWrap = document.getElementById('ms-fin-slots');
+  if (!sigWrap || !finWrap) return;
+
+  // In edit mode ensure at least one slot per column
+  const sigs = on
+    ? (data.signatures?.length ? data.signatures : [{}])
+    : (data.signatures||[]).filter(m => m.newName);
+  const fins = on
+    ? (data.finishers?.length ? data.finishers : [{}])
+    : (data.finishers||[]).filter(m => m.newName);
+
+  sigWrap.innerHTML = '';
+  finWrap.innerHTML = '';
+  sigs.forEach((m, i) => sigWrap.appendChild(_buildMoveSlot(m, 'sig', i, on)));
+  fins.forEach((m, i) => finWrap.appendChild(_buildMoveSlot(m, 'fin', i, on)));
+  _refreshAddButtons({ signatures: sigs, finishers: fins });
+}
+
 function renderMoveset(raw, editable) {
   _movesetEditable = editable;
   _movesetIsOwn    = typeof _isOwnProfile !== 'undefined' ? _isOwnProfile : false;
+  _movesetEditMode = false; // always start in view mode
   const data = _parseMovesetRaw(raw);
 
-  if (editable) {
-    // Start with one empty slot if nothing saved
-    if (!data.signatures?.length) data.signatures = [{}];
-    if (!data.finishers?.length)  data.finishers  = [{}];
-  } else {
-    // View mode: only show slots that have a name
-    data.signatures = (data.signatures||[]).filter(m => m.newName);
-    data.finishers  = (data.finishers ||[]).filter(m => m.newName);
-  }
+  // View mode: only show slots that have a name
+  const viewSigs = (data.signatures||[]).filter(m => m.newName);
+  const viewFins = (data.finishers ||[]).filter(m => m.newName);
+
+  // Store full data (including empty slots) for edit use
+  if (!data.signatures?.length) data.signatures = [];
+  if (!data.finishers?.length)  data.finishers  = [];
   window._movesetData = data;
 
   const sec     = document.getElementById('moveset-section');
   const sigWrap = document.getElementById('ms-sig-slots');
   const finWrap = document.getElementById('ms-fin-slots');
+  const toggleBtn = document.getElementById('ms-toggle-btn');
+  const saveBar   = document.getElementById('ms-save-bar');
   if (!sec || !sigWrap || !finWrap) return;
 
+  // Show toggle button only to profile owner
+  if (toggleBtn) toggleBtn.style.display = editable ? 'flex' : 'none';
+  // Ensure save bar hidden on initial render
+  if (saveBar) saveBar.style.display = 'none';
+  // Reset toggle icon to plus
+  const toggleIcon = document.getElementById('ms-toggle-icon');
+  if (toggleIcon) toggleIcon.innerHTML = '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>';
+  if (toggleBtn) {
+    toggleBtn.style.background = '';
+    toggleBtn.style.borderColor = '';
+    toggleBtn.style.borderStyle = '';
+    toggleBtn.style.color = '';
+  }
+
   // Hide section entirely in view mode if nothing to show
-  if (!editable && !data.signatures.length && !data.finishers.length) {
+  if (!editable && !viewSigs.length && !viewFins.length) {
     sec.style.display = 'none'; return;
   }
   sec.style.display = '';
 
   sigWrap.innerHTML = '';
   finWrap.innerHTML = '';
-  data.signatures.forEach((m, i) => sigWrap.appendChild(_buildMoveSlot(m, 'sig', i, editable)));
-  data.finishers.forEach((m, i)  => finWrap.appendChild(_buildMoveSlot(m, 'fin', i, editable)));
-  _refreshAddButtons(data);
+  viewSigs.forEach((m, i) => sigWrap.appendChild(_buildMoveSlot(m, 'sig', i, false)));
+  viewFins.forEach((m, i)  => finWrap.appendChild(_buildMoveSlot(m, 'fin', i, false)));
+
+  // Always hide add/save controls on initial load
+  const sigAdd = document.getElementById('ms-sig-add');
+  const finAdd = document.getElementById('ms-fin-add');
+  if (sigAdd) sigAdd.style.display = 'none';
+  if (finAdd) finAdd.style.display = 'none';
 }
 
 function addMoveSlot(type) {
@@ -10057,16 +10166,11 @@ function deleteMoveSlot(type, idx) {
     arr.forEach((m, i) => wrap.appendChild(_buildMoveSlot(m, type, i, true)));
     _refreshAddButtons(data);
   }
-  _movesetAutosave();
 }
 
-// Kept for backwards compat — no longer shows a FAB, just ensures editable
-function toggleMovesetEdit() {
-  renderMoveset(window._movesetData, !_movesetEditable);
-}
-
-// Legacy alias — saveMoveset is still called by some older code paths
-async function saveMoveset() { _movesetAutosave(); }
+// Legacy compat
+function toggleMovesetEdit() { toggleMovesetEditMode(); }
+async function saveMoveset() { await saveMovesetManual(); }
 
 function _moveThumbIcon() {
   return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span>photo</span>`;
