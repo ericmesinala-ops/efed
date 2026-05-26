@@ -5244,27 +5244,35 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
 
     const _buildPollUI = () => {
       _pollPanel.innerHTML = '';
-      const _ps = typeof getSession === 'function' ? getSession() : null;
-      const _pv = (_ps?.username || '').toLowerCase();
-      const _pollVotes = match.polls?.votes || {};
-      // Normalize all stored keys to lowercase for case-insensitive comparison
-      const _pollVotesNorm = {};
-      Object.keys(_pollVotes).forEach(k => { _pollVotesNorm[k.toLowerCase()] = _pollVotes[k]; });
-      const _myVoteIdx = _pv ? _pollVotesNorm[_pv] : undefined;
-      const _hasVoted = !!(_pv && _myVoteIdx !== undefined);
-      const _total = Object.keys(_pollVotesNorm).length;
-      const _counts = _pollSides.map((_, si) => Object.values(_pollVotesNorm).filter(v => v === si).length);
+
+      // Who is viewing right now?
+      const _curSession = typeof getSession === 'function' ? getSession() : null;
+      const _viewer = _curSession ? _curSession.username.toLowerCase() : null;
+
+      // Normalize all stored vote keys to lowercase
+      const _rawVotes = (match.polls && match.polls.votes) ? match.polls.votes : {};
+      const _votes = {};
+      Object.keys(_rawVotes).forEach(k => { _votes[k.toLowerCase()] = _rawVotes[k]; });
+
+      // Has THIS viewer voted? Use hasOwnProperty — avoids prototype chain issues
+      // _viewerVote is the side index they picked (0, 1, 2…) or -1 if not voted
+      const _viewerVote = (_viewer && Object.prototype.hasOwnProperty.call(_votes, _viewer))
+        ? _votes[_viewer]
+        : -1;
+      const _hasVoted = _viewerVote >= 0;
+
+      const _total = Object.keys(_votes).length;
+      const _counts = _pollSides.map((_, i) => Object.values(_votes).filter(v => v === i).length);
 
       const _qEl = document.createElement('div');
       _qEl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.68rem;color:rgba(255,255,255,.38);margin-bottom:10px;text-align:center;letter-spacing:.3px;";
       _qEl.textContent = 'Who do you think will win?';
       _pollPanel.appendChild(_qEl);
 
-      _pollSides.forEach((side, si) => {
-        const sideLabel = side.map(t => t.display_name || t.username || '???').join(' & ');
-        const pct = _total ? Math.round(_counts[si] / _total * 100) : 0;
-
-        if (!_hasVoted) {
+      if (!_hasVoted) {
+        // Vote buttons — one per side
+        _pollSides.forEach((side, si) => {
+          const sideLabel = side.map(t => t.display_name || t.username || '???').join(' & ');
           const _vBtn = document.createElement('button');
           _vBtn.style.cssText = "width:100%;margin-bottom:7px;padding:9px 13px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:9px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.7rem;cursor:pointer;text-align:left;transition:all .15s;display:block;";
           _vBtn.textContent = sideLabel;
@@ -5272,22 +5280,22 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
           _vBtn.onmouseleave = () => { _vBtn.style.background='rgba(255,255,255,.04)'; _vBtn.style.borderColor='rgba(255,255,255,.09)'; _vBtn.style.color='rgba(255,255,255,.55)'; };
           _vBtn.onclick = async (e) => {
             e.stopPropagation();
-            // Always read session fresh at click time — never trust the closure
-            const _clickSession = typeof getSession === 'function' ? getSession() : null;
-            if (!_clickSession) return;
-            const _clickUser = _clickSession.username.toLowerCase();
-            // Hard double-vote guard using normalized lookup
-            const _nowVotes = match.polls?.votes || {};
-            const _nowNorm = {};
-            Object.keys(_nowVotes).forEach(k => { _nowNorm[k.toLowerCase()] = _nowVotes[k]; });
-            if (_nowNorm[_clickUser] !== undefined) return;
-            // Store with lowercase key
-            if (!match.polls) match.polls = { votes: {} };
+            // Always read session fresh at click time
+            const _cs = typeof getSession === 'function' ? getSession() : null;
+            if (!_cs) return;
+            const _cu = _cs.username.toLowerCase();
+            // Hard double-vote guard
+            const _cv = (match.polls && match.polls.votes) ? match.polls.votes : {};
+            const _cn = {};
+            Object.keys(_cv).forEach(k => { _cn[k.toLowerCase()] = _cv[k]; });
+            if (Object.prototype.hasOwnProperty.call(_cn, _cu)) return;
+            // Record vote with lowercase key
+            if (!match.polls) match.polls = {};
             if (!match.polls.votes) match.polls.votes = {};
-            match.polls.votes[_clickUser] = si;
+            match.polls.votes[_cu] = si;
             _buildPollUI();
             try {
-              const _saveOwner = (typeof EFED_OWNER !== 'undefined' && EFED_OWNER) ? EFED_OWNER : _clickUser;
+              const _saveOwner = (typeof EFED_OWNER !== 'undefined' && EFED_OWNER) ? EFED_OWNER : _cu;
               if (isExtraCard) {
                 await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(_saveOwner), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:window._efedExtraEvents})});
               } else {
@@ -5296,27 +5304,31 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
             } catch(e2) {}
           };
           _pollPanel.appendChild(_vBtn);
-        } else {
-          const _isMyPick = _myVoteIdx === si;
+        });
+      } else {
+        // Result bars — shown only to users who have voted
+        _pollSides.forEach((side, si) => {
+          const sideLabel = side.map(t => t.display_name || t.username || '???').join(' & ');
+          const pct = _total ? Math.round(_counts[si] / _total * 100) : 0;
+          const isMyPick = _viewerVote === si;
           const _barRow = document.createElement('div');
           _barRow.style.cssText = 'margin-bottom:9px;';
-          const _barFill = _isMyPick ? 'rgba(200,168,75,.65)' : 'rgba(255,255,255,.14)';
           const _barLabel = document.createElement('div');
           _barLabel.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;';
-          _barLabel.innerHTML = `<span style="font-size:.65rem;font-family:'DM Sans',sans-serif;color:${_isMyPick ? '#c8a84b' : 'rgba(255,255,255,.42)'};font-weight:${_isMyPick ? '700' : '400'};">${sideLabel}${_isMyPick ? ' <span style="opacity:.6;">✓</span>' : ''}</span><span style="font-size:.64rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);">${pct}%</span>`;
+          _barLabel.innerHTML = `<span style="font-size:.65rem;font-family:'DM Sans',sans-serif;color:${isMyPick?'#c8a84b':'rgba(255,255,255,.42)'};font-weight:${isMyPick?'700':'400'};">${sideLabel}${isMyPick?' <span style="opacity:.6;">✓</span>':''}</span><span style="font-size:.64rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);">${pct}%</span>`;
           const _barTrack = document.createElement('div');
           _barTrack.style.cssText = 'height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;';
           const _barFillEl = document.createElement('div');
-          _barFillEl.style.cssText = `height:100%;width:0%;background:${_barFill};border-radius:2px;transition:width .5s ease;`;
+          _barFillEl.style.cssText = `height:100%;width:0%;background:${isMyPick?'rgba(200,168,75,.65)':'rgba(255,255,255,.14)'};border-radius:2px;transition:width .5s ease;`;
           _barTrack.appendChild(_barFillEl);
           _barRow.appendChild(_barLabel);
           _barRow.appendChild(_barTrack);
           _pollPanel.appendChild(_barRow);
           requestAnimationFrame(() => requestAnimationFrame(() => { _barFillEl.style.width = pct + '%'; }));
-        }
-      });
+        });
+      }
 
-      if (!_pv) {
+      if (!_viewer) {
         const _loginHint = document.createElement('div');
         _loginHint.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.18);text-align:center;margin-top:4px;font-family:'DM Sans',sans-serif;font-style:italic;";
         _loginHint.textContent = 'Log in to cast your vote';
