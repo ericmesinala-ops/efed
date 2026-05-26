@@ -5208,12 +5208,40 @@ function renderGrid() {
   const grid = document.getElementById('card-grid');
   const empty = document.getElementById('empty-state');
   const countEl = document.getElementById('vid-count');
-  grid.innerHTML = '';
   const list = filteredVideos();
   countEl.textContent = ' · ' + list.length + ' video' + (list.length !== 1 ? 's' : '');
-  if (!list.length) { empty.classList.add('visible'); return; }
+  if (!list.length) { empty.classList.add('visible'); grid.innerHTML = ''; return; }
   empty.classList.remove('visible');
-  list.forEach(v => { try { grid.appendChild(makeCard(v)); } catch(err) { console.error("makeCard failed for", v.url, err); } });
+
+  // Diff update — only add/remove changed cards, never destroy existing ones
+  // This prevents thumbnails from flickering on periodic re-renders
+  const newUrls = list.map(v => v.url);
+  const newUrlSet = new Set(newUrls);
+
+  // Remove cards that are no longer in the list
+  [...grid.querySelectorAll('.card')].forEach(c => {
+    if (!newUrlSet.has(c.dataset.url)) c.remove();
+  });
+
+  // Build a map of existing cards by URL
+  const existingMap = {};
+  grid.querySelectorAll('.card').forEach(c => { existingMap[c.dataset.url] = c; });
+
+  // Append only new cards (preserving already-rendered ones)
+  const fragment = document.createDocumentFragment();
+  list.forEach(v => {
+    if (!existingMap[v.url]) {
+      try { fragment.appendChild(makeCard(v)); } catch(err) { console.error("makeCard failed for", v.url, err); }
+    }
+  });
+  grid.appendChild(fragment);
+
+  // Re-order cards to match the desired list order without re-creating them
+  newUrls.forEach((url, i) => {
+    const card = grid.querySelector(`.card[data-url="${CSS.escape(url)}"]`);
+    if (card && grid.children[i] !== card) grid.insertBefore(card, grid.children[i] || null);
+  });
+
   setTimeout(updateRowArrows, 50);
   setTimeout(loadAllCardRatings, 300);
   setTimeout(updateLiveBadges, 2000);
@@ -5323,8 +5351,10 @@ async function updateLiveBadges() {
     // Move to Latest Videos 15 min before broadcast, or when live, or when VOD is ready
     if (within15Min || isNowLive || noLongerUpcoming) {
       const promoted_v = { ...uv, status: 'approved', submittedAt: uv.dateMs || now };
-      if (!videos.find(v => v.url === promoted_v.url)) {
+      const alreadyPromoted = !!videos.find(v => v.url === promoted_v.url);
+      if (!alreadyPromoted) {
         videos.push(promoted_v);
+        promoted = true;
       }
       upcomingVideos.splice(i, 1);
       // Update DB status to approved
@@ -6236,6 +6266,115 @@ async function _loadDashEfedFeed(session) {
   } catch(e) { body.innerHTML = '<div class="dash-empty">Could not load feed.</div>'; }
 }
 
+// ── Poll section builder — shared by Schedule + Watchlist tabs ──────────────
+function _ixBuildPollSection(baseMatch, liveMatch, session, ownerUsername) {
+  const _ixPollSides = [];
+  let _ixCur = [];
+  (baseMatch.tokens || []).forEach(tok => {
+    if (tok.type === 'vs') { if (_ixCur.length) _ixPollSides.push(_ixCur); _ixCur = []; }
+    else if (tok.type === 'wrestler' || tok.type === 'unknown') _ixCur.push(tok);
+  });
+  if (_ixCur.length) _ixPollSides.push(_ixCur);
+  if (_ixPollSides.length < 2) return null; // promo — no poll
+
+  const matchUid = baseMatch.uid || baseMatch.matchUid;
+
+  const pollToggle = document.createElement('div');
+  pollToggle.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:5px 0 7px;cursor:pointer;border-top:1px solid rgba(255,255,255,.04);';
+  const pollLbl = document.createElement('span');
+  pollLbl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.58rem;color:rgba(255,255,255,.2);letter-spacing:1px;display:flex;align-items:center;gap:3px;user-select:none;transition:color .15s;";
+  pollLbl.innerHTML = 'Vote <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+  pollToggle.appendChild(pollLbl);
+
+  const pollPanel = document.createElement('div');
+  pollPanel.style.cssText = 'display:none;padding:12px 16px 14px;border-top:1px solid rgba(255,255,255,.05);';
+
+  const _ixDrawPoll = (lm) => {
+    pollPanel.innerHTML = '';
+    const viewer = session?.username || '';
+    const votes = (lm?.polls?.votes) || {};
+    const myVote = viewer ? votes[viewer] : undefined;
+    const hasVoted = viewer && myVote !== undefined;
+    const total = Object.keys(votes).length;
+    const counts = _ixPollSides.map((_, si) => Object.values(votes).filter(v => v === si).length);
+
+    const qEl = document.createElement('div');
+    qEl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.68rem;color:rgba(255,255,255,.38);margin-bottom:10px;text-align:center;letter-spacing:.3px;";
+    qEl.textContent = 'Who do you think will win?';
+    pollPanel.appendChild(qEl);
+
+    _ixPollSides.forEach((side, si) => {
+      const sideLabel = side.map(t => t.display_name || t.username || '???').join(' & ');
+      const pct = total ? Math.round(counts[si] / total * 100) : 0;
+      if (!hasVoted) {
+        const vBtn = document.createElement('button');
+        vBtn.style.cssText = "width:100%;margin-bottom:7px;padding:9px 13px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:9px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.7rem;cursor:pointer;text-align:left;transition:all .15s;display:block;";
+        vBtn.textContent = sideLabel;
+        vBtn.onmouseenter = () => { vBtn.style.background='rgba(200,168,75,.09)'; vBtn.style.borderColor='rgba(200,168,75,.3)'; vBtn.style.color='#c8a84b'; };
+        vBtn.onmouseleave = () => { vBtn.style.background='rgba(255,255,255,.04)'; vBtn.style.borderColor='rgba(255,255,255,.09)'; vBtn.style.color='rgba(255,255,255,.55)'; };
+        vBtn.onclick = async (e) => {
+          e.stopPropagation();
+          if (!session) return;
+          try {
+            const oRows = await sbGet('users', `username=eq.${encodeURIComponent(ownerUsername)}&select=efed_event_matches_json,efed_events_json`);
+            const oRow = oRows[0]; if (!oRow) return;
+            let match = null, isPrimary = false, extrasArr = null;
+            const primaryMatches = Array.isArray(oRow.efed_event_matches_json) ? oRow.efed_event_matches_json : [];
+            const pi = primaryMatches.findIndex(m => m.uid === matchUid);
+            if (pi > -1) { match = primaryMatches[pi]; isPrimary = true; }
+            else {
+              extrasArr = Array.isArray(oRow.efed_events_json) ? oRow.efed_events_json : [];
+              for (const ev of extrasArr) { const mi = (ev.matches||[]).findIndex(m => m.uid === matchUid); if (mi > -1) { match = ev.matches[mi]; break; } }
+            }
+            if (!match) return;
+            if (!match.polls) match.polls = { votes: {} };
+            if (!match.polls.votes) match.polls.votes = {};
+            match.polls.votes[session.username] = si;
+            _ixDrawPoll(match);
+            const patch = isPrimary ? { efed_event_matches_json: primaryMatches } : { efed_events_json: extrasArr };
+            await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(ownerUsername), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify(patch)});
+          } catch(e2) { console.warn('[poll vote]', e2); }
+        };
+        pollPanel.appendChild(vBtn);
+      } else {
+        const isMyPick = myVote === si;
+        const barRow = document.createElement('div'); barRow.style.cssText = 'margin-bottom:9px;';
+        const barLbl = document.createElement('div'); barLbl.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;';
+        barLbl.innerHTML = `<span style="font-size:.65rem;font-family:'DM Sans',sans-serif;color:${isMyPick?'#c8a84b':'rgba(255,255,255,.42)'};font-weight:${isMyPick?'700':'400'};">${sideLabel}${isMyPick?' <span style="opacity:.6;">✓</span>':''}</span><span style="font-size:.64rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);">${pct}%</span>`;
+        const barTrack = document.createElement('div'); barTrack.style.cssText = 'height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;';
+        const barFill = document.createElement('div'); barFill.style.cssText = `height:100%;width:0%;background:${isMyPick?'rgba(200,168,75,.65)':'rgba(255,255,255,.14)'};border-radius:2px;transition:width .5s ease;`;
+        barTrack.appendChild(barFill); barRow.appendChild(barLbl); barRow.appendChild(barTrack);
+        pollPanel.appendChild(barRow);
+        requestAnimationFrame(() => requestAnimationFrame(() => { barFill.style.width = pct + '%'; }));
+      }
+    });
+
+    if (!viewer) {
+      const hint = document.createElement('div');
+      hint.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.18);text-align:center;margin-top:4px;font-family:'DM Sans',sans-serif;font-style:italic;";
+      hint.textContent = 'Log in to cast your vote';
+      pollPanel.appendChild(hint);
+    }
+  };
+
+  _ixDrawPoll(liveMatch);
+
+  let pollOpen = false;
+  pollToggle.onclick = (e) => {
+    e.stopPropagation();
+    pollOpen = !pollOpen;
+    pollPanel.style.display = pollOpen ? 'block' : 'none';
+    pollLbl.innerHTML = `Vote <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="${pollOpen?'18 15 12 9 6 15':'6 9 12 15 18 9'}"/></svg>`;
+  };
+  pollToggle.onmouseenter = () => { pollLbl.style.color = 'rgba(255,255,255,.4)'; };
+  pollToggle.onmouseleave = () => { pollLbl.style.color = 'rgba(255,255,255,.2)'; };
+
+  const frag = document.createElement('div');
+  frag.appendChild(pollToggle);
+  frag.appendChild(pollPanel);
+  return frag;
+}
+
 // ── TAB 3: My Schedule — new matchcard system ──
 
 // ── Compute match type live from tokens (ignores stale stored value) ──────────
@@ -6528,6 +6667,10 @@ async function _loadDashMySchedule(session) {
           btm.appendChild(rightSlot);
           wrap.appendChild(btm);
         }
+
+        // Poll
+        const _ixPoll = _ixBuildPollSection(match, liveMatch, session, owner?.username || '');
+        if (_ixPoll) wrap.appendChild(_ixPoll);
 
         body.appendChild(wrap);
       }
@@ -6827,6 +6970,12 @@ async function _loadDashMatchWatchlist(session) {
       if(ms.promoUrl){const pl=document.createElement('button');pl.style.cssText="background:rgba(192,0,14,.1);border:1px solid rgba(192,0,14,.3);border-radius:7px;padding:4px 10px;font-size:.63rem;color:rgba(255,100,100,.85);font-family:'DM Sans',sans-serif;font-weight:700;cursor:pointer;white-space:nowrap;";pl.textContent='▶ Notable Promo';pl.onclick=(e)=>{e.stopPropagation();if(typeof openVideoPopup==='function'){const _ytId=(u)=>{try{const p=new URL(u);if(p.hostname==='youtu.be')return p.pathname.slice(1).split('?')[0];if(p.hostname.includes('youtube.com')){if(p.searchParams.get('v'))return p.searchParams.get('v');const m=p.pathname.match(/\/(embed|shorts|v)\/([^/?&]+)/);if(m)return m[2];}}catch(e){}const m=u.match(/[?&]v=([^&]+)/);return m?m[1]:'';};const vid=_ytId(ms.promoUrl);if(vid)openVideoPopup('https://www.youtube.com/embed/'+vid+'?autoplay=1',{label:'Notable Promo',efedShow:ms.eventTitle||''});}};rS.appendChild(pl);}
       btm.appendChild(rS);
       w.appendChild(btm);
+
+      // Poll
+      const _lmPoll = ownerMatchMap[ms.matchUid] || ms;
+      const _ixPoll2 = _ixBuildPollSection({...ms, uid: ms.matchUid}, _lmPoll, session, _lmPoll._ownerUsername || ms.ownerUsername || '');
+      if (_ixPoll2) w.appendChild(_ixPoll2);
+
       body.appendChild(w);
     }
   } catch(e) { console.error(e); body.innerHTML='<div class="dash-empty">Could not load watchlist.</div>'; }
@@ -7282,10 +7431,11 @@ function makeCard(v) {
   thumbDiv.className = 'card-thumb';
 
   const img = document.createElement('img');
-  img.style.opacity = '0';
   img.style.transition = 'opacity .3s';
   img.onload = function() { this.style.opacity = '1'; };
   img.src = thumbUrl;
+  // Start hidden only if not already cached; avoids flash on repeated renderGrid calls
+  if (!img.complete || !img.naturalWidth) { img.style.opacity = '0'; } else { img.style.opacity = '1'; }
   img.alt = v.show || '';
   img.loading = 'lazy';
 
