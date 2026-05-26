@@ -6289,24 +6289,39 @@ function _ixBuildPollSection(baseMatch, liveMatch, session, ownerUsername) {
   const pollPanel = document.createElement('div');
   pollPanel.style.cssText = 'display:none;padding:12px 16px 14px;border-top:1px solid rgba(255,255,255,.05);';
 
-  const _ixDrawPoll = (lm) => {
+  // Track the latest live match data (updated on open via Supabase fetch)
+  let _liveData = liveMatch;
+
+  const _ixDrawPoll = () => {
     pollPanel.innerHTML = '';
-    const viewer = session?.username || '';
-    const votes = (lm?.polls?.votes) || {};
-    const myVote = viewer ? votes[viewer] : undefined;
-    const hasVoted = viewer && myVote !== undefined;
-    const total = Object.keys(votes).length;
-    const counts = _ixPollSides.map((_, si) => Object.values(votes).filter(v => v === si).length);
+
+    // Always read session fresh
+    const _curSession = typeof getSession === 'function' ? getSession() : null;
+    const _viewer = _curSession ? _curSession.username.toLowerCase() : null;
+
+    // Normalize all stored vote keys to lowercase
+    const _rawVotes = (_liveData && _liveData.polls && _liveData.polls.votes) ? _liveData.polls.votes : {};
+    const _votes = {};
+    Object.keys(_rawVotes).forEach(k => { _votes[k.toLowerCase()] = _rawVotes[k]; });
+
+    // Has THIS viewer voted? Sentinel -1 = no vote
+    const _viewerVote = (_viewer && Object.prototype.hasOwnProperty.call(_votes, _viewer))
+      ? _votes[_viewer]
+      : -1;
+    const _hasVoted = _viewerVote >= 0;
+
+    const _total = Object.keys(_votes).length;
+    const _counts = _ixPollSides.map((_, i) => Object.values(_votes).filter(v => v === i).length);
 
     const qEl = document.createElement('div');
     qEl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.68rem;color:rgba(255,255,255,.38);margin-bottom:10px;text-align:center;letter-spacing:.3px;";
     qEl.textContent = 'Who do you think will win?';
     pollPanel.appendChild(qEl);
 
-    _ixPollSides.forEach((side, si) => {
-      const sideLabel = side.map(t => t.display_name || t.username || '???').join(' & ');
-      const pct = total ? Math.round(counts[si] / total * 100) : 0;
-      if (!hasVoted) {
+    if (!_hasVoted) {
+      // Vote buttons
+      _ixPollSides.forEach((side, si) => {
+        const sideLabel = side.map(t => t.display_name || t.username || '???').join(' & ');
         const vBtn = document.createElement('button');
         vBtn.style.cssText = "width:100%;margin-bottom:7px;padding:9px 13px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:9px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.7rem;cursor:pointer;text-align:left;transition:all .15s;display:block;";
         vBtn.textContent = sideLabel;
@@ -6314,8 +6329,12 @@ function _ixBuildPollSection(baseMatch, liveMatch, session, ownerUsername) {
         vBtn.onmouseleave = () => { vBtn.style.background='rgba(255,255,255,.04)'; vBtn.style.borderColor='rgba(255,255,255,.09)'; vBtn.style.color='rgba(255,255,255,.55)'; };
         vBtn.onclick = async (e) => {
           e.stopPropagation();
-          if (!session) return;
+          // Always read session fresh at click time
+          const _cs = typeof getSession === 'function' ? getSession() : null;
+          if (!_cs) return;
+          const _cu = _cs.username.toLowerCase();
           try {
+            // Fetch latest data from owner
             const oRows = await sbGet('users', `username=eq.${encodeURIComponent(ownerUsername)}&select=efed_event_matches_json,efed_events_json`);
             const oRow = oRows[0]; if (!oRow) return;
             let match = null, isPrimary = false, extrasArr = null;
@@ -6327,17 +6346,31 @@ function _ixBuildPollSection(baseMatch, liveMatch, session, ownerUsername) {
               for (const ev of extrasArr) { const mi = (ev.matches||[]).findIndex(m => m.uid === matchUid); if (mi > -1) { match = ev.matches[mi]; break; } }
             }
             if (!match) return;
-            if (!match.polls) match.polls = { votes: {} };
+            // Hard double-vote guard on fresh data
+            const _cv = (match.polls && match.polls.votes) ? match.polls.votes : {};
+            const _cn = {};
+            Object.keys(_cv).forEach(k => { _cn[k.toLowerCase()] = _cv[k]; });
+            if (Object.prototype.hasOwnProperty.call(_cn, _cu)) return;
+            // Record vote with lowercase key
+            if (!match.polls) match.polls = {};
             if (!match.polls.votes) match.polls.votes = {};
-            match.polls.votes[session.username] = si;
-            _ixDrawPoll(match);
+            match.polls.votes[_cu] = si;
+            // Update local live data and re-render
+            _liveData = match;
+            _ixDrawPoll();
+            // Save to owner
             const patch = isPrimary ? { efed_event_matches_json: primaryMatches } : { efed_events_json: extrasArr };
             await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(ownerUsername), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify(patch)});
           } catch(e2) { console.warn('[poll vote]', e2); }
         };
         pollPanel.appendChild(vBtn);
-      } else {
-        const isMyPick = myVote === si;
+      });
+    } else {
+      // Result bars
+      _ixPollSides.forEach((side, si) => {
+        const sideLabel = side.map(t => t.display_name || t.username || '???').join(' & ');
+        const pct = _total ? Math.round(_counts[si] / _total * 100) : 0;
+        const isMyPick = _viewerVote === si;
         const barRow = document.createElement('div'); barRow.style.cssText = 'margin-bottom:9px;';
         const barLbl = document.createElement('div'); barLbl.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;';
         barLbl.innerHTML = `<span style="font-size:.65rem;font-family:'DM Sans',sans-serif;color:${isMyPick?'#c8a84b':'rgba(255,255,255,.42)'};font-weight:${isMyPick?'700':'400'};">${sideLabel}${isMyPick?' <span style="opacity:.6;">✓</span>':''}</span><span style="font-size:.64rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);">${pct}%</span>`;
@@ -6346,10 +6379,10 @@ function _ixBuildPollSection(baseMatch, liveMatch, session, ownerUsername) {
         barTrack.appendChild(barFill); barRow.appendChild(barLbl); barRow.appendChild(barTrack);
         pollPanel.appendChild(barRow);
         requestAnimationFrame(() => requestAnimationFrame(() => { barFill.style.width = pct + '%'; }));
-      }
-    });
+      });
+    }
 
-    if (!viewer) {
+    if (!_viewer) {
       const hint = document.createElement('div');
       hint.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.18);text-align:center;margin-top:4px;font-family:'DM Sans',sans-serif;font-style:italic;";
       hint.textContent = 'Log in to cast your vote';
@@ -6357,14 +6390,35 @@ function _ixBuildPollSection(baseMatch, liveMatch, session, ownerUsername) {
     }
   };
 
-  _ixDrawPoll(liveMatch);
+  _ixDrawPoll();
 
   let pollOpen = false;
-  pollToggle.onclick = (e) => {
+  pollToggle.onclick = async (e) => {
     e.stopPropagation();
     pollOpen = !pollOpen;
-    pollPanel.style.display = pollOpen ? 'block' : 'none';
     pollLbl.innerHTML = `Vote <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="${pollOpen?'18 15 12 9 6 15':'6 9 12 15 18 9'}"/></svg>`;
+    if (pollOpen) {
+      // Fetch fresh poll data so vote state is always current
+      try {
+        if (ownerUsername) {
+          const fRows = await sbGet('users', `username=eq.${encodeURIComponent(ownerUsername)}&select=efed_event_matches_json,efed_events_json`);
+          const fRow = fRows[0];
+          if (fRow) {
+            const fPrimary = Array.isArray(fRow.efed_event_matches_json) ? fRow.efed_event_matches_json : [];
+            const fMatch = fPrimary.find(m => m.uid === matchUid);
+            if (fMatch) { _liveData = fMatch; }
+            else {
+              const fExtras = Array.isArray(fRow.efed_events_json) ? fRow.efed_events_json : [];
+              for (const fEv of fExtras) { const fEm = (fEv.matches||[]).find(m => m.uid === matchUid); if (fEm) { _liveData = fEm; break; } }
+            }
+          }
+        }
+      } catch(_fe) {}
+      _ixDrawPoll();
+      pollPanel.style.display = 'block';
+    } else {
+      pollPanel.style.display = 'none';
+    }
   };
   pollToggle.onmouseenter = () => { pollLbl.style.color = 'rgba(255,255,255,.4)'; };
   pollToggle.onmouseleave = () => { pollLbl.style.color = 'rgba(255,255,255,.2)'; };
