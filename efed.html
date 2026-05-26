@@ -5214,6 +5214,123 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
     wrap.appendChild(btm);
   }
 
+  // ── Poll section ─────────────────────────────────────────────────────────
+  // Build sides: groups of wrestlers separated by VS tokens
+  const _pollSides = [];
+  let _curSide = [];
+  (match.tokens || []).forEach(tok => {
+    if (tok.type === 'vs') {
+      if (_curSide.length) _pollSides.push(_curSide);
+      _curSide = [];
+    } else if (tok.type === 'wrestler' || tok.type === 'unknown') {
+      _curSide.push(tok);
+    }
+    // ally tokens stay in same side — just skip, they're implied by the wrestlers around them
+  });
+  if (_curSide.length) _pollSides.push(_curSide);
+
+  if (_pollSides.length >= 2) {
+    // Chevron toggle row
+    const _pollToggle = document.createElement('div');
+    _pollToggle.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:5px 0 7px;cursor:pointer;background:transparent;border-top:1px solid rgba(255,255,255,.04);';
+    const _pollToggleLbl = document.createElement('span');
+    _pollToggleLbl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.58rem;color:rgba(255,255,255,.2);letter-spacing:1px;display:flex;align-items:center;gap:3px;user-select:none;transition:color .15s;";
+    _pollToggleLbl.innerHTML = 'Vote <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    _pollToggle.appendChild(_pollToggleLbl);
+
+    // Poll expand panel
+    const _pollPanel = document.createElement('div');
+    _pollPanel.style.cssText = 'display:none;padding:12px 16px 14px;border-top:1px solid rgba(255,255,255,.05);';
+
+    const _buildPollUI = () => {
+      _pollPanel.innerHTML = '';
+      const _ps = typeof getSession === 'function' ? getSession() : null;
+      const _pv = _ps?.username || '';
+      const _pollVotes = match.polls?.votes || {};
+      const _myVoteIdx = _pv ? _pollVotes[_pv] : undefined;
+      const _hasVoted = _pv && _myVoteIdx !== undefined;
+      const _total = Object.keys(_pollVotes).length;
+      const _counts = _pollSides.map((_, si) => Object.values(_pollVotes).filter(v => v === si).length);
+
+      const _qEl = document.createElement('div');
+      _qEl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.68rem;color:rgba(255,255,255,.38);margin-bottom:10px;text-align:center;letter-spacing:.3px;";
+      _qEl.textContent = 'Who do you think will win?';
+      _pollPanel.appendChild(_qEl);
+
+      _pollSides.forEach((side, si) => {
+        const sideLabel = side.map(t => t.display_name || t.username || '???').join(' & ');
+        const pct = _total ? Math.round(_counts[si] / _total * 100) : 0;
+
+        if (!_hasVoted) {
+          // Vote button
+          const _vBtn = document.createElement('button');
+          _vBtn.style.cssText = "width:100%;margin-bottom:7px;padding:9px 13px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:9px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.7rem;cursor:pointer;text-align:left;transition:all .15s;display:block;";
+          _vBtn.textContent = sideLabel;
+          _vBtn.onmouseenter = () => { _vBtn.style.background='rgba(200,168,75,.09)'; _vBtn.style.borderColor='rgba(200,168,75,.3)'; _vBtn.style.color='#c8a84b'; };
+          _vBtn.onmouseleave = () => { _vBtn.style.background='rgba(255,255,255,.04)'; _vBtn.style.borderColor='rgba(255,255,255,.09)'; _vBtn.style.color='rgba(255,255,255,.55)'; };
+          _vBtn.onclick = async (e) => {
+            e.stopPropagation();
+            if (!_ps) return;
+            if (!match.polls) match.polls = { votes: {} };
+            if (!match.polls.votes) match.polls.votes = {};
+            match.polls.votes[_pv] = si;
+            _buildPollUI();
+            try {
+              const _saveOwner = (typeof EFED_OWNER !== 'undefined' && EFED_OWNER) ? EFED_OWNER : _pv;
+              if (isExtraCard) {
+                await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(_saveOwner), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:window._efedExtraEvents})});
+              } else {
+                await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(_saveOwner), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_matches_json:window._efedPrimaryEvent?.matches})});
+              }
+            } catch(e2) {}
+          };
+          _pollPanel.appendChild(_vBtn);
+        } else {
+          // Result bar
+          const _isMyPick = _myVoteIdx === si;
+          const _barRow = document.createElement('div');
+          _barRow.style.cssText = 'margin-bottom:9px;';
+          const _barFill = _isMyPick ? 'rgba(200,168,75,.65)' : 'rgba(255,255,255,.14)';
+          const _barLabel = document.createElement('div');
+          _barLabel.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;';
+          _barLabel.innerHTML = `<span style="font-size:.65rem;font-family:'DM Sans',sans-serif;color:${_isMyPick ? '#c8a84b' : 'rgba(255,255,255,.42)'};font-weight:${_isMyPick ? '700' : '400'};">${sideLabel}${_isMyPick ? ' <span style="opacity:.6;">✓</span>' : ''}</span><span style="font-size:.64rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);">${pct}%</span>`;
+          const _barTrack = document.createElement('div');
+          _barTrack.style.cssText = 'height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;';
+          const _barFillEl = document.createElement('div');
+          _barFillEl.style.cssText = `height:100%;width:0%;background:${_barFill};border-radius:2px;transition:width .5s ease;`;
+          _barTrack.appendChild(_barFillEl);
+          _barRow.appendChild(_barLabel);
+          _barRow.appendChild(_barTrack);
+          _pollPanel.appendChild(_barRow);
+          // Animate bar after paint
+          requestAnimationFrame(() => requestAnimationFrame(() => { _barFillEl.style.width = pct + '%'; }));
+        }
+      });
+
+      if (!_pv) {
+        const _loginHint = document.createElement('div');
+        _loginHint.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.18);text-align:center;margin-top:4px;font-family:'DM Sans',sans-serif;font-style:italic;";
+        _loginHint.textContent = 'Log in to cast your vote';
+        _pollPanel.appendChild(_loginHint);
+      }
+    };
+
+    _buildPollUI();
+
+    let _pollOpen = false;
+    _pollToggle.onclick = (e) => {
+      e.stopPropagation();
+      _pollOpen = !_pollOpen;
+      _pollPanel.style.display = _pollOpen ? 'block' : 'none';
+      _pollToggleLbl.innerHTML = `Vote <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="${_pollOpen ? '18 15 12 9 6 15' : '6 9 12 15 18 9'}"/></svg>`;
+    };
+    _pollToggle.onmouseenter = () => { _pollToggleLbl.style.color='rgba(255,255,255,.4)'; };
+    _pollToggle.onmouseleave = () => { _pollToggleLbl.style.color='rgba(255,255,255,.2)'; };
+
+    wrap.appendChild(_pollToggle);
+    wrap.appendChild(_pollPanel);
+  }
+
   return wrap;
 }
 
