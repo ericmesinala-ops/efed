@@ -5245,12 +5245,15 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
     const _buildPollUI = () => {
       _pollPanel.innerHTML = '';
       const _ps = typeof getSession === 'function' ? getSession() : null;
-      const _pv = _ps?.username || '';
+      const _pv = (_ps?.username || '').toLowerCase();
       const _pollVotes = match.polls?.votes || {};
-      const _myVoteIdx = _pv ? _pollVotes[_pv] : undefined;
-      const _hasVoted = _pv && _myVoteIdx !== undefined;
-      const _total = Object.keys(_pollVotes).length;
-      const _counts = _pollSides.map((_, si) => Object.values(_pollVotes).filter(v => v === si).length);
+      // Normalize all stored keys to lowercase for case-insensitive comparison
+      const _pollVotesNorm = {};
+      Object.keys(_pollVotes).forEach(k => { _pollVotesNorm[k.toLowerCase()] = _pollVotes[k]; });
+      const _myVoteIdx = _pv ? _pollVotesNorm[_pv] : undefined;
+      const _hasVoted = !!(_pv && _myVoteIdx !== undefined);
+      const _total = Object.keys(_pollVotesNorm).length;
+      const _counts = _pollSides.map((_, si) => Object.values(_pollVotesNorm).filter(v => v === si).length);
 
       const _qEl = document.createElement('div');
       _qEl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.68rem;color:rgba(255,255,255,.38);margin-bottom:10px;text-align:center;letter-spacing:.3px;";
@@ -5262,7 +5265,6 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
         const pct = _total ? Math.round(_counts[si] / _total * 100) : 0;
 
         if (!_hasVoted) {
-          // Vote button
           const _vBtn = document.createElement('button');
           _vBtn.style.cssText = "width:100%;margin-bottom:7px;padding:9px 13px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:9px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.7rem;cursor:pointer;text-align:left;transition:all .15s;display:block;";
           _vBtn.textContent = sideLabel;
@@ -5270,13 +5272,22 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
           _vBtn.onmouseleave = () => { _vBtn.style.background='rgba(255,255,255,.04)'; _vBtn.style.borderColor='rgba(255,255,255,.09)'; _vBtn.style.color='rgba(255,255,255,.55)'; };
           _vBtn.onclick = async (e) => {
             e.stopPropagation();
-            if (!_ps) return;
+            // Always read session fresh at click time — never trust the closure
+            const _clickSession = typeof getSession === 'function' ? getSession() : null;
+            if (!_clickSession) return;
+            const _clickUser = _clickSession.username.toLowerCase();
+            // Hard double-vote guard using normalized lookup
+            const _nowVotes = match.polls?.votes || {};
+            const _nowNorm = {};
+            Object.keys(_nowVotes).forEach(k => { _nowNorm[k.toLowerCase()] = _nowVotes[k]; });
+            if (_nowNorm[_clickUser] !== undefined) return;
+            // Store with lowercase key
             if (!match.polls) match.polls = { votes: {} };
             if (!match.polls.votes) match.polls.votes = {};
-            match.polls.votes[_pv] = si;
+            match.polls.votes[_clickUser] = si;
             _buildPollUI();
             try {
-              const _saveOwner = (typeof EFED_OWNER !== 'undefined' && EFED_OWNER) ? EFED_OWNER : _pv;
+              const _saveOwner = (typeof EFED_OWNER !== 'undefined' && EFED_OWNER) ? EFED_OWNER : _clickUser;
               if (isExtraCard) {
                 await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(_saveOwner), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:window._efedExtraEvents})});
               } else {
@@ -5286,7 +5297,6 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
           };
           _pollPanel.appendChild(_vBtn);
         } else {
-          // Result bar
           const _isMyPick = _myVoteIdx === si;
           const _barRow = document.createElement('div');
           _barRow.style.cssText = 'margin-bottom:9px;';
@@ -5302,7 +5312,6 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
           _barRow.appendChild(_barLabel);
           _barRow.appendChild(_barTrack);
           _pollPanel.appendChild(_barRow);
-          // Animate bar after paint
           requestAnimationFrame(() => requestAnimationFrame(() => { _barFillEl.style.width = pct + '%'; }));
         }
       });
