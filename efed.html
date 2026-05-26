@@ -11243,6 +11243,41 @@ function showToast(msg, duration = 2800) {
   t._timer = setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(12px)'; }, duration);
 }
 
+function showSuccessModal(name, action) {
+  var existing = document.getElementById('_mgmt_success_modal'); if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = '_mgmt_success_modal';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);animation:_smFadeIn .18s ease;';
+  overlay.style.setProperty('--sm-anim','none');
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#16161e;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:32px 36px;text-align:center;max-width:320px;width:90%;box-shadow:0 24px 60px rgba(0,0,0,.7);animation:_smSlideUp .2s ease;';
+  var icon = document.createElement('div');
+  icon.style.cssText = 'width:52px;height:52px;border-radius:50%;background:rgba(34,197,94,.12);border:1.5px solid rgba(34,197,94,.35);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;';
+  icon.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+  var title = document.createElement('div');
+  title.style.cssText = 'font-family:"Bebas Neue",sans-serif;font-size:1.25rem;letter-spacing:1.5px;color:#e8e8e8;margin-bottom:6px;';
+  title.textContent = action || 'Successfully Updated';
+  var sub = document.createElement('div');
+  sub.style.cssText = 'font-family:"DM Sans",sans-serif;font-size:.82rem;color:rgba(255,255,255,.45);line-height:1.5;';
+  sub.textContent = name || '';
+  var closeBtn = document.createElement('button');
+  closeBtn.style.cssText = 'margin-top:22px;background:#22c55e;border:none;border-radius:8px;color:#000;font-family:"DM Sans",sans-serif;font-size:.78rem;font-weight:700;padding:9px 28px;cursor:pointer;letter-spacing:.4px;transition:opacity .15s;';
+  closeBtn.textContent = 'Got it';
+  closeBtn.onmouseover = function(){closeBtn.style.opacity='.85';};
+  closeBtn.onmouseout = function(){closeBtn.style.opacity='1';};
+  closeBtn.onclick = function(){ overlay.remove(); };
+  overlay.onclick = function(e){ if(e.target===overlay) overlay.remove(); };
+  box.appendChild(icon); box.appendChild(title); box.appendChild(sub); box.appendChild(closeBtn);
+  overlay.appendChild(box);
+  if (!document.getElementById('_smStyles')) {
+    var st = document.createElement('style'); st.id = '_smStyles';
+    st.textContent = '@keyframes _smFadeIn{from{opacity:0}to{opacity:1}}@keyframes _smSlideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}';
+    document.head.appendChild(st);
+  }
+  document.body.appendChild(overlay);
+  setTimeout(function(){ overlay.remove(); }, 4000);
+}
+
 function scrollRosterRow(dir) {
   const row = document.getElementById('roster-grid'); if (!row) return;
   row.scrollBy({ left: dir * 500, behavior: 'smooth' });
@@ -20776,7 +20811,10 @@ async function mgmtRosterSave() {
     // Also backup to localStorage
     localStorage.setItem(_mgmtRosterKey(), JSON.stringify({ roster: _mgmtRosterData, roster_mgmt: _mgmtRosterMgmt }));
     if (btn) { btn.textContent = '✓ Saved'; btn.style.background = '#22c55e'; btn.style.borderColor = 'rgba(34,197,94,.5)'; setTimeout(function(){ if(btn){ btn.textContent='Save Roster'; btn.style.background='#c0000e'; btn.style.borderColor='rgba(255,255,255,.1)'; } }, 2000); }
-    showToast('Roster saved!');
+    var _saveId = _mgmtDesktopSelectedId || (_mgmtMobileDetailId !== undefined ? _mgmtMobileDetailId : null);
+    var _saveName = '';
+    if (_saveId) { var _saveR = _mgmtRosterData.find(function(x){return x.id===_saveId;}); if (_saveR) _saveName = _saveR.name || ''; }
+    showSuccessModal(_saveName, 'Successfully Saved');
     _mgmtRosterLoaded = true; // keep cache valid after save
     // Sync hub usernames to roster table so profile/locker room/feed connections are live
     _syncMgmtToRosterTable().catch(function(e){ console.warn('[roster sync]', e); });
@@ -21449,6 +21487,7 @@ function _mgmtMobileOpenDetail(id) {
   }
 
   document.body.appendChild(overlay);
+  overlay.scrollTop = 0;
 }
 
 /* ── Back to list ── */
@@ -21613,6 +21652,7 @@ function _mgmtBuildOvrEdit(m, id, ovrCircle) {
 
 function _mgmtDesktopRenderDetail(id) {
   var panel = document.getElementById('mgmt-roster-detail-panel'); if (!panel) return;
+  panel.scrollTop = 0;
   var r = _mgmtRosterData.find(function(x){return x.id===id;}); if (!r) return;
   var m = _mgmtGetMgmt(id);
   var isOwner = typeof _isOwnProfile !== 'undefined' && _isOwnProfile;
@@ -22314,7 +22354,7 @@ function _mgmtShowHubConfirm(rosterId, displayName, u) {
     Object.entries(fields).forEach(function(e){if(e[1])_mgmtSetMgmt(rosterId,e[0],e[1]);});
     if(u._factionName){_mgmtSetMgmt(rosterId,'faction_affiliation',u._factionName);}
     if (u.alignment) { var _ai=_mgmtRosterData.findIndex(function(x){return x.id===rosterId;}); if(_ai!==-1) _mgmtRosterData[_ai].alignment=u.alignment; }
-    _mgmtRosterRender();closeHubDataModal();showToast('Profile updated from hub!');
+    _mgmtRosterRender();closeHubDataModal();showSuccessModal(displayName, 'CAW Hub Synced');
     if (typeof mgmtRosterSave === 'function') mgmtRosterSave();
     if (u.username && typeof EFED_NAME !== 'undefined' && EFED_NAME) {
       (async function() {
