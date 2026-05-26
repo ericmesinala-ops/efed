@@ -5318,12 +5318,37 @@ function _buildMatchBanner(match, avatarMap, efedAcronym, forPanel, isExtraCard,
     _buildPollUI();
 
     let _pollOpen = false;
-    _pollToggle.onclick = (e) => {
+    _pollToggle.onclick = async (e) => {
       e.stopPropagation();
       _pollOpen = !_pollOpen;
-      if (_pollOpen) _buildPollUI(); // always re-render on open — picks up current session
-      _pollPanel.style.display = _pollOpen ? 'block' : 'none';
       _pollToggleLbl.innerHTML = `Vote <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="${_pollOpen ? '18 15 12 9 6 15' : '6 9 12 15 18 9'}"/></svg>`;
+      if (_pollOpen) {
+        // Always fetch fresh poll data so current session's vote state is accurate
+        try {
+          const _freshOwner = (typeof EFED_OWNER !== 'undefined' && EFED_OWNER) ? EFED_OWNER : '';
+          if (_freshOwner) {
+            const _fRows = await sbGet('users', `username=eq.${encodeURIComponent(_freshOwner)}&select=efed_event_matches_json,efed_events_json`);
+            const _fRow = _fRows[0];
+            if (_fRow) {
+              const _fPrimary = Array.isArray(_fRow.efed_event_matches_json) ? _fRow.efed_event_matches_json : [];
+              const _fMatch = _fPrimary.find(m => m.uid === match.uid);
+              if (_fMatch) {
+                match.polls = _fMatch.polls || {};
+              } else {
+                const _fExtras = Array.isArray(_fRow.efed_events_json) ? _fRow.efed_events_json : [];
+                for (const _fEv of _fExtras) {
+                  const _fEm = (_fEv.matches || []).find(m => m.uid === match.uid);
+                  if (_fEm) { match.polls = _fEm.polls || {}; break; }
+                }
+              }
+            }
+          }
+        } catch(_fe) {}
+        _buildPollUI();
+        _pollPanel.style.display = 'block';
+      } else {
+        _pollPanel.style.display = 'none';
+      }
     };
     _pollToggle.onmouseenter = () => { _pollToggleLbl.style.color='rgba(255,255,255,.4)'; };
     _pollToggle.onmouseleave = () => { _pollToggleLbl.style.color='rgba(255,255,255,.2)'; };
