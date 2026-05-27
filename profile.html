@@ -1534,6 +1534,15 @@ html.day-mode .prof-pill-arr, html.day-mode .prof-jump-btn { background: rgba(0,
   #notif-overlay{z-index:99995!important;}
   #search-overlay{z-index:99996!important;}
 }
+.mc-split-row { display:grid; grid-template-columns:1fr 1fr; }
+.mc-split-img { overflow:hidden; border-right:1px solid rgba(255,255,255,.05); min-height:180px; }
+.mc-split-img img { min-height:180px; }
+@media (max-width:600px) {
+  .mc-split-row { grid-template-columns:1fr !important; }
+  .mc-split-img { border-right:none; border-bottom:1px solid rgba(255,255,255,.05); min-height:240px; }
+  .mc-split-img img { min-height:240px; }
+}
+
 </style>
 </head>
 <body>
@@ -11014,21 +11023,21 @@ async function loadAppearances(targetUser, isOwn) {
       const _pNotes = liveMatch.notes||match.notes||'';
       if (_pMatchImg || _pNotes) {
         const _pSplit = document.createElement('div');
-        _pSplit.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;border-top:1px solid rgba(255,255,255,.05);min-height:180px;';
+        _pSplit.className = 'mc-split-row';
+        _pSplit.style.cssText = 'border-top:1px solid rgba(255,255,255,.05);';
         if (_pMatchImg) {
           const _pImgSide = document.createElement('div');
-          _pImgSide.style.cssText = 'overflow:hidden;border-right:1px solid rgba(255,255,255,.05);';
+          _pImgSide.className = 'mc-split-img';
           const _pImg = document.createElement('img');
           _pImg.src = _pMatchImg.url || _pMatchImg;
-          _pImg.style.cssText = `width:100%;height:100%;object-fit:cover;object-position:${_pMatchImg.pos||'50% 50%'};display:block;min-height:180px;`;
-          _pImg.onerror = () => { _pImgSide.style.display='none'; _pSplit.style.gridTemplateColumns='1fr'; };
+          _pImg.style.cssText = `width:100%;height:100%;object-fit:cover;object-position:${_pMatchImg.pos||'50% 50%'};display:block;`;
+          _pImg.onerror = () => { _pImgSide.style.display='none'; };
           _pImgSide.appendChild(_pImg);
           _pSplit.appendChild(_pImgSide);
-        } else {
-          _pSplit.style.gridTemplateColumns = '1fr';
         }
         const _pNotesSide = document.createElement('div');
-        _pNotesSide.style.cssText = "padding:14px;display:flex;flex-direction:column;gap:6px;justify-content:flex-start;";
+        _pNotesSide.className = 'mc-split-notes';
+        _pNotesSide.style.cssText = 'padding:14px;display:flex;flex-direction:column;gap:6px;';
         if (_pNotes) {
           const _pNLbl = document.createElement('div');
           _pNLbl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.52rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.22);margin-bottom:2px;";
@@ -11128,7 +11137,115 @@ async function loadAppearances(targetUser, isOwn) {
         card.appendChild(btm);
       }
 
-
+      // ── Poll / Vote section ──
+      const _pPollSides = [];
+      let _pCurSide = [];
+      (liveMatch.tokens||match.tokens||[]).forEach(tok => {
+        if (tok.type==='vs') { if(_pCurSide.length)_pPollSides.push(_pCurSide); _pCurSide=[]; }
+        else if (tok.type==='wrestler'||tok.type==='unknown') _pCurSide.push(tok);
+      });
+      if (_pCurSide.length) _pPollSides.push(_pCurSide);
+      if (_pPollSides.length >= 2) {
+        const _pPollToggle = document.createElement('div');
+        _pPollToggle.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:5px 0 7px;cursor:pointer;background:transparent;border-top:1px solid rgba(255,255,255,.04);';
+        const _pPollLbl = document.createElement('span');
+        _pPollLbl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.72rem;color:rgba(255,255,255,.2);letter-spacing:1px;display:flex;align-items:center;gap:3px;user-select:none;transition:color .15s;";
+        _pPollLbl.innerHTML = 'Vote <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+        _pPollToggle.appendChild(_pPollLbl);
+        const _pPollPanel = document.createElement('div');
+        _pPollPanel.style.cssText = 'display:none;padding:12px 16px 14px;border-top:1px solid rgba(255,255,255,.05);';
+        const _pBuildPoll = () => {
+          _pPollPanel.innerHTML = '';
+          const _pCs = typeof getSession==='function'?getSession():null;
+          const _pViewer = _pCs?_pCs.username.toLowerCase():null;
+          const _pRawV = (liveMatch.polls&&liveMatch.polls.votes)?liveMatch.polls.votes:((match.polls&&match.polls.votes)?match.polls.votes:{});
+          const _pVotes = {}; Object.keys(_pRawV).forEach(k=>{ _pVotes[k.toLowerCase()]=_pRawV[k]; });
+          const _pViewerVote = (_pViewer&&Object.prototype.hasOwnProperty.call(_pVotes,_pViewer))?_pVotes[_pViewer]:-1;
+          const _pHasVoted = _pViewerVote>=0;
+          const _pTotal = Object.keys(_pVotes).length;
+          const _pCounts = _pPollSides.map((_,i)=>Object.values(_pVotes).filter(v=>v===i).length);
+          const _pQ = document.createElement('div');
+          _pQ.style.cssText = "font-family:'DM Sans',sans-serif;font-size:.68rem;color:rgba(255,255,255,.38);margin-bottom:10px;text-align:center;";
+          _pQ.textContent = 'Who do you think will win?';
+          _pPollPanel.appendChild(_pQ);
+          if (!_pHasVoted) {
+            _pPollSides.forEach((side,si) => {
+              const lbl = side.map(t=>t.display_name||t.username||'???').join(' & ');
+              const btn = document.createElement('button');
+              btn.style.cssText = "width:100%;margin-bottom:7px;padding:9px 13px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:9px;color:rgba(255,255,255,.55);font-family:'DM Sans',sans-serif;font-size:.7rem;cursor:pointer;text-align:left;transition:all .15s;display:block;";
+              btn.textContent = lbl;
+              btn.onmouseenter=()=>{btn.style.background='rgba(200,168,75,.09)';btn.style.borderColor='rgba(200,168,75,.3)';btn.style.color='#c8a84b';};
+              btn.onmouseleave=()=>{btn.style.background='rgba(255,255,255,.04)';btn.style.borderColor='rgba(255,255,255,.09)';btn.style.color='rgba(255,255,255,.55)';};
+              btn.onclick = async (e) => {
+                e.stopPropagation();
+                const cs=typeof getSession==='function'?getSession():null; if(!cs)return;
+                const cu=cs.username.toLowerCase();
+                const cv=(liveMatch.polls&&liveMatch.polls.votes)?liveMatch.polls.votes:{};
+                const cn={}; Object.keys(cv).forEach(k=>{cn[k.toLowerCase()]=cv[k];});
+                if(Object.prototype.hasOwnProperty.call(cn,cu))return;
+                if(!liveMatch.polls)liveMatch.polls={};
+                if(!liveMatch.polls.votes)liveMatch.polls.votes={};
+                liveMatch.polls.votes[cu]=si;
+                _pBuildPoll();
+                try {
+                  if(ownerUsername){
+                    const oRows=await sbGet('users',`username=eq.${encodeURIComponent(ownerUsername)}&select=efed_event_matches_json,efed_events_json`);
+                    const oRow=oRows[0]; if(!oRow)return;
+                    const pArr=Array.isArray(oRow.efed_event_matches_json)?oRow.efed_event_matches_json:[];
+                    const pi=pArr.findIndex(m=>m.uid===liveMatch.uid);
+                    if(pi>-1){pArr[pi].polls=liveMatch.polls;await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(ownerUsername),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_matches_json:pArr})});}
+                    else{
+                      const eArr=Array.isArray(oRow.efed_events_json)?oRow.efed_events_json:[];
+                      for(const ev of eArr){const mi=(ev.matches||[]).findIndex(m=>m.uid===liveMatch.uid);if(mi>-1){ev.matches[mi].polls=liveMatch.polls;break;}}
+                      await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(ownerUsername),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:eArr})});
+                    }
+                  }
+                } catch(e2){}
+              };
+              _pPollPanel.appendChild(btn);
+            });
+          } else {
+            _pPollSides.forEach((side,si) => {
+              const lbl=side.map(t=>t.display_name||t.username||'???').join(' & ');
+              const pct=_pTotal?Math.round(_pCounts[si]/_pTotal*100):0;
+              const isMyPick=_pViewerVote===si;
+              const row=document.createElement('div'); row.style.cssText='margin-bottom:9px;';
+              const rl=document.createElement('div'); rl.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;';
+              rl.innerHTML=`<span style="font-size:.65rem;font-family:'DM Sans',sans-serif;color:${isMyPick?'#c8a84b':'rgba(255,255,255,.42)'};font-weight:${isMyPick?'700':'400'};">${lbl}${isMyPick?' <span style="opacity:.6;">✓</span>':''}</span><span style="font-size:.64rem;font-family:'DM Sans',sans-serif;color:rgba(255,255,255,.3);">${pct}%</span>`;
+              const track=document.createElement('div'); track.style.cssText='height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;';
+              const fill=document.createElement('div'); fill.style.cssText=`height:100%;width:0%;background:${isMyPick?'rgba(200,168,75,.65)':'rgba(255,255,255,.14)'};border-radius:2px;transition:width .5s ease;`;
+              track.appendChild(fill); row.appendChild(rl); row.appendChild(track);
+              _pPollPanel.appendChild(row);
+              requestAnimationFrame(()=>requestAnimationFrame(()=>{fill.style.width=pct+'%';}));
+            });
+          }
+          if(!_pViewer){const h=document.createElement('div');h.style.cssText="font-size:.6rem;color:rgba(255,255,255,.18);text-align:center;margin-top:4px;font-family:'DM Sans',sans-serif;font-style:italic;";h.textContent='Log in to cast your vote';_pPollPanel.appendChild(h);}
+        };
+        _pBuildPoll();
+        let _pPollOpen=false;
+        _pPollToggle.onclick=async(e)=>{
+          e.stopPropagation(); _pPollOpen=!_pPollOpen;
+          _pPollLbl.innerHTML=`Vote <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="${_pPollOpen?'18 15 12 9 6 15':'6 9 12 15 18 9'}"/></svg>`;
+          if(_pPollOpen){
+            try{
+              if(ownerUsername){
+                const fr=await sbGet('users',`username=eq.${encodeURIComponent(ownerUsername)}&select=efed_event_matches_json,efed_events_json`);
+                const fo=fr[0]; if(fo){
+                  const fp=Array.isArray(fo.efed_event_matches_json)?fo.efed_event_matches_json:[];
+                  const fm=fp.find(m=>m.uid===liveMatch.uid);
+                  if(fm){liveMatch.polls=fm.polls||{};}
+                  else{const fe=Array.isArray(fo.efed_events_json)?fo.efed_events_json:[];for(const fev of fe){const fem=(fev.matches||[]).find(m=>m.uid===liveMatch.uid);if(fem){liveMatch.polls=fem.polls||{};break;}}}
+                }
+              }
+            }catch(fe){}
+            _pBuildPoll(); _pPollPanel.style.display='block';
+          } else { _pPollPanel.style.display='none'; }
+        };
+        _pPollToggle.onmouseenter=()=>{_pPollLbl.style.color='rgba(255,255,255,.4)';};
+        _pPollToggle.onmouseleave=()=>{_pPollLbl.style.color='rgba(255,255,255,.2)';};
+        card.appendChild(_pPollToggle);
+        card.appendChild(_pPollPanel);
+      }
 
       list.appendChild(card);
     });
