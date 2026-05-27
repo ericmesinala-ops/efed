@@ -6633,7 +6633,6 @@ async function _loadDashMySchedule(session) {
       body.appendChild(efedHead);
 
       // ── Carousel wrapper ──
-      let _dxIdx = 0;
       const _dxOuter = document.createElement('div');
       _dxOuter.style.cssText = 'margin:0 14px 14px;';
 
@@ -6988,7 +6987,7 @@ function _buildRepostStampPicker(gridId, textareaId, efedName) {
     grid.appendChild(btn);
   });
 }
-function openMatchRepostModal(match, avatarMap) {
+function _openMatchRepostModalLegacy(match, avatarMap) {
   const session = typeof getSession === 'function' ? getSession() : null;
   if (!session) { if (typeof showToast === 'function') showToast('Sign in to repost.'); return; }
   window._repostMatchData = { match, avatarMap: avatarMap || {} };
@@ -18024,93 +18023,6 @@ function mr_toggleStamp(e) {
   e.stopPropagation();
   const picker = document.getElementById('mr-stamp-picker');
   if (picker) picker.classList.toggle('open');
-}
-
-function openMatchRepostModal(match, avatarMap) {
-  const session = (typeof getSession==="function"?getSession():null)();
-  if (!session) { (function(m){if(typeof showToast==="function")showToast(m);})('Sign in to repost.'); return; }
-  window.mrRepostData = { match, avatarMap: avatarMap||{} };
-  // Reset
-  mr_setMode('ic');
-  document.getElementById('mr-text').value = '';
-  document.getElementById('mr-char').textContent = '0 / 800';
-  document.getElementById('mr-msg').style.display = 'none';
-  document.getElementById('mr-post').style.display = 'inline-flex';
-  document.getElementById('mr-post').disabled = false;
-  document.getElementById('mr-post').textContent = 'Post';
-  document.getElementById('mr-stamp-picker')?.classList.remove('open');
-  const prev = document.getElementById('mr-preview');
-  prev.innerHTML = '';
-  const matchEfed = (match.efed||match._efed||'').trim();
-  const _cardFn = typeof _mcBuildCompactCard === 'function' ? _mcBuildCompactCard
-                : typeof _prBuildCompactCard  === 'function' ? _prBuildCompactCard
-                : typeof _buildCompactMatchCard === 'function' ? _buildCompactMatchCard : null;
-  if (_cardFn) {
-    const cardEl = _cardFn(match, avatarMap||{});
-    // remove inner border/radius so the mr-preview container is the frame
-    if (cardEl) { cardEl.style.border = 'none'; cardEl.style.borderRadius = '0'; cardEl.style.background = 'transparent'; }
-    prev.appendChild(cardEl);
-  }
-  // Build pills
-  sbGetCached('users', `username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`)
-    .then(uRows => sbGetCached('roster', `username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`).then(rRows => {
-      const u = uRows[0];
-      const efeds = [];
-      if ((u?.is_efed_owner||u?.role==='owner') && u?.promo_name) efeds.push(u.promo_name);
-      rRows.forEach(r => { if(r.efed && !efeds.map(e=>e.toLowerCase()).includes(r.efed.toLowerCase())) efeds.push(r.efed); });
-      mr_buildPills(efeds, matchEfed);
-      mr_buildStamps(matchEfed || efeds[0] || null);
-    })).catch(()=>{});
-  // Show
-  const bg = document.getElementById('mr-bg');
-  bg.style.display='flex'; bg.classList.add('open');
-}
-
-function mr_close() {
-  const bg = document.getElementById('mr-bg');
-  if(bg) { bg.style.display='none'; bg.classList.remove('open'); }
-  document.getElementById('mr-stamp-picker')?.classList.remove('open');
-  window.mrRepostData = null;
-}
-
-async function mr_submit() {
-  const session = (typeof getSession==="function"?getSession():null)();
-  if (!session || !window.mrRepostData) return;
-  const text = document.getElementById('mr-text').value.trim();
-  const btn  = document.getElementById('mr-post');
-  btn.disabled=true; btn.textContent='Posting…';
-  const { match } = window.mrRepostData;
-  const postType = window.mrMode==='ooc' ? 'match_repost_ooc' : 'match_repost';
-  try {
-    const matchMeta = JSON.stringify({ type:'match', uid:match.uid, efed:match.efed||match._efed||'', eventTitle:match.eventTitle||'', eventDate:match.eventDate||'', matchType:match.matchType||'', stipulation:match.stipulation||'', tokens:match.tokens||[], champ:match.champ||null, ownerUsername:match.ownerUsername||'' });
-    const base = { username:session.username, text:text||null, image_url:matchMeta, post_type:postType, likes:0, created_at:new Date().toISOString(), reply_to:null };
-    const sel  = window.mrSelectedEfed;
-    const matchEfedName = (match.efed||match._efed||'').trim();
-    // efed:null = global/profile feed always
-    await sbInsert('posts', {...base, efed:null});
-    if (sel==='__all__') {
-      // All efeds the user belongs to
-      const [uR,rR] = await Promise.all([
-        sbGet('users',`username=eq.${encodeURIComponent(session.username)}&select=promo_name,is_efed_owner,role`),
-        sbGet('roster',`username=eq.${encodeURIComponent(session.username)}&status=eq.approved&select=efed`)
-      ]);
-      const u=uR[0]; const allE=[];
-      if((u?.is_efed_owner||u?.role==='owner')&&u?.promo_name) allE.push(u.promo_name);
-      rR.forEach(r=>{ if(r.efed&&!allE.map(e=>e.toLowerCase()).includes(r.efed.toLowerCase())) allE.push(r.efed); });
-      for (const e of allE) await sbInsert('posts', {...base, efed:e});
-    } else if (sel && sel!=='__myfeed__') {
-      await sbInsert('posts', {...base, efed:sel});
-    } else if (!sel && matchEfedName) {
-      // My Feed Only: still post to match's efed so it appears in context
-      await sbInsert('posts', {...base, efed:matchEfedName});
-    }
-    btn.style.display='none';
-    const msg=document.getElementById('mr-msg');
-    const destLabel = sel==='__all__' ? 'all eFeds' : sel==='__myfeed__'||!sel ? 'your profile' : sel;
-    msg.innerHTML=`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4caf8a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Reposted to ${destLabel}`;
-    msg.style.display='flex';
-    setTimeout(()=>mr_close(), 2800);
-  } catch(e) { btn.disabled=false; btn.textContent='Post'; (function(m){if(typeof showToast==="function")showToast(m);})('Could not post. Try again.'); }
 }
 
 function openMatchRepostModal(match,avatarMap){
