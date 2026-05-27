@@ -6612,6 +6612,8 @@ async function _loadDashMySchedule(session) {
       const _dxOuter = document.createElement('div');
       _dxOuter.style.cssText = 'margin:0 14px 14px;';
 
+      // Carousel setup for multiple matches
+      let _dxTrack = null, _dxIdx = 0;
       if (newMatches.length > 1) {
         const _dxChev = document.createElement('div');
         _dxChev.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:14px;padding:6px 0 8px;';
@@ -6625,50 +6627,38 @@ async function _loadDashMySchedule(session) {
         _dxDotsWrap.style.cssText = 'display:flex;gap:5px;align-items:center;';
         const _dxDots = newMatches.map((_,i) => {
           const d = document.createElement('div');
-          d.style.cssText = i===0 ? 'width:14px;height:5px;border-radius:3px;background:#c8a84b;transition:all .2s;' : 'width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.2);transition:all .2s;';
+          d.style.cssText = i===0?'width:14px;height:5px;border-radius:3px;background:#c8a84b;transition:all .2s;':'width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.2);transition:all .2s;';
           _dxDotsWrap.appendChild(d); return d;
         });
+        function _dxUpdateDots() {
+          _dxDots.forEach((d,i)=>{ d.style.background=i===_dxIdx?'#c8a84b':'rgba(255,255,255,.2)'; d.style.width=i===_dxIdx?'14px':'5px'; d.style.borderRadius=i===_dxIdx?'3px':'50%'; });
+        }
+        function _dxGoTo(n) {
+          _dxIdx=Math.max(0,Math.min(newMatches.length-1,n));
+          _dxTrack.style.transform=`translateX(-${_dxIdx*100}%)`;
+          _dxUpdateDots();
+        }
         _dxChev.appendChild(_dxPrev); _dxChev.appendChild(_dxDotsWrap); _dxChev.appendChild(_dxNext);
         _dxOuter.appendChild(_dxChev);
-
         const _dxViewport = document.createElement('div');
         _dxViewport.style.cssText = 'overflow:hidden;border-radius:12px;';
-        const _dxTrack = document.createElement('div');
+        _dxTrack = document.createElement('div');
         _dxTrack.style.cssText = 'display:flex;transition:transform .3s ease;';
         _dxViewport.appendChild(_dxTrack);
         _dxOuter.appendChild(_dxViewport);
+        _dxPrev.onclick = () => _dxGoTo(_dxIdx-1);
+        _dxNext.onclick = () => _dxGoTo(_dxIdx+1);
+        let _dxTX=0;
+        _dxViewport.addEventListener('touchstart',e=>{_dxTX=e.touches[0].clientX;},{passive:true});
+        _dxViewport.addEventListener('touchend',e=>{const d=_dxTX-e.changedTouches[0].clientX;if(Math.abs(d)>40)_dxGoTo(_dxIdx+(d>0?1:-1));},{passive:true});
+      }
+      body.appendChild(_dxOuter);
 
-        function _dxUpdateDots() {
-          _dxDots.forEach((d,i) => {
-            d.style.background = i===_dxIdx ? '#c8a84b' : 'rgba(255,255,255,.2)';
-            d.style.width = i===_dxIdx ? '14px' : '5px';
-            d.style.borderRadius = i===_dxIdx ? '3px' : '50%';
-          });
-        }
-        function _dxGoTo(n) {
-          _dxIdx = Math.max(0, Math.min(newMatches.length-1, n));
-          _dxTrack.style.transform = `translateX(-${_dxIdx*100}%)`;
-          _dxUpdateDots();
-        }
-        _dxPrev.onclick = () => _dxGoTo(_dxIdx - 1);
-        _dxNext.onclick = () => _dxGoTo(_dxIdx + 1);
+      for (const match of newMatches) {
+        const liveMatch = ownerMatchMap[match.uid] || match;
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden;background:#0d0d12;';
 
-        // Touch swipe support
-        let _dxTouchX = 0;
-        _dxViewport.addEventListener('touchstart', e => { _dxTouchX = e.touches[0].clientX; }, {passive:true});
-        _dxViewport.addEventListener('touchend', e => {
-          const diff = _dxTouchX - e.changedTouches[0].clientX;
-          if (Math.abs(diff) > 40) _dxGoTo(_dxIdx + (diff > 0 ? 1 : -1));
-        }, {passive:true});
-
-        body.appendChild(_dxOuter);
-
-        for (const match of newMatches) {
-          const liveMatch = ownerMatchMap[match.uid] || match;
-          const _dxSlide = document.createElement('div');
-          _dxSlide.style.cssText = 'min-width:100%;box-sizing:border-box;';
-          const wrap = document.createElement('div');
-          wrap.style.cssText = 'border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden;background:#0d0d12;';
 
         // Top bar — 3-col: [event·date] | [stip] | [matchType]
         const topBar = document.createElement('div');
@@ -6833,16 +6823,17 @@ async function _loadDashMySchedule(session) {
         const _ixPoll = _ixBuildPollSection(match, liveMatch, session, owner?.username || '');
         if (_ixPoll) wrap.appendChild(_ixPoll);
 
-        if (newMatches.length > 1) {
+
+        // Add to carousel track or directly
+        if (_dxTrack) {
+          const _dxSlide = document.createElement('div');
+          _dxSlide.style.cssText = 'min-width:100%;box-sizing:border-box;';
           _dxSlide.appendChild(wrap);
           _dxTrack.appendChild(_dxSlide);
         } else {
-          wrap.style.cssText = 'border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden;background:#0d0d12;';
           _dxOuter.appendChild(wrap);
-          body.appendChild(_dxOuter);
         }
       }
-      } // close if(newMatches.length > 1)
     }
 
     if (!hasAnyContent) {
