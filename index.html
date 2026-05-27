@@ -10044,7 +10044,7 @@ async function savePassword() {
 
       <button id="submit-override-btn" type="button" onclick="overrideAndSubmit()" style="display:none;width:100%;padding:13px;margin-bottom:12px;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.4);border-radius:10px;color:#d4af55;font-family:DM Sans,sans-serif;font-size:.92rem;font-weight:700;letter-spacing:.5px;cursor:pointer;">⚡ Admin Override — Post Anyway</button>
       <button id="submit-notify-btn" type="button" onclick="notifyAdminScreening()" style="display:none;width:100%;padding:13px;margin-bottom:12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:10px;color:rgba(255,255,255,.9);font-family:DM Sans,sans-serif;font-size:.92rem;font-weight:600;letter-spacing:.5px;cursor:pointer;transition:all .2s;">📣 Request Review</button>
-      <button id="submit-post-btn" type="button" onclick="event.preventDefault();event.stopPropagation();doSubmitPost()" style="display:none;">Submit to Hub</button>
+      <button id="submit-post-btn" type="button" style="display:none;">Submit to Hub</button>
 
       <!-- Footer note -->
       <div class="submit-footer-note">All submissions are screened for eFed content. Videos that don't match may be flagged for review. You can reassign the category at any time after posting.</div>
@@ -10152,7 +10152,7 @@ function showSubmitStatus(msg, type) {
 
 function resetSubmitCatDropdown() {
   const catWrap = document.getElementById('submit-category-wrap');
-  if (catWrap) { catWrap.style.display = 'none'; catWrap.style.pointerEvents = ''; }
+  if (catWrap) { catWrap.style.display = 'none'; catWrap.style.pointerEvents = ''; catWrap.dataset.preselect = ''; }
   const menu = document.getElementById('submit-cat-menu');
   if (menu) menu.style.display = 'none';
   const arrow = document.getElementById('submit-cat-arrow');
@@ -10174,7 +10174,7 @@ function clearSubmitPreview() {
   if (overrideBtn) overrideBtn.style.display = 'none';
   if (notifyBtn) notifyBtn.style.display = 'none';
   const btn = document.getElementById('submit-post-btn');
-  if (btn) { btn.disabled = true; btn.style.opacity = '.35'; btn.style.cursor = 'not-allowed'; btn.textContent = 'Submit to Hub'; }
+  if (btn) { btn.style.display = 'none'; btn.disabled = true; btn.style.opacity = '.35'; btn.style.cursor = 'not-allowed'; btn.textContent = 'Submit to Hub'; btn.onclick = null; }
 }
 
 // ── SCREENING ENGINE (swap this function body for an API call when key available) ──
@@ -10388,12 +10388,16 @@ async function fetchSubmitPreview() {
     screenEl.style.border = '1px solid rgba(76,175,138,.25)';
     screenEl.style.color = '#4caf8a';
 
-    // Show category dropdown — auto-submits on selection
+    // Show category dropdown
     const catWrap = document.getElementById('submit-category-wrap');
     if (catWrap) catWrap.style.display = 'block';
 
+    // Show Submit button disabled until category is picked
+    const _postBtn = document.getElementById('submit-post-btn');
+    if (_postBtn) { _postBtn.style.display = 'block'; }
+
     // If YouTube reports this as a scheduled upcoming stream, pre-select Upcoming
-    if (_fetchedMeta.isUpcoming && _fetchedMeta.scheduledMs) {
+    if (_fetchedMeta.isUpcoming) {
       screenEl.textContent = '⏰ YouTube reports this as a scheduled upcoming stream — pre-selected below. Change the category if needed.';
       screenEl.style.background = 'rgba(200,168,75,.08)';
       screenEl.style.border = '1px solid rgba(200,168,75,.25)';
@@ -10405,15 +10409,8 @@ async function fetchSubmitPreview() {
       if (placement) { placement.textContent = '→ Will appear in Upcoming Shows'; placement.style.display = 'block'; }
       // Store the pre-selection so clicking Submit uses it — user can override by picking another
       if (catWrap) catWrap.dataset.preselect = 'upcoming';
-      // Wire up a one-time submit with 'upcoming' if user doesn't manually change it
-      const postBtn = document.getElementById('submit-post-btn');
-      if (postBtn) {
-        postBtn.style.display = 'block';
-        postBtn.onclick = (e) => { e.preventDefault(); e.stopPropagation();
-          const sel = catWrap.dataset.preselect || 'upcoming';
-          doSubmitPost(sel);
-        };
-      }
+      // Pre-selection stored — submit button will use it via onSubmitCategorySelect
+      onSubmitCategorySelect('upcoming');
     }
   } catch(e) {
     console.warn('Preview fetch failed', e);
@@ -10803,7 +10800,6 @@ function toggleSubmitCatDropdown(e) {
 }
 
 function selectSubmitCat(type, label, rowName) {
-  // Close menu
   const menu = document.getElementById('submit-cat-menu');
   const arrow = document.getElementById('submit-cat-arrow');
   const trigger = document.getElementById('submit-cat-label');
@@ -10811,8 +10807,7 @@ function selectSubmitCat(type, label, rowName) {
   if (menu) menu.style.display = 'none';
   if (arrow) arrow.style.transform = '';
   if (trigger) { trigger.textContent = label; trigger.parentElement.style.color = '#fff'; }
-  if (placement) { placement.textContent = 'This clip will appear on ' + rowName + '.'; placement.style.display = 'block'; }
-  // Clear any pre-selection so user's explicit choice wins
+  if (placement) { placement.textContent = 'Will appear in: ' + rowName; placement.style.display = 'block'; }
   const catWrap = document.getElementById('submit-category-wrap');
   if (catWrap) catWrap.dataset.preselect = type;
   onSubmitCategorySelect(type);
@@ -10820,10 +10815,17 @@ function selectSubmitCat(type, label, rowName) {
 
 function onSubmitCategorySelect(type) {
   if (!type) return;
-  const catWrap = document.getElementById('submit-category-wrap');
-  if (catWrap) catWrap.style.pointerEvents = 'none';
-  showSubmitStatus('⏳ Posting to the Hub…', 'info');
-  doSubmitPost(type);
+  // Enable the Submit button — user confirms by clicking it
+  const btn = document.getElementById('submit-post-btn');
+  if (btn) {
+    btn.style.display = 'block';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    btn.textContent = 'Submit to Hub';
+    // Wire onclick cleanly — single handler
+    btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); doSubmitPost(type); };
+  }
 }
 
 // Close custom dropdown when clicking outside of it (but stay inside modal)
