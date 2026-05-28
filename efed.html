@@ -4808,7 +4808,7 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
 
   // Banner image element (hidden until an image is set)
   const bannerImg = document.createElement('img');
-  bannerImg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;z-index:1;pointer-events:none;';
+  bannerImg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:none;z-index:1;pointer-events:none;';
   if (ev.banner) { bannerImg.src = ev.banner; bannerImg.style.display = 'block'; }
   rightSide.appendChild(bannerImg);
 
@@ -4964,7 +4964,7 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
       });
 
       // ── DOM refs ──
-      let _pendingDataUrl = null, _pendingFile = null, _dirty = false, _bannerRemoved = false;
+      let _pendingDataUrl = null, _pendingFile = null, _dirty = false;
       const dropzone    = box.querySelector('#_ebc_dropzone');
       const imgWrap     = box.querySelector('#_ebc_img_wrap');
       const previewImg  = box.querySelector('#_ebc_preview_img');
@@ -5018,7 +5018,7 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
         };
       }
       function _clearPreview() {
-        _pendingDataUrl = null; _pendingFile = null; _dirty = false; _bannerRemoved = true;
+        _pendingDataUrl = null; _pendingFile = null; _dirty = false;
         previewImg.src = '';
         imgWrap.style.display = 'none';
         emptyState.style.display = 'flex';
@@ -5079,7 +5079,7 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
       emptyState.onclick = () => fileInput.click();
       fileInput.onchange = () => { if (fileInput.files[0]) _setFile(fileInput.files[0]); };
       function _setFile(f) {
-        _pendingFile = f; _dirty = false; _bannerRemoved = false;
+        _pendingFile = f; _dirty = false;
         const reader = new FileReader();
         reader.onload = (re) => { _pendingDataUrl = re.target.result; _showPreview(re.target.result); };
         reader.readAsDataURL(f);
@@ -5093,10 +5093,10 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
 
       // ── Canvas crop ──
       async function _exportCrop() {
-        const EXPORT_W = 1400, EXPORT_H = 220;
+        const EXPORT_W = Math.round(renderW), EXPORT_H = CH;
         const renderW = _cw();
         const canvas = document.createElement('canvas');
-        canvas.width = EXPORT_W; canvas.height = EXPORT_H;
+        canvas.width = EXPORT_W; canvas.height = EXPORT_H; // matches preview exactly
         const ctx = canvas.getContext('2d');
         // Source rect in natural image coords (what's visible in the preview)
         const sx = -_ox / _scale, sy = -_oy / _scale;
@@ -5119,36 +5119,40 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
         saveBtn.textContent = 'Saving…'; saveBtn.style.opacity='.6'; saveBtn.style.pointerEvents='none';
         statusEl.style.color='rgba(255,255,255,.3)'; statusEl.textContent='';
         try {
-          // Banner: re-export if new/changed; null if removed; keep existing otherwise
-          let url = _bannerRemoved ? null : (ev.banner || null);
-          if (!_bannerRemoved && (_pendingFile || _dirty)) {
+          // Banner: re-export if dragged/zoomed or new file; otherwise keep existing
+          let url = ev.banner || null;
+          if (_pendingFile || _dirty) {
             const cropped = await _exportCrop();
             const arr = cropped.split(','), mime = arr[0].match(/:(.*?);/)[1];
             const bstr = atob(arr[1]); let n = bstr.length; const u8 = new Uint8Array(n);
             while(n--) u8[n] = bstr.charCodeAt(n);
             const blob = new Blob([u8], {type: mime});
             url = await _uploadToCloudinary(new File([blob], 'banner.jpg', {type:'image/jpeg'}), 'event_banners');
-          } else if (!_bannerRemoved && _pendingDataUrl && _pendingDataUrl !== ev.banner) {
+          } else if (_pendingDataUrl && _pendingDataUrl !== ev.banner) {
             url = _pendingDataUrl;
           }
           // Update live card DOM
           if (url) { bannerImg.src = url; bannerImg.style.display='block'; if (hint) hint.style.opacity='0'; }
-          else { bannerImg.src=''; bannerImg.style.display='none'; if (hint) { hint.style.opacity='1'; hint.textContent=newTitle.toUpperCase(); } }
           titleEl.textContent = newTitle;
           dateEl.textContent = newDate; dateEl.style.display = newDate ? '' : 'none';
           locEl.textContent  = newLoc;  locEl.style.display  = newLoc  ? '' : 'none';
           if (hint) hint.textContent = newTitle.toUpperCase();
+          // Update data-match-panel so match re-render still finds the panel
           if (expandPanel) { expandPanel.dataset.matchPanel = newTitle; expandPanel.setAttribute('data-match-panel', newTitle); }
-          ev.title = newTitle; ev.date = newDate||null; ev.location = newLoc||null; ev.banner = url;
-          // Persist to Supabase — always write banner (including null for removal)
+          // Update globals
+          ev.title = newTitle; ev.date = newDate||null; ev.location = newLoc||null;
+          if (url) ev.banner = url;
+          // Persist to Supabase
           if (isExtraCard) {
             const extras = window._efedExtraEvents ? [...window._efedExtraEvents] : [];
-            if (extras[extraIndex]) extras[extraIndex] = {...extras[extraIndex], title:newTitle, date:newDate||null, location:newLoc||null, banner:url};
+            if (extras[extraIndex]) extras[extraIndex] = {...extras[extraIndex], title:newTitle, date:newDate||null, location:newLoc||null, banner:url||extras[extraIndex].banner};
             await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:extras})});
             window._efedExtraEvents = extras;
           } else {
-            await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_title:newTitle||null, efed_event_date:newDate||null, efed_event_location:newLoc||null, efed_event_banner:url})});
-            if (window._efedPrimaryEvent) { window._efedPrimaryEvent.title=newTitle; window._efedPrimaryEvent.date=newDate||null; window._efedPrimaryEvent.location=newLoc||null; window._efedPrimaryEvent.banner=url; }
+            const patch = {efed_event_title:newTitle||null, efed_event_date:newDate||null, efed_event_location:newLoc||null};
+            if (url) patch.efed_event_banner = url;
+            await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify(patch)});
+            if (window._efedPrimaryEvent) { window._efedPrimaryEvent.title=newTitle; window._efedPrimaryEvent.date=newDate||null; window._efedPrimaryEvent.location=newLoc||null; if (url) window._efedPrimaryEvent.banner=url; }
           }
           statusEl.style.color='#4caf64'; statusEl.textContent='Saved!';
           setTimeout(closePopup, 600);
@@ -5798,14 +5802,13 @@ function _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, ext
     ? (window._efedExtraEvents || [])[extraIndex]?.matches
     : window._efedPrimaryEvent?.matches) || [];
 
-  // Strip blank/corrupt entries — must have uid and at least one meaningful token
+  // Strip blank/corrupt entries — must have at least one wrestler token
   const matches = rawMatches.filter(m =>
-    m && m.uid &&
-    Array.isArray(m.tokens) &&
+    m && m.uid && Array.isArray(m.tokens) &&
     m.tokens.some(t => t.type === 'wrestler' || t.type === 'unknown')
   );
 
-  // If blanks were found, purge them from global state + DB silently
+  // Blanks found — purge from DB silently so they don't come back on refresh
   if (matches.length !== rawMatches.length) {
     const _s = typeof getSession === 'function' ? getSession() : null;
     if (_s) {
