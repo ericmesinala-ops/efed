@@ -837,7 +837,7 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
             <div class="panel-title">Welcome Back</div>
 
             <!-- Google sign-in -->
-            <button class="btn-google" onclick="startGoogleSignIn('login')">
+            <button class="btn-google" onclick="startGoogleSignIn()">
               <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
               Continue with Google
             </button>
@@ -879,7 +879,7 @@ html, body { width:100%; min-height:100vh; background:var(--bg); font-family:'DM
               <div class="msg error" id="reg-err"></div>
 
               <!-- Google sign-up -->
-              <button class="btn-google" onclick="startGoogleSignIn('register')">
+              <button class="btn-google" onclick="startGoogleSignIn()">
                 <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
                 Sign up with Google
               </button>
@@ -1807,6 +1807,9 @@ async function forceLogoutAllDevices() {
 }
 </script>
 
+<!-- Hidden container for GIS renderButton (no redirect URI required) -->
+<div id="gsi-hidden-btn" style="position:fixed;top:-999px;left:-999px;opacity:0;pointer-events:none;z-index:-1;"></div>
+
 <!-- ═══════════════════════════════════════════════════════════════
      GOOGLE SIGN-IN — Profile completion overlay
      Shows when a new user signs up via Google. Existing users
@@ -1875,11 +1878,11 @@ const GOOGLE_CLIENT_ID = '985984907437-qvvqqp4p9ea88tspmrgluc6ta6no18gt.apps.goo
 
 let _googlePendingUser = null; // stores decoded JWT payload while overlay is open
 
-// Called by both login and register Google buttons
-function startGoogleSignIn(mode) {
-  // mode is 'login' or 'register' — same flow either way
+// Called by both login and register Google buttons.
+// Uses GIS renderButton (no redirect URI required — works with JS origins only).
+function startGoogleSignIn() {
   if (typeof google === 'undefined' || !google.accounts) {
-    showGoogleError('Google Sign-In script not loaded yet. Try again in a moment.');
+    showGoogleError('Google Sign-In not loaded yet. Refresh the page and try again.');
     return;
   }
   google.accounts.id.initialize({
@@ -1888,41 +1891,19 @@ function startGoogleSignIn(mode) {
     auto_select: false,
     cancel_on_tap_outside: true,
   });
-  google.accounts.id.prompt((notification) => {
-    if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-      // One-Tap not available — fall back to popup
-      google.accounts.id.renderButton(
-        document.createElement('div'), // dummy container
-        { theme: 'outline', size: 'large' }
-      );
-      // Open OAuth popup manually
-      openGooglePopup();
-    }
+  // Render a hidden official Google button, then programmatically click it.
+  // This is the correct no-redirect-URI approach.
+  const container = document.getElementById('gsi-hidden-btn');
+  container.innerHTML = '';
+  google.accounts.id.renderButton(container, {
+    type: 'standard', theme: 'outline', size: 'large', text: 'signin_with', width: 300,
   });
-}
-
-function openGooglePopup() {
-  const client = google.accounts.oauth2.initTokenClient({
-    client_id: GOOGLE_CLIENT_ID,
-    scope: 'openid email profile',
-    callback: () => {}, // not used — we use id_token flow
-  });
-  // Use the ID token flow via a redirect to sign-in
-  const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
-  const state = Math.random().toString(36).slice(2);
-  sessionStorage.setItem('gsi_state', state);
-  const url = 'https://accounts.google.com/o/oauth2/v2/auth'
-    + '?client_id=' + encodeURIComponent(GOOGLE_CLIENT_ID)
-    + '&redirect_uri=' + redirectUri
-    + '&response_type=id_token'
-    + '&scope=openid%20email%20profile'
-    + '&nonce=' + Math.random().toString(36).slice(2)
-    + '&state=' + state;
-  const w = window.open(url, 'google_signin', 'width=500,height=620,left=200,top=100');
-  if (!w) {
-    // Popup blocked — navigate in same tab
-    window.location.href = url;
-  }
+  setTimeout(() => {
+    const btn = container.querySelector('div[role="button"], iframe');
+    if (btn) { btn.click(); return; }
+    // Fallback: show One-Tap prompt
+    google.accounts.id.prompt();
+  }, 150);
 }
 
 // Google One-Tap / GIS callback — receives a JWT credential
@@ -2100,7 +2081,7 @@ function showGoogleError(msg) {
   }
 }
 
-// Initialize Google One-Tap on load (silent — shows the tap widget if eligible)
+// Initialize Google One-Tap on load (silent — only shows if eligible)
 window.addEventListener('load', () => {
   if (typeof google !== 'undefined' && google.accounts) {
     google.accounts.id.initialize({
@@ -2109,8 +2090,7 @@ window.addEventListener('load', () => {
       auto_select: false,
     });
     // Only prompt if user is NOT already signed in
-    const session = getSession();
-    if (!session) {
+    if (!getSession()) {
       google.accounts.id.prompt(() => {}); // silent — no error if dismissed
     }
   }
