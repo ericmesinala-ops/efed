@@ -4277,6 +4277,30 @@ html, body { overscroll-behavior-y: none; }
 
 <main>
 
+  <!-- ── CONTINUE WATCHING ── -->
+  <section class="section" id="section-cw" style="display:none;">
+    <div class="sec-head">
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <div class="sec-title-wrap">
+          <div class="s-bar" style="background:var(--red);"></div>
+          <div class="sec-title">Continue Watching</div>
+          <span class="sec-count" id="cw-count"></span>
+        </div>
+        <div style="padding-left:15px;font-size:.57rem;color:var(--muted);letter-spacing:.5px;">Pick up where you left off</div>
+      </div>
+      <button onclick="cwClearAll()" style="background:none;border:none;font-size:.6rem;letter-spacing:1px;text-transform:uppercase;color:var(--muted);cursor:pointer;transition:color .2s;font-family:'DM Sans',sans-serif;" onmouseover="this.style.color='rgba(255,255,255,.55)'" onmouseout="this.style.color='var(--muted)'">Clear all</button>
+    </div>
+    <div class="row-wrap">
+      <div class="arr-col left">
+        <button class="pill-arr left hidden" id="cw-arr-left" onclick="scrollNamedRow('cw',-1)">&#8249;</button>
+      </div>
+      <div class="card-grid card-grid--big" id="row-cw"></div>
+      <div class="arr-col right">
+        <button class="pill-arr right hidden" id="cw-arr-right" onclick="scrollNamedRow('cw',1)">&#8250;</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ── LATEST VIDEOS + EFED PILLS (these two are a unit) ── -->
   <section class="section">
     <div class="sec-head">
@@ -7805,6 +7829,7 @@ async function initHub() {
     } catch(fetchErr) {
       console.warn('Phase 1 fetch slow/failed, rendering with hardcoded videos:', fetchErr);
       buildPills(); renderGrid(); loadUpcomingRow(); loadDashboard(); loadWatchlistRow();
+      cwRender(); // ── Continue Watching ──
       loadEfedOwnerRow(); buildHeroDots(); loadSlide(); loadMostViewed(videos);
       loadHLRShows(videos); loadRecentlyAdded(videos); loadSpotlight(videos);
 loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); loadPromosRow(videos); loadPodcastRow(videos);
@@ -7896,6 +7921,7 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
   loadUpcomingRow();
   loadDashboard();
   loadWatchlistRow();
+  cwRender(); // ── Continue Watching ──
   loadEfedOwnerRow();
   buildHeroDots();
   loadSlide();
@@ -10895,11 +10921,110 @@ let _expandLikes = {};
 let _expandBookmarks = {};
 let _expandWatchlist = {};
 
+// ════════════════════════════════════════════════════════════════
+// CONTINUE WATCHING — per-user, localStorage, max 10
+// ════════════════════════════════════════════════════════════════
+const CW_MAX = 10;
+
+function _cwKey() {
+  const s = typeof getSession === 'function' ? getSession() : null;
+  return s?.username ? 'cw_' + s.username : null;
+}
+
+function cwLoad() {
+  const key = _cwKey(); if (!key) return [];
+  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
+}
+
+function cwSave(v) {
+  const key = _cwKey(); if (!key) return;
+  if (!v?.url) return;
+  let list = cwLoad();
+  // Remove existing entry for same URL, then prepend fresh
+  list = list.filter(x => x.url !== v.url);
+  list.unshift({
+    url:  v.url,
+    show: v.show || v.title || '',
+    efed: v.efed || '',
+    date: v.date || '',
+    thumb: v.thumb || v.thumbUrl || '',
+    video_id: v.video_id || v.videoId || '',
+    status: v.status || 'approved',
+    submission_type: v.submission_type || 'show',
+    username: v.username || '',
+    _savedAt: Date.now(),
+  });
+  if (list.length > CW_MAX) list = list.slice(0, CW_MAX);
+  localStorage.setItem(key, JSON.stringify(list));
+  cwRender();
+}
+
+function cwClearAll() {
+  const key = _cwKey(); if (!key) return;
+  localStorage.removeItem(key);
+  cwRender();
+}
+
+function cwRemoveOne(url) {
+  const key = _cwKey(); if (!key) return;
+  const list = cwLoad().filter(x => x.url !== url);
+  localStorage.setItem(key, JSON.stringify(list));
+  cwRender();
+}
+
+function cwRender() {
+  const sec   = document.getElementById('section-cw');
+  const grid  = document.getElementById('row-cw');
+  const badge = document.getElementById('cw-count');
+  if (!sec || !grid) return;
+
+  const session = typeof getSession === 'function' ? getSession() : null;
+  const list = session?.username ? cwLoad() : [];
+
+  if (!list.length) { sec.style.display = 'none'; return; }
+
+  sec.style.display = 'block';
+  if (badge) { badge.textContent = list.length; badge.style.display = 'inline'; }
+
+  grid.innerHTML = '';
+  list.forEach(v => {
+    if (typeof makeCard !== 'function') return;
+    const card = makeCard(v);
+    // Add a small "remove from CW" × button on the card
+    const xBtn = document.createElement('button');
+    xBtn.title = 'Remove';
+    xBtn.style.cssText = 'position:absolute;top:5px;right:5px;z-index:10;background:rgba(0,0,0,.65);border:none;border-radius:50%;width:22px;height:22px;color:rgba(255,255,255,.6);font-size:.7rem;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;transition:background .15s,color .15s;';
+    xBtn.innerHTML = '✕';
+    xBtn.onmouseover = () => { xBtn.style.background = 'rgba(192,0,14,.8)'; xBtn.style.color = '#fff'; };
+    xBtn.onmouseout  = () => { xBtn.style.background = 'rgba(0,0,0,.65)';   xBtn.style.color = 'rgba(255,255,255,.6)'; };
+    xBtn.onclick = (e) => { e.stopPropagation(); cwRemoveOne(v.url); };
+    // card-thumb is first child; make card position:relative if not already
+    card.style.position = 'relative';
+    card.appendChild(xBtn);
+    grid.appendChild(card);
+  });
+
+  // Update scroll arrows
+  if (typeof scrollNamedRow === 'function') {
+    const lArr = document.getElementById('cw-arr-left');
+    const rArr = document.getElementById('cw-arr-right');
+    const updateArrows = () => {
+      if (!lArr || !rArr) return;
+      lArr.classList.toggle('hidden', grid.scrollLeft <= 10);
+      rArr.classList.toggle('hidden', grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 10);
+    };
+    grid.onscroll = updateArrows;
+    setTimeout(updateArrows, 50);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
 function openExpand(v) {
   const tab = document.getElementById('chat-tab');
   if (tab) { tab.style.display = 'none'; tab.classList.remove('roster-visible'); }
   _expandVideo = v;
   if (typeof hubStartWatching === 'function') hubStartWatching(v.url);
+  cwSave(v); // ── Continue Watching ──
   if (v.efed) {
     _INDEX_EFED_SET = getEfedEmojis(v.efed);
     _INDEX_EFED_MOODLET = _getMoodletForEfed(v.efed);
