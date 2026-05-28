@@ -4965,14 +4965,17 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
           <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Event Banner</div>
           <button id="_ebc_close" style="background:none;border:none;color:rgba(255,255,255,.35);font-size:1rem;cursor:pointer;padding:2px 6px;line-height:1;">✕</button>
         </div>
-        <div id="_ebc_dropzone" style="border:2px dashed rgba(255,255,255,.15);border-radius:10px;padding:36px 20px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;background:rgba(255,255,255,.02);position:relative;">
-          <div style="font-size:1.6rem;margin-bottom:8px;opacity:.5;">🖼️</div>
-          <div id="_ebc_label" style="font-family:'DM Sans',sans-serif;font-size:.8rem;color:rgba(255,255,255,.4);line-height:1.5;">Upload a 1920 × 220 px banner<br><span style="font-size:.7rem;color:rgba(255,255,255,.22);">Click or drag & drop an image</span></div>
-          <input id="_ebc_file" type="file" accept="image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;">
-        </div>
-        <div id="_ebc_preview" style="display:none;margin-top:12px;border-radius:8px;overflow:hidden;position:relative;">
-          <img id="_ebc_preview_img" src="" alt="banner preview" style="width:100%;height:auto;display:block;border-radius:8px;">
-          <button id="_ebc_remove_preview" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.75);border:1px solid rgba(255,255,255,.2);border-radius:6px;color:rgba(255,255,255,.6);font-size:.65rem;padding:3px 8px;cursor:pointer;">Remove</button>
+        <div id="_ebc_dropzone" style="border:2px dashed rgba(255,255,255,.15);border-radius:10px;overflow:hidden;cursor:pointer;transition:border-color .2s;background:rgba(255,255,255,.02);position:relative;min-height:110px;display:flex;align-items:center;justify-content:center;">
+          <div id="_ebc_empty" style="text-align:center;padding:28px 20px;pointer-events:none;">
+            <div style="font-size:1.6rem;margin-bottom:8px;opacity:.5;">🖼️</div>
+            <div style="font-family:'DM Sans',sans-serif;font-size:.8rem;color:rgba(255,255,255,.4);line-height:1.5;">Upload a 1920 × 220 px banner<br><span style="font-size:.7rem;color:rgba(255,255,255,.22);">Click or drag & drop an image</span></div>
+          </div>
+          <img id="_ebc_preview_img" src="" alt="" style="display:none;width:100%;height:100%;object-fit:cover;position:absolute;inset:0;pointer-events:none;">
+          <div id="_ebc_hover_overlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center;pointer-events:none;">
+            <div style="font-family:'DM Sans',sans-serif;font-size:.78rem;color:#fff;font-weight:600;letter-spacing:.5px;">Click to replace</div>
+          </div>
+          <button id="_ebc_remove_preview" style="display:none;position:absolute;top:7px;right:7px;background:rgba(0,0,0,.8);border:1px solid rgba(255,255,255,.2);border-radius:6px;color:rgba(255,255,255,.7);font-size:.65rem;padding:3px 8px;cursor:pointer;z-index:2;">Remove</button>
+          <input id="_ebc_file" type="file" accept="image/*" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;z-index:1;">
         </div>
         <div id="_ebc_status" style="font-size:.68rem;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;margin-top:10px;min-height:16px;text-align:center;"></div>
         <div style="display:flex;gap:8px;margin-top:16px;">
@@ -4986,49 +4989,66 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
       box.querySelector('#_ebc_close').onclick = closePopup;
       box.querySelector('#_ebc_cancel').onclick = closePopup;
       bg.addEventListener('click', (ev2) => { if (ev2.target === bg) closePopup(); });
+      let _pendingDataUrl = null;
       let _pendingFile = null;
       const dropzone = box.querySelector('#_ebc_dropzone');
       const fileInput = box.querySelector('#_ebc_file');
-      const previewWrap = box.querySelector('#_ebc_preview');
       const previewImg = box.querySelector('#_ebc_preview_img');
+      const emptyState = box.querySelector('#_ebc_empty');
+      const hoverOverlay = box.querySelector('#_ebc_hover_overlay');
+      const removeBtn = box.querySelector('#_ebc_remove_preview');
       const statusEl = box.querySelector('#_ebc_status');
       const saveBtn = box.querySelector('#_ebc_save');
-      const labelEl = box.querySelector('#_ebc_label');
-      // If there's already a banner, show it
-      if (ev.banner) {
-        previewImg.src = ev.banner;
-        previewWrap.style.display = 'block';
+      function _showPreview(src) {
+        previewImg.src = src;
+        previewImg.style.display = 'block';
+        emptyState.style.display = 'none';
+        removeBtn.style.display = 'block';
+        dropzone.style.minHeight = '140px';
+        dropzone.style.border = '2px solid rgba(200,168,75,.3)';
         saveBtn.style.opacity = '1'; saveBtn.style.pointerEvents = 'auto';
-        labelEl.innerHTML = 'Replace the current banner<br><span style="font-size:.7rem;color:rgba(255,255,255,.22);">Click or drag & drop a new image</span>';
+        statusEl.textContent = '';
       }
-      dropzone.addEventListener('dragover', (ev2) => { ev2.preventDefault(); dropzone.style.borderColor='rgba(200,168,75,.5)'; dropzone.style.background='rgba(200,168,75,.04)'; });
-      dropzone.addEventListener('dragleave', () => { dropzone.style.borderColor='rgba(255,255,255,.15)'; dropzone.style.background='rgba(255,255,255,.02)'; });
-      dropzone.addEventListener('drop', (ev2) => { ev2.preventDefault(); dropzone.style.borderColor='rgba(255,255,255,.15)'; dropzone.style.background='rgba(255,255,255,.02)'; const f=ev2.dataTransfer.files[0]; if(f&&f.type.startsWith('image/')) _setFile(f); });
+      function _clearPreview() {
+        _pendingDataUrl = null;
+        previewImg.src = ''; previewImg.style.display = 'none';
+        emptyState.style.display = 'flex';
+        removeBtn.style.display = 'none';
+        hoverOverlay.style.display = 'none';
+        dropzone.style.minHeight = '110px';
+        dropzone.style.border = '2px dashed rgba(255,255,255,.15)';
+        saveBtn.style.opacity = '.4'; saveBtn.style.pointerEvents = 'none';
+      }
+      // Hover overlay on the dropzone when image is loaded
+      dropzone.addEventListener('mouseenter', () => { if (previewImg.style.display !== 'none') hoverOverlay.style.display = 'flex'; });
+      dropzone.addEventListener('mouseleave', () => { hoverOverlay.style.display = 'none'; });
+      // If there's already a banner, show it
+      if (ev.banner) { _pendingDataUrl = ev.banner; _showPreview(ev.banner); }
+      dropzone.addEventListener('dragover', (ev2) => { ev2.preventDefault(); dropzone.style.borderColor='rgba(200,168,75,.5)'; });
+      dropzone.addEventListener('dragleave', () => { dropzone.style.borderColor = previewImg.style.display!=='none' ? 'rgba(200,168,75,.3)' : 'rgba(255,255,255,.15)'; });
+      dropzone.addEventListener('drop', (ev2) => { ev2.preventDefault(); const f=ev2.dataTransfer.files[0]; if(f&&f.type.startsWith('image/')) _setFile(f); });
       fileInput.addEventListener('change', () => { if(fileInput.files[0]) _setFile(fileInput.files[0]); });
       function _setFile(f) {
         _pendingFile = f;
         const reader = new FileReader();
-        reader.onload = (re) => { previewImg.src = re.target.result; previewWrap.style.display='block'; };
+        reader.onload = (re) => { _pendingDataUrl = re.target.result; _showPreview(re.target.result); };
         reader.readAsDataURL(f);
-        saveBtn.style.opacity='1'; saveBtn.style.pointerEvents='auto';
-        statusEl.textContent = '';
       }
-      box.querySelector('#_ebc_remove_preview').onclick = () => {
-        _pendingFile = null; previewImg.src=''; previewWrap.style.display='none';
-        saveBtn.style.opacity='.4'; saveBtn.style.pointerEvents='none';
-      };
+      removeBtn.onclick = (ev2) => { ev2.stopPropagation(); _pendingFile = null; _clearPreview(); };
       saveBtn.onclick = async () => {
         const session = typeof getSession==='function'?getSession():null; if(!session) return;
-        // If no new file but existing banner stays (no change needed unless file picked)
-        if (!_pendingFile) { closePopup(); return; }
-        saveBtn.textContent = 'Uploading…'; saveBtn.style.opacity='.6'; saveBtn.style.pointerEvents='none';
-        statusEl.textContent = 'Uploading to Cloudinary…';
+        if (!_pendingDataUrl) { closePopup(); return; }
+        saveBtn.textContent = 'Saving…'; saveBtn.style.opacity='.6'; saveBtn.style.pointerEvents='none';
+        statusEl.style.color='rgba(255,255,255,.3)'; statusEl.textContent='';
         try {
-          const url = await _uploadToCloudinary(_pendingFile, 'event_banners');
+          let url = _pendingDataUrl;
+          // If it's a local data URL (new file picked), upload it to get a storable URL
+          if (url.startsWith('data:') && _pendingFile) {
+            url = await _uploadToCloudinary(_pendingFile, 'event_banners');
+          }
           ev.banner = url;
           bannerImg.src = url; bannerImg.style.display='block';
           hint.style.opacity='0';
-          // Persist to DB
           if (isExtraCard) {
             const extras = window._efedExtraEvents ? [...window._efedExtraEvents] : [];
             if (extras[extraIndex]) { extras[extraIndex] = {...extras[extraIndex], banner:url}; }
@@ -5039,9 +5059,9 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
             if (window._efedPrimaryEvent) window._efedPrimaryEvent.banner = url;
           }
           statusEl.style.color='#4caf64'; statusEl.textContent='Banner saved!';
-          setTimeout(closePopup, 800);
+          setTimeout(closePopup, 700);
         } catch(err) {
-          statusEl.style.color='#ff6b6b'; statusEl.textContent='Upload failed — try again.';
+          statusEl.style.color='#ff6b6b'; statusEl.textContent='Save failed — try again.';
           saveBtn.textContent='Save Banner'; saveBtn.style.opacity='1'; saveBtn.style.pointerEvents='auto';
         }
       };
@@ -6946,7 +6966,7 @@ function renderEvent(ev, extraEvents) {
   const evCardsContainer = document.getElementById('ev-extra-cards-display');
   if (primaryWrap) {
     primaryWrap.innerHTML = '';
-    const ev1Card = _makeEventCard({title:ev.title, date:ev.date, location:ev.location, main:ev.main}, isOwnerOrAdmin, null);
+    const ev1Card = _makeEventCard({title:ev.title, date:ev.date, location:ev.location, main:ev.main, banner:ev.banner||null}, isOwnerOrAdmin, null);
     ev1Card.id = 'event-card';
     ev1Card.classList.add('ev-primary-card');
     if (isOwnerOrAdmin) {
