@@ -4725,8 +4725,7 @@ async function saveEvent() {
       location: primary.location || null,
       main:     primary.slogan   || null,
       hype:     null,
-      banner:   primary.banner   || null,
-      matches:  window._efedPrimaryEvent?.matches || []
+      banner:   primary.banner   || null
     };
     window._efedExtraEvents = extraEvents;
     renderEvent(window._efedPrimaryEvent, extraEvents);
@@ -4766,13 +4765,13 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
 
   // Inner row — the visible card face
   const row = document.createElement('div');
-  row.style.cssText = 'display:flex;height:220px;position:relative;cursor:pointer;transition:background .15s;';
+  row.style.cssText = 'display:flex;height:110px;position:relative;cursor:pointer;transition:background .15s;';
   row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,.015)'; });
   row.addEventListener('mouseleave', () => { row.style.background = ''; });
 
-  // LEFT COLUMN — fixed width, right side takes the full banner area
+  // LEFT COLUMN
   const leftCol = document.createElement('div');
-  leftCol.style.cssText = 'flex-shrink:0;width:200px;background:#07070a;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:0 20px;gap:2px;border-right:1px solid rgba(255,255,255,.07);position:relative;z-index:1;box-sizing:border-box;';
+  leftCol.style.cssText = 'flex-shrink:0;width:220px;background:#07070a;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:0 20px;gap:2px;border-right:1px solid rgba(255,255,255,.07);position:relative;z-index:1;box-sizing:border-box;';
 
   // Acronym (static)
   if (acronym) {
@@ -4782,45 +4781,101 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
     leftCol.appendChild(acEl);
   }
 
-  // Title — display only (edit via the banner composer)
+  // Title — contenteditable for owner
   const titleEl = document.createElement('div');
-  titleEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:1.35rem;letter-spacing:2px;color:#fff;line-height:1.05;word-break:break-word;max-width:100%;";
+  titleEl.style.cssText = "font-family:'Bebas Neue',sans-serif;font-size:1.35rem;letter-spacing:2px;color:#fff;line-height:1.05;word-break:break-word;outline:none;max-width:100%;";
   titleEl.textContent = ev.title || '';
+  if (isOwnerOrAdmin) {
+    titleEl.contentEditable = 'true';
+    titleEl.title = 'Click to edit';
+    titleEl.style.cursor = 'text';
+    titleEl.dataset.field = 'title';
+  }
   leftCol.appendChild(titleEl);
 
-  // Date — display only
+  // Date — contenteditable for owner
   const dateEl = document.createElement('div');
-  dateEl.style.cssText = "font-size:.63rem;color:rgba(200,168,75,.85);font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:.3px;margin-top:4px;";
+  dateEl.style.cssText = "font-size:.63rem;color:rgba(200,168,75,.85);font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:.3px;outline:none;margin-top:4px;";
   dateEl.textContent = ev.date || '';
-  if (!ev.date) dateEl.style.display = 'none';
+  if (isOwnerOrAdmin) {
+    dateEl.contentEditable = 'true';
+    dateEl.title = 'Click to edit date';
+    dateEl.style.cursor = 'text';
+    dateEl.dataset.field = 'date';
+    if (!ev.date) { dateEl.dataset.placeholder = 'Date / TBA'; dateEl.style.color = 'rgba(200,168,75,.3)'; }
+  } else if (!ev.date) {
+    dateEl.style.display = 'none';
+  }
   leftCol.appendChild(dateEl);
 
-  // Location — display only
+  // Location — contenteditable for owner
   const locEl = document.createElement('div');
-  locEl.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;";
+  locEl.style.cssText = "font-size:.6rem;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;outline:none;";
   locEl.textContent = ev.location || '';
-  if (!ev.location) locEl.style.display = 'none';
+  if (isOwnerOrAdmin) {
+    locEl.contentEditable = 'true';
+    locEl.title = 'Click to edit location';
+    locEl.style.cursor = 'text';
+    locEl.dataset.field = 'location';
+    if (!ev.location) { locEl.dataset.placeholder = 'Location'; locEl.style.color = 'rgba(255,255,255,.15)'; }
+  } else if (!ev.location) {
+    locEl.style.display = 'none';
+  }
   leftCol.appendChild(locEl);
 
-  // RIGHT SIDE — 1920×220 banner area
+  // Inline save for owner fields
+  if (isOwnerOrAdmin) {
+    let _evSaveTimer = null;
+    const _evSaveCard = async () => {
+      const session = typeof getSession === 'function' ? getSession() : null;
+      if (!session) return;
+      const newTitle    = titleEl.innerText.trim();
+      const newDate     = dateEl.innerText.trim();
+      const newLocation = locEl.innerText.trim();
+      // Update watermark
+      if (hint) hint.textContent = newTitle.toUpperCase();
+      try {
+        if (isExtraCard) {
+          const extras = window._efedExtraEvents ? [...window._efedExtraEvents] : [];
+          if (extras[extraIndex]) {
+            extras[extraIndex] = { ...extras[extraIndex], title: newTitle, date: newDate||null, location: newLocation||null };
+            await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username),
+              { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({ efed_events_json: extras }) });
+            window._efedExtraEvents = extras;
+          }
+        } else {
+          await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username),
+            { method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({ efed_event_title: newTitle||null, efed_event_date: newDate||null, efed_event_location: newLocation||null }) });
+          if (window._efedPrimaryEvent) { window._efedPrimaryEvent.title = newTitle; window._efedPrimaryEvent.date = newDate||null; window._efedPrimaryEvent.location = newLocation||null; }
+        }
+      } catch(e) {}
+    };
+    const _evQueueSave = () => { clearTimeout(_evSaveTimer); _evSaveTimer = setTimeout(_evSaveCard, 900); };
+
+    [titleEl, dateEl, locEl].forEach(el => {
+      // Placeholder behaviour
+      const ph = el.dataset.placeholder;
+      if (ph) {
+        el.addEventListener('focus', () => { if (!el.innerText.trim()) { el.style.color = ''; el.style.color = el.dataset.field==='date' ? 'rgba(200,168,75,.85)' : 'rgba(255,255,255,.32)'; } });
+        el.addEventListener('blur',  () => { if (!el.innerText.trim()) { el.style.color = el.dataset.field==='date' ? 'rgba(200,168,75,.3)' : 'rgba(255,255,255,.15)'; } });
+      }
+      el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
+      el.addEventListener('input', _evQueueSave);
+      el.addEventListener('blur',  () => { clearTimeout(_evSaveTimer); _evSaveCard(); });
+    });
+  }
+
+  // RIGHT SIDE — show title watermark + chevron
   const rightSide = document.createElement('div');
   rightSide.style.cssText = 'flex:1;min-width:0;position:relative;overflow:hidden;background:linear-gradient(135deg,#0d0d10 0%,#111118 100%);';
-
-  // Banner image element (hidden until an image is set)
-  const bannerImg = document.createElement('img');
-  bannerImg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;z-index:1;pointer-events:none;';
-  if (ev.banner) { bannerImg.src = ev.banner; bannerImg.style.display = 'block'; }
-  rightSide.appendChild(bannerImg);
-
   const hint = document.createElement('div');
-  hint.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:6px;color:rgba(255,255,255,.06);user-select:none;pointer-events:none;overflow:hidden;text-align:center;padding:0 12px;z-index:2;";
+  hint.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:6px;color:rgba(255,255,255,.06);user-select:none;pointer-events:none;overflow:hidden;text-align:center;padding:0 12px;";
   hint.textContent = (ev.title||'').toUpperCase();
-  if (ev.banner) hint.style.opacity = '0';
   rightSide.appendChild(hint);
 
   // Chevron — signals the card is expandable
   const chevron = document.createElement('div');
-  chevron.style.cssText = 'position:absolute;bottom:10px;right:14px;color:rgba(255,255,255,.18);font-size:.65rem;pointer-events:none;transition:transform .22s,color .18s;line-height:1;z-index:3;';
+  chevron.style.cssText = 'position:absolute;bottom:10px;right:14px;color:rgba(255,255,255,.18);font-size:.65rem;pointer-events:none;transition:transform .22s,color .18s;line-height:1;';
   chevron.innerHTML = '&#9660;'; // ▼
   rightSide.appendChild(chevron);
 
@@ -4882,291 +4937,6 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
     xBtn.style.cssText = 'position:absolute;top:8px;right:8px;z-index:10;background:rgba(10,10,14,.85);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:rgba(255,255,255,.3);font-size:.7rem;padding:4px 7px;cursor:pointer;opacity:0;transition:opacity .18s,color .15s,border-color .15s;backdrop-filter:blur(6px);line-height:1;';
     xBtn.onmouseenter = () => { xBtn.style.color='#ff6b6b'; xBtn.style.borderColor='rgba(192,0,14,.4)'; };
     xBtn.onmouseleave = () => { xBtn.style.color='rgba(255,255,255,.3)'; xBtn.style.borderColor='rgba(255,255,255,.12)'; };
-
-    // ── + Banner upload button ──
-    const addBannerBtn = document.createElement('button');
-    addBannerBtn.title = 'Edit event info & banner';
-    addBannerBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-    addBannerBtn.style.cssText = 'position:absolute;top:8px;right:46px;z-index:10;background:rgba(10,10,14,.85);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:rgba(255,255,255,.3);padding:5px 7px;cursor:pointer;opacity:0;transition:opacity .18s,color .15s,border-color .15s;backdrop-filter:blur(6px);line-height:1;display:flex;align-items:center;justify-content:center;';
-    addBannerBtn.onmouseenter = () => { addBannerBtn.style.color='#c8a84b'; addBannerBtn.style.borderColor='rgba(200,168,75,.4)'; };
-    addBannerBtn.onmouseleave = () => { addBannerBtn.style.color='rgba(255,255,255,.3)'; addBannerBtn.style.borderColor='rgba(255,255,255,.12)'; };
-    addBannerBtn.onclick = (e) => {
-      e.stopPropagation();
-      // ── Banner upload popup ──
-      const bg = document.createElement('div');
-      bg.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:20px;';
-      const box = document.createElement('div');
-      box.style.cssText = 'background:#13131a;border:1px solid rgba(255,255,255,.1);border-radius:16px;padding:28px 24px;max-width:900px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.9);';
-      box.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Event Banner</div>
-          <button id="_ebc_close" style="background:none;border:none;color:rgba(255,255,255,.35);font-size:1rem;cursor:pointer;padding:2px 6px;line-height:1;">✕</button>
-        </div>
-        <div style="font-family:'DM Sans',sans-serif;font-size:.65rem;color:rgba(255,255,255,.25);margin-bottom:10px;letter-spacing:.3px;">Click the left panel to edit event info · drag &amp; scroll right to adjust the banner</div>
-        <div style="display:flex;height:220px;border:1px solid rgba(255,255,255,.13);border-radius:10px;overflow:hidden;margin-bottom:14px;">
-          <div style="flex-shrink:0;width:200px;background:#07070a;display:flex;flex-direction:column;justify-content:center;padding:0 20px;gap:2px;border-right:1px solid rgba(255,255,255,.07);box-sizing:border-box;">
-            <div id="_ebc_prev_acronym" style="font-family:'Bebas Neue',sans-serif;font-size:.72rem;letter-spacing:4px;color:#c8a84b;line-height:1;margin-bottom:1px;"></div>
-            <div id="_ebc_prev_title" contenteditable="true" spellcheck="false" data-ph="Event Title" style="font-family:'Bebas Neue',sans-serif;font-size:1.35rem;letter-spacing:2px;color:#fff;line-height:1.05;word-break:break-word;outline:none;cursor:text;min-height:1em;"></div>
-            <div id="_ebc_prev_date" contenteditable="true" spellcheck="false" data-ph="Date / TBA" style="font-size:.63rem;color:rgba(200,168,75,.85);font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:.3px;margin-top:4px;outline:none;cursor:text;min-height:1em;"></div>
-            <div id="_ebc_prev_loc" contenteditable="true" spellcheck="false" data-ph="Location" style="font-size:.6rem;color:rgba(255,255,255,.32);font-family:'DM Sans',sans-serif;outline:none;cursor:text;min-height:1em;"></div>
-          </div>
-          <div id="_ebc_dropzone" style="flex:1;min-width:0;position:relative;overflow:hidden;background:linear-gradient(135deg,#0d0d10 0%,#111118 100%);">
-            <div id="_ebc_empty" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;cursor:pointer;z-index:1;">
-              <div style="font-size:1.6rem;margin-bottom:8px;opacity:.35;">🖼️</div>
-              <div style="font-family:'DM Sans',sans-serif;font-size:.78rem;color:rgba(255,255,255,.3);line-height:1.5;">Drop an image or click to upload<br><span style="font-size:.68rem;color:rgba(255,255,255,.18);">Any aspect ratio — saved at 1400 × 220 px</span></div>
-            </div>
-            <div id="_ebc_img_wrap" style="display:none;position:absolute;inset:0;overflow:hidden;cursor:grab;touch-action:none;z-index:1;">
-              <img id="_ebc_preview_img" src="" crossorigin="anonymous" alt="" style="position:absolute;transform-origin:0 0;pointer-events:none;user-select:none;max-width:none;max-height:none;">
-            </div>
-            <div id="_ebc_hover_overlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.45);align-items:center;justify-content:center;cursor:pointer;z-index:3;">
-              <div style="font-family:'DM Sans',sans-serif;font-size:.75rem;color:#fff;font-weight:600;letter-spacing:.5px;background:rgba(0,0,0,.5);padding:6px 14px;border-radius:6px;">Click to replace</div>
-            </div>
-            <button id="_ebc_remove_preview" style="display:none;position:absolute;top:7px;right:7px;background:rgba(0,0,0,.8);border:1px solid rgba(255,255,255,.2);border-radius:6px;color:rgba(255,255,255,.7);font-size:.65rem;padding:3px 8px;cursor:pointer;z-index:5;">Remove</button>
-            <div id="_ebc_zoom_bar" style="display:none;position:absolute;bottom:8px;right:8px;align-items:center;gap:4px;background:rgba(0,0,0,.72);border-radius:20px;padding:3px 8px;z-index:4;">
-              <button id="_ebc_zoom_out" style="background:none;border:none;color:rgba(255,255,255,.55);font-size:.95rem;cursor:pointer;line-height:1;padding:0 3px;">−</button>
-              <span id="_ebc_zoom_pct" style="font-family:'DM Sans',sans-serif;font-size:.58rem;color:rgba(255,255,255,.45);min-width:34px;text-align:center;"></span>
-              <button id="_ebc_zoom_in" style="background:none;border:none;color:rgba(255,255,255,.55);font-size:.95rem;cursor:pointer;line-height:1;padding:0 3px;">+</button>
-            </div>
-            <div id="_ebc_drag_hint" style="display:none;position:absolute;bottom:8px;left:10px;font-family:'DM Sans',sans-serif;font-size:.52rem;color:rgba(255,255,255,.38);background:rgba(0,0,0,.55);border-radius:4px;padding:3px 7px;pointer-events:none;z-index:4;">drag · scroll to zoom</div>
-            <input id="_ebc_file" type="file" accept="image/*" style="display:none;">
-          </div>
-        </div>
-        <div id="_ebc_status" style="font-size:.68rem;color:rgba(255,255,255,.3);font-family:'DM Sans',sans-serif;margin-bottom:10px;min-height:16px;text-align:center;"></div>
-        <div style="display:flex;gap:8px;">
-          <button id="_ebc_cancel" style="flex:1;padding:10px 0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:9px;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;font-size:.8rem;cursor:pointer;">Cancel</button>
-          <button id="_ebc_save" style="flex:1;padding:10px 0;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:9px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer;">Save</button>
-        </div>
-      `;
-      bg.appendChild(box);
-      document.body.appendChild(bg);
-      const closePopup = () => bg.remove();
-      box.querySelector('#_ebc_close').onclick = closePopup;
-      box.querySelector('#_ebc_cancel').onclick = closePopup;
-      bg.addEventListener('click', (ev2) => { if (ev2.target === bg) closePopup(); });
-      // Populate left column
-      const _acronymEl = box.querySelector('#_ebc_prev_acronym');
-      const _titleEl   = box.querySelector('#_ebc_prev_title');
-      const _dateEl    = box.querySelector('#_ebc_prev_date');
-      const _locEl     = box.querySelector('#_ebc_prev_loc');
-      if (_acronymEl) _acronymEl.textContent = (document.getElementById('stat-acronym')?.textContent || '').trim();
-      if (_titleEl)   _titleEl.textContent   = ev.title    || '';
-      if (_dateEl)    _dateEl.textContent    = ev.date     || '';
-      if (_locEl)     _locEl.textContent     = ev.location || '';
-      // Placeholder styling for editable fields
-      [_titleEl, _dateEl, _locEl].forEach(el => {
-        if (!el) return;
-        const ph = el.dataset.ph || '';
-        const _phColor = el === _dateEl ? 'rgba(200,168,75,.28)' : 'rgba(255,255,255,.15)';
-        if (!el.textContent.trim()) el.style.color = _phColor;
-        el.addEventListener('focus', () => { if (!el.textContent.trim()) { el.textContent = ''; el.style.color = el === _dateEl ? 'rgba(200,168,75,.85)' : el === _locEl ? 'rgba(255,255,255,.32)' : '#fff'; } });
-        el.addEventListener('blur',  () => { if (!el.textContent.trim()) el.style.color = _phColor; });
-        el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
-      });
-
-      // ── DOM refs ──
-      let _pendingDataUrl = null, _pendingFile = null, _dirty = false, _bannerRemoved = false;
-      const dropzone    = box.querySelector('#_ebc_dropzone');
-      const imgWrap     = box.querySelector('#_ebc_img_wrap');
-      const previewImg  = box.querySelector('#_ebc_preview_img');
-      const emptyState  = box.querySelector('#_ebc_empty');
-      const hoverOverlay= box.querySelector('#_ebc_hover_overlay');
-      const dragHint    = box.querySelector('#_ebc_drag_hint');
-      const removeBtn   = box.querySelector('#_ebc_remove_preview');
-      const zoomBar     = box.querySelector('#_ebc_zoom_bar');
-      const zoomOut     = box.querySelector('#_ebc_zoom_out');
-      const zoomIn      = box.querySelector('#_ebc_zoom_in');
-      const zoomPct     = box.querySelector('#_ebc_zoom_pct');
-      const fileInput   = box.querySelector('#_ebc_file');
-      const statusEl    = box.querySelector('#_ebc_status');
-      const saveBtn     = box.querySelector('#_ebc_save');
-
-      // ── Pan/zoom state ──
-      let _scale = 1, _ox = 0, _oy = 0, _minScale = 1, _natW = 0, _natH = 0;
-      const CH = 220;
-      function _cw() { return dropzone.getBoundingClientRect().width || 680; }
-      function _applyTransform() {
-        previewImg.style.width  = (_natW * _scale) + 'px';
-        previewImg.style.height = (_natH * _scale) + 'px';
-        previewImg.style.left   = _ox + 'px';
-        previewImg.style.top    = _oy + 'px';
-        zoomPct.textContent = Math.round(_scale * 100) + '%';
-      }
-      function _clamp() {
-        const cw = _cw();
-        _ox = Math.min(0, Math.max(cw - _natW * _scale, _ox));
-        _oy = Math.min(0, Math.max(CH - _natH * _scale, _oy));
-      }
-      function _commit() { _clamp(); _applyTransform(); }
-
-      // ── Show / clear ──
-      function _showPreview(src) {
-        previewImg.src = src;
-        previewImg.onload = () => {
-          _natW = previewImg.naturalWidth; _natH = previewImg.naturalHeight;
-          const cw = _cw();
-          _minScale = Math.max(cw / _natW, CH / _natH);
-          _scale = _minScale;
-          _ox = (cw - _natW * _scale) / 2;
-          _oy = (CH - _natH * _scale) / 2;
-          _commit();
-          imgWrap.style.display = 'block';
-          emptyState.style.display = 'none';
-          removeBtn.style.display = 'block';
-          zoomBar.style.display = 'flex';
-          dragHint.style.display = 'block';
-          statusEl.textContent = '';
-        };
-      }
-      function _clearPreview() {
-        _pendingDataUrl = null; _pendingFile = null; _dirty = false; _bannerRemoved = true;
-        previewImg.src = '';
-        imgWrap.style.display = 'none';
-        emptyState.style.display = 'flex';
-        removeBtn.style.display = 'none';
-        hoverOverlay.style.display = 'none';
-        zoomBar.style.display = 'none';
-        dragHint.style.display = 'none';
-      }
-
-      // ── Zoom ──
-      const ZOOM_STEP = 0.15;
-      function _zoom(delta, cx, cy) {
-        const cw = _cw();
-        cx = cx ?? cw / 2; cy = cy ?? CH / 2;
-        const ns = Math.max(_minScale, Math.min(5, _scale * (1 + delta)));
-        _ox = cx - (cx - _ox) * (ns / _scale);
-        _oy = cy - (cy - _oy) * (ns / _scale);
-        _scale = ns; _dirty = true; _commit();
-      }
-      zoomIn.onclick  = (e) => { e.stopPropagation(); _zoom(ZOOM_STEP); };
-      zoomOut.onclick = (e) => { e.stopPropagation(); _zoom(-ZOOM_STEP); };
-      imgWrap.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        const r = imgWrap.getBoundingClientRect();
-        _zoom(e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP, e.clientX - r.left, e.clientY - r.top);
-      }, { passive: false });
-
-      // ── Mouse drag ──
-      let _dr = false, _sX = 0, _sY = 0, _soX = 0, _soY = 0;
-      imgWrap.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
-        _dr = true; _sX = e.clientX; _sY = e.clientY; _soX = _ox; _soY = _oy;
-        imgWrap.style.cursor = 'grabbing'; e.preventDefault();
-      });
-      const _mmv = (e) => { if (!_dr) return; _ox = _soX + (e.clientX - _sX); _oy = _soY + (e.clientY - _sY); _dirty = true; _commit(); };
-      const _mup = () => { _dr = false; if (imgWrap.style.display !== 'none') imgWrap.style.cursor = 'grab'; };
-      document.addEventListener('mousemove', _mmv);
-      document.addEventListener('mouseup', _mup);
-      bg.addEventListener('remove', () => { document.removeEventListener('mousemove', _mmv); document.removeEventListener('mouseup', _mup); document.removeEventListener('touchmove', _tmv); document.removeEventListener('touchend', _tup); }, { once: true });
-
-      // ── Touch drag ──
-      let _tdr = false, _tsX = 0, _tsY = 0, _tsoX = 0, _tsoY = 0;
-      imgWrap.addEventListener('touchstart', (e) => {
-        if (e.touches.length !== 1) return;
-        _tdr = true; _tsX = e.touches[0].clientX; _tsY = e.touches[0].clientY; _tsoX = _ox; _tsoY = _oy; e.preventDefault();
-      }, { passive: false });
-      const _tmv = (e) => { if (!_tdr || e.touches.length !== 1) return; _ox = _tsoX + (e.touches[0].clientX - _tsX); _oy = _tsoY + (e.touches[0].clientY - _tsY); _dirty = true; _commit(); };
-      const _tup = () => { _tdr = false; };
-      document.addEventListener('touchmove', _tmv, { passive: false });
-      document.addEventListener('touchend', _tup);
-
-      // ── Hover overlay (replace) ──
-      imgWrap.addEventListener('mouseenter', () => { if (previewImg.src) hoverOverlay.style.display = 'flex'; });
-      imgWrap.addEventListener('mouseleave', (e) => { if (!imgWrap.contains(e.relatedTarget)) hoverOverlay.style.display = 'none'; });
-      hoverOverlay.onclick = () => { hoverOverlay.style.display = 'none'; fileInput.click(); };
-
-      // ── File picking ──
-      emptyState.onclick = () => fileInput.click();
-      fileInput.onchange = () => { if (fileInput.files[0]) _setFile(fileInput.files[0]); };
-      function _setFile(f) {
-        _pendingFile = f; _dirty = false; _bannerRemoved = false;
-        const reader = new FileReader();
-        reader.onload = (re) => { _pendingDataUrl = re.target.result; _showPreview(re.target.result); };
-        reader.readAsDataURL(f);
-      }
-      dropzone.addEventListener('dragover', (ev2) => { ev2.preventDefault(); });
-      dropzone.addEventListener('drop', (ev2) => { ev2.preventDefault(); const f = ev2.dataTransfer.files[0]; if (f && f.type.startsWith('image/')) _setFile(f); });
-      removeBtn.onclick = (ev2) => { ev2.stopPropagation(); _clearPreview(); };
-
-      // ── Load existing banner ──
-      if (ev.banner) { _pendingDataUrl = ev.banner; _showPreview(ev.banner); }
-
-      // ── Canvas crop ──
-      async function _exportCrop() {
-        const EXPORT_W = 1400, EXPORT_H = 220;
-        const renderW = _cw();
-        const canvas = document.createElement('canvas');
-        canvas.width = EXPORT_W; canvas.height = EXPORT_H;
-        const ctx = canvas.getContext('2d');
-        // Source rect in natural image coords (what's visible in the preview)
-        const sx = -_ox / _scale, sy = -_oy / _scale;
-        const sw = renderW / _scale, sh = CH / _scale;
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => { ctx.drawImage(img, sx, sy, sw, sh, 0, 0, EXPORT_W, EXPORT_H); resolve(canvas.toDataURL('image/jpeg', 0.92)); };
-          img.onerror = () => resolve(_pendingDataUrl || ev.banner || '');
-          img.src = _pendingDataUrl || ev.banner || '';
-        });
-      }
-
-      // ── Save ──
-      saveBtn.onclick = async () => {
-        const session = typeof getSession==='function'?getSession():null; if(!session) return;
-        const newTitle = (_titleEl?.innerText||'').trim();
-        const newDate  = (_dateEl?.innerText||'').trim();
-        const newLoc   = (_locEl?.innerText||'').trim();
-        saveBtn.textContent = 'Saving…'; saveBtn.style.opacity='.6'; saveBtn.style.pointerEvents='none';
-        statusEl.style.color='rgba(255,255,255,.3)'; statusEl.textContent='';
-        try {
-          // Banner: re-export if dragged/zoomed or new file; null out if removed; otherwise keep existing
-          let url = _bannerRemoved ? null : (ev.banner || null);
-          if (!_bannerRemoved && (_pendingFile || _dirty)) {
-            const cropped = await _exportCrop();
-            const arr = cropped.split(','), mime = arr[0].match(/:(.*?);/)[1];
-            const bstr = atob(arr[1]); let n = bstr.length; const u8 = new Uint8Array(n);
-            while(n--) u8[n] = bstr.charCodeAt(n);
-            const blob = new Blob([u8], {type: mime});
-            url = await _uploadToCloudinary(new File([blob], 'banner.jpg', {type:'image/jpeg'}), 'event_banners');
-          } else if (_pendingDataUrl && _pendingDataUrl !== ev.banner) {
-            url = _pendingDataUrl;
-          }
-          // Update live card DOM
-          if (url) { bannerImg.src = url; bannerImg.style.display='block'; if (hint) hint.style.opacity='0'; }
-          else if (_bannerRemoved) { bannerImg.src=''; bannerImg.style.display='none'; if (hint) { hint.style.opacity='1'; hint.textContent=newTitle.toUpperCase(); } }
-          titleEl.textContent = newTitle;
-          dateEl.textContent = newDate; dateEl.style.display = newDate ? '' : 'none';
-          locEl.textContent  = newLoc;  locEl.style.display  = newLoc  ? '' : 'none';
-          if (hint) hint.textContent = newTitle.toUpperCase();
-          // Update data-match-panel so match re-render still finds the panel
-          if (expandPanel) { expandPanel.dataset.matchPanel = newTitle; expandPanel.setAttribute('data-match-panel', newTitle); }
-          // Update globals
-          ev.title = newTitle; ev.date = newDate||null; ev.location = newLoc||null; ev.banner = url;
-          if (window._efedPrimaryEvent && !isExtraCard) window._efedPrimaryEvent.banner = url;
-          // Persist to Supabase
-          if (isExtraCard) {
-            const extras = window._efedExtraEvents ? [...window._efedExtraEvents] : [];
-            if (extras[extraIndex]) extras[extraIndex] = {...extras[extraIndex], title:newTitle, date:newDate||null, location:newLoc||null, banner:url};
-            await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:extras})});
-            window._efedExtraEvents = extras;
-          } else {
-            const patch = {efed_event_title:newTitle||null, efed_event_date:newDate||null, efed_event_location:newLoc||null, efed_event_banner:url};
-            await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify(patch)});
-            if (window._efedPrimaryEvent) { window._efedPrimaryEvent.title=newTitle; window._efedPrimaryEvent.date=newDate||null; window._efedPrimaryEvent.location=newLoc||null; }
-          }
-          statusEl.style.color='#4caf64'; statusEl.textContent='Saved!';
-          setTimeout(closePopup, 600);
-        } catch(err) {
-          statusEl.style.color='#ff6b6b'; statusEl.textContent='Save failed — try again.';
-          saveBtn.textContent='Save'; saveBtn.style.opacity='1'; saveBtn.style.pointerEvents='auto';
-        }
-      };
-    };
-
-    row.appendChild(addBannerBtn);
-    row.appendChild(xBtn);
-    row.addEventListener('mouseenter', () => { xBtn.style.opacity='1'; addBannerBtn.style.opacity='1'; });
-    row.addEventListener('mouseleave', () => { xBtn.style.opacity='0'; addBannerBtn.style.opacity='0'; });
     xBtn.onclick = (e) => {
       e.stopPropagation();
       const _dc = (onConfirm) => {
@@ -5190,12 +4960,13 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
             renderEvent(window._efedPrimaryEvent || {}, extras);
           } catch(err) { console.error('Delete event error:', err); }
         } else {
+          // Deleting primary event — promote first extra or clear all
           const extras = window._efedExtraEvents || [];
           if (extras.length) {
             const [newPrimary, ...rest] = extras;
             try {
               await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), { method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_event_title: newPrimary.title, efed_event_date: newPrimary.date||null, efed_event_location: newPrimary.location||null, efed_event_main: newPrimary.slogan||null, efed_event_banner: newPrimary.banner||null, efed_events_json: rest }) });
-              window._efedPrimaryEvent = { title: newPrimary.title, date: newPrimary.date||null, location: newPrimary.location||null, main: newPrimary.slogan||null, banner: newPrimary.banner||null, matches: Array.isArray(newPrimary.matches) ? newPrimary.matches : [] };
+              window._efedPrimaryEvent = { title: newPrimary.title, date: newPrimary.date||null, location: newPrimary.location||null, main: newPrimary.slogan||null, banner: newPrimary.banner||null };
               window._efedExtraEvents = rest;
               document.querySelectorAll('.sched-booking-banner').forEach(b => b.remove());
               renderEvent(window._efedPrimaryEvent, rest);
@@ -5211,6 +4982,9 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
         }
       });
     };
+    row.appendChild(xBtn);
+    row.addEventListener('mouseenter', () => { xBtn.style.opacity='1'; });
+    row.addEventListener('mouseleave', () => { xBtn.style.opacity='0'; });
   }
 
   return card;
@@ -5798,27 +5572,9 @@ async function _mcToggleLike(matchUid, isExtraCard, extraIndex, btnEl, countEl) 
 // ── Render saved matches in the expand panel ─────────────────────────────────
 function _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, extraIndex) {
   if (!expandPanel) return;
-  const rawMatches = (isExtraCard
+  const matches = (isExtraCard
     ? (window._efedExtraEvents || [])[extraIndex]?.matches
     : window._efedPrimaryEvent?.matches) || [];
-
-  // Strip blank/corrupt entries (no uid, empty tokens, etc.)
-  const matches = rawMatches.filter(m => m && m.uid && Array.isArray(m.tokens) && m.tokens.length > 0);
-
-  // If blanks were found, auto-purge them from global state + DB silently
-  if (matches.length !== rawMatches.length) {
-    const session = typeof getSession === 'function' ? getSession() : null;
-    if (session) {
-      if (isExtraCard) {
-        const extras = window._efedExtraEvents ? [...window._efedExtraEvents] : [];
-        if (extras[extraIndex]) { extras[extraIndex] = {...extras[extraIndex], matches}; window._efedExtraEvents = extras; }
-        fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:extras})}).catch(()=>{});
-      } else {
-        if (window._efedPrimaryEvent) window._efedPrimaryEvent.matches = matches;
-        fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_matches_json:matches})}).catch(()=>{});
-      }
-    }
-  }
   const addBtn = expandPanel.querySelector('._mc-add-btn');
   const listEl = expandPanel.querySelector('._mc-list');
   const emptyEl = expandPanel.querySelector('._mc-empty');
@@ -5877,8 +5633,8 @@ function _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, ext
       });
     }
     function goTo(n) {
-      _mcPanelIdx = ((n % matches.length) + matches.length) % matches.length;
-      track.style.transform = `translateX(-${_mcPanelIdx * viewport.getBoundingClientRect().width}px)`;
+      _mcPanelIdx = Math.max(0, Math.min(matches.length-1, n));
+      track.style.transform = `translateX(-${_mcPanelIdx * 100}%)`;
       updateDots();
     }
     prevBtn.onclick = () => goTo(_mcPanelIdx - 1);
@@ -7080,7 +6836,7 @@ function renderEvent(ev, extraEvents) {
   const evCardsContainer = document.getElementById('ev-extra-cards-display');
   if (primaryWrap) {
     primaryWrap.innerHTML = '';
-    const ev1Card = _makeEventCard({title:ev.title, date:ev.date, location:ev.location, main:ev.main, banner:ev.banner||null}, isOwnerOrAdmin, null);
+    const ev1Card = _makeEventCard({title:ev.title, date:ev.date, location:ev.location, main:ev.main}, isOwnerOrAdmin, null);
     ev1Card.id = 'event-card';
     ev1Card.classList.add('ev-primary-card');
     if (isOwnerOrAdmin) {
@@ -7216,7 +6972,7 @@ function evInlineAdd() {
           method: 'PATCH', headers: SB_HEADERS,
           body: JSON.stringify({ efed_event_title: title, efed_event_date: date, efed_event_location: location, efed_event_main: null, efed_event_banner: null })
         });
-        window._efedPrimaryEvent = { title, date, location, main: null, banner: null, matches: [] };
+        window._efedPrimaryEvent = { title, date, location, main: null, banner: null };
         renderEvent(window._efedPrimaryEvent, window._efedExtraEvents || []);
         // card is now replaced by renderEvent — no need to keep the editable one
       } catch(e) { console.error('evInlineAdd save error', e); }
