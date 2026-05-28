@@ -4808,7 +4808,7 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
 
   // Banner image element (hidden until an image is set)
   const bannerImg = document.createElement('img');
-  bannerImg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:none;z-index:1;pointer-events:none;';
+  bannerImg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;z-index:1;pointer-events:none;';
   if (ev.banner) { bannerImg.src = ev.banner; bannerImg.style.display = 'block'; }
   rightSide.appendChild(bannerImg);
 
@@ -4964,7 +4964,7 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
       });
 
       // ── DOM refs ──
-      let _pendingDataUrl = null, _pendingFile = null, _dirty = false;
+      let _pendingDataUrl = null, _pendingFile = null, _dirty = false, _bannerRemoved = false;
       const dropzone    = box.querySelector('#_ebc_dropzone');
       const imgWrap     = box.querySelector('#_ebc_img_wrap');
       const previewImg  = box.querySelector('#_ebc_preview_img');
@@ -5018,7 +5018,7 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
         };
       }
       function _clearPreview() {
-        _pendingDataUrl = null; _pendingFile = null; _dirty = false;
+        _pendingDataUrl = null; _pendingFile = null; _dirty = false; _bannerRemoved = true;
         previewImg.src = '';
         imgWrap.style.display = 'none';
         emptyState.style.display = 'flex';
@@ -5079,7 +5079,7 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
       emptyState.onclick = () => fileInput.click();
       fileInput.onchange = () => { if (fileInput.files[0]) _setFile(fileInput.files[0]); };
       function _setFile(f) {
-        _pendingFile = f; _dirty = false;
+        _pendingFile = f; _dirty = false; _bannerRemoved = false;
         const reader = new FileReader();
         reader.onload = (re) => { _pendingDataUrl = re.target.result; _showPreview(re.target.result); };
         reader.readAsDataURL(f);
@@ -5098,25 +5098,15 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
         const canvas = document.createElement('canvas');
         canvas.width = EXPORT_W; canvas.height = EXPORT_H;
         const ctx = canvas.getContext('2d');
-        const src = _pendingDataUrl || ev.banner || '';
+        // Source rect in natural image coords (what's visible in the preview)
+        const sx = -_ox / _scale, sy = -_oy / _scale;
+        const sw = renderW / _scale, sh = CH / _scale;
         return new Promise((resolve) => {
           const img = new Image();
           img.crossOrigin = 'anonymous';
-          img.onload = () => {
-            // If preview hasn't loaded yet, compute from this image's natural size
-            const nw = _natW || img.naturalWidth;
-            const nh = _natH || img.naturalHeight;
-            const cw = renderW;
-            const scale = _natW ? _scale : Math.max(cw / nw, CH / nh);
-            const ox = _natW ? _ox : (cw - nw * scale) / 2;
-            const oy = _natW ? _oy : (CH - nh * scale) / 2;
-            const sx = -ox / scale, sy = -oy / scale;
-            const sw = cw / scale, sh = CH / scale;
-            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, EXPORT_W, EXPORT_H);
-            resolve(canvas.toDataURL('image/jpeg', 0.92));
-          };
-          img.onerror = () => resolve(src);
-          img.src = src;
+          img.onload = () => { ctx.drawImage(img, sx, sy, sw, sh, 0, 0, EXPORT_W, EXPORT_H); resolve(canvas.toDataURL('image/jpeg', 0.92)); };
+          img.onerror = () => resolve(_pendingDataUrl || ev.banner || '');
+          img.src = _pendingDataUrl || ev.banner || '';
         });
       }
 
@@ -5129,9 +5119,9 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
         saveBtn.textContent = 'Saving…'; saveBtn.style.opacity='.6'; saveBtn.style.pointerEvents='none';
         statusEl.style.color='rgba(255,255,255,.3)'; statusEl.textContent='';
         try {
-          // Banner: re-export if dragged/zoomed or new file; otherwise keep existing
-          let url = ev.banner || null;
-          if (_pendingFile || _dirty) {
+          // Banner: re-export if dragged/zoomed or new file; null out if removed; otherwise keep existing
+          let url = _bannerRemoved ? null : (ev.banner || null);
+          if (!_bannerRemoved && (_pendingFile || _dirty)) {
             const cropped = await _exportCrop();
             const arr = cropped.split(','), mime = arr[0].match(/:(.*?);/)[1];
             const bstr = atob(arr[1]); let n = bstr.length; const u8 = new Uint8Array(n);
@@ -5143,6 +5133,7 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
           }
           // Update live card DOM
           if (url) { bannerImg.src = url; bannerImg.style.display='block'; if (hint) hint.style.opacity='0'; }
+          else if (_bannerRemoved) { bannerImg.src=''; bannerImg.style.display='none'; if (hint) { hint.style.opacity='1'; hint.textContent=newTitle.toUpperCase(); } }
           titleEl.textContent = newTitle;
           dateEl.textContent = newDate; dateEl.style.display = newDate ? '' : 'none';
           locEl.textContent  = newLoc;  locEl.style.display  = newLoc  ? '' : 'none';
@@ -5150,19 +5141,18 @@ function _makeEventCard(ev, isOwnerOrAdmin, extraEls, extraIndex) {
           // Update data-match-panel so match re-render still finds the panel
           if (expandPanel) { expandPanel.dataset.matchPanel = newTitle; expandPanel.setAttribute('data-match-panel', newTitle); }
           // Update globals
-          ev.title = newTitle; ev.date = newDate||null; ev.location = newLoc||null;
-          if (url) ev.banner = url;
+          ev.title = newTitle; ev.date = newDate||null; ev.location = newLoc||null; ev.banner = url;
+          if (window._efedPrimaryEvent && !isExtraCard) window._efedPrimaryEvent.banner = url;
           // Persist to Supabase
           if (isExtraCard) {
             const extras = window._efedExtraEvents ? [...window._efedExtraEvents] : [];
-            if (extras[extraIndex]) extras[extraIndex] = {...extras[extraIndex], title:newTitle, date:newDate||null, location:newLoc||null, banner:url||extras[extraIndex].banner};
+            if (extras[extraIndex]) extras[extraIndex] = {...extras[extraIndex], title:newTitle, date:newDate||null, location:newLoc||null, banner:url};
             await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:extras})});
             window._efedExtraEvents = extras;
           } else {
-            const patch = {efed_event_title:newTitle||null, efed_event_date:newDate||null, efed_event_location:newLoc||null};
-            if (url) patch.efed_event_banner = url;
+            const patch = {efed_event_title:newTitle||null, efed_event_date:newDate||null, efed_event_location:newLoc||null, efed_event_banner:url};
             await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify(patch)});
-            if (window._efedPrimaryEvent) { window._efedPrimaryEvent.title=newTitle; window._efedPrimaryEvent.date=newDate||null; window._efedPrimaryEvent.location=newLoc||null; if (url) window._efedPrimaryEvent.banner=url; }
+            if (window._efedPrimaryEvent) { window._efedPrimaryEvent.title=newTitle; window._efedPrimaryEvent.date=newDate||null; window._efedPrimaryEvent.location=newLoc||null; }
           }
           statusEl.style.color='#4caf64'; statusEl.textContent='Saved!';
           setTimeout(closePopup, 600);
@@ -5808,9 +5798,27 @@ async function _mcToggleLike(matchUid, isExtraCard, extraIndex, btnEl, countEl) 
 // ── Render saved matches in the expand panel ─────────────────────────────────
 function _renderMatchesInPanel(expandPanel, ev, isOwnerOrAdmin, isExtraCard, extraIndex) {
   if (!expandPanel) return;
-  const matches = (isExtraCard
+  const rawMatches = (isExtraCard
     ? (window._efedExtraEvents || [])[extraIndex]?.matches
     : window._efedPrimaryEvent?.matches) || [];
+
+  // Strip blank/corrupt entries (no uid, empty tokens, etc.)
+  const matches = rawMatches.filter(m => m && m.uid && Array.isArray(m.tokens) && m.tokens.length > 0);
+
+  // If blanks were found, auto-purge them from global state + DB silently
+  if (matches.length !== rawMatches.length) {
+    const session = typeof getSession === 'function' ? getSession() : null;
+    if (session) {
+      if (isExtraCard) {
+        const extras = window._efedExtraEvents ? [...window._efedExtraEvents] : [];
+        if (extras[extraIndex]) { extras[extraIndex] = {...extras[extraIndex], matches}; window._efedExtraEvents = extras; }
+        fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_events_json:extras})}).catch(()=>{});
+      } else {
+        if (window._efedPrimaryEvent) window._efedPrimaryEvent.matches = matches;
+        fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_event_matches_json:matches})}).catch(()=>{});
+      }
+    }
+  }
   const addBtn = expandPanel.querySelector('._mc-add-btn');
   const listEl = expandPanel.querySelector('._mc-list');
   const emptyEl = expandPanel.querySelector('._mc-empty');
