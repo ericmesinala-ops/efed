@@ -1930,20 +1930,42 @@ function startGoogleSignIn() {
     callback: handleGoogleCredential,
     auto_select: false,
     cancel_on_tap_outside: true,
+    use_fedcm_for_prompt: true,
   });
-  // Render a hidden official Google button, then programmatically click it.
-  // This is the correct no-redirect-URI approach.
+
   const container = document.getElementById('gsi-hidden-btn');
   container.innerHTML = '';
+
+  // Make the container temporarily visible + interactive so mobile browsers
+  // allow the programmatic click on the cross-origin Google button iframe.
+  container.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;opacity:0.01;pointer-events:auto;';
+
   google.accounts.id.renderButton(container, {
     type: 'standard', theme: 'outline', size: 'large', text: 'signin_with', width: 300,
   });
-  setTimeout(() => {
-    const btn = container.querySelector('div[role="button"], iframe');
-    if (btn) { btn.click(); return; }
-    // Fallback: show One-Tap prompt
-    google.accounts.id.prompt();
-  }, 150);
+
+  let attempts = 0;
+  const tryClick = setInterval(() => {
+    attempts++;
+    const btn = container.querySelector('div[role="button"]');
+    if (btn) {
+      clearInterval(tryClick);
+      btn.click();
+      setTimeout(() => {
+        container.style.cssText = 'position:fixed;top:-999px;left:-999px;opacity:0;pointer-events:none;z-index:-1;';
+      }, 500);
+      return;
+    }
+    if (attempts > 20) {
+      clearInterval(tryClick);
+      container.style.cssText = 'position:fixed;top:-999px;left:-999px;opacity:0;pointer-events:none;z-index:-1;';
+      google.accounts.id.prompt(notification => {
+        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+          showGoogleError('Google Sign-In could not open. Please try refreshing the page.');
+        }
+      });
+    }
+  }, 100);
 }
 
 // Google One-Tap / GIS callback — receives a JWT credential
@@ -1983,10 +2005,18 @@ async function handleGoogleCredential(response) {
   if (existingUser) {
     // Existing user — log them straight in
     const session = buildSession(existingUser);
-    if (ADMIN_ACCOUNTS.includes(existingUser.username)) {
+    const isAddAccount = new URLSearchParams(window.location.search).get('add') === '1';
+    if (ADMIN_ACCOUNTS.includes(existingUser.username.toLowerCase())) {
       _apcPendingSession = session;
-      _apcIsAdd = false;
+      _apcIsAdd = isAddAccount;
       document.getElementById('auth-passcode-gate').style.display = 'flex';
+    } else if (isAddAccount) {
+      // Adding a second account — save to switcher without overwriting active session
+      const saved = JSON.parse(localStorage.getItem('efed_saved_accounts') || '[]');
+      const idx = saved.findIndex(a => a.username === session.username);
+      if (idx >= 0) saved[idx] = session; else saved.push(session);
+      localStorage.setItem('efed_saved_accounts', JSON.stringify(saved));
+      window.location.replace('index.html');
     } else {
       setSession(session);
       window.location.replace('index.html');
@@ -2173,6 +2203,7 @@ function buildSession(user) {
   return {
     username: user.username,
     displayName: user.display_name || user.username,
+    avatarUrl: user.avatar_url || null,
     logged_in_at: Date.now(),
   };
 }
