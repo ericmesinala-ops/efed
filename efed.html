@@ -3364,6 +3364,7 @@ window._efedRules = (function(){
       <input id="mgmt-roster-quick-inp" placeholder="Type any name &amp; Quick Add →" maxlength="60" autocomplete="off"
         style="flex:1;max-width:260px;background:#1a1a22;border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:7px 12px;font-size:.82rem;font-family:'DM Sans',sans-serif;color:#e8e8e8;outline:none;transition:border-color .2s;"
         onfocus="this.style.borderColor='rgba(200,168,75,.5)'" onblur="this.style.borderColor='rgba(255,255,255,.12)';setTimeout(()=>{ const d=document.getElementById('mgmt-qa-drop'); if(d)d.style.display='none'; },200)"
+        oninput="_mgmtQaSearch(this.value,'mgmt-qa-drop',this)"
       />
       <button onclick="mgmtQuickAddRoster()" ontouchend="event.preventDefault();mgmtQuickAddRoster();" style="background:#c0000e;color:#fff;border:none;border-radius:5px;padding:7px 16px;font-size:.78rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;letter-spacing:.5px;white-space:nowrap;transition:background .15s;" onmouseover="this.style.background='#e0000f'" onmouseout="this.style.background='#c0000e'">Quick Add</button>
       <div style="flex:1;"></div>
@@ -13521,7 +13522,7 @@ async function markAllNotifsRead() {
     <div id="mgmt-mob-qa-handle"></div>
     <div id="mgmt-mob-qa-title">Quick Add Wrestler</div>
     <div id="mgmt-mob-qa-inner">
-      <input id="mgmt-mob-qa-inp" type="text" placeholder="Type any name…" maxlength="60" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false"/>
+      <input id="mgmt-mob-qa-inp" type="text" placeholder="Type any name…" maxlength="60" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="_mgmtQaSearch(this.value,'mgmt-mob-qa-results',this)"/>
       <div id="mgmt-mob-qa-results"></div>
       <div class="mgmt-mob-qa-hint">Type a name to search hub members, or just hit Add to create a slot.</div>
       <button id="mgmt-mob-qa-btn">Add to Roster</button>
@@ -22842,5 +22843,115 @@ function _mgmtShowHubConfirm(rosterId, displayName, u) {
   };
   btnRow.appendChild(cancelBtn);btnRow.appendChild(proceedBtn);body.appendChild(btnRow);
 }
+
+// ── QUICK-ADD SEARCH (desktop dropdown + mobile sheet) ──────────────────────
+var _mgmtQaTimer = null;
+
+async function _mgmtQaSearch(query, resultsId, inputEl) {
+  clearTimeout(_mgmtQaTimer);
+  var results = document.getElementById(resultsId);
+  if (!results) return;
+  query = (query || '').trim();
+  var isDrop = (resultsId === 'mgmt-qa-drop');
+  if (isDrop) {
+    if (query.length < 1) { results.style.display = 'none'; results.innerHTML = ''; return; }
+    var rect = inputEl.getBoundingClientRect();
+    results.style.top  = (rect.bottom + 4) + 'px';
+    results.style.left = rect.left + 'px';
+    results.style.width = Math.max(rect.width, 300) + 'px';
+  } else {
+    if (query.length < 1) { results.innerHTML = ''; return; }
+  }
+  _mgmtQaTimer = setTimeout(async function() {
+    results.innerHTML = '<div style="padding:10px 14px;font-size:.72rem;color:rgba(255,255,255,.3);">Searching…</div>';
+    if (isDrop) results.style.display = 'block';
+    try {
+      var rows = await sbGet('users', 'or=(username.ilike.*'+encodeURIComponent(query)+'*,display_name.ilike.*'+encodeURIComponent(query)+'*)&select=username,display_name,avatar_url&limit=8');
+      if (!rows || !rows.length) {
+        results.innerHTML = '<div style="padding:10px 14px;font-size:.72rem;color:rgba(255,255,255,.3);">No hub members found.</div>';
+        return;
+      }
+      var existing = _mgmtRosterData.map(function(r){ return ((_mgmtGetMgmt(r.id)||{}).efed_username||'').toLowerCase(); });
+      rows = rows.filter(function(r){ return !existing.includes(r.username.toLowerCase()); });
+      if (!rows.length) {
+        results.innerHTML = '<div style="padding:10px 14px;font-size:.72rem;color:rgba(255,255,255,.3);">All matches are already on the roster.</div>';
+        return;
+      }
+      results.innerHTML = rows.map(function(r) {
+        var dn = (r.display_name || r.username || '').replace(/</g,'&lt;');
+        var av = r.avatar_url
+          ? '<img src="'+r.avatar_url+'" style="width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0;">'
+          : '<div style="width:30px;height:30px;border-radius:50%;background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.25);display:flex;align-items:center;justify-content:center;font-family:\'Bebas Neue\',sans-serif;font-size:.9rem;color:#c8a84b;flex-shrink:0;">'+dn[0].toUpperCase()+'</div>';
+        return '<div class="mgmt-mob-qa-result-item" style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;" onclick="_mgmtQaPick(\''+r.username.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\',\''+dn.replace(/'/g,"\\'")+'\')">'+av+'<div style="flex:1;min-width:0;"><div style="font-size:.8rem;font-weight:600;color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+dn+'</div><div style="font-size:.65rem;color:rgba(255,255,255,.35);">@'+r.username+'</div></div><span style="font-size:.65rem;color:#c8a84b;font-weight:700;white-space:nowrap;">+ Add</span></div>';
+      }).join('');
+    } catch(e) {
+      results.innerHTML = '<div style="padding:10px 14px;font-size:.72rem;color:rgba(255,255,255,.3);">Search failed.</div>';
+    }
+  }, 280);
+}
+
+function _mgmtQaPick(username, displayName) {
+  var desktopInp = document.getElementById('mgmt-roster-quick-inp');
+  var drop = document.getElementById('mgmt-qa-drop');
+  var mobInp = document.getElementById('mgmt-mob-qa-inp');
+  var mobResults = document.getElementById('mgmt-mob-qa-results');
+  if (desktopInp) desktopInp.value = displayName || username;
+  if (drop) { drop.style.display = 'none'; drop.innerHTML = ''; }
+  if (mobInp) mobInp.value = displayName || username;
+  if (mobResults) mobResults.innerHTML = '';
+}
+
+function mgmtQuickAddRoster() {
+  var inp = document.getElementById('mgmt-roster-quick-inp');
+  var name = (inp ? inp.value : '').trim();
+  if (!name) { if (inp) inp.focus(); return; }
+  var drop = document.getElementById('mgmt-qa-drop');
+  if (drop) { drop.style.display = 'none'; drop.innerHTML = ''; }
+  _mgmtQaDoAdd(name);
+  if (inp) inp.value = '';
+}
+
+function _mgmtMobQaAdd() {
+  var inp = document.getElementById('mgmt-mob-qa-inp');
+  var name = (inp ? inp.value : '').trim();
+  if (!name) { if (inp) inp.focus(); return; }
+  var results = document.getElementById('mgmt-mob-qa-results');
+  if (results) results.innerHTML = '';
+  _mgmtQaDoAdd(name);
+  if (inp) inp.value = '';
+  _mgmtMobQaClose();
+}
+
+function _mgmtQaDoAdd(name) {
+  if (!name) return;
+  var id = 'slot_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+  _mgmtRosterData.push({ id: id, name: name, tier: 'Member', alignment: '', championship: false });
+  _mgmtRosterRender();
+  showToast(name + ' added to roster.');
+  if (typeof mgmtRosterSave === 'function') mgmtRosterSave(true);
+}
+
+function _mgmtMobQaOpen() {
+  var sheet = document.getElementById('mgmt-mob-qa-sheet');
+  if (sheet) sheet.classList.add('open');
+  setTimeout(function(){ var inp = document.getElementById('mgmt-mob-qa-inp'); if (inp) inp.focus(); }, 120);
+}
+function _mgmtMobQaClose() {
+  var sheet = document.getElementById('mgmt-mob-qa-sheet');
+  if (sheet) sheet.classList.remove('open');
+  var inp = document.getElementById('mgmt-mob-qa-inp');
+  if (inp) inp.value = '';
+  var results = document.getElementById('mgmt-mob-qa-results');
+  if (results) results.innerHTML = '';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  var fab      = document.getElementById('mgmt-mob-qa-fab');
+  var backdrop = document.getElementById('mgmt-mob-qa-backdrop');
+  var addBtn   = document.getElementById('mgmt-mob-qa-btn');
+  if (fab)      fab.addEventListener('click', _mgmtMobQaOpen);
+  if (backdrop) backdrop.addEventListener('click', _mgmtMobQaClose);
+  if (addBtn)   addBtn.addEventListener('click', _mgmtMobQaAdd);
+});
 </script>
 </html>
