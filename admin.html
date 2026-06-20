@@ -446,6 +446,7 @@ html.day-mode .nav-tv-svg--day { display: inline; }
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
         <div class="card-title" style="margin-bottom:0;"><div class="dot"></div>Registered Channels <span id="ch-count" style="font-size:1.12rem;color:var(--muted);font-family:'DM Sans';font-weight:400;letter-spacing:0;margin-left:4px;"></span></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;" id="scan-month-btns">
+          <button class="btn btn-ghost btn-sm" id="scan-find-lost" onclick="findLostLinks()" style="border-color:rgba(122,144,232,.5);color:#7a90e8;background:rgba(122,144,232,.08);">🔍 Find Lost Links</button>
           <button class="btn btn-ghost btn-sm" id="scan-check-all" onclick="checkAllChannels()" style="border-color:rgba(76,175,100,.5);color:#4caf64;background:rgba(76,175,100,.08);">✓ Check All</button>
           <button class="btn btn-ghost btn-sm" id="scan-filter-all" onclick="toggleScanFilter('all')" style="border-color:rgba(200,168,75,.5);color:var(--gold);background:rgba(200,168,75,.08);">All</button>
           <button class="btn btn-ghost btn-sm" id="scan-filter-current" onclick="toggleScanFilter('current')">This Month</button>
@@ -462,6 +463,8 @@ html.day-mode .nav-tv-svg--day { display: inline; }
           📡 GROUP B <span id="ch-tab-b-count" style="font-size:.8rem;font-weight:700;padding:1px 7px;border-radius:10px;background:rgba(76,100,200,.15);color:#7a90e8;font-family:'DM Sans',sans-serif;letter-spacing:0;">0</span>
         </button>
       </div>
+
+      <div id="lost-links-results" style="display:none;margin-bottom:14px;"></div>
 
       <div id="channel-list" style="padding-top:12px;padding-bottom:12px;"><div class="empty"><div class="empty-icon">📺</div>No channels yet.</div></div>
     </div>
@@ -1657,7 +1660,100 @@ function _renderActiveChGroup(all) {
   }
 }
 
+// ── LOST LINK RECOVERY ──
+// Strips emoji, punctuation, and spacing differences so we can match names like
+// "#TeamSHaRP" against a YouTube-official title like "Team SHaRP Wrestling".
+function _normalizeName(s) {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '') // strip accents
+    .replace(/[^a-z0-9]/g, ''); // strip everything but letters/digits
+}
+
+async function findLostLinks() {
+  const box = document.getElementById('lost-links-results');
+  const btn = document.getElementById('scan-find-lost');
+  box.style.display = 'block';
+  box.innerHTML = '<div class="empty" style="padding:16px;"><div class="empty-icon">⏳</div>Scanning for orphaned links…</div>';
+  if (btn) { btn.disabled = true; }
+
+  try {
+    const [channels, subs] = await Promise.all([
+      sbGet('efed_channels', 'select=id,efed_name,yt_channel_url'),
+      sbGet('submissions', 'status=eq.approved&select=efed')
+    ]);
+
+    // Exact (lowercase) names already registered with a URL
+    const registeredExact = new Set(channels.filter(c => c.yt_channel_url).map(c => c.efed_name.trim().toLowerCase()));
+
+    // Distinct submission names that do NOT have an exact-match registered row —
+    // these are the ones showing "No YT channel" in the list.
+    const subNames = new Map(); // lowercase -> original-case name
+    subs.forEach(s => { if (s.efed) subNames.set(s.efed.trim().toLowerCase(), s.efed.trim()); });
+    const missing = Array.from(subNames.entries()).filter(([key]) => !registeredExact.has(key));
+
+    // Channels rows that DO have a URL — candidates for being an orphaned match
+    const linkedRows = channels.filter(c => c.yt_channel_url);
+
+    const matches = [];
+    missing.forEach(([missingKey, missingName]) => {
+      const normMissing = _normalizeName(missingName);
+      if (!normMissing) return;
+      linkedRows.forEach(row => {
+        const rowKey = row.efed_name.trim().toLowerCase();
+        if (rowKey === missingKey) return; // already exact match, not orphaned
+        const normRow = _normalizeName(row.efed_name);
+        if (normRow && normRow === normMissing) {
+          matches.push({ missingName, row });
+        }
+      });
+    });
+
+    if (!matches.length) {
+      box.innerHTML = '<div class="empty" style="padding:16px;"><div class="empty-icon">✅</div>No orphaned links found — every registered URL matches its submissions name.</div>';
+      return;
+    }
+
+    box.innerHTML = `<div style="background:rgba(122,144,232,.08);border:1px solid rgba(122,144,232,.3);border-radius:10px;padding:14px 16px;">
+      <div style="font-weight:700;color:#7a90e8;margin-bottom:10px;">🔍 Found ${matches.length} likely orphaned link${matches.length!==1?'s':''}</div>
+      <div style="font-size:.88rem;color:var(--muted);margin-bottom:12px;">These channels have a saved YouTube link, but under a slightly different name than what's used in your submissions — so they show up as a separate, unlinked row. Click "Relink" to fix it without retyping the URL.</div>
+      ${matches.map((m, i) => `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-top:1px solid rgba(255,255,255,.08);">
+          <div style="flex:1;min-width:200px;">
+            <div style="font-size:.84rem;color:var(--muted);">Shows as "No YT channel":</div>
+            <div style="font-weight:600;color:#fff;">${esc(m.missingName)}</div>
+          </div>
+          <div style="font-size:1.2rem;color:var(--muted);">→</div>
+          <div style="flex:1;min-width:200px;">
+            <div style="font-size:.84rem;color:var(--muted);">Has the link, saved as:</div>
+            <div style="font-weight:600;color:#fff;">${esc(m.row.efed_name)}</div>
+            <div class="channel-url" style="font-size:.8rem;">${esc(m.row.yt_channel_url)}</div>
+          </div>
+          <button class="btn btn-gold btn-sm" onclick="restoreLostLink('${esc(m.missingName)}', ${m.row.id})">✓ Relink</button>
+        </div>
+      `).join('')}
+    </div>`;
+  } catch(e) {
+    box.innerHTML = '<div class="empty" style="padding:16px;">Error scanning: ' + esc(e.message) + '</div>';
+  } finally {
+    if (btn) { btn.disabled = false; }
+  }
+}
+
+async function restoreLostLink(correctName, channelRowId) {
+  try {
+    await sbUpdate('efed_channels', { efed_name: correctName }, 'id=eq.' + channelRowId);
+    toast('✅ Relinked: ' + correctName);
+    findLostLinks();
+    loadChannels();
+  } catch(e) {
+    toast('Error: ' + e.message);
+  }
+}
+
 async function loadChannels() {
+
+
   const list = document.getElementById('channel-list');
   list.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
   try {
@@ -2797,15 +2893,19 @@ async function saveChannelUrl(cbKey, efedName, existingId) {
     const ytName = d.items?.[0]?.snippet?.title || '';
     if (!ytName) { showChEditStatus(status, '❌ YouTube returned no channel name.', 'error'); return; }
 
+    // IMPORTANT: keep the existing display name (efedName) — that's the exact name
+    // already used to match rows in the `submissions` table. Overwriting it with
+    // YouTube's official title (ytName) is what made saved links disappear on
+    // reload — the row stopped matching and looked like the link was erased.
     if (existingId) {
-      // Update existing efed_channels row
-      await sbUpdate('efed_channels', { yt_channel_url: url, efed_name: ytName }, 'id=eq.' + existingId);
+      // Update existing efed_channels row — URL only, name stays as-is
+      await sbUpdate('efed_channels', { yt_channel_url: url }, 'id=eq.' + existingId);
     } else {
-      // No existing row — insert new one
-      await sbInsert('efed_channels', { efed_name: ytName, yt_channel_url: url });
+      // No existing row — insert new one, keeping the name already shown for this row
+      await sbInsert('efed_channels', { efed_name: efedName, yt_channel_url: url });
     }
 
-    showChEditStatus(status, '✓ Saved: ' + ytName, 'success');
+    showChEditStatus(status, '✓ Saved — verified channel: ' + ytName, 'success');
     setTimeout(() => loadChannels(), 1200);
   } catch(e) {
     showChEditStatus(status, '❌ Error: ' + e.message, 'error');
