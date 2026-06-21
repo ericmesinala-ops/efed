@@ -638,6 +638,26 @@ html.day-mode .nav-tv-svg--day { display: inline; }
       <div id="hc-log" style="margin-top:20px;font-size:.88rem;line-height:1.9;color:rgba(255,255,255,.45);font-family:'JetBrains Mono',monospace;"></div>
       <div id="hc-result" style="margin-top:16px;font-size:3rem;font-family:'Bebas Neue',sans-serif;letter-spacing:4px;color:#4caf8a;display:none;"></div>
     </div>
+
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>🏠 Homepage Stats Band</div>
+      <div style="font-size:1.08rem;color:var(--muted);margin-bottom:20px;line-height:1.7;">These two numbers show on the sign-in page (auth.html) above the login form. Edit them here — changes go live immediately, no code edits needed.</div>
+      <div class="input-row">
+        <div class="input-group" style="flex:1;">
+          <label class="input-label">Hours Display Text</label>
+          <input class="input-field" id="hs-hours-input" placeholder="e.g. 1,320+">
+        </div>
+        <div class="input-group" style="flex:1;">
+          <label class="input-label">EFED Channels Display Text</label>
+          <input class="input-field" id="hs-efed-input" placeholder="e.g. 139">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;">
+        <button class="btn btn-gold" onclick="saveHomepageStats()">Save Changes</button>
+        <button class="btn btn-ghost btn-sm" onclick="useCountedHours()" title="Fill the Hours field from the count above">↑ Use Counted Total</button>
+        <span id="hs-status" style="display:none;font-size:.86rem;"></span>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -819,6 +839,7 @@ function switchTab(name, btn) {
   if(name==='banned') { loadBannedLinks(); }
   if(name==='badges') { loadBadges(); }
   if(name==='maintenance') loadMaintenanceAlerts();
+  if(name==='hourcounter') loadHomepageStats();
 }
 
 // ── PASSCODE ──
@@ -3016,12 +3037,67 @@ async function runHourCounter() {
     if (resultEl) {
       resultEl.textContent = `${totalHours} HRS ${totalMins} MINS`;
       resultEl.style.display = 'block';
+      resultEl.dataset.hours = totalHours; // stashed for "Use Counted Total"
     }
   } catch(e) {
     hcLog(`<span style="color:#ff6b6b;">Error: ${e.message}</span>`);
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+// ── HOMEPAGE STATS (auth.html sign-in page band) ──
+function hsStatus(msg, ok) {
+  const el = document.getElementById('hs-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok ? '#4caf64' : '#ff6b6b';
+  el.style.display = 'inline';
+  setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+async function loadHomepageStats() {
+  const hoursInput = document.getElementById('hs-hours-input');
+  const efedInput = document.getElementById('hs-efed-input');
+  try {
+    const rows = await sbGet('site_stats', 'id=eq.1&select=hours_label,efed_label');
+    if (rows.length) {
+      if (hoursInput) hoursInput.value = rows[0].hours_label || '';
+      if (efedInput) efedInput.value = rows[0].efed_label || '';
+    } else {
+      // No row yet — prefill with the current hardcoded defaults from auth.html
+      if (hoursInput && !hoursInput.value) hoursInput.value = '1,320+';
+      if (efedInput && !efedInput.value) efedInput.value = '139';
+    }
+  } catch(e) {
+    hsStatus('Could not load (has the site_stats table been created yet?)', false);
+  }
+}
+
+async function saveHomepageStats() {
+  const hoursInput = document.getElementById('hs-hours-input');
+  const efedInput = document.getElementById('hs-efed-input');
+  const hours_label = hoursInput ? hoursInput.value.trim() : '';
+  const efed_label = efedInput ? efedInput.value.trim() : '';
+  if (!hours_label || !efed_label) { hsStatus('Fill in both fields first.', false); return; }
+  try {
+    const existing = await sbGet('site_stats', 'id=eq.1');
+    if (existing.length) {
+      await sbUpdate('site_stats', { hours_label, efed_label }, 'id=eq.1');
+    } else {
+      await sbInsert('site_stats', { id: 1, hours_label, efed_label });
+    }
+    hsStatus('✓ Saved — live on the sign-in page now.', true);
+  } catch(e) {
+    hsStatus('Error saving: ' + e.message, false);
+  }
+}
+
+function useCountedHours() {
+  const resultEl = document.getElementById('hc-result');
+  const hoursInput = document.getElementById('hs-hours-input');
+  if (!resultEl || !resultEl.dataset.hours) { hsStatus('Run "Count Hours" first.', false); return; }
+  if (hoursInput) hoursInput.value = Number(resultEl.dataset.hours).toLocaleString() + '+';
 }
 </script>
 
