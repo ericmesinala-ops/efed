@@ -13016,18 +13016,19 @@ async function loadExistingRating(url) {
       const r = rows[0];
       const hasUsedEdit = localStorage.getItem('rating_edited_' + extractId(url)) === '1';
 
-      // Decode promo_storyline — could be string or number from DB
-      const _packedRaw = parseInt(String(r.promo_storyline || '0').replace(/[^0-9]/g, ''), 10) || 0;
-      const _isNewFormat = _packedRaw >= 900000;
+      // Decode promo_storyline: promo*100 + sound*10 + promo2 (max 555)
+      // Decode production: overall_stars*10 + visual_stars (max 55)
+      const _packedPromoRaw = parseInt(String(r.promo_storyline || '0').replace(/[^0-9]/g, ''), 10) || 0;
+      const _packedProdRaw  = parseInt(String(r.production || '0').replace(/[^0-9]/g, ''), 10) || 0;
 
       let _rOverallStars, _rVisual, _rPromo, _rSound, _rPromo2;
-      if (_isNewFormat) {
-        const _p = _packedRaw - 900000;
-        _rOverallStars = Math.floor(_p / 10000);
-        _rVisual       = Math.floor((_p % 10000) / 1000);
-        _rPromo        = Math.floor((_p % 1000) / 100);
-        _rSound        = Math.floor((_p % 100) / 10);
-        _rPromo2       = _p % 10;
+      if (_packedProdRaw >= 10 && _packedProdRaw <= 55) {
+        // New format: production = overall*10 + visual
+        _rOverallStars = Math.floor(_packedProdRaw / 10);
+        _rVisual       = _packedProdRaw % 10;
+        _rPromo        = Math.floor(_packedPromoRaw / 100);
+        _rSound        = Math.floor((_packedPromoRaw % 100) / 10);
+        _rPromo2       = _packedPromoRaw % 10;
       } else {
         // Legacy row — use whatever individual cols exist, default others to 3
         _rOverallStars = Math.round(r.production || 0) || 3;
@@ -13226,21 +13227,19 @@ async function submitRating() {
     const _isEdit = _existingForSave.length > 0;
     const _wasEdited = _isEdit && localStorage.getItem('rating_edited_' + extractId(url)) === '1';
 
-    // Pack all individual stars into promo_storyline with magic prefix 9:
-    // 900000 + overall_stars*10000 + visual*1000 + promo*100 + sound*10 + promo2
-    // Ensure all values are integers 1-5 before packing
+    // Pack promo/sound/promo2 as a small 3-digit number (max 555) — safe for smallint
+    // Format: promo*100 + sound*10 + promo2  (each 1-5, no prefix needed)
     const _clampStar = v => Math.min(5, Math.max(1, parseInt(v) || 1));
-    const _packedPromo = 900000
-      + _clampStar(_ratingValues.overall)     * 10000
-      + _clampStar(_ratingValues.production)  * 1000
-      + _clampStar(_ratingValues.promo)       * 100
-      + _clampStar(_ratingValues.sound)       * 10
+    const _packedPromo = _clampStar(_ratingValues.promo) * 100
+      + _clampStar(_ratingValues.sound)  * 10
       + _clampStar(_ratingValues.promo2);
+    // production col stores: overall_stars*10 + visual_stars  (e.g. 43 = overall 4, visual 3)
+    const _packedProd = _clampStar(_ratingValues.overall) * 10 + _clampStar(_ratingValues.production);
 
     // Only the score columns — never send username/video_id/created_at on update (causes 400)
     const _scoreData = {
       overall:         _weighted,
-      production:      _ratingValues.overall,
+      production:      _packedProd,
       promo_storyline: _packedPromo,
       match_quality:   _ratingValues.match,
       roster_talent:   _ratingValues.roster
@@ -13555,14 +13554,31 @@ async function loadVideoRating(url) {
     // Update all cards with this URL
     document.querySelectorAll('.card').forEach(card => {
       if (card._videoUrl === url) {
+        // Update or create the card-info text rating
         let ratingEl = card.querySelector('.card-rating');
         if (!ratingEl) {
           ratingEl = document.createElement('div');
           ratingEl.className = 'card-rating';
           ratingEl.style.cssText = 'font-size:.6rem;color:#c8a84b;font-weight:700;margin-top:2px;';
-          card.querySelector('.card-info').appendChild(ratingEl);
+          const info = card.querySelector('.card-info');
+          if (info) info.appendChild(ratingEl);
         }
         ratingEl.textContent = _formatRating(rounded);
+        // Update or create the thumbnail badge (only show >= 4.0)
+        const thumb = card.querySelector('.card-thumb');
+        if (thumb) {
+          let badge = thumb.querySelector('.card-rating-badge');
+          if (rounded >= 4.0) {
+            if (!badge) {
+              badge = document.createElement('div');
+              badge.className = 'card-rating-badge';
+              thumb.appendChild(badge);
+            }
+            badge.innerHTML = _formatRating(rounded);
+          } else if (badge) {
+            badge.remove();
+          }
+        }
       }
     });
   } catch(e) {}
