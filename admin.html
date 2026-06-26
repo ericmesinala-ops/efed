@@ -939,7 +939,14 @@ document.addEventListener('keydown', function(e) {
 async function loadStats() {
   const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
   try { const r=await sbGet('users','select=username&limit=1000'); set('stat-users',r.length); document.getElementById('page-sub-info').textContent=r.length+' members'; } catch(e){ console.error('users stat',e); }
-  try { const r=await sbGet('submissions','status=eq.approved&select=url&limit=5000'); set('stat-submissions',r.length); } catch(e){ console.error('subs stat',e); }
+  try {
+    const _vr = await fetch(SUPABASE_URL + '/rest/v1/submissions?status=eq.approved&select=url', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact', 'Range': '0-0' }
+    });
+    const _vRange = _vr.headers.get('Content-Range'); // e.g. "0-0/1247"
+    const _vTotal = _vRange ? parseInt(_vRange.split('/')[1]) : 0;
+    set('stat-submissions', _vTotal);
+  } catch(e){ console.error('subs stat',e); }
   try { const r=await sbGet('submissions','status=eq.pending&select=url'); set('stat-pending',r.length); } catch(e){ console.error('pending stat',e); }
   try {
     const [chRows, subRows] = await Promise.all([
@@ -3002,10 +3009,19 @@ async function runHourCounter() {
 
   try {
     hcLog('Fetching approved videos from Supabase…');
-    const res = await fetch(SUPABASE_URL + '/rest/v1/submissions?status=eq.approved&select=url', {
-      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
-    });
-    const rows = await res.json();
+    let rows = [];
+    let _hcOffset = 0;
+    const _hcPage = 1000;
+    while (true) {
+      const _hcRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/submissions?status=eq.approved&select=url&offset=${_hcOffset}&limit=${_hcPage}`,
+        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Range': `${_hcOffset}-${_hcOffset + _hcPage - 1}` } }
+      );
+      const _hcBatch = await _hcRes.json();
+      rows = rows.concat(_hcBatch);
+      if (_hcBatch.length < _hcPage) break;
+      _hcOffset += _hcPage;
+    }
     hcLog(`Found ${rows.length} approved videos in Supabase.`);
 
     const supabaseIds = rows.map(r => {
