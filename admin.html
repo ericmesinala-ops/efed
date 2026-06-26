@@ -939,7 +939,7 @@ document.addEventListener('keydown', function(e) {
 async function loadStats() {
   const set = (id, val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
 
-  // ── MEMBERS: use count=exact so >1000 users are counted correctly ──
+  // MEMBERS — count=exact, no 1000-row cap
   try {
     const _mr = await fetch(SUPABASE_URL + '/rest/v1/users?select=username', {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact', 'Range': '0-0' }
@@ -951,7 +951,7 @@ async function loadStats() {
     if (subInfo) subInfo.textContent = _mTotal + ' members';
   } catch(e){ console.error('users stat',e); }
 
-  // ── VIDEOS: count=exact (already fixed) ──
+  // VIDEOS — count=exact
   try {
     const _vr = await fetch(SUPABASE_URL + '/rest/v1/submissions?status=eq.approved&select=url', {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact', 'Range': '0-0' }
@@ -961,7 +961,7 @@ async function loadStats() {
     set('stat-submissions', _vTotal);
   } catch(e){ console.error('subs stat',e); }
 
-  // ── PENDING: count=exact so it doesn't cap at 1000 ──
+  // PENDING — count=exact, no 1000-row cap
   try {
     const _pr = await fetch(SUPABASE_URL + '/rest/v1/submissions?status=eq.pending&select=url', {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact', 'Range': '0-0' }
@@ -971,8 +971,7 @@ async function loadStats() {
     set('stat-pending', _pTotal);
   } catch(e){ console.error('pending stat',e); }
 
-  // ── EFED CHANNELS: count only rows in efed_channels table (not submissions) ──
-  // Submissions efed field is a free-text label, not a channel registry entry — don't mix them
+  // EFED CHANNELS — count only actual efed_channels rows, not free-text submission fields
   try {
     const _cr = await fetch(SUPABASE_URL + '/rest/v1/efed_channels?select=id', {
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact', 'Range': '0-0' }
@@ -982,14 +981,14 @@ async function loadStats() {
     set('stat-channels', _cTotal);
   } catch(e){ console.error('channels stat',e); }
 
-  // ── ONLINE NOW: last_seen within 2 minutes ──
+  // ONLINE NOW
   try {
     const cutoff=Date.now()-120000;
     const r=await sbGet('presence',`last_seen=gt.${cutoff}&select=username,last_seen&order=last_seen.desc`);
     set('stat-online',r.length);
   } catch(e){ set('stat-online','—'); }
 
-  // ── LAST SCAN ──
+  // LAST SCAN
   try {
     const r=await sbGet('scan_log','select=scanned_at&order=scanned_at.desc&limit=1');
     if(r.length){const d=new Date(r[0].scanned_at);set('stat-last-scan',d.toLocaleDateString('en-US',{month:'short',day:'numeric'}));}
@@ -1386,7 +1385,7 @@ async function startScan(grp) {
   const _totalCost = channels.length * 100;
   const _quotaLeft = 10000 - _totalCost;
   label.textContent=`Group ${grp.toUpperCase()} scan complete — ${results.length} new video${results.length!==1?'s':''} found · Cost: ${_totalCost} units`;
-  try { await sbInsert('scan_log',{channels_scanned:channels.length,videos_found:results.length,videos_added:0,scan_group:grp.toUpperCase()}); } catch(e){}
+  try { await sbInsert('scan_log',{channels_scanned:channels.length,videos_found:results.length,videos_added:0,scan_group:grp.toUpperCase(),scanned_at:new Date().toISOString()}); } catch(e){ console.error('[scan_log insert]',e); }
   localStorage.setItem('admin_last_scan_'+grp, Date.now().toString());
   loadStats(); loadScanLog();
   await saveResultsToQueue(results);
