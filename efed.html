@@ -7842,10 +7842,161 @@ function efedFeedSetPostBtnName() {
 }
 
 // ── MAIN ──
+// ── EFED PUBLIC (GUEST) VIEW ──
+// Mirrors the profile.html guest-mode pattern: signed-out visitors can read
+// the page (tabs, info, videos thumbnails, feed posts) but every link to a
+// video or a profile page pops a sign-in prompt instead of navigating, and
+// the Locker Room chat is shown but locked. Nothing here grants any write
+// access — every mutating action still requires its own session check.
+
+function _applyEfedPublicNav() {
+  const searchWrap = document.getElementById('nav-search-wrap');
+  const notifBtn   = document.getElementById('notif-btn');
+  const userWrap   = document.getElementById('nav-user-wrap');
+  if (searchWrap) searchWrap.style.display = 'none';
+  if (notifBtn)   notifBtn.style.display   = 'none';
+  if (userWrap)   userWrap.style.display   = 'none';
+  const navRight = document.querySelector('.nav-right');
+  if (navRight && !document.getElementById('efed-public-signin-nav-btn')) {
+    const btn = document.createElement('a');
+    btn.id = 'efed-public-signin-nav-btn';
+    btn.href = 'index.html';
+    btn.style.cssText = 'display:flex;align-items:center;gap:6px;padding:7px 16px;background:#c0000e;border:none;border-radius:20px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:.5px;text-decoration:none;cursor:pointer;transition:opacity .15s;';
+    btn.textContent = 'Sign In';
+    btn.onmouseover = () => btn.style.opacity = '.85';
+    btn.onmouseout  = () => btn.style.opacity = '1';
+    navRight.appendChild(btn);
+  }
+  const bnav = document.getElementById('bottom-nav');
+  if (bnav) bnav.style.display = 'none';
+  const pnav = document.getElementById('profile-nav-row');
+  if (pnav) pnav.style.display = 'none';
+}
+
+function _showEfedSignInPrompt() {
+  const existing = document.getElementById('efed-public-signin-prompt');
+  if (existing) existing.remove();
+  const el = document.createElement('div');
+  el.id = 'efed-public-signin-prompt';
+  el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  el.innerHTML = `
+    <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:18px;width:90%;max-width:360px;padding:28px 24px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.8);">
+      <div style="font-size:2rem;margin-bottom:12px;">🔒</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:3px;color:#fff;margin-bottom:8px;">Sign In to Continue</div>
+      <div style="font-size:.8rem;color:rgba(255,255,255,.45);margin-bottom:22px;line-height:1.5;">Create a free account to watch videos, join the conversation, and explore the Hub.</div>
+      <a href="index.html" style="display:block;padding:12px;background:#c0000e;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;text-decoration:none;margin-bottom:10px;">Sign In / Join Free</a>
+      <button onclick="document.getElementById('efed-public-signin-prompt').remove()" style="background:none;border:none;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.78rem;cursor:pointer;padding:4px;">Maybe later</button>
+    </div>`;
+  document.body.appendChild(el);
+  el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
+}
+
+function _lockEfedChatForGuests() {
+  const sec = document.getElementById('efed-chat-section');
+  if (sec) sec.style.display = '';
+  const nameLabel = document.getElementById('efed-chat-name-label');
+  if (nameLabel) nameLabel.textContent = EFED_NAME;
+  const box = document.getElementById('efed-chat-messages');
+  if (box) box.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:36px 20px;text-align:center;color:rgba(255,255,255,.4);min-height:120px;"><div style="font-size:1.8rem;">🔒</div><div style="font-family:\'DM Sans\',sans-serif;font-size:.8rem;">Sign in to view the Locker Room chat</div></div>';
+  const inputRow = document.getElementById('efed-chat-input-row');
+  if (inputRow) inputRow.style.display = 'none';
+  const pickers = document.getElementById('efed-pickers-wrap');
+  if (pickers) pickers.style.display = 'none';
+}
+
+function _applyEfedPublicBlock() {
+  window._efedGuestMode = true;
+  window._efedPublicBlocked = true;
+
+  document.addEventListener('click', function(e) {
+    if (!window._efedPublicBlocked) return;
+
+    // Always allow interacting with the sign-in prompt itself
+    if (e.target.closest('#efed-public-signin-prompt')) return;
+
+    // Tab navigation (Info/Roster/Connect/Schedule/Videos) is always allowed
+    if (e.target.closest('.efed-tab')) return;
+
+    // Liking a post is allowed — the like() function itself nudges sign-in
+    // via a small toast, same as everywhere else in the app
+    const ocEl = e.target.closest('[onclick]');
+    const oc = ocEl ? (ocEl.getAttribute('onclick') || '') : '';
+    if (/_efedFeed\.like\(|_efedFeed\.likeReply\(/.test(oc)) return;
+
+    // Viewing an image lightbox in place is allowed (no navigation/edit)
+    if (/\blightbox\(|openLightbox\(/.test(oc)) return;
+    if (e.target.closest('#lightbox-bg, #efed-public-signin-prompt')) return;
+
+    // Entrance music play/toggle (audio only) is allowed
+    if (e.target.closest('#entrance-music-bar, #em-video-inline')) return;
+
+    // Block any internal <a href> — allow external social links through
+    const link = e.target.closest('a[href]');
+    if (link) {
+      const href = link.getAttribute('href') || '';
+      if (href.startsWith('http') || href.startsWith('//') || href.startsWith('mailto')) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Block video thumbnails (episodes + best matches rows)
+    if (e.target.closest('#episodes-row, #best-matches-row, .vid-card, .vid-thumb, .vid-item')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Block roster member cards (link to profile) and champion cards
+    if (e.target.closest('[data-username], #champions-grid')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Block the community feed's paging controls — guests see the latest
+    // post only, no browsing through history
+    if (e.target.closest('#efed-posts-jump, #efed-posts-prev, #efed-posts-next')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Block reply/post/delete/compose controls on the feed (defense in
+    // depth — these should already be hidden for guests)
+    if (e.target.closest('.efed-post-reply-compose, .efed-post-replies-toggle, .efed-post-delete-btn, #efed-feed-compose, #efed-post-modal, #efed-post-modal-bg')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Block the Locker Room chat entirely — shown, but locked
+    if (e.target.closest('#efed-chat-section')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Catch-all: any other onclick that navigates to another internal page
+    if (ocEl && /profile\.html|efed\.html|index\.html|management\.html|admin\.html|openVideo|playVideo|window\.location/.test(oc)) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+  }, true); // capture phase — fires before the element's own click handler
+}
+
 async function loadProfile() {
   const session = getSession();
   const params = new URLSearchParams(window.location.search);
   EFED_NAME = decodeURIComponent(params.get('e') || '');
+
+  // Public/guest view — apply nav + global link/video/profile click-block
+  // as early as possible so nothing is clickable before this runs.
+  if (!session) {
+    _applyEfedPublicNav();
+    _applyEfedPublicBlock();
+  }
 
   // If no ?e= param, fetch promo_name from DB (owner visiting their own page)
   if (!EFED_NAME && session) {
@@ -8195,7 +8346,11 @@ async function loadProfile() {
   loadEfedStats();
   loadEpisodes();
   // loadRoster() — deferred to tab click to save Supabase reads
-  initEfedChatView(); // always load chat messages — input row shown separately for members/admin
+  if (session) {
+    initEfedChatView(); // always load chat messages — input row shown separately for members/admin
+  } else {
+    _lockEfedChatForGuests(); // guests see the chat exists, but locked — no messages, no input
+  }
   _efedFeed.load();  // always load community feed — visible to all, reply-enabled for logged-in users
   // Only load efed social feed for non-owners here; owners loaded it above when EFED_OWNER was set
   if (!_isOwnProfile) loadEfedSocialFeed(false);
@@ -17761,8 +17916,8 @@ const _efedFeed = (() => {
     requestAnimationFrame(() => requestAnimationFrame(() => _syncWrapHeight(_idx, false)));
   }
 
-  function prev() { if (_idx > 0) { _idx--; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); return true; } return false; }
-  function next() { if (_idx < _items.length - 1) { _idx++; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); return true; } return false; }
+  function prev() { if (window._efedGuestMode) { if (typeof _showEfedSignInPrompt === 'function') _showEfedSignInPrompt(); return false; } if (_idx > 0) { _idx--; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); return true; } return false; }
+  function next() { if (window._efedGuestMode) { if (typeof _showEfedSignInPrompt === 'function') _showEfedSignInPrompt(); return false; } if (_idx < _items.length - 1) { _idx++; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); return true; } return false; }
   function goTo(i) { _idx = i; _slide(i); _setNav(i, _items.length); _setDots(i, _items.length); }
   function jumpCurrent() { goTo(0); }
 
