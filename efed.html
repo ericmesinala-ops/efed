@@ -2988,8 +2988,17 @@ function _lsYtId(url) {
 
 // Pull league status (with one-time migration fallback from the old
 // Signings columns, so nothing an owner already set gets silently lost).
-function _loadLeagueStatus(user) {
-  let data = user && user.efed_league_status_json;
+// Fetched as its own isolated request — deliberately NOT part of the main
+// eFed query — so that if the efed_league_status_json column doesn't exist
+// yet in Supabase, only this feature is skipped instead of the whole page.
+async function _loadLeagueStatus(user) {
+  let data = null;
+  try {
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(user.username)}&select=efed_league_status_json&limit=1`);
+    data = rows && rows[0] && rows[0].efed_league_status_json;
+  } catch(e) {
+    console.warn('[league-status] efed_league_status_json column not available yet — add it in Supabase to enable this feature.', e);
+  }
   if (data && typeof data === 'object' && !Array.isArray(data)) {
     _lsData = Object.assign({
       status: 'active', season: '', hiring: false, application_link: '',
@@ -8466,7 +8475,7 @@ async function loadProfile() {
 
   // Single DB call — load efed data + check ownership in one shot
   try {
-    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_gallery_5,efed_gallery_6,efed_gallery_7,efed_gallery_8,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_event_banner,efed_events_json,efed_event_matches_json,efed_champions_json,efed_league_status_json,efed_roster_order,efed_match_order&limit=1`);
+    const users = await sbGet('users', `promo_name=ilike.${encodeURIComponent(EFED_NAME)}&select=username,display_name,avatar_url,efed_banner,efed_banner_dim,is_efed_owner,role,promo_name,promo_logo,yt_channel,ig_handle,x_handle,twitch_channel,promo_website,efed_open_signings,efed_signings_link,efed_gallery_1,efed_gallery_2,efed_gallery_3,efed_gallery_4,efed_gallery_5,efed_gallery_6,efed_gallery_7,efed_gallery_8,efed_bio,efed_event_title,efed_event_date,efed_event_location,efed_event_main,efed_event_hype,efed_event_banner,efed_events_json,efed_event_matches_json,efed_champions_json,efed_roster_order,efed_match_order&limit=1`);
     console.log('[efed] users query result:', users);
     if (!users.length) {
       document.getElementById('efed-name').textContent = EFED_NAME;
