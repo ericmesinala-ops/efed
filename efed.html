@@ -2947,11 +2947,16 @@ async function efedBioSave(){}
 #ls-rs-like-btn{width:auto;padding:0 10px;}
 .ls-rs-act-btn.active{background:rgba(192,0,14,.18);border-color:rgba(192,0,14,.4);color:#ff6b6b;}
 html.day-mode .ls-rs-act-btn{border-color:rgba(0,0,0,.12);background:rgba(0,0,0,.04);color:rgba(0,0,0,.55);}
+#league-status-modal-bg .cv-modal-wrap::-webkit-scrollbar{width:6px;}
+#league-status-modal-bg .cv-modal-wrap::-webkit-scrollbar-track{background:transparent;}
+#league-status-modal-bg .cv-modal-wrap::-webkit-scrollbar-thumb{background:rgba(255,255,255,.28);border-radius:10px;}
+#league-status-modal-bg .cv-modal-wrap::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.4);}
+html.day-mode #league-status-modal-bg .cv-modal-wrap::-webkit-scrollbar-thumb{background:rgba(0,0,0,.25);}
 </style>
 
 <!-- ── LEAGUE STATUS: EDIT MODAL ── -->
 <div id="league-status-modal-bg" onclick="if(event.target===this)closeLeagueStatusModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;">
-  <div class="cv-modal-wrap" style="max-height:90vh;overflow-y:auto;scrollbar-width:none;">
+  <div class="cv-modal-wrap" style="max-height:90vh;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.28) transparent;">
     <div class="cv-modal-title">League Status</div>
 
     <label class="cv-modal-label">Status</label>
@@ -3520,15 +3525,28 @@ async function saveLeagueStatus() {
   const saveBtn = document.getElementById('ls-save-btn');
   saveBtn.disabled = true; saveBtn.style.opacity = '.6';
   try {
-    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
       method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_league_status_json: payload })
     });
+    if (!res.ok) {
+      const bodyText = await res.text().catch(() => '');
+      console.error('[league-status] save failed:', res.status, bodyText);
+      let msg = 'Could not save (server rejected the request — check console for details).';
+      try {
+        const j = JSON.parse(bodyText);
+        if (j && j.message) msg = 'Could not save: ' + j.message;
+      } catch(_) {}
+      err.textContent = msg; err.style.display = 'block';
+      saveBtn.disabled = false; saveBtn.style.opacity = '1';
+      return;
+    }
     _lsData = payload;
     renderLeagueStatusDisplay();
     closeLeagueStatusModal();
     if (typeof showToast === 'function') showToast('League Status saved!');
   } catch(e) {
-    err.textContent = 'Could not save — try again.'; err.style.display = 'block';
+    console.error('[league-status] save error:', e);
+    err.textContent = 'Could not save — check your connection and try again.'; err.style.display = 'block';
   }
   saveBtn.disabled = false; saveBtn.style.opacity = '1';
 }
