@@ -2915,6 +2915,7 @@ async function efedBioSave(){}
         <div id="ls-rs-creator-tag" style="display:flex;align-items:center;gap:6px;font-size:.68rem;font-weight:700;letter-spacing:.5px;color:rgba(255,255,255,.55);text-transform:uppercase;"></div>
         <div id="ls-rs-title" style="font-size:.92rem;font-weight:700;color:#fff;line-height:1.3;"></div>
         <div id="ls-rs-meta-line" style="font-size:.72rem;color:rgba(255,255,255,.4);"></div>
+        <div id="ls-rs-participants" style="display:none;flex-wrap:nowrap;align-items:center;gap:0;margin-top:2px;"></div>
         <!-- Action buttons — same markup/classes/icons as the real video page's expand-actions row -->
         <div id="ls-rs-action-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;">
           <button id="ls-rs-like-btn" class="expand-action-btn" onclick="_lsToggleLike()" data-tip="Like">
@@ -2960,6 +2961,24 @@ async function efedBioSave(){}
 .expand-action-btn.bookmarked { color: #c8a84b; border-color: rgba(200,168,75,.4); background: rgba(200,168,75,.1); }
 .expand-action-btn.appeared { color: #ff8c42; border-color: rgba(255,140,66,.4); background: rgba(255,140,66,.1); }
 .expand-action-btn.appeared .ls-rs-appear-emoji { filter: none; }
+.ls-participant-avatar,
+.ls-participant-initials,
+.ls-participant-more {
+  width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid rgba(12,12,18,.95);
+  margin-right: -6px; object-fit: cover;
+}
+.ls-participant-avatar { background: rgba(255,255,255,.08); display: block; }
+.ls-participant-initials {
+  background: rgba(192,0,14,.55); color: #fff;
+  font-size: .5rem; font-weight: 700; font-family: 'Bebas Neue', sans-serif;
+  display: flex; align-items: center; justify-content: center; letter-spacing: .5px;
+}
+.ls-participant-more {
+  background: rgba(255,255,255,.1); color: rgba(255,255,255,.5);
+  font-size: .48rem; font-weight: 700; font-family: 'DM Sans', sans-serif;
+  display: flex; align-items: center; justify-content: center;
+}
 html.day-mode .expand-action-btn { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.12); color: rgba(0,0,0,.7); }
 #league-status-modal-bg .cv-modal-wrap::-webkit-scrollbar{width:6px;}
 #league-status-modal-bg .cv-modal-wrap::-webkit-scrollbar-track{background:transparent;}
@@ -3083,6 +3102,7 @@ function _lsGetAnonId() {
 // yet in Supabase, only this feature is skipped instead of the whole page.
 async function _loadLeagueStatus(user) {
   window._lsOwnerAvatar = user.avatar_url || '';
+  window._lsPromoLogo   = user.promo_logo  || '';
   let data = null;
   try {
     const rows = await sbGet('users', `username=eq.${encodeURIComponent(user.username)}&select=efed_league_status_json&limit=1`);
@@ -3169,9 +3189,11 @@ function renderRecentShowView() {
 
   const creatorTag = document.getElementById('ls-rs-creator-tag');
   if (creatorTag) {
-    const avatar = (window._lsOwnerAvatar || '');
-    creatorTag.innerHTML = (avatar ? `<img src="${_lsEsc(avatar)}" style="width:16px;height:16px;border-radius:50%;object-fit:cover;">` : '') +
-      `<span>${_lsEsc(window.EFED_NAME || 'eFed')}</span>`;
+    const logo = (window._lsPromoLogo || window._lsOwnerAvatar || '');
+    const efedName = window.EFED_NAME || 'eFed';
+    creatorTag.innerHTML =
+      (logo ? `<img src="${_lsEsc(logo)}" style="width:18px;height:18px;border-radius:4px;object-fit:cover;border:1px solid rgba(255,255,255,.15);">` : '') +
+      `<span>${_lsEsc(efedName)}</span>`;
   }
   const titleEl = document.getElementById('ls-rs-title');
   if (titleEl) titleEl.textContent = show.show_name || 'Untitled';
@@ -3183,6 +3205,52 @@ function renderRecentShowView() {
   if (tagBtn) tagBtn.style.display = _isOwnProfile ? 'flex' : 'none';
 
   _lsInitRecentShowActions(show);
+  _lsLoadParticipants(show);
+}
+
+async function _lsLoadParticipants(show) {
+  const row = document.getElementById('ls-rs-participants');
+  if (!row || !show || !show.video_id) return;
+  try {
+    const MAX = 6;
+    const apRows = await sbGet('video_appearances', `video_id=eq.${encodeURIComponent(show.video_id)}&select=username`);
+    if (!apRows.length) { row.style.display = 'none'; return; }
+    const usernames = apRows.map(r => r.username);
+    let avatarMap = {};
+    try {
+      const users = await sbGet('users', `username=in.(${usernames.map(u=>encodeURIComponent(u)).join(',')})&select=username,avatar_url,display_name`);
+      users.forEach(u => { avatarMap[u.username] = { avatar: u.avatar_url, name: u.display_name || u.username }; });
+    } catch(e) {}
+    row.innerHTML = '';
+    const shown = usernames.slice(0, MAX);
+    const extra = usernames.length - MAX;
+    shown.forEach(username => {
+      const info = avatarMap[username] || { avatar: null, name: username };
+      const el = document.createElement(info.avatar ? 'img' : 'div');
+      if (info.avatar) {
+        el.src = info.avatar; el.alt = info.name; el.loading = 'lazy';
+        el.onerror = function() {
+          const d = document.createElement('div');
+          d.className = 'ls-participant-initials'; d.title = info.name;
+          d.textContent = (info.name[0]||'?').toUpperCase();
+          this.parentNode.replaceChild(d, this);
+        };
+        el.className = 'ls-participant-avatar';
+      } else {
+        el.className = 'ls-participant-initials';
+        el.textContent = (info.name[0]||'?').toUpperCase();
+      }
+      el.title = info.name;
+      row.appendChild(el);
+    });
+    if (extra > 0) {
+      const more = document.createElement('div');
+      more.className = 'ls-participant-more';
+      more.textContent = '+' + extra;
+      row.appendChild(more);
+    }
+    row.style.display = 'flex';
+  } catch(e) { /* silently skip */ }
 }
 
 function _lsOpenRecentShow() {
