@@ -334,70 +334,21 @@ function getEmblemSVG(designId) {
     return r;
   }
   (function() {
+    // Allow signed-out visitors through when they're viewing a specific
+    // eFed via a shared link (?e=...) — the public/guest view handles
+    // that case. Only redirect to auth.html if there's truly nothing to
+    // show them (no session AND no ?e= param).
+    function _hasEfedParam() {
+      try { return !!new URLSearchParams(window.location.search).get('e'); }
+      catch(e) { return /(\?|&)e=/.test(window.location.search); }
+    }
     try {
       const s = JSON.parse(localStorage.getItem('efed_session'));
-      if (!s || !s.username) {
-        // Allow public eFed view if a ?e= param is present
-        if (!new URLSearchParams(window.location.search).get('e')) {
-          window.location.replace('auth.html');
-        }
-      }
+      if ((!s || !s.username) && !_hasEfedParam()) window.location.replace('auth.html');
     } catch(e) {
-      if (!new URLSearchParams(window.location.search).get('e')) {
-        window.location.replace('auth.html');
-      }
+      if (!_hasEfedParam()) window.location.replace('auth.html');
     }
   })();
-  // ── PUBLIC VIEW HELPERS ──
-  var _isPublicView = false; // set true when no session
-  function _showSignInPrompt(msg) {
-    var existing = document.getElementById('public-signin-prompt');
-    if (existing) existing.remove();
-    var el = document.createElement('div');
-    el.id = 'public-signin-prompt';
-    el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
-    el.innerHTML = '<div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:18px;width:90%;max-width:360px;padding:28px 24px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.8);">'
-      + '<div style="font-size:2rem;margin-bottom:12px;">🔒</div>'
-      + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:1.4rem;letter-spacing:3px;color:#fff;margin-bottom:8px;">Sign In to Continue</div>'
-      + '<div style="font-size:.8rem;color:rgba(255,255,255,.45);margin-bottom:22px;line-height:1.5;">' + (msg || 'Create a free account to watch videos, join the community, and explore the Hub.') + '</div>'
-      + '<a href="index.html" style="display:block;padding:12px;background:#c0000e;border-radius:10px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.85rem;font-weight:700;text-decoration:none;margin-bottom:10px;">Sign In / Join Free</a>'
-      + '<button onclick="document.getElementById(\'public-signin-prompt\').remove()" style="background:none;border:none;color:rgba(255,255,255,.35);font-family:\'DM Sans\',sans-serif;font-size:.78rem;cursor:pointer;padding:4px;">Maybe later</button>'
-      + '</div>';
-    document.body.appendChild(el);
-    el.addEventListener('click', function(e) { if (e.target === el) el.remove(); });
-  }
-  function _applyPublicEfedBlock() {
-    window._publicVideoBlocked = true;
-    document.addEventListener('click', function(e) {
-      if (!window._publicVideoBlocked) return;
-      if (e.target.closest('#public-signin-prompt')) return;
-      // Block video cards / thumbnails
-      if (e.target.closest('.vid-card, .vid-thumb, .vid-item, .ep-card, .episode-card, .ep-thumb, [data-video], .ep-row')) {
-        e.preventDefault(); e.stopImmediatePropagation();
-        _showSignInPrompt('Sign in to watch videos and full episodes.');
-        return;
-      }
-      // Block internal links (not external social)
-      var link = e.target.closest('a[href]');
-      if (link) {
-        var href = link.getAttribute('href') || '';
-        if (href.startsWith('http') || href.startsWith('//') || href.startsWith('mailto:') || href.startsWith('#')) return;
-        e.preventDefault(); e.stopImmediatePropagation();
-        _showSignInPrompt();
-        return;
-      }
-      // Block profile page nav
-      var onclickEl = e.target.closest('[onclick]');
-      if (onclickEl) {
-        var oc = onclickEl.getAttribute('onclick') || '';
-        if (/profile\.html|efed\.html(?!.*\?e=)|index\.html|management\.html|admin\.html|openVideo|playVideo|window\.location(?!.*\?e=)/.test(oc)) {
-          e.preventDefault(); e.stopImmediatePropagation();
-          _showSignInPrompt();
-          return;
-        }
-      }
-    }, true);
-  }
   // Forward declaration — full implementation (_efedBuildFeedPicker) loads later
   function efedFeedOpenModal() {
     const bg = document.getElementById('efed-post-modal-bg');
@@ -2711,7 +2662,7 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
       <div>
         <div style="font-size:.52rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.28);margin-bottom:4px;font-weight:700;">Application Link</div>
         <input id="ep-apply-input" type="url" placeholder="https://forms.gle/..." style="width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:7px;padding:7px 10px;color:#e8e8e8;font-family:'DM Sans',sans-serif;font-size:.75rem;outline:none;box-sizing:border-box;transition:border-color .2s;margin-bottom:3px;" onfocus="this.style.borderColor='rgba(200,168,75,.35)'" onblur="this.style.borderColor='rgba(255,255,255,.08)'">
-        <div style="font-size:.58rem;color:#3a3a4a;">Only visible when signings are open.</div>
+        <div style="font-size:.58rem;color:#3a3a4a;">Legacy field — set your application link in the League Status editor instead.</div>
       </div>
     </div>
 
@@ -2925,6 +2876,662 @@ html.day-mode .profile-nav-tab:hover .hub-back-label { color: rgba(0,0,0,.85) !i
 function efedBioStartEdit(){}
 function efedBioCancelEdit(){}
 async function efedBioSave(){}
+</script>
+
+<!-- ── LEAGUE STATUS ── -->
+<div id="efed-league-status-section" style="display:none;" class="section">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+    <div class="sec-title" style="margin-bottom:0;flex:1;">League Status</div>
+    <button id="ls-edit-btn" class="tc-add-btn" style="display:none;" title="Edit League Status" onclick="openLeagueStatusModal()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </div>
+  <div id="ls-display-wrap" style="display:flex;gap:16px;align-items:flex-start;background:rgba(255,255,255,.02);border-left:2px solid rgba(255,255,255,.08);border-radius:0 6px 6px 0;padding:14px 16px;">
+    <img id="ls-display-img" src="" alt="" style="display:none;width:96px;height:96px;border-radius:10px;object-fit:cover;flex-shrink:0;background:#1a1a1f;">
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:7px;">
+        <span id="ls-status-dot" style="width:8px;height:8px;border-radius:50%;background:#4caf64;flex-shrink:0;"></span>
+        <span id="ls-status-label" style="font-size:.85rem;font-weight:700;color:#fff;">Currently Active</span>
+      </div>
+      <div id="ls-season-line" style="display:none;font-size:.78rem;color:rgba(255,255,255,.55);"></div>
+      <div id="ls-event-line" style="display:none;font-size:.78rem;color:rgba(255,255,255,.55);"></div>
+      <div id="ls-next-show-line" style="display:none;font-size:.78rem;color:rgba(255,255,255,.55);"></div>
+      <div id="ls-action-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:2px;">
+        <a id="ls-apply-btn" href="" target="_blank" rel="noopener" style="display:none;padding:6px 14px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:20px;color:var(--gold);text-decoration:none;font-size:.65rem;font-weight:700;letter-spacing:1px;white-space:nowrap;">Apply Now</a>
+        <button id="ls-watch-trailer-btn" onclick="_lsWatchTrailer()" style="display:none;padding:6px 14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:20px;color:rgba(255,255,255,.75);font-size:.65rem;font-weight:700;letter-spacing:1px;white-space:nowrap;cursor:pointer;font-family:'DM Sans',sans-serif;">▶ Watch Trailer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Most Recent Show: View Mode ── -->
+  <div id="ls-rs-wrap" style="display:none;margin-top:14px;background:rgba(255,255,255,.02);border-left:2px solid rgba(255,255,255,.08);border-radius:0 6px 6px 0;padding:14px 16px;">
+    <div style="font-size:.62rem;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,.3);font-weight:700;margin-bottom:10px;">Most Recent Show</div>
+    <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;">
+      <div style="flex-shrink:0;width:220px;max-width:100%;">
+        <div id="ls-rs-thumb-wrap" onclick="_lsOpenRecentShow()" style="cursor:pointer;width:220px;max-width:100%;height:124px;border-radius:8px;overflow:hidden;background:#1a1a1f;position:relative;">
+          <img id="ls-rs-thumb" src="" alt="" style="width:100%;height:100%;object-fit:cover;">
+          <div id="ls-rs-duration-badge" style="position:absolute;bottom:6px;right:7px;background:rgba(0,0,0,.78);border-radius:4px;padding:2px 6px;font-size:.62rem;font-weight:700;color:#fff;letter-spacing:.3px;"></div>
+        </div>
+        <div id="ls-rs-action-row" style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap;">
+          <button id="ls-rs-like-btn" onclick="_lsToggleLike()" class="ls-rs-act-btn" title="Like">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
+            <span id="ls-rs-like-count">0</span>
+          </button>
+          <button id="ls-rs-rate-btn" onclick="_lsRateClick()" class="ls-rs-act-btn" title="Rate">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </button>
+          <button id="ls-rs-imin-btn" onclick="_lsImInClick()" class="ls-rs-act-btn" title="I'm In This">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="3"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg>
+          </button>
+          <button id="ls-rs-bookmark-btn" onclick="_lsToggleBookmark()" class="ls-rs-act-btn" title="Bookmark">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+          </button>
+          <button id="ls-rs-tags-btn" onclick="_lsTagsClick()" class="ls-rs-act-btn" title="Tags">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41 11 4H4v7l9.59 9.59a2 2 0 0 0 2.82 0l4.18-4.18a2 2 0 0 0 0-2.82z"/><circle cx="7.5" cy="7.5" r="1" fill="currentColor"/></svg>
+          </button>
+          <button id="ls-rs-repost-btn" onclick="_lsRepostClick()" class="ls-rs-act-btn" title="Repost">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          </button>
+        </div>
+      </div>
+      <div style="flex:1;min-width:160px;display:flex;flex-direction:column;gap:6px;">
+        <div id="ls-rs-creator-tag" style="display:flex;align-items:center;gap:6px;font-size:.68rem;font-weight:700;letter-spacing:.5px;color:rgba(255,255,255,.55);text-transform:uppercase;"></div>
+        <div id="ls-rs-title" style="font-size:.92rem;font-weight:700;color:#fff;line-height:1.3;"></div>
+        <div id="ls-rs-meta-line" style="font-size:.72rem;color:rgba(255,255,255,.4);"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+.ls-rs-act-btn{width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:rgba(255,255,255,.65);display:flex;align-items:center;justify-content:center;gap:3px;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.66rem;font-weight:700;transition:background .15s,color .15s,border-color .15s;padding:0;flex-shrink:0;}
+#ls-rs-like-btn{width:auto;padding:0 10px;}
+.ls-rs-act-btn.active{background:rgba(192,0,14,.18);border-color:rgba(192,0,14,.4);color:#ff6b6b;}
+html.day-mode .ls-rs-act-btn{border-color:rgba(0,0,0,.12);background:rgba(0,0,0,.04);color:rgba(0,0,0,.55);}
+</style>
+
+<!-- ── LEAGUE STATUS: EDIT MODAL ── -->
+<div id="league-status-modal-bg" onclick="if(event.target===this)closeLeagueStatusModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;">
+  <div class="cv-modal-wrap" style="max-height:90vh;overflow-y:auto;scrollbar-width:none;">
+    <div class="cv-modal-title">League Status</div>
+
+    <label class="cv-modal-label">Status</label>
+    <select id="ls-status-select" class="cv-modal-input" onchange="_lsStatusChange()">
+      <option value="active" style="color:#4caf64;">● Currently Active</option>
+      <option value="hiatus" style="color:#c8a84b;">● On Hiatus</option>
+      <option value="rebuilding" style="color:#5b9bd5;">● Rebuilding</option>
+      <option value="inactive" style="color:rgba(180,180,180,1);">● Inactive</option>
+    </select>
+
+    <label class="cv-modal-label">Hiring</label>
+    <select id="ls-hiring-select" class="cv-modal-input" onchange="_lsHiringChange()">
+      <option value="0">Not Hiring</option>
+      <option value="1">Hiring</option>
+    </select>
+
+    <div id="ls-apply-link-wrap" style="display:none;">
+      <label class="cv-modal-label" for="ls-apply-link-input">Application Link</label>
+      <input class="cv-modal-input" id="ls-apply-link-input" type="url" placeholder="https://forms.gle/..." maxlength="300">
+      <div style="font-size:.58rem;color:rgba(255,255,255,.3);margin-top:4px;">Only shown on your page while Hiring is selected.</div>
+    </div>
+
+    <label class="cv-modal-label" for="ls-trailer-input">EFed YouTube Trailer (optional, 5 min max)</label>
+    <input class="cv-modal-input" id="ls-trailer-input" type="url" placeholder="https://youtube.com/watch?v=..." maxlength="300" oninput="_lsTrailerInputChanged()" onblur="_lsValidateTrailer()">
+    <div id="ls-trailer-err" style="font-size:.68rem;margin-top:6px;display:none;"></div>
+    <button id="ls-watch-trailer-modal-btn" onclick="_lsWatchTrailer()" style="display:none;margin-top:8px;padding:8px 14px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:rgba(255,255,255,.75);font-size:.72rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">▶ Watch Trailer</button>
+    <div id="ls-yt-probe" style="position:absolute;width:2px;height:2px;overflow:hidden;opacity:0;pointer-events:none;"></div>
+
+    <label class="cv-modal-label">Most Recent Show</label>
+    <select id="ls-recent-show-select" class="cv-modal-input" onchange="_lsRecentShowChange()">
+      <option value="">— None —</option>
+    </select>
+
+    <label class="cv-modal-label" for="ls-season-input">Upcoming Season / Episode #</label>
+    <input class="cv-modal-input" id="ls-season-input" type="text" placeholder="e.g. Season 8" maxlength="40">
+
+    <label class="cv-modal-label" for="ls-event-input">Upcoming Event</label>
+    <input class="cv-modal-input" id="ls-event-input" type="text" placeholder="e.g. Blood, Sweat &amp; Tears" maxlength="80">
+
+    <label class="cv-modal-label">Date</label>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <input id="ls-date-input" type="date" class="cv-modal-input" style="flex:1;color-scheme:dark;">
+      <button id="ls-tba-btn" onclick="_lsToggleTba()" style="flex-shrink:0;padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:rgba(255,255,255,.5);font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s;">TBA</button>
+    </div>
+
+    <label class="cv-modal-label">Image (optional)</label>
+    <div class="cv-img-upload-area" style="aspect-ratio:16/9;" onclick="document.getElementById('ls-img-file').click()">
+      <img loading="lazy" id="ls-img-preview" src="" alt="" style="display:none;width:100%;height:100%;object-fit:cover;">
+      <div id="ls-img-hint" class="cv-img-upload-hint">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        <span>Tap to upload</span>
+      </div>
+    </div>
+    <input type="file" id="ls-img-file" accept="image/*" style="display:none;" onchange="_lsHandleImgPick(event)">
+    <button id="ls-img-remove-btn" onclick="_lsRemoveImg()" style="display:none;margin-top:6px;background:none;border:none;color:rgba(255,100,100,.7);font-size:.68rem;cursor:pointer;font-family:'DM Sans',sans-serif;padding:2px;">Remove image</button>
+
+    <div class="cv-modal-err" id="ls-modal-err"></div>
+    <div class="cv-modal-actions">
+      <button class="cv-btn-cancel" onclick="closeLeagueStatusModal()">Cancel</button>
+      <button class="cv-btn-save" id="ls-save-btn" onclick="saveLeagueStatus()">Save</button>
+    </div>
+  </div>
+</div>
+<script>
+// ── LEAGUE STATUS ──
+let _lsData = {
+  status: 'active', season: '', hiring: false, application_link: '',
+  current_event: '', next_show_ms: null, next_show_tba: false,
+  trailer_url: '', image_url: '', most_recent_show: null
+};
+let _lsTrailerValid = false;
+let _lsImgPending = null; // public URL once uploaded, or null
+let _lsRecentShowOptions = {}; // id -> denormalized show data, populated when modal opens
+let _lsSelectedShow = null;    // currently chosen recent-show object (or null)
+const LS_STATUS_META = {
+  active:      { label: 'Currently Active', color: '#4caf64' },
+  hiatus:      { label: 'On Hiatus',        color: '#c8a84b' },
+  rebuilding:  { label: 'Rebuilding',       color: '#5b9bd5' },
+  inactive:    { label: 'Inactive',         color: 'rgba(190,190,190,1)' }
+};
+
+function _lsYtId(url) {
+  const m = (url||'').match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+function _lsFormatDuration(secs) {
+  secs = Math.max(0, Math.round(secs || 0));
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  return m + ':' + String(s).padStart(2,'0');
+}
+
+// Anonymous-visitor identity for Like only — persisted per-browser so the
+// same visitor can toggle their like on/off without needing an account.
+function _lsGetAnonId() {
+  try {
+    let id = localStorage.getItem('efed_anon_id');
+    if (!id) { id = 'anon_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('efed_anon_id', id); }
+    return id;
+  } catch(e) { return 'anon_session'; }
+}
+
+// Pull league status (with one-time migration fallback from the old
+// Signings columns, so nothing an owner already set gets silently lost).
+// Fetched as its own isolated request — deliberately NOT part of the main
+// eFed query — so that if the efed_league_status_json column doesn't exist
+// yet in Supabase, only this feature is skipped instead of the whole page.
+async function _loadLeagueStatus(user) {
+  window._lsOwnerAvatar = user.avatar_url || '';
+  let data = null;
+  try {
+    const rows = await sbGet('users', `username=eq.${encodeURIComponent(user.username)}&select=efed_league_status_json&limit=1`);
+    data = rows && rows[0] && rows[0].efed_league_status_json;
+  } catch(e) {
+    console.warn('[league-status] efed_league_status_json column not available yet — add it in Supabase to enable this feature.', e);
+  }
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    _lsData = Object.assign({
+      status: 'active', season: '', hiring: false, application_link: '',
+      current_event: '', next_show_ms: null, next_show_tba: false,
+      trailer_url: '', image_url: '', most_recent_show: null
+    }, data);
+  } else {
+    // No League Status saved yet — seed hiring/link from legacy Signings columns
+    _lsData = {
+      status: 'active', season: '', hiring: !!user.efed_open_signings,
+      application_link: user.efed_signings_link || '',
+      current_event: '', next_show_ms: null, next_show_tba: false,
+      trailer_url: '', image_url: '', most_recent_show: null
+    };
+  }
+  renderLeagueStatusDisplay();
+}
+
+function renderLeagueStatusDisplay() {
+  const sec = document.getElementById('efed-league-status-section');
+  if (!sec) return;
+  const d = _lsData;
+  const hasAnything = d.season || d.current_event || d.next_show_ms || d.next_show_tba || d.trailer_url || d.image_url || d.hiring || d.status !== 'active';
+  // Owners always see the section (so they have an obvious place to fill it in);
+  // visitors only see it once there's something to show.
+  sec.style.display = (_isOwnProfile || hasAnything) ? 'block' : 'none';
+  if (sec.style.display === 'none') return;
+
+  const meta = LS_STATUS_META[d.status] || LS_STATUS_META.active;
+  const dot = document.getElementById('ls-status-dot');
+  const label = document.getElementById('ls-status-label');
+  if (dot) dot.style.background = meta.color;
+  if (label) { label.textContent = meta.label; label.style.color = meta.color === 'rgba(190,190,190,1)' ? 'rgba(255,255,255,.6)' : '#fff'; }
+
+  const seasonLine = document.getElementById('ls-season-line');
+  if (seasonLine) { seasonLine.style.display = d.season ? '' : 'none'; seasonLine.textContent = d.season || ''; }
+
+  const eventLine = document.getElementById('ls-event-line');
+  if (eventLine) { eventLine.style.display = d.current_event ? '' : 'none'; eventLine.innerHTML = d.current_event ? ('<strong style="color:rgba(255,255,255,.4);font-weight:700;">Upcoming Event:</strong> ' + _lsEsc(d.current_event)) : ''; }
+
+  const nextShowLine = document.getElementById('ls-next-show-line');
+  if (nextShowLine) {
+    let val = '';
+    if (d.next_show_tba) val = 'TBA';
+    else if (d.next_show_ms) val = new Date(d.next_show_ms).toLocaleDateString(undefined, { weekday: 'short', month: 'long', day: 'numeric' });
+    nextShowLine.style.display = val ? '' : 'none';
+    nextShowLine.innerHTML = val ? ('<strong style="color:rgba(255,255,255,.4);font-weight:700;">Date:</strong> ' + _lsEsc(val)) : '';
+  }
+
+  const applyBtn = document.getElementById('ls-apply-btn');
+  if (applyBtn) {
+    if (d.hiring && d.application_link) { applyBtn.href = d.application_link; applyBtn.style.display = ''; }
+    else applyBtn.style.display = 'none';
+  }
+
+  const watchBtn = document.getElementById('ls-watch-trailer-btn');
+  if (watchBtn) watchBtn.style.display = d.trailer_url ? '' : 'none';
+
+  const img = document.getElementById('ls-display-img');
+  if (img) { if (d.image_url) { img.src = d.image_url; img.style.display = ''; } else { img.style.display = 'none'; } }
+
+  renderRecentShowView();
+}
+
+// ── Most Recent Show: View Mode ──
+function renderRecentShowView() {
+  const wrap = document.getElementById('ls-rs-wrap');
+  if (!wrap) return;
+  const show = _lsData.most_recent_show;
+  if (!show || !show.video_id) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+
+  const thumb = document.getElementById('ls-rs-thumb');
+  if (thumb) thumb.src = show.thumb_url || `https://i.ytimg.com/vi/${show.video_id}/mqdefault.jpg`;
+  const durBadge = document.getElementById('ls-rs-duration-badge');
+  if (durBadge) durBadge.textContent = show.duration_seconds ? _lsFormatDuration(show.duration_seconds) : '';
+
+  const creatorTag = document.getElementById('ls-rs-creator-tag');
+  if (creatorTag) {
+    const avatar = (window._lsOwnerAvatar || '');
+    creatorTag.innerHTML = (avatar ? `<img src="${_lsEsc(avatar)}" style="width:16px;height:16px;border-radius:50%;object-fit:cover;">` : '') +
+      `<span>${_lsEsc(window.EFED_NAME || 'eFed')}</span>`;
+  }
+  const titleEl = document.getElementById('ls-rs-title');
+  if (titleEl) titleEl.textContent = show.show_name || 'Untitled';
+  const metaEl = document.getElementById('ls-rs-meta-line');
+  if (metaEl) metaEl.textContent = [show.date, show.duration_seconds ? _lsFormatDuration(show.duration_seconds) : ''].filter(Boolean).join(' · ');
+
+  _lsInitRecentShowActions(show);
+}
+
+function _lsOpenRecentShow() {
+  const show = _lsData.most_recent_show; if (!show || !show.url) return;
+  const session = getSession();
+  if (!session) { if (typeof _showEfedSignInPrompt === 'function') _showEfedSignInPrompt(); return; }
+  window.location.href = 'index.html?play=' + encodeURIComponent(show.url);
+}
+
+// Like — open to everyone, including signed-out visitors (anonymous id)
+async function _lsInitRecentShowActions(show) {
+  const session = getSession();
+  const identity = session ? session.username : _lsGetAnonId();
+  const likeBtn = document.getElementById('ls-rs-like-btn');
+  const likeCountEl = document.getElementById('ls-rs-like-count');
+  try {
+    const likeRows = await sbGet('likes', `video_id=eq.${encodeURIComponent(show.video_id)}&select=username`);
+    if (likeCountEl) likeCountEl.textContent = likeRows.length;
+    if (likeBtn) likeBtn.classList.toggle('active', likeRows.some(r => r.username === identity));
+  } catch(e) {}
+
+  const bmBtn = document.getElementById('ls-rs-bookmark-btn');
+  if (bmBtn) {
+    bmBtn.classList.remove('active');
+    if (session) {
+      try {
+        const bmRows = await sbGet('bookmarks', `video_id=eq.${encodeURIComponent(show.video_id)}&username=eq.${encodeURIComponent(session.username)}&select=username`);
+        bmBtn.classList.toggle('active', bmRows.length > 0);
+      } catch(e) {}
+    }
+  }
+}
+
+async function _lsToggleLike() {
+  const show = _lsData.most_recent_show; if (!show || !show.video_id) return;
+  const session = getSession();
+  const identity = session ? session.username : _lsGetAnonId();
+  const btn = document.getElementById('ls-rs-like-btn');
+  const countEl = document.getElementById('ls-rs-like-count');
+  if (!btn || btn.disabled) return;
+  const liked = btn.classList.contains('active');
+  btn.disabled = true;
+  try {
+    if (liked) {
+      await fetch(SUPABASE_URL+'/rest/v1/likes?video_id=eq.'+encodeURIComponent(show.video_id)+'&username=eq.'+encodeURIComponent(identity), { method:'DELETE', headers:SB_HEADERS });
+      btn.classList.remove('active');
+      if (countEl) countEl.textContent = Math.max(0, (parseInt(countEl.textContent)||1) - 1);
+    } else {
+      await fetch(SUPABASE_URL+'/rest/v1/likes', { method:'POST', headers: Object.assign({}, SB_HEADERS, {Prefer:'resolution=ignore-duplicates'}), body: JSON.stringify({ video_id: show.video_id, username: identity }) });
+      btn.classList.add('active');
+      if (countEl) countEl.textContent = (parseInt(countEl.textContent)||0) + 1;
+    }
+  } catch(e) {}
+  btn.disabled = false;
+}
+
+async function _lsToggleBookmark() {
+  const session = getSession();
+  if (!session) { if (typeof _showEfedSignInPrompt === 'function') _showEfedSignInPrompt(); return; }
+  const show = _lsData.most_recent_show; if (!show || !show.video_id) return;
+  const btn = document.getElementById('ls-rs-bookmark-btn'); if (!btn || btn.disabled) return;
+  const bookmarked = btn.classList.contains('active');
+  btn.disabled = true;
+  try {
+    if (bookmarked) {
+      await fetch(SUPABASE_URL+'/rest/v1/bookmarks?video_id=eq.'+encodeURIComponent(show.video_id)+'&username=eq.'+encodeURIComponent(session.username), { method:'DELETE', headers:SB_HEADERS });
+      btn.classList.remove('active');
+    } else {
+      await fetch(SUPABASE_URL+'/rest/v1/bookmarks', { method:'POST', headers:SB_HEADERS, body: JSON.stringify({ video_id: show.video_id, video_url: show.url, username: session.username, saved_at: new Date().toISOString() }) });
+      btn.classList.add('active');
+    }
+  } catch(e) {}
+  btn.disabled = false;
+}
+
+// Rate / I'm In This / Tags / Repost — visible to everyone, but the actual
+// action lives on the main video page (rating scale, cast list, tag picker,
+// and the repost-to-feed composer are all part of that page, not duplicated
+// here). Signed-out visitors get the sign-in prompt; signed-in visitors are
+// taken to the video page to complete the action there.
+function _lsRateClick()  { _lsGatedOpen(); }
+function _lsImInClick()  { _lsGatedOpen(); }
+function _lsTagsClick()  { _lsGatedOpen(); }
+function _lsRepostClick(){ _lsGatedOpen(); }
+function _lsGatedOpen() {
+  const session = getSession();
+  if (!session) { if (typeof _showEfedSignInPrompt === 'function') _showEfedSignInPrompt(); return; }
+  _lsOpenRecentShow();
+}
+
+
+function _lsEsc(s) { return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function _lsWatchTrailer() {
+  if (!_lsData.trailer_url) return;
+  if (typeof _openEntranceVid === 'function') _openEntranceVid(_lsData.trailer_url, (window.EFED_NAME || 'League') + ' Trailer');
+}
+
+function openLeagueStatusModal() {
+  if (!_isOwnProfile) return;
+  const d = _lsData;
+  document.getElementById('ls-status-select').value = d.status || 'active';
+  document.getElementById('ls-season-input').value = d.season || '';
+  document.getElementById('ls-hiring-select').value = d.hiring ? '1' : '0';
+  document.getElementById('ls-apply-link-input').value = d.application_link || '';
+  document.getElementById('ls-event-input').value = d.current_event || '';
+  document.getElementById('ls-date-input').value = d.next_show_ms ? _lsMsToInputDate(d.next_show_ms) : '';
+  document.getElementById('ls-date-input').disabled = !!d.next_show_tba;
+  document.getElementById('ls-date-input').style.opacity = d.next_show_tba ? '.4' : '1';
+  _lsSetTbaBtnUI(!!d.next_show_tba);
+  document.getElementById('ls-trailer-input').value = d.trailer_url || '';
+  _lsTrailerValid = !!d.trailer_url;
+  const watchModalBtn = document.getElementById('ls-watch-trailer-modal-btn');
+  if (watchModalBtn) watchModalBtn.style.display = d.trailer_url ? 'inline-block' : 'none';
+  document.getElementById('ls-trailer-err').style.display = 'none';
+  _lsImgPending = d.image_url || null;
+  const preview = document.getElementById('ls-img-preview');
+  const hint = document.getElementById('ls-img-hint');
+  const removeBtn = document.getElementById('ls-img-remove-btn');
+  if (d.image_url) { preview.src = d.image_url; preview.style.display = 'block'; hint.style.display = 'none'; removeBtn.style.display = 'inline-block'; }
+  else { preview.style.display = 'none'; hint.style.display = 'flex'; removeBtn.style.display = 'none'; }
+  document.getElementById('ls-modal-err').style.display = 'none';
+  _lsHiringChange();
+  _lsSelectedShow = d.most_recent_show || null;
+  _lsLoadRecentShowOptions();
+  document.getElementById('league-status-modal-bg').style.display = 'flex';
+}
+
+async function _lsLoadRecentShowOptions() {
+  const sel = document.getElementById('ls-recent-show-select');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— None —</option>';
+  sel.disabled = true;
+  try {
+    const rows = await sbGet('submissions', `efed=eq.${encodeURIComponent(EFED_NAME)}&status=eq.approved&order=date_ms.desc&limit=5`);
+    _lsRecentShowOptions = {};
+    rows.forEach(r => {
+      const vid = _lsYtId(r.url) || '';
+      if (!vid) return;
+      const thumb = r.thumb_url || `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`;
+      _lsRecentShowOptions[r.id] = {
+        id: r.id, url: r.url, video_id: vid, show_name: r.show_name || '',
+        date: r.date || '', date_ms: r.date_ms || null, thumb_url: thumb,
+        duration_seconds: r.duration_seconds || 0
+      };
+      const opt = document.createElement('option');
+      opt.value = String(r.id);
+      opt.textContent = (r.show_name || 'Untitled') + (r.date ? ' — ' + r.date : '');
+      sel.appendChild(opt);
+    });
+    const cur = _lsSelectedShow;
+    if (cur && cur.id && _lsRecentShowOptions[cur.id]) sel.value = String(cur.id);
+    else sel.value = '';
+  } catch(e) {
+    console.warn('[league-status] could not load recent shows', e);
+  }
+  sel.disabled = false;
+}
+
+function _lsRecentShowChange() {
+  const sel = document.getElementById('ls-recent-show-select');
+  const id = sel.value;
+  _lsSelectedShow = id ? _lsRecentShowOptions[id] : null;
+}
+
+function closeLeagueStatusModal() {
+  document.getElementById('league-status-modal-bg').style.display = 'none';
+}
+
+function _lsStatusChange() {} // hook reserved for future inline preview if needed
+
+function _lsHiringChange() {
+  const hiring = document.getElementById('ls-hiring-select').value === '1';
+  document.getElementById('ls-apply-link-wrap').style.display = hiring ? 'block' : 'none';
+}
+
+function _lsMsToInputDate(ms) {
+  const d = new Date(ms);
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+function _lsSetTbaBtnUI(isTba) {
+  const btn = document.getElementById('ls-tba-btn');
+  if (!btn) return;
+  btn.style.background = isTba ? 'rgba(192,0,14,.2)' : 'rgba(255,255,255,.06)';
+  btn.style.borderColor = isTba ? 'rgba(192,0,14,.4)' : 'rgba(255,255,255,.1)';
+  btn.style.color = isTba ? '#fff' : 'rgba(255,255,255,.5)';
+}
+
+function _lsToggleTba() {
+  const input = document.getElementById('ls-date-input');
+  const isTba = !input.disabled;
+  input.disabled = isTba;
+  input.style.opacity = isTba ? '.4' : '1';
+  if (isTba) input.value = '';
+  _lsSetTbaBtnUI(isTba);
+}
+
+// ── Trailer validation (YouTube IFrame API — no API key needed) ──
+function _lsTrailerInputChanged() {
+  _lsTrailerValid = false;
+  const watchModalBtn = document.getElementById('ls-watch-trailer-modal-btn');
+  if (watchModalBtn) watchModalBtn.style.display = 'none';
+  const err = document.getElementById('ls-trailer-err');
+  if (err) err.style.display = 'none';
+}
+
+function _lsLoadYtApi() {
+  return new Promise((resolve) => {
+    if (window.YT && window.YT.Player) { resolve(); return; }
+    window._lsYtApiCallbacks = window._lsYtApiCallbacks || [];
+    window._lsYtApiCallbacks.push(resolve);
+    if (window._lsYtApiLoading) return;
+    window._lsYtApiLoading = true;
+    const prevReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = function() {
+      if (typeof prevReady === 'function') { try { prevReady(); } catch(e) {} }
+      (window._lsYtApiCallbacks || []).forEach(cb => cb());
+      window._lsYtApiCallbacks = [];
+    };
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(tag);
+  });
+}
+
+async function _lsValidateTrailer() {
+  const input = document.getElementById('ls-trailer-input');
+  const err = document.getElementById('ls-trailer-err');
+  const watchModalBtn = document.getElementById('ls-watch-trailer-modal-btn');
+  const url = (input.value || '').trim();
+  _lsTrailerValid = false;
+  if (watchModalBtn) watchModalBtn.style.display = 'none';
+  err.style.display = 'none'; err.textContent = '';
+  if (!url) return;
+  const vidId = _lsYtId(url);
+  if (!vidId) {
+    err.textContent = 'Must be a YouTube video link.'; err.style.color = '#ff6b6b'; err.style.display = 'block';
+    return;
+  }
+  err.textContent = 'Checking video length…'; err.style.color = 'rgba(255,255,255,.4)'; err.style.display = 'block';
+  try {
+    await _lsLoadYtApi();
+    const holder = document.getElementById('ls-yt-probe');
+    holder.innerHTML = '<div id="ls-yt-probe-target"></div>';
+    const dur = await new Promise((resolve, reject) => {
+      let settled = false;
+      let player;
+      try {
+        player = new YT.Player('ls-yt-probe-target', {
+          videoId: vidId,
+          events: {
+            onReady: (e) => { if (settled) return; settled = true; const d = e.target.getDuration(); try { e.target.destroy(); } catch(_) {} resolve(d); },
+            onError: () => { if (settled) return; settled = true; reject(new Error('invalid')); }
+          }
+        });
+      } catch(e) { reject(e); return; }
+      setTimeout(() => { if (!settled) { settled = true; try { player && player.destroy && player.destroy(); } catch(_) {} reject(new Error('timeout')); } }, 8000);
+    });
+    if (dur > 300) {
+      err.textContent = 'Trailer must be 5 minutes or under (this video is ' + Math.ceil(dur/60) + ' min).';
+      err.style.color = '#ff6b6b'; err.style.display = 'block';
+      _lsTrailerValid = false;
+    } else {
+      err.style.display = 'none';
+      _lsTrailerValid = true;
+      if (watchModalBtn) watchModalBtn.style.display = 'inline-block';
+    }
+  } catch(e) {
+    err.textContent = 'Could not verify this video — check the link.'; err.style.color = '#ff6b6b'; err.style.display = 'block';
+    _lsTrailerValid = false;
+  }
+}
+
+// ── Image upload ──
+function _lsHandleImgPick(ev) {
+  const file = ev.target.files && ev.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const preview = document.getElementById('ls-img-preview');
+    const hint = document.getElementById('ls-img-hint');
+    const removeBtn = document.getElementById('ls-img-remove-btn');
+    preview.src = e.target.result; preview.style.display = 'block';
+    hint.style.display = 'none'; removeBtn.style.display = 'inline-block';
+    _lsImgPending = e.target.result; // base64 fallback until upload finishes
+    try {
+      const session = getSession(); if (!session) return;
+      const res = await fetch(e.target.result);
+      const blob = await res.blob();
+      const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+      const fileName = 'league-status/' + session.username.toLowerCase().replace(/[^a-z0-9]/g,'-') + '-' + Date.now() + '.' + ext;
+      const uploadRes = await fetch(
+        SUPABASE_URL + '/storage/v1/object/' + fileName,
+        { method: 'POST', headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': blob.type, 'x-upsert': 'true' }, body: blob }
+      );
+      if (uploadRes.ok) {
+        _lsImgPending = SUPABASE_URL + '/storage/v1/object/public/' + fileName;
+        preview.src = _lsImgPending;
+      }
+    } catch(uploadErr) { console.warn('[league-status] image upload failed, using base64 fallback', uploadErr); }
+  };
+  reader.readAsDataURL(file);
+}
+
+function _lsRemoveImg() {
+  _lsImgPending = null;
+  const preview = document.getElementById('ls-img-preview');
+  const hint = document.getElementById('ls-img-hint');
+  const removeBtn = document.getElementById('ls-img-remove-btn');
+  preview.src = ''; preview.style.display = 'none';
+  hint.style.display = 'flex'; removeBtn.style.display = 'none';
+  document.getElementById('ls-img-file').value = '';
+}
+
+async function saveLeagueStatus() {
+  const session = getSession(); if (!session || !_isOwnProfile) return;
+  const err = document.getElementById('ls-modal-err');
+  err.style.display = 'none';
+
+  const trailerUrl = document.getElementById('ls-trailer-input').value.trim();
+  if (trailerUrl && !_lsTrailerValid) {
+    // Give the blur-validation a chance to finish if the user clicked Save fast
+    await _lsValidateTrailer();
+    if (trailerUrl && !_lsTrailerValid) {
+      err.textContent = 'Please fix the YouTube Trailer link before saving.'; err.style.display = 'block';
+      return;
+    }
+  }
+
+  const applyLink = document.getElementById('ls-apply-link-input').value.trim();
+  const hiring = document.getElementById('ls-hiring-select').value === '1';
+  if (hiring && applyLink && !/^https?:\/\//.test(applyLink)) {
+    err.textContent = 'Application Link must start with http:// or https://'; err.style.display = 'block';
+    return;
+  }
+
+  const dateInput = document.getElementById('ls-date-input');
+  const isTba = dateInput.disabled;
+  let nextShowMs = null;
+  if (!isTba && dateInput.value) {
+    const parts = dateInput.value.split('-').map(Number);
+    nextShowMs = new Date(parts[0], parts[1]-1, parts[2]).getTime();
+  }
+
+  const payload = {
+    status: document.getElementById('ls-status-select').value,
+    season: document.getElementById('ls-season-input').value.trim().slice(0, 40),
+    hiring: hiring,
+    application_link: hiring ? applyLink : '',
+    current_event: document.getElementById('ls-event-input').value.trim().slice(0, 80),
+    next_show_ms: nextShowMs,
+    next_show_tba: isTba,
+    trailer_url: trailerUrl,
+    image_url: _lsImgPending || '',
+    most_recent_show: _lsSelectedShow || null
+  };
+
+  const saveBtn = document.getElementById('ls-save-btn');
+  saveBtn.disabled = true; saveBtn.style.opacity = '.6';
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/users?username=eq.' + encodeURIComponent(session.username), {
+      method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify({ efed_league_status_json: payload })
+    });
+    _lsData = payload;
+    renderLeagueStatusDisplay();
+    closeLeagueStatusModal();
+    if (typeof showToast === 'function') showToast('League Status saved!');
+  } catch(e) {
+    err.textContent = 'Could not save — try again.'; err.style.display = 'block';
+  }
+  saveBtn.disabled = false; saveBtn.style.opacity = '1';
+}
 </script>
 
 <!-- ── RULES ── -->
@@ -3579,6 +4186,8 @@ html.day-mode .nf-scroll-wrap::after  { background:linear-gradient(to left,var(-
 .cv-modal-title{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;letter-spacing:2px;color:#c8a84b;margin-bottom:16px;}
 .cv-modal-label{font-size:.62rem;letter-spacing:1.2px;text-transform:uppercase;color:rgba(255,255,255,.4);font-weight:700;margin-bottom:5px;display:block;margin-top:12px;}
 .cv-modal-input{width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.84rem;padding:8px 11px;outline:none;box-sizing:border-box;transition:border-color .15s;}
+select.cv-modal-input option{background-color:#0d0d10;color:#e8e8e8;}
+html.day-mode select.cv-modal-input option{background-color:#f4f4fa;color:#111;}
 .cv-modal-input:focus{border-color:rgba(200,168,75,.5);}
 .cv-img-upload-area{width:100%;aspect-ratio:16/7;border-radius:12px;border:2px dashed rgba(200,168,75,.28);background:rgba(0,0,0,.35);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;position:relative;overflow:hidden;transition:border-color .15s,background .15s;}
 .cv-img-upload-area:hover{border-color:rgba(200,168,75,.55);background:rgba(200,168,75,.04);}
@@ -7790,15 +8399,6 @@ async function initNav() {
       if (ddEmail) { ddEmail.textContent = '@' + session.username; ddEmail.style.color = ''; }
     }
     loadMyEfedBtn();
-
-    // Show signings toggle only on own profile
-    const targetUser = new URLSearchParams(location.search).get('e');
-    if (!targetUser || targetUser === session.username) {
-      const sec = document.getElementById('signings-section');
-      if (sec) sec.style.display = 'block';
-      _signingsOn = !!u.efed_open_signings;
-      updateSigningsUI(_signingsOn);
-    }
   } catch(e) {}
 }
 
@@ -7901,68 +8501,160 @@ function efedFeedSetPostBtnName() {
 }
 
 // ── MAIN ──
+// ── EFED PUBLIC (GUEST) VIEW ──
+// Mirrors the profile.html guest-mode pattern: signed-out visitors can read
+// the page (tabs, info, videos thumbnails, feed posts) but every link to a
+// video or a profile page pops a sign-in prompt instead of navigating, and
+// the Locker Room chat is shown but locked. Nothing here grants any write
+// access — every mutating action still requires its own session check.
+
+function _applyEfedPublicNav() {
+  const searchWrap = document.getElementById('nav-search-wrap');
+  const notifBtn   = document.getElementById('notif-btn');
+  const userWrap   = document.getElementById('nav-user-wrap');
+  if (searchWrap) searchWrap.style.display = 'none';
+  if (notifBtn)   notifBtn.style.display   = 'none';
+  if (userWrap)   userWrap.style.display   = 'none';
+  const navRight = document.querySelector('.nav-right');
+  if (navRight && !document.getElementById('efed-public-signin-nav-btn')) {
+    const btn = document.createElement('a');
+    btn.id = 'efed-public-signin-nav-btn';
+    btn.href = 'index.html';
+    btn.style.cssText = 'display:flex;align-items:center;gap:6px;padding:7px 16px;background:#c0000e;border:none;border-radius:20px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:.5px;text-decoration:none;cursor:pointer;transition:opacity .15s;';
+    btn.textContent = 'Sign In';
+    btn.onmouseover = () => btn.style.opacity = '.85';
+    btn.onmouseout  = () => btn.style.opacity = '1';
+    navRight.appendChild(btn);
+  }
+  const bnav = document.getElementById('bottom-nav');
+  if (bnav) bnav.style.display = 'none';
+  const pnav = document.getElementById('profile-nav-row');
+  if (pnav) pnav.style.display = 'none';
+}
+
+function _showEfedSignInPrompt() {
+  const existing = document.getElementById('efed-public-signin-prompt');
+  if (existing) existing.remove();
+  const el = document.createElement('div');
+  el.id = 'efed-public-signin-prompt';
+  el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+  el.innerHTML = `
+    <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:18px;width:90%;max-width:360px;padding:28px 24px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.8);">
+      <div style="font-size:2rem;margin-bottom:12px;">🔒</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:3px;color:#fff;margin-bottom:8px;">Sign In to Continue</div>
+      <div style="font-size:.8rem;color:rgba(255,255,255,.45);margin-bottom:22px;line-height:1.5;">Create a free account to watch videos, join the conversation, and explore the Hub.</div>
+      <a href="index.html" style="display:block;padding:12px;background:#c0000e;border-radius:10px;color:#fff;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;text-decoration:none;margin-bottom:10px;">Sign In / Join Free</a>
+      <button onclick="document.getElementById('efed-public-signin-prompt').remove()" style="background:none;border:none;color:rgba(255,255,255,.35);font-family:'DM Sans',sans-serif;font-size:.78rem;cursor:pointer;padding:4px;">Maybe later</button>
+    </div>`;
+  document.body.appendChild(el);
+  el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
+}
+
+function _lockEfedChatForGuests() {
+  const sec = document.getElementById('efed-chat-section');
+  if (sec) sec.style.display = '';
+  const nameLabel = document.getElementById('efed-chat-name-label');
+  if (nameLabel) nameLabel.textContent = EFED_NAME;
+  const box = document.getElementById('efed-chat-messages');
+  if (box) box.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:36px 20px;text-align:center;color:rgba(255,255,255,.4);min-height:120px;"><div style="font-size:1.8rem;">🔒</div><div style="font-family:\'DM Sans\',sans-serif;font-size:.8rem;">Only roster members can view this Locker Room chat</div></div>';
+  const inputRow = document.getElementById('efed-chat-input-row');
+  if (inputRow) inputRow.style.display = 'none';
+  const pickers = document.getElementById('efed-pickers-wrap');
+  if (pickers) pickers.style.display = 'none';
+}
+
+function _applyEfedPublicBlock() {
+  window._efedGuestMode = true;
+  window._efedPublicBlocked = true;
+
+  document.addEventListener('click', function(e) {
+    if (!window._efedPublicBlocked) return;
+
+    // Always allow interacting with the sign-in prompt itself
+    if (e.target.closest('#efed-public-signin-prompt')) return;
+
+    // Tab navigation (Info/Roster/Connect/Schedule/Videos) is always allowed
+    if (e.target.closest('.efed-tab')) return;
+
+    // Liking a post is allowed — the like() function itself nudges sign-in
+    // via a small toast, same as everywhere else in the app
+    const ocEl = e.target.closest('[onclick]');
+    const oc = ocEl ? (ocEl.getAttribute('onclick') || '') : '';
+    if (/_efedFeed\.like\(|_efedFeed\.likeReply\(/.test(oc)) return;
+
+    // Viewing an image lightbox in place is allowed (no navigation/edit)
+    if (/\blightbox\(|openLightbox\(/.test(oc)) return;
+    if (e.target.closest('#lightbox-bg, #efed-public-signin-prompt')) return;
+
+    // Entrance music play/toggle (audio only) is allowed
+    if (e.target.closest('#entrance-music-bar, #em-video-inline')) return;
+
+    // Block any internal <a href> — allow external social links through
+    const link = e.target.closest('a[href]');
+    if (link) {
+      const href = link.getAttribute('href') || '';
+      if (href.startsWith('http') || href.startsWith('//') || href.startsWith('mailto')) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Block video thumbnails (episodes + best matches rows)
+    if (e.target.closest('#episodes-row, #best-matches-row, .vid-card, .vid-thumb, .vid-item')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Block roster member cards (link to profile) and champion cards
+    if (e.target.closest('[data-username], #champions-grid')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Block the community feed's paging controls — guests see the latest
+    // post only, no browsing through history
+    if (e.target.closest('#efed-posts-jump, #efed-posts-prev, #efed-posts-next')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Block reply/post/delete/compose controls on the feed (defense in
+    // depth — these should already be hidden for guests)
+    if (e.target.closest('.efed-post-reply-compose, .efed-post-replies-toggle, .efed-post-delete-btn, #efed-feed-compose, #efed-post-modal, #efed-post-modal-bg')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Block the Locker Room chat entirely — shown, but locked
+    if (e.target.closest('#efed-chat-section')) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+
+    // Catch-all: any other onclick that navigates to another internal page
+    if (ocEl && /profile\.html|efed\.html|index\.html|management\.html|admin\.html|openVideo|playVideo|window\.location/.test(oc)) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      _showEfedSignInPrompt();
+      return;
+    }
+  }, true); // capture phase — fires before the element's own click handler
+}
+
 async function loadProfile() {
   const session = getSession();
   const params = new URLSearchParams(window.location.search);
   EFED_NAME = decodeURIComponent(params.get('e') || '');
 
-  // ── PUBLIC VIEW SETUP (no session) ──
+  // Public/guest view — apply nav + global link/video/profile click-block
+  // as early as possible so nothing is clickable before this runs.
   if (!session) {
-    _isPublicView = true;
-    // Inject Sign In button into nav
-    const notifBtn = document.getElementById('nav-notif-btn');
-    const userWrap = document.getElementById('nav-user-wrap');
-    const mailBtn  = document.getElementById('nav-mail-btn');
-    const plannerBtn = document.getElementById('planner-btn');
-    if (notifBtn)  notifBtn.style.display  = 'none';
-    if (userWrap)  userWrap.style.display  = 'none';
-    if (mailBtn)   mailBtn.style.display   = 'none';
-    if (plannerBtn) plannerBtn.style.display = 'none';
-    const navRight = document.querySelector('.nav-right');
-    if (navRight) {
-      const btn = document.createElement('a');
-      btn.href = 'index.html';
-      btn.style.cssText = 'display:flex;align-items:center;gap:6px;padding:7px 16px;background:#c0000e;border:none;border-radius:20px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.75rem;font-weight:700;letter-spacing:.5px;text-decoration:none;cursor:pointer;transition:opacity .15s;';
-      btn.textContent = 'Sign In';
-      btn.onmouseover = () => btn.style.opacity = '.85';
-      btn.onmouseout  = () => btn.style.opacity = '1';
-      navRight.appendChild(btn);
-    }
-    // Hide bottom nav and My eFed / My Profile nav tabs
-    const bnav = document.getElementById('bottom-nav');
-    if (bnav) bnav.style.display = 'none';
-    const navTabMyEfed = document.getElementById('nav-tab-myefed');
-    const navTabMyProfile = document.getElementById('nav-tab-myprofile');
-    if (navTabMyEfed) navTabMyEfed.style.display = 'none';
-    if (navTabMyProfile) navTabMyProfile.style.display = 'none';
-    // Hide owner-only banner and edit controls
-    const ownerBanner = document.getElementById('owner-banner');
-    if (ownerBanner) ownerBanner.style.display = 'none';
-    // Hide compose feed button
-    const feedCompose = document.getElementById('efed-feed-compose');
-    if (feedCompose) feedCompose.style.display = 'none';
-    // Replace chat section with a "locked" placeholder
-    const chatSec = document.getElementById('efed-chat-section');
-    if (chatSec) {
-      chatSec.innerHTML = '<div class="sec-title" style="margin-bottom:8px;">Locker Room</div>'
-        + '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:28px 16px;background:rgba(255,255,255,.025);border-radius:12px;border:1px solid rgba(255,255,255,.07);">'
-        + '<div style="font-size:1.5rem;">🔒</div>'
-        + '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:.95rem;letter-spacing:2px;color:rgba(255,255,255,.55);">Members Only</div>'
-        + '<div style="font-size:.72rem;color:rgba(255,255,255,.3);text-align:center;max-width:220px;line-height:1.5;">Sign in to access the locker room chat.</div>'
-        + '<a href="index.html" style="margin-top:4px;padding:8px 20px;background:#c0000e;border-radius:20px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.74rem;font-weight:700;text-decoration:none;">Sign In</a>'
-        + '</div>';
-      chatSec.style.display = 'block';
-    }
-    // Hide feed scroll navigation for public
-    const postsNavRow = document.getElementById('efed-posts-nav-row');
-    if (postsNavRow) postsNavRow.style.display = 'none';
-    // Inject CSS: lock overlay on vid-cards for public hint
-    const pubStyle = document.createElement('style');
-    pubStyle.textContent = '.vid-card::after{content:"🔒 Sign In";position:absolute;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-family:"DM Sans",sans-serif;font-size:.65rem;font-weight:700;letter-spacing:1px;color:rgba(255,255,255,.7);border-radius:8px;pointer-events:none;}.vid-card{position:relative!important;}'
-      + '#efed-posts-track-wrap{overflow:hidden!important;}.efed-posts-track{transform:none!important;transition:none!important;}';
-    document.head.appendChild(pubStyle);
-    // Apply click intercept for videos and internal navigation
-    _applyPublicEfedBlock();
+    _applyEfedPublicNav();
+    _applyEfedPublicBlock();
   }
 
   // If no ?e= param, fetch promo_name from DB (owner visiting their own page)
@@ -8091,8 +8783,8 @@ async function loadProfile() {
             document.getElementById('ob-avatar-initial').textContent = (user.display_name || session.username || '?')[0].toUpperCase();
           }
         }
-        const sec = document.getElementById('signings-section');
-        if (sec) sec.style.display = 'block';
+        const lsEditBtn = document.getElementById('ls-edit-btn');
+        if (lsEditBtn) lsEditBtn.style.display = '';
         const evBtn = document.getElementById('event-edit-btn');
         if (evBtn) evBtn.style.display = 'block';
         // Enable Book tab for owner
@@ -8274,24 +8966,11 @@ async function loadProfile() {
       }
     }
 
-    // Signings toggle state
-    _signingsOn = !!user.efed_open_signings;
-    updateSigningsUI(_signingsOn);
     // Watchlist button + support/roster banners
     initWatchlistBtn();
-    const applyBtn = document.getElementById('signings-apply-btn');
-    if (applyBtn && _signingsOn && user.efed_signings_link) {
-      applyBtn.href = user.efed_signings_link;
-      applyBtn.style.display = 'block';
-    }
 
-    // Signings section visible to all
-    const sec = document.getElementById('signings-section');
-    if (sec) sec.style.display = 'block';
-    if (!_isOwnProfile) {
-      const toggle = document.getElementById('signings-toggle');
-      if (toggle) toggle.style.pointerEvents = 'none';
-    }
+    // League Status — replaces the old Signings section
+    _loadLeagueStatus(user);
 
     // Gallery — show for everyone, edit only for owner
     loadCawImages(user);
@@ -8313,7 +8992,11 @@ async function loadProfile() {
   loadEfedStats();
   loadEpisodes();
   // loadRoster() — deferred to tab click to save Supabase reads
-  initEfedChatView(); // always load chat messages — input row shown separately for members/admin
+  if (session) {
+    initEfedChatView(); // always load chat messages — input row shown separately for members/admin
+  } else {
+    _lockEfedChatForGuests(); // guests see the chat exists, but locked — no messages, no input
+  }
   _efedFeed.load();  // always load community feed — visible to all, reply-enabled for logged-in users
   // Only load efed social feed for non-owners here; owners loaded it above when EFED_OWNER was set
   if (!_isOwnProfile) loadEfedSocialFeed(false);
@@ -8690,47 +9373,6 @@ async function _leaveOrphanedRoster() {
     showToast('Could not leave roster. Try again.');
   }
   if (btn) { btn.disabled = false; }
-}
-
-function updateSigningsUI(on) {
-  const section = document.getElementById('signings-section');
-  const toggle = document.getElementById('signings-toggle');
-  const knob = document.getElementById('signings-knob');
-  const label = document.getElementById('signings-status-label');
-  const applyBtn = document.getElementById('signings-apply-btn');
-  if (!toggle) return;
-
-  if (!_isOwnProfile) {
-    // Visitor — only show section when open
-    if (section) section.style.display = on ? 'block' : 'none';
-    toggle.style.display = 'none';
-    if (label && on) {
-      label.style.display = '';
-      label.textContent = (window.EFED_NAME || 'This eFed') + ' is currently accepting signings.';
-    } else if (label) {
-      label.style.display = 'none';
-    }
-    return;
-  }
-
-  // Owner
-  if (section) section.style.display = 'block';
-  if (label) label.style.display = '';
-  // Show edit btn for owner
-  const editBtn = document.getElementById('signings-edit-btn');
-  if (editBtn) editBtn.style.display = 'block';
-  if (on) {
-    toggle.style.background = 'rgba(76,175,100,.5)'; toggle.style.borderColor = 'rgba(76,175,100,.6)';
-    knob.style.transform = 'translateX(20px)'; knob.style.opacity = '1';
-    if (label) label.textContent = (window.EFED_NAME || 'This eFed') + ' is currently accepting signings.';
-    // Show Apply Now only if link is set
-    if (applyBtn && applyBtn.href && applyBtn.href !== window.location.href) applyBtn.style.display = '';
-  } else {
-    toggle.style.background = 'rgba(255,255,255,.12)'; toggle.style.borderColor = 'rgba(255,255,255,.1)';
-    knob.style.transform = 'translateX(0)'; knob.style.opacity = '.4';
-    if (label) label.textContent = 'Toggle on to let CAW wrestlers know you are accepting signings.';
-    if (applyBtn) applyBtn.style.display = 'none';
-  }
 }
 
 // ── ROSTER ACTION MENU ──
@@ -11036,59 +11678,6 @@ function bkTabAddGhost()        { return bkAddGhost(); }
 function bkTabRenderStickyPreview() { bkSyncPreview(); }
 function _showBookingConfirm(l, s) { _bkShowConfirm(l, s); }
 
-function openApplyLinkModal() {
-  const applyBtn = document.getElementById('signings-apply-btn');
-  const input = document.getElementById('apply-link-input');
-  const msg = document.getElementById('apply-link-msg');
-  if (input) input.value = (applyBtn && applyBtn.href !== window.location.href) ? applyBtn.href : '';
-  if (msg) msg.textContent = '';
-  document.getElementById('apply-link-modal-bg').style.display = 'flex';
-  setTimeout(() => input?.focus(), 80);
-}
-function closeApplyLinkModal() {
-  document.getElementById('apply-link-modal-bg').style.display = 'none';
-}
-async function saveApplyLink(remove) {
-  const session = getSession(); if (!session) return;
-  const msg = document.getElementById('apply-link-msg');
-  const link = remove ? null : (document.getElementById('apply-link-input')?.value.trim() || null);
-  if (!remove && link && !/^https?:\/\/.+/.test(link)) {
-    if (msg) { msg.textContent = 'Please enter a valid URL starting with https://'; msg.style.color = '#ff6b6b'; }
-    return;
-  }
-  try {
-    await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
-      method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({efed_signings_link: link})
-    });
-    const applyBtn = document.getElementById('signings-apply-btn');
-    if (applyBtn) {
-      if (link) {
-        applyBtn.href = link;
-        if (_signingsOn) applyBtn.style.display = '';
-      } else {
-        applyBtn.href = '';
-        applyBtn.style.display = 'none';
-      }
-    }
-    closeApplyLinkModal();
-    showToast(remove ? 'Link removed' : 'Application link saved!');
-  } catch(e) {
-    if (msg) { msg.textContent = 'Could not save. Try again.'; msg.style.color = '#ff6b6b'; }
-  }
-}
-
-async function toggleSignings() {
-  if (!_isOwnProfile) return;
-  const session = getSession(); if (!session) return;
-  _signingsOn = !_signingsOn;
-  updateSigningsUI(_signingsOn);
-  try {
-    await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username), {
-      method:'PATCH', headers:SB_HEADERS, body:JSON.stringify({efed_open_signings:_signingsOn})
-    });
-  } catch(e) { _signingsOn=!_signingsOn; updateSigningsUI(_signingsOn); }
-}
-
 async function loadEfedStats() {
   if (_isUnclaimed) {
     document.getElementById('stat-roster').textContent = '0';
@@ -12440,19 +13029,6 @@ function triggerInstall() {
 </div>
 
 
-<!-- ── OPEN FOR SIGNINGS (bottom) ── -->
-<div id="signings-section" style="display:none;" class="section">
-  <div class="sec-title">Signings</div>
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-    <div style="font-size:.78rem;color:rgba(255,255,255,.65);" id="signings-status-label">Toggle on to let CAW wrestlers know you are accepting signings.</div>
-    <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-      <a id="signings-apply-btn" href="" target="_blank" style="display:none;padding:6px 14px;background:rgba(200,168,75,.15);border:1px solid rgba(200,168,75,.35);border-radius:20px;color:var(--gold);text-decoration:none;font-size:.65rem;font-weight:700;letter-spacing:1px;white-space:nowrap;">Apply Now</a>
-      <div id="signings-toggle" onclick="toggleSignings()" style="width:44px;height:24px;border-radius:40px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.1);cursor:pointer;position:relative;transition:background .2s,border-color .2s;flex-shrink:0;">
-        <div id="signings-knob" style="position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .2s;opacity:.4;"></div>
-      </div>
-    </div>
-  </div>
-</div>
 
 </div><!-- /efed-info-tail -->
 
@@ -13233,22 +13809,6 @@ function closeEmblemConfirm() {
   </div>
 </div>
 
-<!-- ── APPLY LINK MODAL ── -->
-<div id="apply-link-modal-bg" onclick="if(event.target===this)closeApplyLinkModal()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
-  <div style="background:#111114;border:1px solid rgba(255,255,255,.1);border-radius:16px;width:90%;max-width:360px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.7);">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
-      <div style="font-family:"Bebas Neue",sans-serif;font-size:1.1rem;letter-spacing:3px;color:#fff;">Application Link</div>
-      <button onclick="closeApplyLinkModal()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:1rem;cursor:pointer;padding:4px;">✕</button>
-    </div>
-    <div style="font-size:.72rem;color:#8a8a9a;margin-bottom:14px;line-height:1.5;">Paste a link to your application form (Google Form, Linktree, etc). Shown beside the toggle when signings are open.</div>
-    <input id="apply-link-input" type="url" placeholder="https://forms.gle/..." maxlength="300" style="width:100%;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:10px 12px;color:#e8e8e8;font-family:"DM Sans",sans-serif;font-size:.82rem;outline:none;box-sizing:border-box;margin-bottom:6px;">
-    <div id="apply-link-msg" style="font-size:.68rem;min-height:14px;margin-bottom:14px;"></div>
-    <div style="display:flex;gap:8px;">
-      <button onclick="saveApplyLink()" style="flex:1;padding:11px;background:#c0000e;border:none;border-radius:8px;color:#fff;font-family:"DM Sans",sans-serif;font-size:.78rem;font-weight:700;letter-spacing:1px;cursor:pointer;">Save</button>
-      <button onclick="saveApplyLink(true)" style="padding:11px 16px;background:rgba(255,80,80,.08);border:1px solid rgba(255,80,80,.2);border-radius:8px;color:#ff6b6b;font-family:"DM Sans",sans-serif;font-size:.78rem;cursor:pointer;">Remove</button>
-    </div>
-  </div>
-</div>
 
 <!-- ── ROSTER POPUP MODAL ── -->
 <div id="roster-modal-bg" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.85);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closeRosterModal()">
@@ -15684,7 +16244,7 @@ function updateChampArrows() {
           ✓ Lets you edit your logo, banner &amp; bio<br>
           ✓ Lets you submit &amp; manage episodes<br>
           ✓ Your episodes &amp; roster stats become active<br>
-          ✓ You can open signings for roster members
+          ✓ You can set your League Status &amp; open hiring for roster members
         </div>
       </div>
 
@@ -17879,8 +18439,8 @@ const _efedFeed = (() => {
     requestAnimationFrame(() => requestAnimationFrame(() => _syncWrapHeight(_idx, false)));
   }
 
-  function prev() { if (_idx > 0) { _idx--; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); return true; } return false; }
-  function next() { if (_idx < _items.length - 1) { _idx++; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); return true; } return false; }
+  function prev() { if (window._efedGuestMode) { if (typeof _showEfedSignInPrompt === 'function') _showEfedSignInPrompt(); return false; } if (_idx > 0) { _idx--; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); return true; } return false; }
+  function next() { if (window._efedGuestMode) { if (typeof _showEfedSignInPrompt === 'function') _showEfedSignInPrompt(); return false; } if (_idx < _items.length - 1) { _idx++; _slide(_idx); _setNav(_idx, _items.length); _setDots(_idx, _items.length); return true; } return false; }
   function goTo(i) { _idx = i; _slide(i); _setNav(i, _items.length); _setDots(i, _items.length); }
   function jumpCurrent() { goTo(0); }
 
@@ -18026,24 +18586,7 @@ const _efedFeed = (() => {
 
   // ── LIKES ──
   async function like(id, btn) {
-    const session = getSession();
-    // Public users: track likes in localStorage to allow one like per post
-    if (!session) {
-      const _pubLikes = (() => { try { return JSON.parse(localStorage.getItem('efed_pub_likes') || '{}'); } catch(e) { return {}; } })();
-      const liked = !!_pubLikes[id];
-      if (liked) { if(typeof showToast==='function') showToast('Sign in to unlike or manage your likes.'); return; }
-      const item = _items.find(p => p.id === id); if (!item) return;
-      item.likes = Math.max(0, (item.likes||0) + 1);
-      btn.dataset.liked = '1';
-      btn.className = 'efed-post-action-btn liked';
-      btn.querySelector('span').textContent = item.likes;
-      btn.querySelector('svg').setAttribute('fill', '#c0000e');
-      btn.querySelector('svg').setAttribute('stroke', '#c0000e');
-      _pubLikes[id] = 1;
-      try { localStorage.setItem('efed_pub_likes', JSON.stringify(_pubLikes)); } catch(e) {}
-      try { await fetch(SUPABASE_URL+'/rest/v1/posts?id=eq.'+encodeURIComponent(id), {method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({likes:item.likes})}); } catch(e) {}
-      return;
-    }
+    const session = getSession(); if (!session) { if(typeof showToast==='function') showToast('Sign in to like.'); return; }
     const liked = btn.dataset.liked === '1';
     const item = _items.find(p => p.id === id); if (!item) return;
     item._liked = !liked; item.likes = Math.max(0, (item.likes||0) + (liked ? -1 : 1));
@@ -18170,20 +18713,7 @@ const _efedFeed = (() => {
   }
 
   async function likeReply(replyId, postId, btn) {
-    const session = getSession();
-    if (!session) {
-      const _pubLikes = (() => { try { return JSON.parse(localStorage.getItem('efed_pub_likes') || '{}'); } catch(e) { return {}; } })();
-      if (_pubLikes[replyId]) { if(typeof showToast==='function') showToast('Sign in to manage your likes.'); return; }
-      const replies = _replyCache[postId] || []; const item = replies.find(r => r.id === replyId);
-      if (item) { item.likes = Math.max(0,(item.likes||0)+1); }
-      btn.dataset.liked = '1'; btn.className = 'efed-post-action-btn liked';
-      if (item) btn.querySelector('span').textContent = item.likes;
-      btn.querySelector('svg').setAttribute('fill','#c0000e'); btn.querySelector('svg').setAttribute('stroke','#c0000e');
-      _pubLikes[replyId] = 1;
-      try { localStorage.setItem('efed_pub_likes', JSON.stringify(_pubLikes)); } catch(e) {}
-      try { await fetch(SUPABASE_URL+'/rest/v1/posts?id=eq.'+encodeURIComponent(replyId),{method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({likes:item?item.likes:0})}); } catch(e) {}
-      return;
-    }
+    const session = getSession(); if (!session) { if(typeof showToast==='function') showToast('Sign in to like.'); return; }
     const liked = btn.dataset.liked === '1';
     const replies = _replyCache[postId] || []; const item = replies.find(r => r.id === replyId);
     if (item) { item._liked = !liked; item.likes = Math.max(0,(item.likes||0)+(liked?-1:1)); }
