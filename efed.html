@@ -4160,6 +4160,9 @@ window._efedRules = (function(){
     </div>
   </div>
 </div>
+<!-- Staff hub search portal (fixed, outside modal) -->
+<div id="efed-staff-portal-drop"></div>
+
 <style>
 #efed-staff-modal-bg{display:none;}
 #efed-staff-modal-bg.open{display:flex!important;}
@@ -4172,7 +4175,7 @@ window._efedRules = (function(){
 .efed-staff-type-sel:focus{border-color:rgba(200,168,75,.4);color:#c8a84b;}
 .efed-staff-row-del{flex-shrink:0;background:transparent;border:none;color:rgba(255,255,255,.18);font-size:.8rem;cursor:pointer;padding:3px 5px;border-radius:5px;line-height:1;transition:color .12s,background .12s;}
 .efed-staff-row-del:hover{color:#ff6b6b;background:rgba(255,80,80,.08);}
-.efed-staff-hub-drop{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:10002;max-height:200px;overflow-y:auto;border-radius:8px;background:#1a1a22;border:1px solid rgba(200,168,75,.4);box-shadow:0 8px 32px rgba(0,0,0,.7);}
+#efed-staff-portal-drop{display:none;position:fixed;z-index:99999;max-height:200px;overflow-y:auto;border-radius:8px;background:#1a1a22;border:1px solid rgba(200,168,75,.4);box-shadow:0 8px 32px rgba(0,0,0,.7);}
 /* Public view */
 .efed-staff-group-label{font-size:.6rem;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.28);font-weight:700;margin:10px 0 6px;}
 .efed-staff-group-label:first-child{margin-top:0;}
@@ -4244,6 +4247,20 @@ window._efedStaff=(function(){
     _appendGroup(production,'Production Staff');
   }
 
+  var _activeNameInp=null; // currently focused name input
+
+  function _getPortal(){return document.getElementById('efed-staff-portal-drop');}
+
+  function _hidePortal(){var p=_getPortal();if(p){p.style.display='none';p.innerHTML='';}_activeNameInp=null;}
+
+  function _positionPortal(inputEl){
+    var p=_getPortal();if(!p||!inputEl)return;
+    var r=inputEl.getBoundingClientRect();
+    p.style.left=r.left+'px';
+    p.style.top=(r.bottom+4)+'px';
+    p.style.width=Math.max(r.width,220)+'px';
+  }
+
   function _renderRows(){
     var wrap=document.getElementById('efed-staff-rows');
     if(!wrap)return;
@@ -4263,18 +4280,17 @@ window._efedStaff=(function(){
     nameInp.type='text'; nameInp.className='efed-staff-inp';
     nameInp.placeholder='Name'; nameInp.maxLength=80; nameInp.autocomplete='off';
     nameInp.value=m.name||'';
-    var drop=document.createElement('div');
-    drop.className='efed-staff-hub-drop';
     nameInp.addEventListener('input',function(){
       _draft[i].name=nameInp.value;
       _draft[i].avatar_url='';
-      _doSearch(nameInp.value,drop,i);
+      _activeNameInp=nameInp;
+      _doSearch(nameInp.value,i,nameInp);
     });
+    nameInp.addEventListener('focus',function(){_activeNameInp=nameInp;});
     nameInp.addEventListener('blur',function(){
-      setTimeout(function(){drop.style.display='none';drop.innerHTML='';},200);
+      setTimeout(function(){if(_activeNameInp===nameInp)_hidePortal();},200);
     });
     nameWrap.appendChild(nameInp);
-    nameWrap.appendChild(drop);
 
     var d1=document.createElement('div'); d1.className='efed-staff-divider';
 
@@ -4298,7 +4314,7 @@ window._efedStaff=(function(){
     // delete
     var del=document.createElement('button');
     del.className='efed-staff-row-del'; del.title='Remove'; del.innerHTML='✕';
-    del.onclick=function(){_draft.splice(i,1);_renderRows();};
+    del.onclick=function(){_draft.splice(i,1);_hidePortal();_renderRows();};
 
     row.appendChild(nameWrap);
     row.appendChild(d1);
@@ -4309,17 +4325,22 @@ window._efedStaff=(function(){
     return row;
   }
 
-  function _doSearch(query,drop,idx){
+  function _doSearch(query,idx,nameInp){
     clearTimeout(_searchTimers[idx]);
     query=(query||'').trim();
-    if(query.length<1){drop.style.display='none';drop.innerHTML='';return;}
-    drop.innerHTML='<div style="padding:8px 12px;font-size:.72rem;color:rgba(255,255,255,.3);">Searching…</div>';
-    drop.style.display='block';
+    var portal=_getPortal();
+    if(!portal)return;
+    if(query.length<1){_hidePortal();return;}
+    _positionPortal(nameInp);
+    portal.innerHTML='<div style="padding:8px 12px;font-size:.72rem;color:rgba(255,255,255,.3);">Searching…</div>';
+    portal.style.display='block';
     _searchTimers[idx]=setTimeout(async function(){
+      if(_activeNameInp!==nameInp){return;} // input changed
       try{
         var rows=await sbGet('users','or=(username.ilike.*'+encodeURIComponent(query)+'*,display_name.ilike.*'+encodeURIComponent(query)+'*)&select=username,display_name,avatar_url&limit=8');
-        if(!rows||!rows.length){drop.innerHTML='<div style="padding:8px 12px;font-size:.72rem;color:rgba(255,255,255,.3);">No hub members found.</div>';return;}
-        drop.innerHTML='';
+        if(_activeNameInp!==nameInp)return;
+        if(!rows||!rows.length){portal.innerHTML='<div style="padding:8px 12px;font-size:.72rem;color:rgba(255,255,255,.3);">No hub members found.</div>';return;}
+        portal.innerHTML='';
         rows.forEach(function(r){
           var dn=(r.display_name||r.username||'').replace(/</g,'&lt;');
           var av=r.avatar_url
@@ -4332,16 +4353,14 @@ window._efedStaff=(function(){
           item.addEventListener('mouseout',function(){item.style.background='';});
           item.addEventListener('mousedown',function(e){
             e.preventDefault();
-            // find the name input in this row via idx
-            var wrap=document.getElementById('efed-staff-rows');
-            if(wrap){var rows2=wrap.querySelectorAll('.efed-staff-row');if(rows2[idx]){var inp=rows2[idx].querySelector('.efed-staff-inp');if(inp){inp.value=r.display_name||r.username;}}}
+            nameInp.value=r.display_name||r.username;
             _draft[idx].name=r.display_name||r.username;
             _draft[idx].avatar_url=r.avatar_url||'';
-            drop.style.display='none';drop.innerHTML='';
+            _hidePortal();
           });
-          drop.appendChild(item);
+          portal.appendChild(item);
         });
-      }catch(e){drop.innerHTML='<div style="padding:8px 12px;font-size:.72rem;color:rgba(255,255,255,.3);">Search failed.</div>';}
+      }catch(e){if(portal)portal.innerHTML='<div style="padding:8px 12px;font-size:.72rem;color:rgba(255,255,255,.3);">Search failed.</div>';}
     },280);
   }
 
@@ -4354,6 +4373,7 @@ window._efedStaff=(function(){
   }
 
   function cancel(){
+    _hidePortal();
     var bg=document.getElementById('efed-staff-modal-bg');
     if(bg){bg.classList.remove('open');bg.style.display='none';}
     _draft=[];
@@ -4404,7 +4424,12 @@ window._efedStaff=(function(){
   document.addEventListener('click',function(e){
     var bg=document.getElementById('efed-staff-modal-bg');
     if(bg&&bg.classList.contains('open')&&e.target===bg)cancel();
+    var portal=_getPortal();
+    if(portal&&portal.style.display==='block'&&!portal.contains(e.target)&&e.target!==_activeNameInp)_hidePortal();
   });
+
+  // reposition portal on modal scroll
+  document.addEventListener('scroll',function(){if(_activeNameInp)_positionPortal(_activeNameInp);},true);
 
   window._efedStaffSetOwner=setOwner;
   window._efedStaffSetData=setData;
