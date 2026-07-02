@@ -9498,6 +9498,10 @@ const _soSearch = (() => {
       // My eFed button — show for owners AND roster members
       loadMyEfedBtn();
 
+      // Re-persist to the account switcher now that displayName/avatar/promo
+      // are fully synced from the DB, so switcher entries don't go stale.
+      saveAccountToSwitcher(session);
+
       // ── DAILY LOGIN +3 PTS (once per calendar day) ──
       try {
         const _today = new Date().toDateString();
@@ -9622,7 +9626,7 @@ function getSavedAccounts() {
 function saveAccountToSwitcher(session) {
   if (!session || !session.username) return;
   const accounts = getSavedAccounts();
-  const idx = accounts.findIndex(function(a){ return a.username === session.username; });
+  const idx = accounts.findIndex(function(a){ return (a.username || '').toLowerCase() === session.username.toLowerCase(); });
   const entry = { username: session.username, displayName: session.displayName || session.username, avatarUrl: session.avatarUrl || null, logged_in_at: session.logged_in_at || Date.now() };
   if (idx >= 0) accounts[idx] = entry;
   else accounts.push(entry);
@@ -9639,7 +9643,7 @@ var ADMIN_ACCOUNTS_IDX = ['derrick_maximus', 'shibata_reyes', 'kyle_vance'];
 
 function switchToAccount(username) {
   const accounts = getSavedAccounts();
-  const account = accounts.find(function(a){ return a.username === username; });
+  const account = accounts.find(function(a){ return (a.username || '').toLowerCase() === username.toLowerCase(); });
   if (!account) return;
 
   // Always stamp a fresh logged_in_at so force_logout_at checks pass
@@ -9754,10 +9758,12 @@ function renderAccountSwitcher() {
   var container = document.getElementById('account-switcher-section');
   if (!container) return;
   var session = (typeof getSession === 'function') ? getSession() : null;
-  var accounts = getSavedAccounts().filter(function(a){ return a.username !== (session && session.username); });
-  if (!accounts.length) { container.innerHTML = ''; container.style.display = 'none'; return; }
+  var curUser = (session && session.username || '').toLowerCase();
+  var accounts = getSavedAccounts().filter(function(a){ return (a.username || '').toLowerCase() !== curUser; });
+  // Always show the section (so "Add Account" is discoverable) even when there
+  // are no other saved accounts yet — previously this hid the whole section.
   container.style.display = 'block';
-  var html = '<div class="acct-switch-label">Switch Account</div>';
+  var html = accounts.length ? '<div class="acct-switch-label">Switch Account</div>' : '';
   accounts.forEach(function(a) {
     var initial = (a.displayName || a.username).charAt(0).toUpperCase();
     var uSafe = a.username.replace(/&/g,'&amp;').replace(/'/g,'&#39;');
@@ -9789,8 +9795,9 @@ function renderMobileAccountSwitcher() {
   const modal = document.getElementById('settings-modal');
   if (!col || !modal) return;
   const session = (typeof getSession === 'function') ? getSession() : null;
+  const curUser = (session && session.username || '').toLowerCase();
   const accounts = getSavedAccounts().filter(function(a) {
-    return a.username !== (session && session.username);
+    return (a.username || '').toLowerCase() !== curUser;
   });
   if (!accounts.length) {
     col.style.display = 'none';
