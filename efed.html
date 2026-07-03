@@ -4471,6 +4471,12 @@ window._pr=(function(){
     var months=['January','February','March','April','May','June','July','August','September','October','November','December'];
     return months[d.getMonth()]+' '+d.getFullYear();
   }
+  function _monthLabelFromMs(ms){
+    var d=new Date(ms);
+    var months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return months[d.getMonth()]+' '+d.getFullYear();
+  }
+  var _monthAutoFilled=''; // last month label we auto-filled from a show's date, so we know not to stomp on a manual edit
   // ── Tie-break priority: championship status > win match > debut > return > random ──
   function _hasAny(entry,keys){
     var p=entry.pills||{};
@@ -4862,7 +4868,7 @@ window._pr=(function(){
     sel.innerHTML='<option value="">Loading shows…</option>';
     try{
       var name=typeof EFED_NAME!=='undefined'?EFED_NAME:'';
-      var rows=await sbGet('submissions','efed=eq.'+encodeURIComponent(name)+'&status=eq.approved&order=date_ms.desc&select=id,url,show_name,date');
+      var rows=await sbGet('submissions','efed=eq.'+encodeURIComponent(name)+'&status=eq.approved&order=date_ms.desc&select=id,url,show_name,date,date_ms');
       sel.innerHTML='';
       var placeholder=document.createElement('option');
       placeholder.value='';placeholder.textContent='— Select a show —';
@@ -4872,6 +4878,7 @@ window._pr=(function(){
         opt.value=String(r.id);
         opt.dataset.url=r.url||'';
         opt.dataset.name=r.show_name||'';
+        opt.dataset.dateMs=r.date_ms||'';
         opt.textContent=(r.show_name||'Untitled')+(r.date?' · '+r.date:'');
         if(_draftShow&&String(_draftShow.id)===String(r.id))opt.selected=true;
         sel.appendChild(opt);
@@ -4888,7 +4895,16 @@ window._pr=(function(){
   function _onShowChange(sel){
     var opt=sel.options[sel.selectedIndex];
     if(!opt||!opt.value){_draftShow=null;return;}
-    _draftShow={id:opt.value,url:opt.dataset.url||'',name:opt.dataset.name||''};
+    var dateMs=opt.dataset.dateMs?Number(opt.dataset.dateMs):null;
+    _draftShow={id:opt.value,url:opt.dataset.url||'',name:opt.dataset.name||'',date_ms:dateMs};
+    var monthInp=document.getElementById('pr-month-input');
+    // Only auto-fill the month if it's empty or still matches the last auto-filled value —
+    // if the person has typed their own custom label, leave it alone.
+    if(monthInp&&dateMs&&(!monthInp.value.trim()||monthInp.value===_monthAutoFilled)){
+      var lbl=_monthLabelFromMs(dateMs);
+      monthInp.value=lbl;
+      _monthAutoFilled=lbl;
+    }
   }
 
   // ── Global show-type switch: one control for the whole ranking ──────
@@ -4929,6 +4945,7 @@ window._pr=(function(){
     _draftMonth=_month||_currentMonthLabel();
     _draftShow=_show?Object.assign({},_show):null;
     _draftShowType=_showType||DEFAULT_SHOW_TYPE;
+    _monthAutoFilled='';
     var monthInp=document.getElementById('pr-month-input');
     if(monthInp)monthInp.value=_draftMonth;
     _renderGlobalSeg();
