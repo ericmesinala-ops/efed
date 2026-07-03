@@ -4441,6 +4441,7 @@ window._pr=(function(){
   var _draftShow=null;
   var _draftShowType=DEFAULT_SHOW_TYPE; // editing-state global show type
   var _lastSaved='';
+  var _serverConfirmed=false; // true once load() has successfully reached the server (avoids clobbering it with a stale/empty local draft)
   var _searchTimers={};
   var _activeNameInp=null;
   var _activeDraftIdx=null;
@@ -4967,11 +4968,19 @@ window._pr=(function(){
     if(!session)return;
     var payload=JSON.stringify({month:_month,show:_show,showType:_showType,entries:_data});
     if(payload===_lastSaved)return;
+    if(!_serverConfirmed){
+      // We never successfully confirmed the latest server copy (e.g. the initial
+      // load failed on this device/connection) — saving now could silently wipe
+      // out rankings created elsewhere (like on desktop). Ask before overwriting.
+      var proceed=confirm('We couldn\'t confirm we have the latest saved Power Rankings on this device. Saving now may overwrite rankings made elsewhere. Save anyway?');
+      if(!proceed)return;
+    }
     try{
       await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{
         method:'PATCH',headers:SB_HEADERS,body:JSON.stringify({efed_power_rankings_json:payload})
       });
       _lastSaved=payload;
+      _serverConfirmed=true;
     }catch(e){/* column may not exist yet — falls back to localStorage below */}
     try{localStorage.setItem('efed_pr_'+(typeof EFED_NAME!=='undefined'?EFED_NAME:''),payload);}catch(e){}
   }
@@ -4998,11 +5007,19 @@ window._pr=(function(){
 
   async function load(){
     var name=typeof EFED_NAME!=='undefined'?EFED_NAME:'';
-    try{
-      var rows=await sbGet('users','promo_name=ilike.'+encodeURIComponent(name)+'&select=efed_power_rankings_json&limit=1');
-      var val=rows&&rows[0]&&rows[0].efed_power_rankings_json;
-      if(val){setData(val);return;}
-    }catch(e){/* column doesn't exist yet — try local fallback */}
+    for(var attempt=0;attempt<2;attempt++){
+      try{
+        var rows=await sbGet('users','promo_name=ilike.'+encodeURIComponent(name)+'&select=efed_power_rankings_json&limit=1');
+        _serverConfirmed=true; // request reached the server — trust this as the source of truth, even if empty
+        var val=rows&&rows[0]&&rows[0].efed_power_rankings_json;
+        if(val){setData(val);}
+        return;
+      }catch(e){
+        if(attempt===0){await new Promise(function(r){setTimeout(r,600);});continue;} // brief retry for flaky mobile connections
+        /* column doesn't exist yet, or request failed twice — try local fallback, but don't let it overwrite the server copy */
+      }
+    }
+    _serverConfirmed=false;
     try{
       var ls=localStorage.getItem('efed_pr_'+name);
       if(ls)setData(ls);
