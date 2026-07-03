@@ -4159,6 +4159,11 @@ window._efedRules = (function(){
       </select>
       <div class="pr-show-hint">All uploaded <span id="pr-show-hint-acronym">this eFed's</span> videos in the hub will be seen here.</div>
     </div>
+    <div style="padding:12px 20px 0;flex-shrink:0;">
+      <div style="font-size:.62rem;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.35);font-weight:700;margin-bottom:5px;">Show type</div>
+      <div id="pr-global-seg" class="pr-tag-seg"></div>
+      <div class="pr-show-hint">Applies to every wrestler's scoring below — event tags and point values update for the whole ranking.</div>
+    </div>
     <div id="pr-edit-rows" style="flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:8px;"></div>
     <div style="padding:0 14px 12px;">
       <button onclick="_pr.addRank()" id="pr-add-rank-btn" class="pr-add-rank-btn">+ Add rank <span id="pr-next-rank-num">1</span></button>
@@ -4232,12 +4237,13 @@ window._efedRules = (function(){
 .pr-pub-body{flex:1;min-width:0;}
 .pr-pub-name{font-size:.82rem;font-weight:700;color:rgba(255,255,255,.9);}
 .pr-pub-reason{font-size:.68rem;color:rgba(255,255,255,.4);margin-top:2px;line-height:1.4;}
-.pr-pub-move{display:flex;align-items:center;gap:3px;font-size:.65rem;font-weight:700;flex-shrink:0;padding-top:2px;}
+.pr-pub-move{display:flex;align-items:center;gap:4px;font-size:.8rem;font-weight:800;flex-shrink:0;padding-top:4px;}
+.pr-pub-move .pr-pub-arrow{font-size:1.15rem;line-height:1;}
 .pr-pub-move.up{color:#4fd67a;}
 .pr-pub-move.down{color:#e8534d;}
 .pr-pub-move.same{color:rgba(255,255,255,.25);}
 .pr-pub-move.new{color:#c8a84b;}
-.pr-pub-score{font-family:'Bebas Neue',sans-serif;font-size:1rem;color:#fff;letter-spacing:1px;flex-shrink:0;padding-top:1px;min-width:26px;text-align:right;}
+.pr-pub-score{font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:#fff;letter-spacing:1px;flex-shrink:0;min-width:40px;text-align:right;}
 #pr-portal-drop{display:none;position:fixed;z-index:99999;max-height:200px;overflow-y:auto;border-radius:8px;background:#1a1a22;border:1px solid rgba(200,168,75,.4);box-shadow:0 8px 32px rgba(0,0,0,.7);}
 html.day-mode .pr-month{color:rgba(140,100,0,.75);}
 html.day-mode .pr-card-body{background:rgba(0,0,0,.03);border-color:rgba(0,0,0,.08);}
@@ -4366,9 +4372,11 @@ window._pr=(function(){
   var _data=[];       // saved/live ranked entries, index 0 = rank 1
   var _month='';
   var _show=null;     // {id,url,name} — show these rankings are based on
+  var _showType=DEFAULT_SHOW_TYPE; // saved global show type — applies to every wrestler
   var _draft=[];
   var _draftMonth='';
   var _draftShow=null;
+  var _draftShowType=DEFAULT_SHOW_TYPE; // editing-state global show type
   var _lastSaved='';
   var _searchTimers={};
   var _activeNameInp=null;
@@ -4379,9 +4387,9 @@ window._pr=(function(){
   function _esc(s){return(s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function _initials(n){var p=(n||'?').trim().split(/\s+/);return p.length>=2?(p[0][0]+p[p.length-1][0]).toUpperCase():(p[0][0]||'?').toUpperCase();}
   function _ensureUid(e){if(!e._uid)e._uid='u'+(_uidSeq++);return e._uid;}
-  function _scoreOf(entry){
+  function _scoreOf(entry,showType){
     var pills=entry.pills||{};
-    var showType=entry.showType||DEFAULT_SHOW_TYPE;
+    showType=showType||DEFAULT_SHOW_TYPE;
     var total=0;
     Object.keys(pills).forEach(function(k){
       var c=pills[k]||0;if(c<=0)return;
@@ -4412,7 +4420,7 @@ window._pr=(function(){
   function _sortDraft(){
     _draft.forEach(function(e){if(e._rand===undefined)e._rand=Math.random();});
     _draft.sort(function(a,b){
-      var sa=_scoreOf(a),sb=_scoreOf(b);
+      var sa=_scoreOf(a,_draftShowType),sb=_scoreOf(b,_draftShowType);
       if(sb!==sa)return sb-sa;
       var ta=_tieVec(a),tb=_tieVec(b);
       for(var i=0;i<ta.length;i++){if(tb[i]!==ta[i])return tb[i]-ta[i];}
@@ -4455,8 +4463,8 @@ window._pr=(function(){
       var avInner=e.avatar_url?'<img src="'+_esc(e.avatar_url)+'">':_initials(e.name);
       var moveHtml='';
       if(e.delta==='NEW')moveHtml='<div class="pr-pub-move new">NEW</div>';
-      else if(typeof e.delta==='number'&&e.delta>0)moveHtml='<div class="pr-pub-move up">&#9650; '+e.delta+'</div>';
-      else if(typeof e.delta==='number'&&e.delta<0)moveHtml='<div class="pr-pub-move down">&#9660; '+Math.abs(e.delta)+'</div>';
+      else if(typeof e.delta==='number'&&e.delta>0)moveHtml='<div class="pr-pub-move up"><span class="pr-pub-arrow">&#9650;</span>'+e.delta+'</div>';
+      else if(typeof e.delta==='number'&&e.delta<0)moveHtml='<div class="pr-pub-move down"><span class="pr-pub-arrow">&#9660;</span>'+Math.abs(e.delta)+'</div>';
       else moveHtml='<div class="pr-pub-move same">&#8212;</div>';
       row.innerHTML=
         '<div class="pr-pub-rank">'+(idx+1)+'</div>'+
@@ -4465,7 +4473,7 @@ window._pr=(function(){
           (e.reason?'<div class="pr-pub-reason">'+_esc(e.reason)+'</div>':'')+
         '</div>'+
         moveHtml+
-        '<div class="pr-pub-score">'+_scoreOf(e)+'</div>';
+        '<div class="pr-pub-score">'+_scoreOf(e,_showType)+'</div>';
       list.appendChild(row);
     });
   }
@@ -4481,33 +4489,15 @@ window._pr=(function(){
     p.style.width=Math.max(r.width,220)+'px';
   }
 
-  // ── Builds the "Power Ranking Event Tags" panel for one card: segmented
-  // show-type control + category-grouped pills. onScoreChange fires after
-  // any tag/show-type change so the caller can refresh score + reflow order.
+  // ── Builds the "Power Ranking Event Tags" panel for one card: category-
+  // grouped pills scored against the global show type. onScoreChange fires
+  // after any tag change so the caller can refresh score + reflow order.
+  // refreshAll() is exposed so the global show-type switch can update every
+  // open card's point values/visibility in place.
   function _buildTagPanel(entry,onScoreChange){
     var wrap=document.createElement('div');
     wrap.className='pr-tag-panel';
     wrap.style.display=entry._pillsOpen?'block':'none';
-
-    var seg=document.createElement('div');
-    seg.className='pr-tag-seg';
-    var segBtns={};
-    SHOW_TYPES.forEach(function(st){
-      var b=document.createElement('button');
-      b.type='button';
-      b.className='pr-tag-seg-btn'+((entry.showType||DEFAULT_SHOW_TYPE)===st.key?' active':'');
-      b.textContent=st.label;
-      b.onclick=function(){
-        if((entry.showType||DEFAULT_SHOW_TYPE)===st.key)return;
-        entry.showType=st.key;
-        Object.keys(segBtns).forEach(function(k){segBtns[k].classList.toggle('active',k===st.key);});
-        _refreshAllTagPills();
-        onScoreChange();
-      };
-      segBtns[st.key]=b;
-      seg.appendChild(b);
-    });
-    wrap.appendChild(seg);
 
     var catsWrap=document.createElement('div');
     catsWrap.className='pr-tag-cats';
@@ -4524,8 +4514,7 @@ window._pr=(function(){
       pillset.className='pr-tag-pillset';
       Object.keys(cat.tags).forEach(function(tagKey){
         var count=(entry.pills&&entry.pills[tagKey])||0;
-        var showType=entry.showType||DEFAULT_SHOW_TYPE;
-        var pts=_tagPts(tagKey,showType);
+        var pts=_tagPts(tagKey,_draftShowType);
         var pill=document.createElement('span');
         pill.className='pr-tag-pill'+(count>0?' active':'')+(pts===null?' pr-tag-hidden':'');
         pill.appendChild(document.createTextNode(cat.tags[tagKey].label+' '));
@@ -4551,10 +4540,9 @@ window._pr=(function(){
     wrap.appendChild(catsWrap);
 
     function _refreshAllTagPills(){
-      var showType=entry.showType||DEFAULT_SHOW_TYPE;
       Object.keys(pillEls).forEach(function(tagKey){
         var rec=pillEls[tagKey];
-        var pts=_tagPts(tagKey,showType);
+        var pts=_tagPts(tagKey,_draftShowType);
         var newText=pts===null?'':((pts>=0?'+':'')+pts);
         if(rec.ptsEl.textContent!==newText){
           rec.ptsEl.textContent=newText;
@@ -4565,7 +4553,7 @@ window._pr=(function(){
       });
     }
 
-    return{el:wrap,segBtns:segBtns,pillEls:pillEls};
+    return{el:wrap,pillEls:pillEls,refreshAll:_refreshAllTagPills};
   }
 
   function _doSearch(query,entry,nameInp){
@@ -4615,8 +4603,8 @@ window._pr=(function(){
     if(!wrap)return;
     wrap.innerHTML='';
     _cardRegistry={};
-    if(!_draft.length)_draft.push({name:'',username:'',avatar_url:'',pills:{},reason:'',delta:0,showType:DEFAULT_SHOW_TYPE});
-    _draft.forEach(function(e){_ensureUid(e);if(!e.showType)e.showType=DEFAULT_SHOW_TYPE;});
+    if(!_draft.length)_draft.push({name:'',username:'',avatar_url:'',pills:{},reason:'',delta:0});
+    _draft.forEach(function(e){_ensureUid(e);});
     _sortDraft();
     _draft.forEach(function(entry,i){wrap.appendChild(_makeCard(entry,i));});
     var addBtn=document.getElementById('pr-add-rank-btn');
@@ -4663,7 +4651,7 @@ window._pr=(function(){
 
     var scoreEl=document.createElement('div');
     scoreEl.className='pr-score-live';
-    scoreEl.textContent=_scoreOf(entry);
+    scoreEl.textContent=_scoreOf(entry,_draftShowType);
     top.appendChild(scoreEl);
 
     var del=document.createElement('button');
@@ -4693,7 +4681,7 @@ window._pr=(function(){
 
     var pillsSummaryEl=document.createElement('span');
     pillsSummaryEl.className='pr-pills-summary'+(scoreCount0?'':' pr-pills-warn');
-    pillsSummaryEl.textContent=scoreCount0?(scoreCount0+' selected · '+_scoreOf(entry)+' pts'):'Required to rank — tap to add points';
+    pillsSummaryEl.textContent=scoreCount0?(scoreCount0+' selected · '+_scoreOf(entry,_draftShowType)+' pts'):'Required to rank — tap to add points';
 
     var pillsToggle=document.createElement('div');
     pillsToggle.className='pr-pills-toggle';
@@ -4702,7 +4690,7 @@ window._pr=(function(){
     pillsToggle.appendChild(pillsSummaryEl);
 
     function _refreshScoreDisplay(){
-      var total=_scoreOf(entry);
+      var total=_scoreOf(entry,_draftShowType);
       scoreEl.textContent=total;
       var cnt=Object.keys(entry.pills||{}).filter(function(k){return(entry.pills[k]||0)>0;}).length;
       if(cnt){
@@ -4735,12 +4723,12 @@ window._pr=(function(){
     card.appendChild(reasonInp);
 
     slot.appendChild(card);
-    _cardRegistry[entry._uid]={slot:slot,badge:badge,scoreEl:scoreEl,pillsSummaryEl:pillsSummaryEl};
+    _cardRegistry[entry._uid]={slot:slot,badge:badge,scoreEl:scoreEl,pillsSummaryEl:pillsSummaryEl,refreshTagPanel:tagPanel.refreshAll,refreshScore:_refreshScoreDisplay};
     return slot;
   }
 
   function addRank(){
-    _draft.push({name:'',username:'',avatar_url:'',pills:{},reason:'',delta:0,showType:DEFAULT_SHOW_TYPE});
+    _draft.push({name:'',username:'',avatar_url:'',pills:{},reason:'',delta:0});
     _renderRows();
     setTimeout(function(){
       var wrap=document.getElementById('pr-edit-rows');
@@ -4789,12 +4777,47 @@ window._pr=(function(){
     _draftShow={id:opt.value,url:opt.dataset.url||'',name:opt.dataset.name||''};
   }
 
+  // ── Global show-type switch: one control for the whole ranking ──────
+  function _renderGlobalSeg(){
+    var wrap=document.getElementById('pr-global-seg');
+    if(!wrap)return;
+    wrap.innerHTML='';
+    SHOW_TYPES.forEach(function(st){
+      var b=document.createElement('button');
+      b.type='button';
+      b.className='pr-tag-seg-btn'+(_draftShowType===st.key?' active':'');
+      b.textContent=st.label;
+      b.onclick=function(){_setGlobalShowType(st.key);};
+      wrap.appendChild(b);
+    });
+  }
+  function _setGlobalShowType(key){
+    if(_draftShowType===key)return;
+    _draftShowType=key;
+    var wrap=document.getElementById('pr-global-seg');
+    if(wrap){
+      var i=0;
+      SHOW_TYPES.forEach(function(st){
+        var btn=wrap.children[i++];
+        if(btn)btn.classList.toggle('active',st.key===key);
+      });
+    }
+    Object.keys(_cardRegistry).forEach(function(uid){
+      var c=_cardRegistry[uid];
+      if(c.refreshTagPanel)c.refreshTagPanel();
+      if(c.refreshScore)c.refreshScore();
+    });
+    _reflow();
+  }
+
   function openModal(){
-    _draft=_data.length?_data.map(function(e){return{name:e.name||'',username:e.username||'',avatar_url:e.avatar_url||'',pills:Object.assign({},e.pills||{}),reason:e.reason||'',delta:e.delta||0,showType:e.showType||DEFAULT_SHOW_TYPE,_pillsOpen:false};}):[];
+    _draft=_data.length?_data.map(function(e){return{name:e.name||'',username:e.username||'',avatar_url:e.avatar_url||'',pills:Object.assign({},e.pills||{}),reason:e.reason||'',delta:e.delta||0,_pillsOpen:false};}):[];
     _draftMonth=_month||_currentMonthLabel();
     _draftShow=_show?Object.assign({},_show):null;
+    _draftShowType=_showType||DEFAULT_SHOW_TYPE;
     var monthInp=document.getElementById('pr-month-input');
     if(monthInp)monthInp.value=_draftMonth;
+    _renderGlobalSeg();
     _renderRows();
     _loadShowSelect();
     var bg=document.getElementById('pr-modal-bg');
@@ -4825,12 +4848,13 @@ window._pr=(function(){
     _data=filtered;
     _month=monthVal;
     _show=_draftShow?Object.assign({},_draftShow):null;
+    _showType=_draftShowType||DEFAULT_SHOW_TYPE;
     cancel();
     _renderPublic();
     if(!_isOwner)return;
     var session=typeof getSession==='function'?getSession():null;
     if(!session)return;
-    var payload=JSON.stringify({month:_month,show:_show,entries:_data});
+    var payload=JSON.stringify({month:_month,show:_show,showType:_showType,entries:_data});
     if(payload===_lastSaved)return;
     try{
       await fetch(SUPABASE_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(session.username),{
@@ -4854,9 +4878,10 @@ window._pr=(function(){
       var p=typeof raw==='string'?JSON.parse(raw):raw;
       _month=(p&&p.month)||'';
       _show=(p&&p.show)||null;
+      _showType=(p&&p.showType)||DEFAULT_SHOW_TYPE;
       _data=(p&&Array.isArray(p.entries))?p.entries:[];
-    }catch(e){_month='';_show=null;_data=[];}
-    _lastSaved=JSON.stringify({month:_month,show:_show,entries:_data});
+    }catch(e){_month='';_show=null;_showType=DEFAULT_SHOW_TYPE;_data=[];}
+    _lastSaved=JSON.stringify({month:_month,show:_show,showType:_showType,entries:_data});
     _renderPublic();
   }
 
