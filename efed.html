@@ -4163,6 +4163,10 @@ window._efedRules = (function(){
     </button>
   </div>
   <div id="pr-month-label" class="pr-month"></div>
+  <div id="pr-load-error" style="display:none;align-items:center;gap:10px;padding:14px 0;">
+    <div style="flex:1;font-size:.76rem;color:rgba(255,255,255,.4);">Couldn't load Power Rankings — check your connection.</div>
+    <button onclick="_pr.load()" style="background:rgba(200,168,75,.12);border:1px solid rgba(200,168,75,.35);border-radius:8px;padding:6px 14px;color:#c8a84b;font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;flex-shrink:0;">Retry</button>
+  </div>
   <div id="pr-public-list"></div>
   <button id="pr-more-btn" class="pr-more-btn" style="display:none;" onclick="_pr._toggleMore()">
     <span id="pr-more-btn-label">More</span>
@@ -4291,6 +4295,7 @@ window._efedRules = (function(){
 .pr-more-btn.open #pr-more-btn-chev{transform:rotate(180deg);}
 #pr-portal-drop{display:none;position:fixed;z-index:99999;max-height:200px;overflow-y:auto;border-radius:8px;background:#1a1a22;border:1px solid rgba(200,168,75,.4);box-shadow:0 8px 32px rgba(0,0,0,.7);}
 html.day-mode .pr-month{color:rgba(140,100,0,.75);}
+html.day-mode #pr-load-error > div{color:rgba(0,0,0,.4);}
 html.day-mode .pr-card-body{background:rgba(0,0,0,.03);border-color:rgba(0,0,0,.08);}
 html.day-mode .pr-name-inp{color:#111;}
 html.day-mode .pr-name-inp::placeholder{color:rgba(0,0,0,.25);}
@@ -4981,8 +4986,9 @@ window._pr=(function(){
       });
       _lastSaved=payload;
       _serverConfirmed=true;
-    }catch(e){/* column may not exist yet — falls back to localStorage below */}
-    try{localStorage.setItem('efed_pr_'+(typeof EFED_NAME!=='undefined'?EFED_NAME:''),payload);}catch(e){}
+    }catch(e){
+      alert('Couldn\'t save Power Rankings — check your connection and try again.');
+    }
   }
 
   function setOwner(isOwner){
@@ -5013,17 +5019,26 @@ window._pr=(function(){
         _serverConfirmed=true; // request reached the server — trust this as the source of truth, even if empty
         var val=rows&&rows[0]&&rows[0].efed_power_rankings_json;
         if(val){setData(val);}
+        _showLoadError(false);
         return;
       }catch(e){
-        if(attempt===0){await new Promise(function(r){setTimeout(r,600);});continue;} // brief retry for flaky mobile connections
-        /* column doesn't exist yet, or request failed twice — try local fallback, but don't let it overwrite the server copy */
+        if(attempt===0){await new Promise(function(r){setTimeout(r,600);});continue;} // brief retry for flaky connections
+        /* request failed twice — surface a retry UI rather than showing a fabricated local copy */
       }
     }
     _serverConfirmed=false;
-    try{
-      var ls=localStorage.getItem('efed_pr_'+name);
-      if(ls)setData(ls);
-    }catch(e){}
+    _showLoadError(true);
+  }
+
+  function _showLoadError(show){
+    var sec=document.getElementById('power-rankings-section');
+    var err=document.getElementById('pr-load-error');
+    if(show){
+      if(sec&&_isOwner)sec.style.display='block';
+      if(err)err.style.display='flex';
+    } else if(err){
+      err.style.display='none';
+    }
   }
 
   // Modal only closes via Cancel/Save/✕ — clicking outside no longer dismisses it.
