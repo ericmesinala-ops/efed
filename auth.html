@@ -1940,11 +1940,26 @@ async function forceLogoutAllDevices() {
 // ═══════════════════════════════════════════════════════════════
 const GOOGLE_CLIENT_ID = '985984907437-qvvqqp4p9ea88tspmrgluc6ta6no18gt.apps.googleusercontent.com';
 
+// Google blocks its Sign-In flow entirely inside in-app WebView browsers
+// (X, Instagram, Facebook, TikTok, LinkedIn, etc.) for security reasons —
+// clicking "Continue with Google" there loads accounts.google.com but
+// renders blank instead of showing a clear error. Detect these up front
+// so we can tell the user to open in their real browser instead.
+function isInAppBrowser() {
+  const ua = navigator.userAgent || '';
+  return /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger|TikTok|musical_ly|Twitter|LinkedInApp|Snapchat|Pinterest/i.test(ua)
+    || (/\bwv\b/.test(ua)) // generic Android WebView marker
+    || (/iPhone|iPad|iPod/.test(ua) && !/Safari/.test(ua)); // iOS WebViews drop the Safari token
+
 let _googlePendingUser = null; // stores decoded JWT payload while overlay is open
 
 // Called by both login and register Google buttons.
 // Uses GIS renderButton (no redirect URI required — works with JS origins only).
 function startGoogleSignIn() {
+  if (isInAppBrowser()) {
+    showGoogleError('Google sign-in doesn\'t work inside this app\'s built-in browser. Tap the ••• or share icon and choose "Open in Safari/Chrome", then try again.');
+    return;
+  }
   if (typeof google === 'undefined' || !google.accounts) {
     showGoogleError('Google Sign-In not loaded yet. Refresh the page and try again.');
     return;
@@ -2222,6 +2237,7 @@ function showGoogleError(msg) {
 
 // Initialize Google One-Tap on load (silent — only shows if eligible)
 window.addEventListener('load', () => {
+  if (isInAppBrowser()) return;
   if (typeof google !== 'undefined' && google.accounts) {
     google.accounts.id.initialize({
       client_id: GOOGLE_CLIENT_ID,
