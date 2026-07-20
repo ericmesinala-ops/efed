@@ -18502,20 +18502,32 @@ async function mr_submit_fn(){
   <div id="shorts-scroll"></div>
 </div>
 
+<script src="https://www.youtube.com/iframe_api" async></script>
+<script>
+// Queue of functions waiting for the YT IFrame Player API to finish loading.
+let _shortsYTQueue = [];
+window.onYouTubeIframeAPIReady = function() {
+  const q = _shortsYTQueue; _shortsYTQueue = [];
+  q.forEach(fn => { try { fn(); } catch(e) {} });
+};
+function _shortsRunWhenYTReady(fn) {
+  if (window.YT && window.YT.Player) fn();
+  else _shortsYTQueue.push(fn);
+}
+</script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 // ── SHORTS FEED ──
 // ═══════════════════════════════════════════════════════════════════
 let _shortsPool = [];
 let _shortsRenderIndex = 0;
-let _shortsClipCache = {};   // videoId -> { clip_start, duration }
-let _shortsPendingDuration = {}; // videoId -> duration (secs), from the availability pre-check
 let _shortsObserver = null;
 let _shortsActiveId = null;
 let _shortsMuted = true;
 let _shortsUserMutedExplicit = false; // true once the user deliberately taps to go silent
 const SHORTS_BATCH_SIZE = 5;
-const SHORTS_CLIP_LEN = 10; // seconds
+const SHORTS_CLIP_START = 12; // seconds — skip the first 12s (intros/tron) of every video
+const SHORTS_CLIP_LEN = 15;   // seconds — each looping clip plays for 15s
 
 function _shortsShuffle(arr) {
   const a = arr.slice();
@@ -18570,11 +18582,8 @@ function _shortsShowSoundPrompt() {
     // This runs synchronously inside a real tap, so iOS honors it —
     // unmute whatever slide is currently active right now.
     document.querySelectorAll('#shorts-scroll .shorts-slide').forEach(slide => {
-      if (slide.dataset.videoId === _shortsActiveId) {
-        const iframe = slide.querySelector('iframe');
-        if (iframe && iframe.contentWindow) {
-          iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
-        }
+      if (slide.dataset.videoId === _shortsActiveId && slide._ytPlayer) {
+        try { slide._ytPlayer.unMute(); } catch(e) {}
       }
     });
     document.querySelectorAll('.shorts-mute-btn').forEach(btn => { btn.innerHTML = _shortsUnmutedIconSvg(); });
@@ -18589,10 +18598,8 @@ function closeShorts(fromPopState) {
   document.body.style.overflow = '';
   if (!fromPopState) history.replaceState(null, '', window.location.pathname);
   // Stop all playback
-  document.querySelectorAll('#shorts-scroll iframe').forEach(f => f.src = '');
   document.querySelectorAll('#shorts-scroll .shorts-slide').forEach(slide => {
-    _shortsClearClipLoop(slide);
-    _shortsResetProgressBar(slide);
+    _shortsDeactivateSlide(slide);
   });
   _shortsActiveId = null;
   const prompt = document.getElementById('shorts-sound-prompt');
@@ -18629,12 +18636,6 @@ async function _shortsRenderNextBatch() {
 
     const ids = candidates.map(v => extractId(v.url)).filter(Boolean);
 
-    // Existing saved clip_start rows for this candidate set
-    try {
-      const rows = await sbGet('video_shorts', `video_id=in.(${ids.map(encodeURIComponent).join(',')})`);
-      rows.forEach(r => { _shortsClipCache[r.video_id] = { clip_start: r.clip_start, duration: r.duration }; });
-    } catch(e) {}
-
     const availableIds = await _shortsCheckAvailability(ids);
     candidates.forEach(v => {
       const id = extractId(v.url);
@@ -18656,21 +18657,12 @@ async function _shortsCheckAvailability(ids) {
   const available = new Set();
   if (!ids.length) return available;
   try {
-    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=status,contentDetails&id=${ids.map(encodeURIComponent).join(',')}&key=${YT_API_KEY}`);
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=status&id=${ids.map(encodeURIComponent).join(',')}&key=${YT_API_KEY}`);
     const data = await res.json();
     (data?.items || []).forEach(item => {
       const isPrivate = item?.status?.privacyStatus === 'private';
       if (isPrivate) return;
       available.add(item.id);
-      // Cache duration now so _shortsComputeClip doesn't need a second fetch
-      if (!_shortsClipCache[item.id]) {
-        const iso = item?.contentDetails?.duration;
-        if (iso) {
-          const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-          const h = parseInt(m?.[1]||0), mn = parseInt(m?.[2]||0), s = parseInt(m?.[3]||0);
-          _shortsPendingDuration[item.id] = h*3600 + mn*60 + s;
-        }
-      }
     });
   } catch(e) {
     // If the availability check itself fails (network hiccup etc.), don't
@@ -18779,70 +18771,84 @@ function _shortsInitObserver() {
   }, { threshold: [0, 0.6] });
 }
 
-async function _shortsActivateSlide(slide) {
+function _shortsActivateSlide(slide) {
   const id = slide.dataset.videoId;
   if (_shortsActiveId === id) return;
   _shortsActiveId = id;
-  let clip = _shortsClipCache[id];
-  if (!clip) {
-    clip = await _shortsComputeClip(id);
-  }
-  if (slide.dataset.videoId !== _shortsActiveId) return; // scrolled away while awaiting
-  let iframe = slide.querySelector('iframe');
-  if (!iframe) {
-    iframe = document.createElement('iframe');
-    iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
-    iframe.allowFullscreen = false;
-    slide.insertBefore(iframe, slide.querySelector('.shorts-right-rail'));
-  }
-  const start = clip.clip_start;
-  const end = start + SHORTS_CLIP_LEN;
-  // Always request muted autoplay first — browsers reliably allow this.
-  // Then auto-unmute ~1s later via postMessage, unless the user explicitly
-  // tapped the speaker to go silent (that choice is respected going forward).
-  iframe.src = `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&start=${start}&end=${end}&controls=0&modestbranding=1&rel=0&playsinline=1&disablekb=1&iv_load_policy=3&enablejsapi=1`;
-  if (!_shortsUserMutedExplicit) {
-    setTimeout(() => {
-      if (_shortsActiveId === id && iframe.contentWindow) {
-        iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
-        _shortsMuted = false;
-        document.querySelectorAll('.shorts-mute-btn').forEach(btn => { btn.innerHTML = _shortsUnmutedIconSvg(); });
+  _shortsRunWhenYTReady(() => {
+    if (_shortsActiveId !== id) return; // scrolled away while API was loading
+    let mount = slide.querySelector('.shorts-player-mount');
+    if (!mount) {
+      mount = document.createElement('div');
+      mount.className = 'shorts-player-mount';
+      slide.insertBefore(mount, slide.querySelector('.shorts-right-rail'));
+    }
+    const player = new YT.Player(mount, {
+      playerVars: {
+        autoplay: 1, mute: 1, start: SHORTS_CLIP_START, end: SHORTS_CLIP_START + SHORTS_CLIP_LEN,
+        controls: 0, modestbranding: 1, rel: 0, playsinline: 1, disablekb: 1,
+        iv_load_policy: 3, origin: window.location.origin
+      },
+      videoId: id,
+      events: {
+        onReady: (e) => {
+          if (_shortsActiveId !== id) { try { e.target.destroy(); } catch(err) {} return; }
+          e.target.playVideo();
+          if (_shortsUserMutedExplicit) {
+            e.target.mute();
+          } else {
+            // Muted autoplay is always allowed — auto-unmute shortly after,
+            // which browsers permit once playback has already started.
+            setTimeout(() => {
+              if (_shortsActiveId === id) {
+                e.target.unMute();
+                _shortsMuted = false;
+                document.querySelectorAll('.shorts-mute-btn').forEach(btn => { btn.innerHTML = _shortsUnmutedIconSvg(); });
+              }
+            }, 600);
+          }
+          _shortsStartProgressLoop(slide, id, e.target);
+        }
       }
-    }, 1000);
-  }
-  _shortsStartClipLoop(slide, id, start, end);
+    });
+    slide._ytPlayer = player;
+  });
 }
 
-// Runs the yellow progress bar in lockstep with the clip, and re-seeks the
-// iframe back to clip_start once the clip's duration has elapsed — since the
-// YouTube embed's `end` param just pauses the video rather than looping it.
-function _shortsStartClipLoop(slide, id, start, end) {
+// Polls playback position and seeks back to the clip start once it reaches
+// the end of the 15s window — looping the clip without ever reloading the
+// iframe (which is what caused the stutter/autoplay-block before).
+function _shortsStartProgressLoop(slide, id, player) {
   _shortsClearClipLoop(slide);
-  const fill = slide.querySelector('.shorts-progress-fill');
-  if (fill) {
-    fill.classList.remove('running');
-    fill.style.animation = 'none';
-    fill.style.width = '0%';
-    // Force reflow so the animation restarts cleanly every loop.
-    void fill.offsetWidth;
-    fill.style.animation = '';
-    fill.style.animationDuration = SHORTS_CLIP_LEN + 's';
-    fill.classList.add('running');
-  }
-  slide._shortsLoopTimer = setTimeout(() => {
-    if (_shortsActiveId !== id) return; // scrolled away, don't keep looping
-    const iframe = slide.querySelector('iframe');
-    if (iframe) {
-      iframe.src = `https://www.youtube.com/embed/${id}?autoplay=1&mute=${_shortsMuted ? 1 : 0}&start=${start}&end=${end}&controls=0&modestbranding=1&rel=0&playsinline=1&disablekb=1&iv_load_policy=3&enablejsapi=1`;
+  _shortsRestartProgressBar(slide);
+  slide._shortsLoopInterval = setInterval(() => {
+    if (_shortsActiveId !== id) { _shortsClearClipLoop(slide); return; }
+    let t;
+    try { t = player.getCurrentTime(); } catch(e) { return; }
+    if (t >= SHORTS_CLIP_START + SHORTS_CLIP_LEN - 0.2) {
+      player.seekTo(SHORTS_CLIP_START, true);
+      _shortsRestartProgressBar(slide);
     }
-    _shortsStartClipLoop(slide, id, start, end);
-  }, SHORTS_CLIP_LEN * 1000);
+  }, 200);
+}
+
+function _shortsRestartProgressBar(slide) {
+  const fill = slide.querySelector('.shorts-progress-fill');
+  if (!fill) return;
+  fill.classList.remove('running');
+  fill.style.animation = 'none';
+  fill.style.width = '0%';
+  // Force reflow so the animation restarts cleanly every loop.
+  void fill.offsetWidth;
+  fill.style.animation = '';
+  fill.style.animationDuration = SHORTS_CLIP_LEN + 's';
+  fill.classList.add('running');
 }
 
 function _shortsClearClipLoop(slide) {
-  if (slide._shortsLoopTimer) {
-    clearTimeout(slide._shortsLoopTimer);
-    slide._shortsLoopTimer = null;
+  if (slide._shortsLoopInterval) {
+    clearInterval(slide._shortsLoopInterval);
+    slide._shortsLoopInterval = null;
   }
 }
 
@@ -18857,41 +18863,12 @@ function _shortsResetProgressBar(slide) {
 
 function _shortsDeactivateSlide(slide) {
   if (_shortsActiveId === slide.dataset.videoId) _shortsActiveId = null;
-  const iframe = slide.querySelector('iframe');
-  if (iframe) iframe.src = '';
   _shortsClearClipLoop(slide);
   _shortsResetProgressBar(slide);
-}
-
-async function _shortsComputeClip(id) {
-  // Fallback default in case duration lookup fails
-  let clip = { clip_start: 15, duration: 0 };
-  try {
-    let totalSec = _shortsPendingDuration[id];
-    if (totalSec === undefined) {
-      const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${id}&key=${YT_API_KEY}`);
-      const data = await res.json();
-      const iso = data?.items?.[0]?.contentDetails?.duration;
-      if (iso) {
-        const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-        const h = parseInt(m?.[1]||0), mn = parseInt(m?.[2]||0), s = parseInt(m?.[3]||0);
-        totalSec = h*3600 + mn*60 + s;
-      }
-    }
-    delete _shortsPendingDuration[id];
-    if (totalSec) {
-      if (totalSec > SHORTS_CLIP_LEN + 10) {
-        const maxStart = Math.max(10, totalSec - SHORTS_CLIP_LEN - 5);
-        clip = { clip_start: Math.floor(Math.random() * (maxStart - 10)) + 10, duration: totalSec };
-      } else {
-        clip = { clip_start: 0, duration: totalSec };
-      }
-    }
-  } catch(e) {}
-  _shortsClipCache[id] = clip;
-  // Persist so it's fixed going forward (best-effort, ignore failures/races)
-  sbInsert('video_shorts', { video_id: id, clip_start: clip.clip_start, duration: clip.duration, created_at: Date.now() }).catch(() => {});
-  return clip;
+  if (slide._ytPlayer) {
+    try { slide._ytPlayer.destroy(); } catch(e) {}
+    slide._ytPlayer = null;
+  }
 }
 
 function _shortsMutedIconSvg() {
@@ -18908,12 +18885,9 @@ function shortsToggleMute(slide) {
   document.querySelectorAll('.shorts-mute-btn').forEach(btn => {
     btn.innerHTML = _shortsMuted ? _shortsMutedIconSvg() : _shortsUnmutedIconSvg();
   });
-  // Apply to the currently playing iframe without restarting the clip
-  const iframe = slide.querySelector('iframe');
-  if (iframe && iframe.contentWindow) {
-    iframe.contentWindow.postMessage(JSON.stringify({
-      event: 'command', func: _shortsMuted ? 'mute' : 'unMute', args: []
-    }), '*');
+  // Apply to the currently playing player without restarting the clip
+  if (slide._ytPlayer) {
+    try { _shortsMuted ? slide._ytPlayer.mute() : slide._ytPlayer.unMute(); } catch(e) {}
   }
 }
 
