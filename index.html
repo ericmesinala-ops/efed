@@ -4942,11 +4942,17 @@ function a2hsDismiss(){
       #expand-shorts-admin .expand-comments-title { color: #c0000e; }
       #shorts-admin-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-family: 'DM Sans', sans-serif; }
       #shorts-admin-panel label { font-size: .72rem; color: rgba(255,255,255,.6); }
-      #shorts-admin-start {
-        width: 70px; padding: 7px 9px; border-radius: 6px; border: 1px solid rgba(255,255,255,.15);
+      #shorts-admin-time-group { display: flex; align-items: center; gap: 4px; }
+      .shorts-admin-time-box {
+        width: 44px; padding: 7px 4px; border-radius: 6px; border: 1px solid rgba(255,255,255,.15);
         background: rgba(255,255,255,.05); color: #fff; font-size: .8rem; text-align: center;
-        font-family: 'DM Sans', sans-serif;
+        font-family: 'DM Sans', sans-serif; -moz-appearance: textfield;
       }
+      .shorts-admin-time-box::-webkit-outer-spin-button,
+      .shorts-admin-time-box::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+      #shorts-admin-time-group .shorts-admin-colon { color: rgba(255,255,255,.4); font-weight: 700; }
+      .shorts-admin-time-unit { font-size: .58rem; color: rgba(255,255,255,.4); text-align: center; display: block; margin-top: 2px; }
+      .shorts-admin-time-col { display: flex; flex-direction: column; align-items: center; }
       #shorts-admin-runtime { font-size: .68rem; color: rgba(255,255,255,.45); }
       #shorts-admin-send-btn, #shorts-admin-remove-btn {
         padding: 8px 16px; border-radius: 20px; border: none; font-size: .72rem; font-weight: 700;
@@ -4960,9 +4966,24 @@ function a2hsDismiss(){
     <div id="expand-shorts-admin" style="display:none;">
       <div class="expand-comments-title" style="margin-bottom:10px;">🔒 Shorts Admin</div>
       <div id="shorts-admin-panel">
-        <label for="shorts-admin-start">Clip start (hh:mm:ss)</label>
-        <input type="text" id="shorts-admin-start" placeholder="00:00:00" maxlength="8" inputmode="numeric" style="width:90px;">
-        <span id="shorts-admin-runtime">runs 25s in Shorts</span>
+        <label>Clip start</label>
+        <div id="shorts-admin-time-group">
+          <div class="shorts-admin-time-col">
+            <input type="number" id="shorts-admin-h" class="shorts-admin-time-box" min="0" max="23" placeholder="00" inputmode="numeric">
+            <span class="shorts-admin-time-unit">hh</span>
+          </div>
+          <span class="shorts-admin-colon">:</span>
+          <div class="shorts-admin-time-col">
+            <input type="number" id="shorts-admin-m" class="shorts-admin-time-box" min="0" max="59" placeholder="00" inputmode="numeric">
+            <span class="shorts-admin-time-unit">mm</span>
+          </div>
+          <span class="shorts-admin-colon">:</span>
+          <div class="shorts-admin-time-col">
+            <input type="number" id="shorts-admin-s" class="shorts-admin-time-box" min="0" max="59" placeholder="00" inputmode="numeric">
+            <span class="shorts-admin-time-unit">ss</span>
+          </div>
+        </div>
+        <span id="shorts-admin-runtime">runs 20s in Shorts</span>
         <button id="shorts-admin-send-btn" onclick="shortsAdminSendToPool()">Send to Pool</button>
         <button id="shorts-admin-remove-btn" onclick="shortsAdminRemoveFromPool()" style="display:none;">Remove from Pool</button>
         <div id="shorts-admin-status"></div>
@@ -18563,7 +18584,7 @@ function _shortsRunWhenYTReady(fn) {
 // video_url, clip_start, clip_len, added_by, added_at) is the only source
 // of videos shown in the Shorts feed — see _shortsEligibleVideos below.
 // ═══════════════════════════════════════════════════════════════════
-const SHORTS_ADMIN_CLIP_LEN = 25; // fixed length for admin-picked clips
+const SHORTS_ADMIN_CLIP_LEN = 20; // fixed length for admin-picked clips
 
 function _shortsSecToClock(sec) {
   sec = Math.max(0, Math.floor(sec || 0));
@@ -18579,19 +18600,52 @@ function _shortsClockToSec(str) {
   return parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
 }
 
+// Reads the 3 hh/mm/ss boxes and returns total seconds, or null if invalid.
+function _shortsTimeBoxesToSec() {
+  const hEl = document.getElementById('shorts-admin-h');
+  const mEl = document.getElementById('shorts-admin-m');
+  const sEl = document.getElementById('shorts-admin-s');
+  if (!hEl || !mEl || !sEl) return null;
+  const h = hEl.value.trim() === '' ? 0 : parseInt(hEl.value, 10);
+  const m = mEl.value.trim() === '' ? 0 : parseInt(mEl.value, 10);
+  const s = sEl.value.trim() === '' ? 0 : parseInt(sEl.value, 10);
+  if (![h, m, s].every(Number.isFinite)) return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s > 59) return null;
+  return h * 3600 + m * 60 + s;
+}
+
+// Populates the 3 hh/mm/ss boxes from a total-seconds value.
+function _shortsSecToTimeBoxes(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const hEl = document.getElementById('shorts-admin-h');
+  const mEl = document.getElementById('shorts-admin-m');
+  const sEl = document.getElementById('shorts-admin-s');
+  if (hEl) hEl.value = String(h).padStart(2, '0');
+  if (mEl) mEl.value = String(m).padStart(2, '0');
+  if (sEl) sEl.value = String(s).padStart(2, '0');
+}
+
+function _shortsClearTimeBoxes() {
+  ['shorts-admin-h', 'shorts-admin-m', 'shorts-admin-s'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = ''; el.style.borderColor = ''; }
+  });
+}
+
 function _shortsIsAdmin() {
   const session = getSession();
   return !!(session && session.username && session.username.toLowerCase() === ADMIN_USERNAME);
 }
 
 async function _shortsAdminLoadForVideo(v) {
-  const input = document.getElementById('shorts-admin-start');
   const sendBtn = document.getElementById('shorts-admin-send-btn');
   const removeBtn = document.getElementById('shorts-admin-remove-btn');
   const status = document.getElementById('shorts-admin-status');
-  if (!input || !sendBtn) return;
-  input.value = '';
-  input.style.borderColor = '';
+  if (!document.getElementById('shorts-admin-h') || !sendBtn) return;
+  _shortsClearTimeBoxes();
   sendBtn.textContent = 'Send to Pool';
   sendBtn.classList.remove('in-pool');
   if (removeBtn) removeBtn.style.display = 'none';
@@ -18602,7 +18656,7 @@ async function _shortsAdminLoadForVideo(v) {
     const rows = await sbGet('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
     if (rows && rows.length) {
       const row = rows[0];
-      input.value = _shortsSecToClock(row.clip_start);
+      _shortsSecToTimeBoxes(row.clip_start);
       sendBtn.textContent = '✓ In Pool — Update';
       sendBtn.classList.add('in-pool');
       if (removeBtn) removeBtn.style.display = 'inline-block';
@@ -18616,18 +18670,21 @@ async function shortsAdminSendToPool() {
   const v = _expandVideo;
   if (!v) return;
   const id = extractId(v.url);
-  const input = document.getElementById('shorts-admin-start');
   const sendBtn = document.getElementById('shorts-admin-send-btn');
   const removeBtn = document.getElementById('shorts-admin-remove-btn');
   const status = document.getElementById('shorts-admin-status');
-  if (!id || !input || !sendBtn) return;
-  const sec = _shortsClockToSec(input.value);
+  const hEl = document.getElementById('shorts-admin-h');
+  const mEl = document.getElementById('shorts-admin-m');
+  const sEl = document.getElementById('shorts-admin-s');
+  if (!id || !hEl || !sendBtn) return;
+  const sec = _shortsTimeBoxesToSec();
   if (sec === null) {
-    input.style.borderColor = '#c0000e';
-    if (status) status.textContent = 'Enter a valid time as hh:mm:ss, e.g. 00:01:23';
+    [hEl, mEl, sEl].forEach(el => { if (el) el.style.borderColor = '#c0000e'; });
+    if (status) status.textContent = 'Enter a valid time — hours 0–23, minutes/seconds 0–59.';
     return;
   }
-  input.style.borderColor = '';
+  [hEl, mEl, sEl].forEach(el => { if (el) el.style.borderColor = ''; });
+  const clockLabel = _shortsSecToClock(sec);
   const session = getSession();
   const origLabel = sendBtn.textContent;
   sendBtn.disabled = true;
@@ -18646,7 +18703,7 @@ async function shortsAdminSendToPool() {
     sendBtn.textContent = '✓ In Pool — Update';
     sendBtn.classList.add('in-pool');
     if (removeBtn) removeBtn.style.display = 'inline-block';
-    if (status) status.textContent = `Saved — starts at ${input.value}, runs ${SHORTS_ADMIN_CLIP_LEN}s in Shorts.`;
+    if (status) status.textContent = `Saved — starts at ${clockLabel}, runs ${SHORTS_ADMIN_CLIP_LEN}s in Shorts.`;
   } catch(e) {
     sendBtn.textContent = origLabel;
     if (status) status.textContent = 'Failed to save — try again.';
@@ -18664,12 +18721,11 @@ async function shortsAdminRemoveFromPool() {
   const sendBtn = document.getElementById('shorts-admin-send-btn');
   const removeBtn = document.getElementById('shorts-admin-remove-btn');
   const status = document.getElementById('shorts-admin-status');
-  const input = document.getElementById('shorts-admin-start');
   try {
     await sbDelete('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
     if (sendBtn) { sendBtn.textContent = 'Send to Pool'; sendBtn.classList.remove('in-pool'); }
     if (removeBtn) removeBtn.style.display = 'none';
-    if (input) input.value = '';
+    _shortsClearTimeBoxes();
     if (status) status.textContent = 'Removed from the Shorts pool.';
   } catch(e) {
     if (status) status.textContent = 'Failed to remove — try again.';
@@ -18686,7 +18742,7 @@ let _shortsActiveId = null;
 let _shortsMuted = true;
 const SHORTS_BATCH_SIZE = 5;
 const SHORTS_CLIP_START = 12; // seconds — skip the first 12s (intros/tron) of every video
-const SHORTS_CLIP_LEN = 30;   // seconds — each looping clip plays for 30s
+const SHORTS_CLIP_LEN = 20;   // seconds — each looping clip plays for 20s
 
 function _shortsShuffle(arr) {
   const a = arr.slice();
