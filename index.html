@@ -18524,10 +18524,9 @@ let _shortsRenderIndex = 0;
 let _shortsObserver = null;
 let _shortsActiveId = null;
 let _shortsMuted = true;
-let _shortsUserMutedExplicit = false; // true once the user deliberately taps to go silent
 const SHORTS_BATCH_SIZE = 5;
 const SHORTS_CLIP_START = 12; // seconds — skip the first 12s (intros/tron) of every video
-const SHORTS_CLIP_LEN = 15;   // seconds — each looping clip plays for 15s
+const SHORTS_CLIP_LEN = 30;   // seconds — each looping clip plays for 30s
 
 function _shortsShuffle(arr) {
   const a = arr.slice();
@@ -18564,32 +18563,6 @@ async function openShorts() {
   await _shortsRenderNextBatch();
   scroll.scrollTop = 0;
   scroll.onscroll = _shortsHandleScroll;
-  if (!_shortsSoundGranted) _shortsShowSoundPrompt();
-}
-
-let _shortsSoundGranted = false; // becomes true after the user's first real tap this session
-
-function _shortsShowSoundPrompt() {
-  const overlay = document.getElementById('shorts-overlay');
-  const prompt = document.createElement('button');
-  prompt.id = 'shorts-sound-prompt';
-  prompt.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.25);border-radius:40px;color:#fff;font-family:\'DM Sans\',sans-serif;font-size:.8rem;font-weight:700;padding:14px 26px;display:flex;align-items:center;gap:8px;cursor:pointer;';
-  prompt.innerHTML = '🔊 &nbsp;Tap for sound';
-  prompt.onclick = () => {
-    _shortsSoundGranted = true;
-    _shortsUserMutedExplicit = false;
-    _shortsMuted = false;
-    // This runs synchronously inside a real tap, so iOS honors it —
-    // unmute whatever slide is currently active right now.
-    document.querySelectorAll('#shorts-scroll .shorts-slide').forEach(slide => {
-      if (slide.dataset.videoId === _shortsActiveId && slide._ytPlayer) {
-        try { slide._ytPlayer.unMute(); } catch(e) {}
-      }
-    });
-    document.querySelectorAll('.shorts-mute-btn').forEach(btn => { btn.innerHTML = _shortsUnmutedIconSvg(); });
-    prompt.remove();
-  };
-  overlay.appendChild(prompt);
 }
 
 function closeShorts(fromPopState) {
@@ -18602,8 +18575,6 @@ function closeShorts(fromPopState) {
     _shortsDeactivateSlide(slide);
   });
   _shortsActiveId = null;
-  const prompt = document.getElementById('shorts-sound-prompt');
-  if (prompt) prompt.remove();
 }
 
 window.addEventListener('popstate', function(e) {
@@ -18775,6 +18746,9 @@ function _shortsActivateSlide(slide) {
   const id = slide.dataset.videoId;
   if (_shortsActiveId === id) return;
   _shortsActiveId = id;
+  // Every time a new video comes into view, force it (and the UI) back to muted.
+  _shortsMuted = true;
+  document.querySelectorAll('.shorts-mute-btn').forEach(btn => { btn.innerHTML = _shortsMutedIconSvg(); });
   _shortsRunWhenYTReady(() => {
     if (_shortsActiveId !== id) return; // scrolled away while API was loading
     let mount = slide.querySelector('.shorts-player-mount');
@@ -18794,19 +18768,7 @@ function _shortsActivateSlide(slide) {
         onReady: (e) => {
           if (_shortsActiveId !== id) { try { e.target.destroy(); } catch(err) {} return; }
           e.target.playVideo();
-          if (_shortsUserMutedExplicit) {
-            e.target.mute();
-          } else {
-            // Muted autoplay is always allowed — auto-unmute shortly after,
-            // which browsers permit once playback has already started.
-            setTimeout(() => {
-              if (_shortsActiveId === id) {
-                e.target.unMute();
-                _shortsMuted = false;
-                document.querySelectorAll('.shorts-mute-btn').forEach(btn => { btn.innerHTML = _shortsUnmutedIconSvg(); });
-              }
-            }, 600);
-          }
+          e.target.mute();
           _shortsStartProgressLoop(slide, id, e.target);
         }
       }
@@ -18880,7 +18842,6 @@ function _shortsUnmutedIconSvg() {
 
 function shortsToggleMute(slide) {
   _shortsMuted = !_shortsMuted;
-  _shortsUserMutedExplicit = _shortsMuted; // manual choice — respected on future slides
   // Update every rendered mute button so state stays consistent across slides
   document.querySelectorAll('.shorts-mute-btn').forEach(btn => {
     btn.innerHTML = _shortsMuted ? _shortsMutedIconSvg() : _shortsUnmutedIconSvg();
