@@ -4961,6 +4961,7 @@ function a2hsDismiss(){
       #shorts-admin-send-btn { background: #c0000e; color: #fff; }
       #shorts-admin-send-btn.in-pool { background: #2e8b57; }
       #shorts-admin-remove-btn { background: rgba(255,255,255,.08); color: rgba(255,255,255,.75); }
+      #shorts-admin-view-btn { background: rgba(255,255,255,.08); color: #fff; border: 1px solid rgba(255,255,255,.2); }
       #shorts-admin-status { width: 100%; font-size: .68rem; color: rgba(255,255,255,.5); }
     </style>
     <div id="expand-shorts-admin" style="display:none;">
@@ -4986,6 +4987,7 @@ function a2hsDismiss(){
         <span id="shorts-admin-runtime">runs 20s in Shorts</span>
         <button id="shorts-admin-send-btn" onclick="shortsAdminSendToPool()">Send to Pool</button>
         <button id="shorts-admin-remove-btn" onclick="shortsAdminRemoveFromPool()" style="display:none;">Remove from Pool</button>
+        <button id="shorts-admin-view-btn" onclick="shortsAdminViewInFeed()" style="display:none;">▶ View in Shorts</button>
         <div id="shorts-admin-status"></div>
       </div>
     </div>
@@ -18643,12 +18645,14 @@ function _shortsIsAdmin() {
 async function _shortsAdminLoadForVideo(v) {
   const sendBtn = document.getElementById('shorts-admin-send-btn');
   const removeBtn = document.getElementById('shorts-admin-remove-btn');
+  const viewBtn = document.getElementById('shorts-admin-view-btn');
   const status = document.getElementById('shorts-admin-status');
   if (!document.getElementById('shorts-admin-h') || !sendBtn) return;
   _shortsClearTimeBoxes();
   sendBtn.textContent = 'Send to Pool';
   sendBtn.classList.remove('in-pool');
   if (removeBtn) removeBtn.style.display = 'none';
+  if (viewBtn) viewBtn.style.display = 'none';
   if (status) status.textContent = '';
   const id = extractId(v.url);
   if (!id) return;
@@ -18660,6 +18664,7 @@ async function _shortsAdminLoadForVideo(v) {
       sendBtn.textContent = '✓ In Pool — Update';
       sendBtn.classList.add('in-pool');
       if (removeBtn) removeBtn.style.display = 'inline-block';
+      if (viewBtn) viewBtn.style.display = 'inline-block';
       if (status) status.textContent = 'Currently in the Shorts pool.';
     }
   } catch(e) {}
@@ -18672,6 +18677,7 @@ async function shortsAdminSendToPool() {
   const id = extractId(v.url);
   const sendBtn = document.getElementById('shorts-admin-send-btn');
   const removeBtn = document.getElementById('shorts-admin-remove-btn');
+  const viewBtn = document.getElementById('shorts-admin-view-btn');
   const status = document.getElementById('shorts-admin-status');
   const hEl = document.getElementById('shorts-admin-h');
   const mEl = document.getElementById('shorts-admin-m');
@@ -18703,6 +18709,7 @@ async function shortsAdminSendToPool() {
     sendBtn.textContent = '✓ In Pool — Update';
     sendBtn.classList.add('in-pool');
     if (removeBtn) removeBtn.style.display = 'inline-block';
+    if (viewBtn) viewBtn.style.display = 'inline-block';
     if (status) status.textContent = `Saved — starts at ${clockLabel}, runs ${SHORTS_ADMIN_CLIP_LEN}s in Shorts.`;
   } catch(e) {
     sendBtn.textContent = origLabel;
@@ -18721,16 +18728,28 @@ async function shortsAdminRemoveFromPool() {
   if (!id) return;
   const sendBtn = document.getElementById('shorts-admin-send-btn');
   const removeBtn = document.getElementById('shorts-admin-remove-btn');
+  const viewBtn = document.getElementById('shorts-admin-view-btn');
   const status = document.getElementById('shorts-admin-status');
   try {
     await sbDelete('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
     if (sendBtn) { sendBtn.textContent = 'Send to Pool'; sendBtn.classList.remove('in-pool'); }
     if (removeBtn) removeBtn.style.display = 'none';
+    if (viewBtn) viewBtn.style.display = 'none';
     _shortsClearTimeBoxes();
     if (status) status.textContent = 'Removed from the Shorts pool.';
   } catch(e) {
     if (status) status.textContent = 'Failed to remove — try again.';
   }
+}
+
+// Jumps straight into the Shorts feed, scrolled to the video currently open
+// in the expand view (used by the admin panel's "View in Shorts" button).
+function shortsAdminViewInFeed() {
+  const v = _expandVideo;
+  if (!v) return;
+  const id = extractId(v.url);
+  if (!id) return;
+  openShorts(id);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -18777,11 +18796,18 @@ async function _shortsEligibleVideos() {
   return out;
 }
 
-async function openShorts() {
+async function openShorts(jumpVideoId) {
   const overlay = document.getElementById('shorts-overlay');
   const scroll = document.getElementById('shorts-scroll');
   // Always refetch fresh — an admin may have just added/changed a pool entry.
   _shortsPool = _shortsShuffle(await _shortsEligibleVideos());
+  if (jumpVideoId) {
+    const idx = _shortsPool.findIndex(v => extractId(v.url) === jumpVideoId);
+    if (idx > 0) {
+      const [v] = _shortsPool.splice(idx, 1);
+      _shortsPool.unshift(v);
+    }
+  }
   scroll.innerHTML = '';
   _shortsRenderIndex = 0;
   overlay.style.display = 'block';
