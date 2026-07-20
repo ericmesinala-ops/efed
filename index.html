@@ -18478,6 +18478,21 @@ async function mr_submit_fn(){
   cursor: pointer; padding: 0;
 }
 .shorts-mute-btn:active { background: rgba(0,0,0,.7); }
+.shorts-progress-track {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 3px; z-index: 6;
+  background: rgba(255,255,255,.25);
+}
+.shorts-progress-fill {
+  height: 100%; width: 0%; background: #ffd400;
+  box-shadow: 0 0 6px rgba(255,212,0,.6);
+}
+.shorts-progress-fill.running {
+  animation: shortsProgressFill linear forwards;
+}
+@keyframes shortsProgressFill {
+  from { width: 0%; }
+  to { width: 100%; }
+}
 </style>
 
 <div id="shorts-overlay">
@@ -18575,6 +18590,10 @@ function closeShorts(fromPopState) {
   if (!fromPopState) history.replaceState(null, '', window.location.pathname);
   // Stop all playback
   document.querySelectorAll('#shorts-scroll iframe').forEach(f => f.src = '');
+  document.querySelectorAll('#shorts-scroll .shorts-slide').forEach(slide => {
+    _shortsClearClipLoop(slide);
+    _shortsResetProgressBar(slide);
+  });
   _shortsActiveId = null;
   const prompt = document.getElementById('shorts-sound-prompt');
   if (prompt) prompt.remove();
@@ -18716,6 +18735,14 @@ function _shortsBuildSlide(v) {
   `;
   slide.appendChild(info);
 
+  // Yellow loading/progress bar
+  const progressTrack = document.createElement('div');
+  progressTrack.className = 'shorts-progress-track';
+  const progressFill = document.createElement('div');
+  progressFill.className = 'shorts-progress-fill';
+  progressTrack.appendChild(progressFill);
+  slide.appendChild(progressTrack);
+
   // Prime like count (non-blocking)
   _shortsLoadLikeState(slide);
 
@@ -18783,12 +18810,57 @@ async function _shortsActivateSlide(slide) {
       }
     }, 1000);
   }
+  _shortsStartClipLoop(slide, id, start, end);
+}
+
+// Runs the yellow progress bar in lockstep with the clip, and re-seeks the
+// iframe back to clip_start once the clip's duration has elapsed — since the
+// YouTube embed's `end` param just pauses the video rather than looping it.
+function _shortsStartClipLoop(slide, id, start, end) {
+  _shortsClearClipLoop(slide);
+  const fill = slide.querySelector('.shorts-progress-fill');
+  if (fill) {
+    fill.classList.remove('running');
+    fill.style.animation = 'none';
+    fill.style.width = '0%';
+    // Force reflow so the animation restarts cleanly every loop.
+    void fill.offsetWidth;
+    fill.style.animation = '';
+    fill.style.animationDuration = SHORTS_CLIP_LEN + 's';
+    fill.classList.add('running');
+  }
+  slide._shortsLoopTimer = setTimeout(() => {
+    if (_shortsActiveId !== id) return; // scrolled away, don't keep looping
+    const iframe = slide.querySelector('iframe');
+    if (iframe) {
+      iframe.src = `https://www.youtube.com/embed/${id}?autoplay=1&mute=${_shortsMuted ? 1 : 0}&start=${start}&end=${end}&controls=0&modestbranding=1&rel=0&playsinline=1&disablekb=1&iv_load_policy=3&enablejsapi=1`;
+    }
+    _shortsStartClipLoop(slide, id, start, end);
+  }, SHORTS_CLIP_LEN * 1000);
+}
+
+function _shortsClearClipLoop(slide) {
+  if (slide._shortsLoopTimer) {
+    clearTimeout(slide._shortsLoopTimer);
+    slide._shortsLoopTimer = null;
+  }
+}
+
+function _shortsResetProgressBar(slide) {
+  const fill = slide.querySelector('.shorts-progress-fill');
+  if (fill) {
+    fill.classList.remove('running');
+    fill.style.animation = 'none';
+    fill.style.width = '0%';
+  }
 }
 
 function _shortsDeactivateSlide(slide) {
   if (_shortsActiveId === slide.dataset.videoId) _shortsActiveId = null;
   const iframe = slide.querySelector('iframe');
   if (iframe) iframe.src = '';
+  _shortsClearClipLoop(slide);
+  _shortsResetProgressBar(slide);
 }
 
 async function _shortsComputeClip(id) {
