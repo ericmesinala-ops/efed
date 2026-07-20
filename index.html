@@ -18494,6 +18494,7 @@ async function mr_submit_fn(){
 let _shortsPool = [];
 let _shortsRenderIndex = 0;
 let _shortsClipCache = {};   // videoId -> { clip_start, duration }
+let _shortsPendingDuration = {}; // videoId -> duration (secs), from the availability pre-check
 let _shortsObserver = null;
 let _shortsActiveId = null;
 let _shortsMuted = true;
@@ -18564,22 +18565,69 @@ function _shortsHandleScroll(e) {
 
 async function _shortsRenderNextBatch() {
   const scroll = document.getElementById('shorts-scroll');
-  const batch = _shortsPool.slice(_shortsRenderIndex, _shortsRenderIndex + SHORTS_BATCH_SIZE);
-  if (!batch.length) return;
-  _shortsRenderIndex += batch.length;
+  let valid = [];
+  let attempts = 0;
 
-  // Fetch existing clip_start rows for this batch in one call
-  const ids = batch.map(v => extractId(v.url)).filter(Boolean);
-  try {
-    const rows = await sbGet('video_shorts', `video_id=in.(${ids.map(encodeURIComponent).join(',')})`);
-    rows.forEach(r => { _shortsClipCache[r.video_id] = { clip_start: r.clip_start, duration: r.duration }; });
-  } catch(e) {}
+  // Pull candidates from the pool, filter out private/deleted videos, and
+  // keep pulling more until we have a full batch (or the pool runs dry).
+  // Capped at a few attempts so a run of bad videos can't spin forever.
+  while (valid.length < SHORTS_BATCH_SIZE && attempts < 4) {
+    const candidates = _shortsPool.slice(_shortsRenderIndex, _shortsRenderIndex + SHORTS_BATCH_SIZE);
+    if (!candidates.length) break;
+    _shortsRenderIndex += candidates.length;
+    attempts++;
 
-  batch.forEach(v => {
+    const ids = candidates.map(v => extractId(v.url)).filter(Boolean);
+
+    // Existing saved clip_start rows for this candidate set
+    try {
+      const rows = await sbGet('video_shorts', `video_id=in.(${ids.map(encodeURIComponent).join(',')})`);
+      rows.forEach(r => { _shortsClipCache[r.video_id] = { clip_start: r.clip_start, duration: r.duration }; });
+    } catch(e) {}
+
+    const availableIds = await _shortsCheckAvailability(ids);
+    candidates.forEach(v => {
+      const id = extractId(v.url);
+      if (availableIds.has(id)) valid.push(v);
+    });
+  }
+
+  valid.forEach(v => {
     const slide = _shortsBuildSlide(v);
     scroll.appendChild(slide);
     _shortsObserver.observe(slide);
   });
+}
+
+// Batch-checks YouTube for private/deleted videos. Private or removed videos
+// simply don't come back in the API response at all, so anything missing
+// from `items` gets treated as unavailable and skipped.
+async function _shortsCheckAvailability(ids) {
+  const available = new Set();
+  if (!ids.length) return available;
+  try {
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=status,contentDetails&id=${ids.map(encodeURIComponent).join(',')}&key=${YT_API_KEY}`);
+    const data = await res.json();
+    (data?.items || []).forEach(item => {
+      const isPrivate = item?.status?.privacyStatus === 'private';
+      if (isPrivate) return;
+      available.add(item.id);
+      // Cache duration now so _shortsComputeClip doesn't need a second fetch
+      if (!_shortsClipCache[item.id]) {
+        const iso = item?.contentDetails?.duration;
+        if (iso) {
+          const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+          const h = parseInt(m?.[1]||0), mn = parseInt(m?.[2]||0), s = parseInt(m?.[3]||0);
+          _shortsPendingDuration[item.id] = h*3600 + mn*60 + s;
+        }
+      }
+    });
+  } catch(e) {
+    // If the availability check itself fails (network hiccup etc.), don't
+    // block playback entirely — fall back to treating all as available.
+    ids.forEach(id => available.add(id));
+  }
+  return available;
 }
 
 function _shortsBuildSlide(v) {
@@ -18716,13 +18764,19 @@ async function _shortsComputeClip(id) {
   // Fallback default in case duration lookup fails
   let clip = { clip_start: 15, duration: 0 };
   try {
-    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${id}&key=${YT_API_KEY}`);
-    const data = await res.json();
-    const iso = data?.items?.[0]?.contentDetails?.duration;
-    if (iso) {
-      const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-      const h = parseInt(m?.[1]||0), mn = parseInt(m?.[2]||0), s = parseInt(m?.[3]||0);
-      const totalSec = h*3600 + mn*60 + s;
+    let totalSec = _shortsPendingDuration[id];
+    if (totalSec === undefined) {
+      const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${id}&key=${YT_API_KEY}`);
+      const data = await res.json();
+      const iso = data?.items?.[0]?.contentDetails?.duration;
+      if (iso) {
+        const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        const h = parseInt(m?.[1]||0), mn = parseInt(m?.[2]||0), s = parseInt(m?.[3]||0);
+        totalSec = h*3600 + mn*60 + s;
+      }
+    }
+    delete _shortsPendingDuration[id];
+    if (totalSec) {
       if (totalSec > SHORTS_CLIP_LEN + 10) {
         const maxStart = Math.max(10, totalSec - SHORTS_CLIP_LEN - 5);
         clip = { clip_start: Math.floor(Math.random() * (maxStart - 10)) + 10, duration: totalSec };
