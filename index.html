@@ -18470,6 +18470,14 @@ async function mr_submit_fn(){
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: rgba(255,255,255,.4); font-family: 'DM Sans', sans-serif; font-size: .75rem;
 }
+.shorts-mute-btn {
+  position: absolute; top: 16px; right: 14px; z-index: 6;
+  width: 34px; height: 34px; border-radius: 50%;
+  background: rgba(0,0,0,.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  border: none; color: #fff; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; padding: 0;
+}
+.shorts-mute-btn:active { background: rgba(0,0,0,.7); }
 </style>
 
 <div id="shorts-overlay">
@@ -18488,6 +18496,7 @@ let _shortsRenderIndex = 0;
 let _shortsClipCache = {};   // videoId -> { clip_start, duration }
 let _shortsObserver = null;
 let _shortsActiveId = null;
+let _shortsMuted = true;
 const SHORTS_BATCH_SIZE = 5;
 const SHORTS_CLIP_LEN = 10; // seconds
 
@@ -18591,6 +18600,13 @@ function _shortsBuildSlide(v) {
   hint.textContent = '';
   slide.appendChild(hint);
 
+  const muteBtn = document.createElement('button');
+  muteBtn.className = 'shorts-mute-btn';
+  muteBtn.setAttribute('aria-label', 'Toggle sound');
+  muteBtn.onclick = () => shortsToggleMute(slide);
+  muteBtn.innerHTML = _shortsMuted ? _shortsMutedIconSvg() : _shortsUnmutedIconSvg();
+  slide.appendChild(muteBtn);
+
   // Right rail
   const rail = document.createElement('div');
   rail.className = 'shorts-right-rail';
@@ -18674,7 +18690,7 @@ async function _shortsActivateSlide(slide) {
   }
   const start = clip.clip_start;
   const end = start + SHORTS_CLIP_LEN;
-  iframe.src = `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&start=${start}&end=${end}&controls=0&modestbranding=1&rel=0&playsinline=1&disablekb=1&iv_load_policy=3`;
+  iframe.src = `https://www.youtube.com/embed/${id}?autoplay=1&mute=${_shortsMuted ? 1 : 0}&start=${start}&end=${end}&controls=0&modestbranding=1&rel=0&playsinline=1&disablekb=1&iv_load_policy=3&enablejsapi=1`;
 }
 
 function _shortsDeactivateSlide(slide) {
@@ -18706,6 +18722,28 @@ async function _shortsComputeClip(id) {
   // Persist so it's fixed going forward (best-effort, ignore failures/races)
   sbInsert('video_shorts', { video_id: id, clip_start: clip.clip_start, duration: clip.duration, created_at: Date.now() }).catch(() => {});
   return clip;
+}
+
+function _shortsMutedIconSvg() {
+  return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>';
+}
+function _shortsUnmutedIconSvg() {
+  return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>';
+}
+
+function shortsToggleMute(slide) {
+  _shortsMuted = !_shortsMuted;
+  // Update every rendered mute button so state stays consistent across slides
+  document.querySelectorAll('.shorts-mute-btn').forEach(btn => {
+    btn.innerHTML = _shortsMuted ? _shortsMutedIconSvg() : _shortsUnmutedIconSvg();
+  });
+  // Apply to the currently playing iframe without restarting the clip
+  const iframe = slide.querySelector('iframe');
+  if (iframe && iframe.contentWindow) {
+    iframe.contentWindow.postMessage(JSON.stringify({
+      event: 'command', func: _shortsMuted ? 'mute' : 'unMute', args: []
+    }), '*');
+  }
 }
 
 function shortsGoToVideo(btn) {
