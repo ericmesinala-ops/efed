@@ -18690,7 +18690,24 @@ async function _shortsActivateSlide(slide) {
   }
   const start = clip.clip_start;
   const end = start + SHORTS_CLIP_LEN;
-  iframe.src = `https://www.youtube.com/embed/${id}?autoplay=1&mute=${_shortsMuted ? 1 : 0}&start=${start}&end=${end}&controls=0&modestbranding=1&rel=0&playsinline=1&disablekb=1&iv_load_policy=3&enablejsapi=1`;
+  // Always request muted autoplay — browsers reliably allow this. If the
+  // user has sound toggled on, we unmute via postMessage right after the
+  // player loads, which browsers permit (unlike starting unmuted, which
+  // gets silently blocked and leaves YouTube's own paused/play button showing).
+  iframe.src = `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&start=${start}&end=${end}&controls=0&modestbranding=1&rel=0&playsinline=1&disablekb=1&iv_load_policy=3&enablejsapi=1`;
+  if (!_shortsMuted) {
+    iframe.onload = () => {
+      // Give the YT player a moment to finish initializing before we can
+      // send it commands; a couple of staggered attempts covers slow loads.
+      [400, 900, 1500].forEach(delay => {
+        setTimeout(() => {
+          if (_shortsActiveId === id && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
+          }
+        }, delay);
+      });
+    };
+  }
 }
 
 function _shortsDeactivateSlide(slide) {
