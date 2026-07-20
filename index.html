@@ -4279,6 +4279,12 @@ html, body { overscroll-behavior-y: none; }
     </div>
     My EFEDs
   </button>
+  <button class="htab" id="htab-shorts" onclick="openShorts()">
+    <div class="htab-icon">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="3"/><polygon points="10,9.5 15,12 10,14.5" fill="currentColor" stroke="none"/></svg>
+    </div>
+    Shorts
+  </button>
 
 </div>
 
@@ -18398,6 +18404,371 @@ async function mr_submit_fn(){
     msg.style.display="flex";
     setTimeout(()=>mr_close(),2800);
   }catch(e){btn.disabled=false;btn.textContent="Post";if(typeof showToast==="function")showToast("Could not post. Try again.");}
+}
+</script>
+<!-- ══════════════ SHORTS FEED ══════════════ -->
+<style>
+#shorts-overlay {
+  display: none; position: fixed; inset: 0; z-index: 999999;
+  background: #000;
+}
+#shorts-back-btn {
+  position: fixed; top: 16px; left: 14px; z-index: 10;
+  width: 38px; height: 38px; border-radius: 50%;
+  background: rgba(0,0,0,.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  border: none; color: #fff; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 22px; line-height: 1; padding: 0;
+}
+#shorts-back-btn:active { background: rgba(0,0,0,.7); }
+#shorts-scroll {
+  height: 100%; width: 100%; overflow-y: scroll; scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+#shorts-scroll::-webkit-scrollbar { display: none; }
+.shorts-slide {
+  position: relative; height: 100%; width: 100%; scroll-snap-align: start; scroll-snap-stop: always;
+  background: #000; overflow: hidden; display: flex; align-items: center; justify-content: center;
+}
+.shorts-slide iframe {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 100%; height: 100%; min-height: 100vh; min-width: 177.78vh; border: none; pointer-events: none;
+}
+.shorts-slide-poster {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(18px) brightness(.5);
+  transform: scale(1.1);
+}
+.shorts-right-rail {
+  position: absolute; right: 10px; bottom: 110px; z-index: 5;
+  display: flex; flex-direction: column; align-items: center; gap: 20px;
+}
+.shorts-rail-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  color: #fff; font-family: 'DM Sans', sans-serif; font-size: .62rem; font-weight: 700;
+  text-shadow: 0 1px 6px rgba(0,0,0,.6);
+}
+.shorts-rail-btn svg { filter: drop-shadow(0 1px 6px rgba(0,0,0,.6)); }
+.shorts-thumb-btn img {
+  width: 42px; height: 42px; object-fit: cover; border-radius: 9px;
+  border: 1.5px solid rgba(255,255,255,.7);
+}
+.shorts-rail-btn.liked svg { fill: #ff3b5c; stroke: #ff3b5c; }
+.shorts-rail-btn.bookmarked svg { fill: #c8a84b; stroke: #c8a84b; }
+.shorts-bottom-info {
+  position: absolute; left: 14px; right: 74px; bottom: 26px; z-index: 5;
+  color: #fff; font-family: 'DM Sans', sans-serif;
+}
+.shorts-bottom-title {
+  font-size: .88rem; font-weight: 700; line-height: 1.3; margin-bottom: 4px;
+  text-shadow: 0 1px 8px rgba(0,0,0,.7);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.shorts-bottom-meta {
+  font-size: .68rem; color: rgba(255,255,255,.75); text-shadow: 0 1px 8px rgba(0,0,0,.7);
+}
+.shorts-loading-hint {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,.4); font-family: 'DM Sans', sans-serif; font-size: .75rem;
+}
+</style>
+
+<div id="shorts-overlay">
+  <button id="shorts-back-btn" onclick="closeShorts()" aria-label="Back to Hub">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <div id="shorts-scroll"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// ── SHORTS FEED ──
+// ═══════════════════════════════════════════════════════════════════
+let _shortsPool = [];
+let _shortsRenderIndex = 0;
+let _shortsClipCache = {};   // videoId -> { clip_start, duration }
+let _shortsObserver = null;
+let _shortsActiveId = null;
+const SHORTS_BATCH_SIZE = 5;
+const SHORTS_CLIP_LEN = 10; // seconds
+
+function _shortsShuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function _shortsEligibleVideos() {
+  const seen = new Set();
+  return videos.filter(v => {
+    if (!v.url || getPlatform(v.url) === 'twitch') return false;
+    const id = extractId(v.url);
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+async function openShorts() {
+  const overlay = document.getElementById('shorts-overlay');
+  const scroll = document.getElementById('shorts-scroll');
+  if (!_shortsPool.length) {
+    _shortsPool = _shortsShuffle(_shortsEligibleVideos());
+  }
+  scroll.innerHTML = '';
+  _shortsRenderIndex = 0;
+  overlay.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+  history.pushState({ shortsOpen: true }, '', window.location.pathname + '?shorts=1');
+  if (!_shortsObserver) _shortsInitObserver();
+  await _shortsRenderNextBatch();
+  scroll.scrollTop = 0;
+  scroll.onscroll = _shortsHandleScroll;
+}
+
+function closeShorts(fromPopState) {
+  const overlay = document.getElementById('shorts-overlay');
+  overlay.style.display = 'none';
+  document.body.style.overflow = '';
+  if (!fromPopState) history.replaceState(null, '', window.location.pathname);
+  // Stop all playback
+  document.querySelectorAll('#shorts-scroll iframe').forEach(f => f.src = '');
+  _shortsActiveId = null;
+}
+
+window.addEventListener('popstate', function(e) {
+  const overlay = document.getElementById('shorts-overlay');
+  if (overlay && overlay.style.display === 'block') {
+    closeShorts(true);
+  }
+});
+
+function _shortsHandleScroll(e) {
+  const el = e.target;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - (window.innerHeight * 2)) {
+    _shortsRenderNextBatch();
+  }
+}
+
+async function _shortsRenderNextBatch() {
+  const scroll = document.getElementById('shorts-scroll');
+  const batch = _shortsPool.slice(_shortsRenderIndex, _shortsRenderIndex + SHORTS_BATCH_SIZE);
+  if (!batch.length) return;
+  _shortsRenderIndex += batch.length;
+
+  // Fetch existing clip_start rows for this batch in one call
+  const ids = batch.map(v => extractId(v.url)).filter(Boolean);
+  try {
+    const rows = await sbGet('video_shorts', `video_id=in.(${ids.map(encodeURIComponent).join(',')})`);
+    rows.forEach(r => { _shortsClipCache[r.video_id] = { clip_start: r.clip_start, duration: r.duration }; });
+  } catch(e) {}
+
+  batch.forEach(v => {
+    const slide = _shortsBuildSlide(v);
+    scroll.appendChild(slide);
+    _shortsObserver.observe(slide);
+  });
+}
+
+function _shortsBuildSlide(v) {
+  const id = extractId(v.url);
+  const thumb = v.thumb || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+  const slide = document.createElement('div');
+  slide.className = 'shorts-slide';
+  slide.dataset.videoId = id;
+  slide._video = v;
+
+  const poster = document.createElement('img');
+  poster.className = 'shorts-slide-poster';
+  poster.src = thumb;
+  poster.loading = 'lazy';
+  slide.appendChild(poster);
+
+  const hint = document.createElement('div');
+  hint.className = 'shorts-loading-hint';
+  hint.textContent = '';
+  slide.appendChild(hint);
+
+  // Right rail
+  const rail = document.createElement('div');
+  rail.className = 'shorts-right-rail';
+  rail.innerHTML = `
+    <button class="shorts-rail-btn shorts-thumb-btn" title="Open video" onclick="shortsGoToVideo(this)">
+      <img src="${thumb}" alt="">
+    </button>
+    <button class="shorts-rail-btn shorts-heart-btn" title="Like" onclick="toggleShortLike(this)">
+      <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      <span class="shorts-heart-count">0</span>
+    </button>
+    <button class="shorts-rail-btn shorts-comment-btn" title="Comments" onclick="shortsOpenComments(this)">
+      <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+    </button>
+    <button class="shorts-rail-btn shorts-bookmark-btn" title="Bookmark" onclick="toggleShortBookmark(this)">
+      <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+    </button>
+  `;
+  slide.appendChild(rail);
+
+  // Bottom info
+  const info = document.createElement('div');
+  info.className = 'shorts-bottom-info';
+  info.innerHTML = `
+    <div class="shorts-bottom-title">${(v.show || '').replace(/</g,'&lt;')}</div>
+    <div class="shorts-bottom-meta">${(v.efed || '').replace(/</g,'&lt;')}${v.date ? '  ·  ' + v.date : ''}</div>
+  `;
+  slide.appendChild(info);
+
+  // Prime like count (non-blocking)
+  _shortsLoadLikeState(slide);
+
+  return slide;
+}
+
+async function _shortsLoadLikeState(slide) {
+  try {
+    const id = slide.dataset.videoId;
+    const rows = await sbGet('likes', `video_id=eq.${encodeURIComponent(id)}`);
+    const countEl = slide.querySelector('.shorts-heart-count');
+    if (countEl) countEl.textContent = rows.length;
+    const session = getSession();
+    if (session && rows.some(r => r.username === session.username)) {
+      slide.querySelector('.shorts-heart-btn').classList.add('liked');
+    }
+    const bmRows = await sbGet('bookmarks', `video_id=eq.${encodeURIComponent(id)}&username=eq.${encodeURIComponent(session ? session.username : '')}`);
+    if (session && bmRows.length) {
+      slide.querySelector('.shorts-bookmark-btn').classList.add('bookmarked');
+    }
+  } catch(e) {}
+}
+
+function _shortsInitObserver() {
+  _shortsObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      const slide = entry.target;
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+        _shortsActivateSlide(slide);
+      } else {
+        _shortsDeactivateSlide(slide);
+      }
+    });
+  }, { threshold: [0, 0.6] });
+}
+
+async function _shortsActivateSlide(slide) {
+  const id = slide.dataset.videoId;
+  if (_shortsActiveId === id) return;
+  _shortsActiveId = id;
+  let clip = _shortsClipCache[id];
+  if (!clip) {
+    clip = await _shortsComputeClip(id);
+  }
+  if (slide.dataset.videoId !== _shortsActiveId) return; // scrolled away while awaiting
+  let iframe = slide.querySelector('iframe');
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.allow = 'autoplay; encrypted-media; picture-in-picture';
+    iframe.allowFullscreen = false;
+    slide.insertBefore(iframe, slide.querySelector('.shorts-right-rail'));
+  }
+  const start = clip.clip_start;
+  const end = start + SHORTS_CLIP_LEN;
+  iframe.src = `https://www.youtube.com/embed/${id}?autoplay=1&mute=1&start=${start}&end=${end}&controls=0&modestbranding=1&rel=0&playsinline=1&disablekb=1&iv_load_policy=3`;
+}
+
+function _shortsDeactivateSlide(slide) {
+  if (_shortsActiveId === slide.dataset.videoId) _shortsActiveId = null;
+  const iframe = slide.querySelector('iframe');
+  if (iframe) iframe.src = '';
+}
+
+async function _shortsComputeClip(id) {
+  // Fallback default in case duration lookup fails
+  let clip = { clip_start: 15, duration: 0 };
+  try {
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${id}&key=${YT_API_KEY}`);
+    const data = await res.json();
+    const iso = data?.items?.[0]?.contentDetails?.duration;
+    if (iso) {
+      const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+      const h = parseInt(m?.[1]||0), mn = parseInt(m?.[2]||0), s = parseInt(m?.[3]||0);
+      const totalSec = h*3600 + mn*60 + s;
+      if (totalSec > SHORTS_CLIP_LEN + 10) {
+        const maxStart = Math.max(10, totalSec - SHORTS_CLIP_LEN - 5);
+        clip = { clip_start: Math.floor(Math.random() * (maxStart - 10)) + 10, duration: totalSec };
+      } else {
+        clip = { clip_start: 0, duration: totalSec };
+      }
+    }
+  } catch(e) {}
+  _shortsClipCache[id] = clip;
+  // Persist so it's fixed going forward (best-effort, ignore failures/races)
+  sbInsert('video_shorts', { video_id: id, clip_start: clip.clip_start, duration: clip.duration, created_at: Date.now() }).catch(() => {});
+  return clip;
+}
+
+function shortsGoToVideo(btn) {
+  const slide = btn.closest('.shorts-slide');
+  const v = slide._video;
+  closeShorts();
+  if (typeof openExpand === 'function') openExpand(v);
+}
+
+function shortsOpenComments(btn) {
+  const slide = btn.closest('.shorts-slide');
+  const v = slide._video;
+  closeShorts();
+  if (typeof openExpand === 'function') {
+    openExpand(v);
+    setTimeout(() => {
+      const sec = document.getElementById('expand-comments-section');
+      if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 400);
+  }
+}
+
+async function toggleShortLike(btn) {
+  const session = getSession();
+  if (!session) { alert('Sign in to like shows.'); return; }
+  const slide = btn.closest('.shorts-slide');
+  const id = slide.dataset.videoId;
+  const v = slide._video;
+  const countEl = btn.querySelector('.shorts-heart-count');
+  const isLiked = btn.classList.contains('liked');
+  try {
+    if (isLiked) {
+      await sbDelete('likes', `video_id=eq.${encodeURIComponent(id)}&username=eq.${encodeURIComponent(session.username)}`);
+      btn.classList.remove('liked');
+      countEl.textContent = Math.max(0, parseInt(countEl.textContent) - 1);
+    } else {
+      await sbInsert('likes', { video_url: v.url, video_id: id, username: session.username, liked_at: Date.now() });
+      btn.classList.add('liked');
+      countEl.textContent = parseInt(countEl.textContent) + 1;
+      const vidOwner = v.submittedBy;
+      if (vidOwner && vidOwner !== session.username && typeof sendNotification === 'function') {
+        sendNotification(vidOwner, 'like', `❤️ @${session.username} liked your show "${v.show || ''}"`, v.url).catch(() => {});
+      }
+    }
+  } catch(e) { console.warn('Short like failed', e); }
+}
+
+async function toggleShortBookmark(btn) {
+  const session = getSession();
+  if (!session) { alert('Sign in to bookmark shows.'); return; }
+  const slide = btn.closest('.shorts-slide');
+  const id = slide.dataset.videoId;
+  const v = slide._video;
+  const isBookmarked = btn.classList.contains('bookmarked');
+  try {
+    if (isBookmarked) {
+      await sbDelete('bookmarks', `video_id=eq.${encodeURIComponent(id)}&username=eq.${encodeURIComponent(session.username)}`);
+      btn.classList.remove('bookmarked');
+    } else {
+      await sbInsert('bookmarks', { video_url: v.url, video_id: id, username: session.username, saved_at: Date.now() });
+      btn.classList.add('bookmarked');
+    }
+  } catch(e) { console.warn('Short bookmark failed', e); }
 }
 </script>
 </body>
