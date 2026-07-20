@@ -4954,14 +4954,21 @@ function a2hsDismiss(){
       .shorts-admin-time-unit { font-size: .58rem; color: rgba(255,255,255,.4); text-align: center; display: block; margin-top: 2px; }
       .shorts-admin-time-col { display: flex; flex-direction: column; align-items: center; }
       #shorts-admin-runtime { font-size: .68rem; color: rgba(255,255,255,.45); }
-      #shorts-admin-send-btn, #shorts-admin-remove-btn {
+      #shorts-admin-caption-wrap { width: 100%; display: flex; flex-direction: column; gap: 4px; }
+      #shorts-admin-caption {
+        width: 100%; padding: 8px 11px; border-radius: 8px; border: 1px solid rgba(255,255,255,.15);
+        background: rgba(255,255,255,.05); color: #fff; font-size: .78rem;
+        font-family: 'DM Sans', sans-serif; box-sizing: border-box;
+      }
+      #shorts-admin-caption::placeholder { color: rgba(255,255,255,.35); }
+      #shorts-admin-send-btn, #shorts-admin-remove-btn, #shorts-admin-view-btn {
         padding: 8px 16px; border-radius: 20px; border: none; font-size: .72rem; font-weight: 700;
         cursor: pointer; font-family: 'DM Sans', sans-serif;
       }
       #shorts-admin-send-btn { background: #c0000e; color: #fff; }
       #shorts-admin-send-btn.in-pool { background: #2e8b57; }
       #shorts-admin-remove-btn { background: rgba(255,255,255,.08); color: rgba(255,255,255,.75); }
-      #shorts-admin-view-btn { background: rgba(255,255,255,.08); color: #fff; border: 1px solid rgba(255,255,255,.2); }
+      #shorts-admin-view-btn { background: #2e8b57; color: #fff; }
       #shorts-admin-status { width: 100%; font-size: .68rem; color: rgba(255,255,255,.5); }
     </style>
     <div id="expand-shorts-admin" style="display:none;">
@@ -4985,9 +4992,13 @@ function a2hsDismiss(){
           </div>
         </div>
         <span id="shorts-admin-runtime">runs 20s in Shorts</span>
+        <div id="shorts-admin-caption-wrap">
+          <label for="shorts-admin-caption">Caption (shown at the bottom of the clip)</label>
+          <input type="text" id="shorts-admin-caption" placeholder="e.g. He didn't see that coming 😳" maxlength="200">
+        </div>
         <button id="shorts-admin-send-btn" onclick="shortsAdminSendToPool()">Send to Pool</button>
-        <button id="shorts-admin-remove-btn" onclick="shortsAdminRemoveFromPool()" style="display:none;">Remove from Pool</button>
         <button id="shorts-admin-view-btn" onclick="shortsAdminViewInFeed()" style="display:none;">▶ View in Shorts</button>
+        <button id="shorts-admin-remove-btn" onclick="shortsAdminRemoveFromPool()" style="display:none;">Remove from Pool</button>
         <div id="shorts-admin-status"></div>
       </div>
     </div>
@@ -18538,6 +18549,12 @@ async function mr_submit_fn(){
   text-shadow: 0 1px 8px rgba(0,0,0,.7);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+.shorts-bottom-caption {
+  font-size: .78rem; font-weight: 400; line-height: 1.35; margin-bottom: 6px;
+  color: rgba(255,255,255,.92); text-shadow: 0 1px 8px rgba(0,0,0,.7);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  white-space: pre-line;
+}
 .shorts-bottom-meta {
   font-size: .68rem; color: rgba(255,255,255,.75); text-shadow: 0 1px 8px rgba(0,0,0,.7);
 }
@@ -18658,8 +18675,10 @@ async function _shortsAdminLoadForVideo(v) {
   const removeBtn = document.getElementById('shorts-admin-remove-btn');
   const viewBtn = document.getElementById('shorts-admin-view-btn');
   const status = document.getElementById('shorts-admin-status');
+  const captionEl = document.getElementById('shorts-admin-caption');
   if (!document.getElementById('shorts-admin-h') || !sendBtn) return;
   _shortsClearTimeBoxes();
+  if (captionEl) captionEl.value = '';
   sendBtn.textContent = 'Send to Pool';
   sendBtn.classList.remove('in-pool');
   if (removeBtn) removeBtn.style.display = 'none';
@@ -18672,6 +18691,7 @@ async function _shortsAdminLoadForVideo(v) {
     if (rows && rows.length) {
       const row = rows[0];
       _shortsSecToTimeBoxes(row.clip_start);
+      if (captionEl) captionEl.value = row.caption || '';
       sendBtn.textContent = '✓ In Pool — Update';
       sendBtn.classList.add('in-pool');
       if (removeBtn) removeBtn.style.display = 'inline-block';
@@ -18693,6 +18713,7 @@ async function shortsAdminSendToPool() {
   const hEl = document.getElementById('shorts-admin-h');
   const mEl = document.getElementById('shorts-admin-m');
   const sEl = document.getElementById('shorts-admin-s');
+  const captionEl = document.getElementById('shorts-admin-caption');
   if (!id || !hEl || !sendBtn) return;
   const sec = _shortsTimeBoxesToSec();
   if (sec === null) {
@@ -18702,6 +18723,7 @@ async function shortsAdminSendToPool() {
   }
   [hEl, mEl, sEl].forEach(el => { if (el) el.style.borderColor = ''; });
   const clockLabel = _shortsSecToClock(sec);
+  const caption = captionEl ? captionEl.value.trim() : '';
   const session = getSession();
   const origLabel = sendBtn.textContent;
   sendBtn.disabled = true;
@@ -18710,7 +18732,7 @@ async function shortsAdminSendToPool() {
     const existing = await sbGet('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
     const payload = {
       video_id: id, video_url: v.url, clip_start: sec, clip_len: SHORTS_ADMIN_CLIP_LEN,
-      added_by: session ? session.username : ADMIN_USERNAME, added_at: Date.now()
+      caption: caption, added_by: session ? session.username : ADMIN_USERNAME, added_at: Date.now()
     };
     if (existing && existing.length) {
       await sbUpdate('shorts_pool', payload, `video_id=eq.${encodeURIComponent(id)}`);
@@ -18741,11 +18763,13 @@ async function shortsAdminRemoveFromPool() {
   const removeBtn = document.getElementById('shorts-admin-remove-btn');
   const viewBtn = document.getElementById('shorts-admin-view-btn');
   const status = document.getElementById('shorts-admin-status');
+  const captionEl = document.getElementById('shorts-admin-caption');
   try {
     await sbDelete('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
     if (sendBtn) { sendBtn.textContent = 'Send to Pool'; sendBtn.classList.remove('in-pool'); }
     if (removeBtn) removeBtn.style.display = 'none';
     if (viewBtn) viewBtn.style.display = 'none';
+    if (captionEl) captionEl.value = '';
     _shortsClearTimeBoxes();
     if (status) status.textContent = 'Removed from the Shorts pool.';
   } catch(e) {
@@ -18801,7 +18825,8 @@ async function _shortsEligibleVideos() {
     if (!v) return; // pool references a video no longer in the feed — skip
     out.push(Object.assign({}, v, {
       _shortsClipStart: row.clip_start,
-      _shortsClipLen: row.clip_len || SHORTS_CLIP_LEN
+      _shortsClipLen: row.clip_len || SHORTS_CLIP_LEN,
+      _shortsCaption: row.caption || ''
     }));
   });
   return out;
@@ -18964,6 +18989,7 @@ function _shortsBuildSlide(v) {
   info.className = 'shorts-bottom-info';
   info.innerHTML = `
     <div class="shorts-bottom-title">${(v.show || '').replace(/</g,'&lt;')}</div>
+    ${v._shortsCaption ? `<div class="shorts-bottom-caption">${v._shortsCaption.replace(/</g,'&lt;')}</div>` : ''}
     <div class="shorts-bottom-meta">${(v.efed || '').replace(/</g,'&lt;')}${v.date ? '  ·  ' + v.date : ''}</div>
   `;
   slide.appendChild(info);
