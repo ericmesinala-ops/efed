@@ -4933,6 +4933,42 @@ function a2hsDismiss(){
     </div>
 
 
+    <!-- ── SHORTS ADMIN: PICK CLIP START + POOL MEMBERSHIP (admin-only) ── -->
+    <style>
+      #expand-shorts-admin {
+        margin: 18px 0 24px; padding: 14px 16px; border-radius: 10px;
+        background: rgba(192,0,14,.06); border: 1px solid rgba(192,0,14,.25);
+      }
+      #expand-shorts-admin .expand-comments-title { color: #c0000e; }
+      #shorts-admin-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-family: 'DM Sans', sans-serif; }
+      #shorts-admin-panel label { font-size: .72rem; color: rgba(255,255,255,.6); }
+      #shorts-admin-start {
+        width: 70px; padding: 7px 9px; border-radius: 6px; border: 1px solid rgba(255,255,255,.15);
+        background: rgba(255,255,255,.05); color: #fff; font-size: .8rem; text-align: center;
+        font-family: 'DM Sans', sans-serif;
+      }
+      #shorts-admin-runtime { font-size: .68rem; color: rgba(255,255,255,.45); }
+      #shorts-admin-send-btn, #shorts-admin-remove-btn {
+        padding: 8px 16px; border-radius: 20px; border: none; font-size: .72rem; font-weight: 700;
+        cursor: pointer; font-family: 'DM Sans', sans-serif;
+      }
+      #shorts-admin-send-btn { background: #c0000e; color: #fff; }
+      #shorts-admin-send-btn.in-pool { background: #2e8b57; }
+      #shorts-admin-remove-btn { background: rgba(255,255,255,.08); color: rgba(255,255,255,.75); }
+      #shorts-admin-status { width: 100%; font-size: .68rem; color: rgba(255,255,255,.5); }
+    </style>
+    <div id="expand-shorts-admin" style="display:none;">
+      <div class="expand-comments-title" style="margin-bottom:10px;">🔒 Shorts Admin</div>
+      <div id="shorts-admin-panel">
+        <label for="shorts-admin-start">Clip start (mm:ss)</label>
+        <input type="text" id="shorts-admin-start" placeholder="00:00" maxlength="5" inputmode="numeric">
+        <span id="shorts-admin-runtime">runs 25s in Shorts</span>
+        <button id="shorts-admin-send-btn" onclick="shortsAdminSendToPool()">Send to Pool</button>
+        <button id="shorts-admin-remove-btn" onclick="shortsAdminRemoveFromPool()" style="display:none;">Remove from Pool</button>
+        <div id="shorts-admin-status"></div>
+      </div>
+    </div>
+
     <!-- ── TAGS DISPLAY ── -->
     <div id="expand-tags-section" style="display:none;">
       <div class="expand-comments-title" style="margin-bottom:10px;">Tags</div>
@@ -11439,6 +11475,11 @@ function openExpand(v) {
   const editDateBtn = document.getElementById('expand-edit-date-btn');
   const flagBtn = document.getElementById('expand-flag-btn');
   const tagBtn = document.getElementById('expand-tag-btn');
+  const shortsAdminBox = document.getElementById('expand-shorts-admin');
+  if (shortsAdminBox) {
+    shortsAdminBox.style.display = isAdmin ? 'block' : 'none';
+    if (isAdmin && typeof _shortsAdminLoadForVideo === 'function') _shortsAdminLoadForVideo(v);
+  }
   if (editDateBtn) editDateBtn.style.display = (isAdmin || isOwner) ? 'flex' : 'none';
   if (delBtn) delBtn.style.display = (isAdmin || isOwner) ? 'flex' : 'none';
   if (flagBtn) flagBtn.style.display = (isAdmin || isOwner) ? 'none' : 'flex';
@@ -18517,6 +18558,124 @@ function _shortsRunWhenYTReady(fn) {
 </script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
+// ── SHORTS ADMIN: pick clip start + manage pool membership ──
+// Restricted to ADMIN_USERNAME; a curated 'shorts_pool' table (video_id,
+// video_url, clip_start, clip_len, added_by, added_at) is the only source
+// of videos shown in the Shorts feed — see _shortsEligibleVideos below.
+// ═══════════════════════════════════════════════════════════════════
+const SHORTS_ADMIN_CLIP_LEN = 25; // fixed length for admin-picked clips
+
+function _shortsSecToClock(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+function _shortsClockToSec(str) {
+  const m = (str || '').trim().match(/^(\d{1,2}):([0-5]\d)$/);
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
+function _shortsIsAdmin() {
+  const session = getSession();
+  return !!(session && session.username && session.username.toLowerCase() === ADMIN_USERNAME);
+}
+
+async function _shortsAdminLoadForVideo(v) {
+  const input = document.getElementById('shorts-admin-start');
+  const sendBtn = document.getElementById('shorts-admin-send-btn');
+  const removeBtn = document.getElementById('shorts-admin-remove-btn');
+  const status = document.getElementById('shorts-admin-status');
+  if (!input || !sendBtn) return;
+  input.value = '';
+  input.style.borderColor = '';
+  sendBtn.textContent = 'Send to Pool';
+  sendBtn.classList.remove('in-pool');
+  if (removeBtn) removeBtn.style.display = 'none';
+  if (status) status.textContent = '';
+  const id = extractId(v.url);
+  if (!id) return;
+  try {
+    const rows = await sbGet('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
+    if (rows && rows.length) {
+      const row = rows[0];
+      input.value = _shortsSecToClock(row.clip_start);
+      sendBtn.textContent = '✓ In Pool — Update';
+      sendBtn.classList.add('in-pool');
+      if (removeBtn) removeBtn.style.display = 'inline-block';
+      if (status) status.textContent = 'Currently in the Shorts pool.';
+    }
+  } catch(e) {}
+}
+
+async function shortsAdminSendToPool() {
+  if (!_shortsIsAdmin()) return;
+  const v = _expandVideo;
+  if (!v) return;
+  const id = extractId(v.url);
+  const input = document.getElementById('shorts-admin-start');
+  const sendBtn = document.getElementById('shorts-admin-send-btn');
+  const removeBtn = document.getElementById('shorts-admin-remove-btn');
+  const status = document.getElementById('shorts-admin-status');
+  if (!id || !input || !sendBtn) return;
+  const sec = _shortsClockToSec(input.value);
+  if (sec === null) {
+    input.style.borderColor = '#c0000e';
+    if (status) status.textContent = 'Enter a valid time as mm:ss, e.g. 01:23';
+    return;
+  }
+  input.style.borderColor = '';
+  const session = getSession();
+  const origLabel = sendBtn.textContent;
+  sendBtn.disabled = true;
+  sendBtn.textContent = 'Saving…';
+  try {
+    const existing = await sbGet('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
+    const payload = {
+      video_id: id, video_url: v.url, clip_start: sec, clip_len: SHORTS_ADMIN_CLIP_LEN,
+      added_by: session ? session.username : ADMIN_USERNAME, added_at: Date.now()
+    };
+    if (existing && existing.length) {
+      await sbUpdate('shorts_pool', payload, `video_id=eq.${encodeURIComponent(id)}`);
+    } else {
+      await sbInsert('shorts_pool', payload);
+    }
+    sendBtn.textContent = '✓ In Pool — Update';
+    sendBtn.classList.add('in-pool');
+    if (removeBtn) removeBtn.style.display = 'inline-block';
+    if (status) status.textContent = `Saved — starts at ${input.value}, runs ${SHORTS_ADMIN_CLIP_LEN}s in Shorts.`;
+  } catch(e) {
+    sendBtn.textContent = origLabel;
+    if (status) status.textContent = 'Failed to save — try again.';
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
+async function shortsAdminRemoveFromPool() {
+  if (!_shortsIsAdmin()) return;
+  const v = _expandVideo;
+  if (!v) return;
+  const id = extractId(v.url);
+  if (!id) return;
+  const sendBtn = document.getElementById('shorts-admin-send-btn');
+  const removeBtn = document.getElementById('shorts-admin-remove-btn');
+  const status = document.getElementById('shorts-admin-status');
+  const input = document.getElementById('shorts-admin-start');
+  try {
+    await sbDelete('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
+    if (sendBtn) { sendBtn.textContent = 'Send to Pool'; sendBtn.classList.remove('in-pool'); }
+    if (removeBtn) removeBtn.style.display = 'none';
+    if (input) input.value = '';
+    if (status) status.textContent = 'Removed from the Shorts pool.';
+  } catch(e) {
+    if (status) status.textContent = 'Failed to remove — try again.';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // ── SHORTS FEED ──
 // ═══════════════════════════════════════════════════════════════════
 let _shortsPool = [];
@@ -18537,23 +18696,34 @@ function _shortsShuffle(arr) {
   return a;
 }
 
-function _shortsEligibleVideos() {
-  const seen = new Set();
-  return videos.filter(v => {
-    if (!v.url || getPlatform(v.url) === 'twitch') return false;
+async function _shortsEligibleVideos() {
+  let poolRows = [];
+  try {
+    poolRows = await sbGet('shorts_pool', 'order=added_at.desc');
+  } catch(e) { poolRows = []; }
+  const videoById = {};
+  videos.forEach(v => {
+    if (!v.url || getPlatform(v.url) === 'twitch') return;
     const id = extractId(v.url);
-    if (!id || seen.has(id)) return false;
-    seen.add(id);
-    return true;
+    if (id && !videoById[id]) videoById[id] = v;
   });
+  const out = [];
+  poolRows.forEach(row => {
+    const v = videoById[row.video_id];
+    if (!v) return; // pool references a video no longer in the feed — skip
+    out.push(Object.assign({}, v, {
+      _shortsClipStart: row.clip_start,
+      _shortsClipLen: row.clip_len || SHORTS_CLIP_LEN
+    }));
+  });
+  return out;
 }
 
 async function openShorts() {
   const overlay = document.getElementById('shorts-overlay');
   const scroll = document.getElementById('shorts-scroll');
-  if (!_shortsPool.length) {
-    _shortsPool = _shortsShuffle(_shortsEligibleVideos());
-  }
+  // Always refetch fresh — an admin may have just added/changed a pool entry.
+  _shortsPool = _shortsShuffle(await _shortsEligibleVideos());
   scroll.innerHTML = '';
   _shortsRenderIndex = 0;
   overlay.style.display = 'block';
@@ -18561,6 +18731,9 @@ async function openShorts() {
   history.pushState({ shortsOpen: true }, '', window.location.pathname + '?shorts=1');
   if (!_shortsObserver) _shortsInitObserver();
   await _shortsRenderNextBatch();
+  if (!scroll.children.length) {
+    scroll.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.5);font-family:\'DM Sans\',sans-serif;font-size:.85rem;text-align:center;padding:40px;">No videos in the Shorts pool yet.</div>';
+  }
   scroll.scrollTop = 0;
   scroll.onscroll = _shortsHandleScroll;
 }
@@ -18649,6 +18822,8 @@ function _shortsBuildSlide(v) {
   const slide = document.createElement('div');
   slide.className = 'shorts-slide';
   slide.dataset.videoId = id;
+  slide.dataset.clipStart = (v._shortsClipStart != null ? v._shortsClipStart : SHORTS_CLIP_START);
+  slide.dataset.clipLen = (v._shortsClipLen != null ? v._shortsClipLen : SHORTS_CLIP_LEN);
   slide._video = v;
 
   const poster = document.createElement('img');
@@ -18749,6 +18924,10 @@ function _shortsActivateSlide(slide) {
   // Every time a new video comes into view, force it (and the UI) back to muted.
   _shortsMuted = true;
   document.querySelectorAll('.shorts-mute-btn').forEach(btn => { btn.innerHTML = _shortsMutedIconSvg(); });
+  const parsedStart = parseInt(slide.dataset.clipStart, 10);
+  const parsedLen = parseInt(slide.dataset.clipLen, 10);
+  const clipStart = Number.isFinite(parsedStart) ? parsedStart : SHORTS_CLIP_START;
+  const clipLen = Number.isFinite(parsedLen) && parsedLen > 0 ? parsedLen : SHORTS_CLIP_LEN;
   _shortsRunWhenYTReady(() => {
     if (_shortsActiveId !== id) return; // scrolled away while API was loading
     let mount = slide.querySelector('.shorts-player-mount');
@@ -18759,7 +18938,7 @@ function _shortsActivateSlide(slide) {
     }
     const player = new YT.Player(mount, {
       playerVars: {
-        autoplay: 1, mute: 1, start: SHORTS_CLIP_START, end: SHORTS_CLIP_START + SHORTS_CLIP_LEN,
+        autoplay: 1, mute: 1, start: clipStart, end: clipStart + clipLen,
         controls: 0, modestbranding: 1, rel: 0, playsinline: 1, disablekb: 1,
         iv_load_policy: 3, cc_load_policy: 0, origin: window.location.origin
       },
@@ -18771,7 +18950,7 @@ function _shortsActivateSlide(slide) {
           e.target.mute();
           try { e.target.unloadModule('captions'); } catch(err) {}
           try { e.target.unloadModule('cc'); } catch(err) {}
-          _shortsStartProgressLoop(slide, id, e.target);
+          _shortsStartProgressLoop(slide, id, e.target, clipStart, clipLen);
         }
       }
     });
@@ -18780,32 +18959,33 @@ function _shortsActivateSlide(slide) {
 }
 
 // Polls playback position and seeks back to the clip start once it reaches
-// the end of the 15s window — looping the clip without ever reloading the
+// the end of the clip's window — looping the clip without ever reloading the
 // iframe (which is what caused the stutter/autoplay-block before).
-function _shortsStartProgressLoop(slide, id, player) {
+function _shortsStartProgressLoop(slide, id, player, clipStart, clipLen) {
   _shortsClearClipLoop(slide);
-  _shortsRestartProgressBar(slide);
+  _shortsRestartProgressBar(slide, clipLen);
   slide._shortsLoopInterval = setInterval(() => {
     if (_shortsActiveId !== id) { _shortsClearClipLoop(slide); return; }
     let t;
     try { t = player.getCurrentTime(); } catch(e) { return; }
-    if (t >= SHORTS_CLIP_START + SHORTS_CLIP_LEN - 0.2) {
-      player.seekTo(SHORTS_CLIP_START, true);
-      _shortsRestartProgressBar(slide);
+    if (t >= clipStart + clipLen - 0.2) {
+      player.seekTo(clipStart, true);
+      _shortsRestartProgressBar(slide, clipLen);
     }
   }, 200);
 }
 
-function _shortsRestartProgressBar(slide) {
+function _shortsRestartProgressBar(slide, clipLen) {
   const fill = slide.querySelector('.shorts-progress-fill');
   if (!fill) return;
+  const len = clipLen || SHORTS_CLIP_LEN;
   fill.classList.remove('running');
   fill.style.animation = 'none';
   fill.style.width = '0%';
   // Force reflow so the animation restarts cleanly every loop.
   void fill.offsetWidth;
   fill.style.animation = '';
-  fill.style.animationDuration = SHORTS_CLIP_LEN + 's';
+  fill.style.animationDuration = len + 's';
   fill.classList.add('running');
 }
 
