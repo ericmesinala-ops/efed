@@ -4994,7 +4994,22 @@ function a2hsDismiss(){
         <span id="shorts-admin-runtime">runs 20s in Shorts</span>
         <div id="shorts-admin-caption-wrap">
           <label for="shorts-admin-caption">Caption (shown at the bottom of the clip)</label>
-          <input type="text" id="shorts-admin-caption" placeholder="e.g. He didn't see that coming 😳" maxlength="200">
+          <!-- Stamp picker popup -->
+          <div id="shorts-admin-stamp-picker" class="stamp-picker-popup" style="bottom:auto;top:auto;left:0;right:0;position:relative;margin-bottom:2px;">
+            <div class="stamp-picker-efed-label" id="shorts-admin-stamp-label">Official Stamps</div>
+            <div class="stamp-picker-grid" id="shorts-admin-stamp-grid"></div>
+            <div class="stamp-picker-divider"></div>
+            <div class="stamp-picker-special-row">
+              <div class="stamp-picker-special-label">Your Special Stamp</div>
+              <div class="stamp-picker-special-wrap" id="shorts-admin-stamp-special"></div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button id="shorts-admin-stamp-btn" class="stamp-btn" type="button" onclick="toggleShortsAdminStampPicker()" title="Stamps">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M7 14V10a5 5 0 0 1 10 0v4"/><circle cx="12" cy="17" r="1.2" fill="currentColor" stroke="none"/></svg>
+            </button>
+            <input type="text" id="shorts-admin-caption" placeholder="e.g. He didn't see that coming 😳" maxlength="200" style="flex:1;">
+          </div>
         </div>
         <button id="shorts-admin-send-btn" onclick="shortsAdminSendToPool()">Send to Pool</button>
         <button id="shorts-admin-view-btn" onclick="shortsAdminViewInFeed()" style="display:none;">▶ View in Shorts</button>
@@ -16040,6 +16055,90 @@ let _expandStampOpen = false;
 let _expandGifOpen = false;
 let _expandGifTimer = null;
 
+// ── SHORTS ADMIN CAPTION STAMP PICKER ──
+let _shortsAdminStampOpen = false;
+function _shortsAdminIsAdmin() {
+  const session = typeof getSession === 'function' ? getSession() : null;
+  return !!(session && typeof ADMIN_ACCOUNTS_IDX !== 'undefined' && ADMIN_ACCOUNTS_IDX.includes((session.username || '').toLowerCase()));
+}
+function toggleShortsAdminStampPicker() {
+  _shortsAdminStampOpen = !_shortsAdminStampOpen;
+  const picker = document.getElementById('shorts-admin-stamp-picker');
+  const btn = document.getElementById('shorts-admin-stamp-btn');
+  if (_shortsAdminStampOpen) {
+    const efedName = _expandVideo?.efed || '';
+    const isAdmin = _shortsAdminIsAdmin();
+    const labelEl = document.getElementById('shorts-admin-stamp-label');
+    const grid = document.getElementById('shorts-admin-stamp-grid');
+    if (grid) {
+      grid.innerHTML = '';
+      let stamps = [];
+      if (isAdmin) {
+        // Admin: unlock every eFed's stamp set, not just this video's eFed
+        const allEfedNames = [...new Set((typeof videos !== 'undefined' ? videos : []).map(v => v.efed).filter(Boolean))];
+        const seen = new Set();
+        allEfedNames.forEach(name => {
+          const s = typeof getEfedStamps === 'function' ? getEfedStamps(name) : [];
+          s.forEach(st => { if (!seen.has(st.code)) { seen.add(st.code); stamps.push(st); } });
+        });
+        if (labelEl) labelEl.textContent = 'All Stamps (Admin)';
+      } else {
+        stamps = typeof getEfedStamps === 'function' ? getEfedStamps(efedName) : [];
+        if (labelEl) labelEl.textContent = (efedName || 'eFed') + ' Official Stamps';
+      }
+      stamps.forEach(s => {
+        const b = document.createElement('button');
+        b.className = 'stamp-picker-btn';
+        b.dataset.label = s.label;
+        b.innerHTML = typeof stampImg === 'function' ? stampImg(s.code, 20) : s.code;
+        b.onclick = () => { insertShortsAdminStamp(s.code); closeShortsAdminStampPicker(); };
+        grid.appendChild(b);
+      });
+    }
+    const specialEl = document.getElementById('shorts-admin-stamp-special');
+    if (specialEl) {
+      specialEl.innerHTML = '';
+      const session = typeof getSession === 'function' ? getSession() : null;
+      const userStamp = (typeof getUserStamp === 'function' && session) ? getUserStamp(session.username || '') : null;
+      if (userStamp) {
+        const b = document.createElement('button');
+        b.className = 'stamp-picker-btn stamp-picker-special-glow';
+        b.dataset.label = userStamp.label || 'Special Stamp';
+        b.innerHTML = typeof stampImg === 'function' ? stampImg(userStamp.code, 20) : userStamp.code;
+        b.onclick = () => { insertShortsAdminStamp(userStamp.code); closeShortsAdminStampPicker(); };
+        specialEl.appendChild(b);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'stamp-picker-empty-slot';
+        specialEl.appendChild(empty);
+      }
+    }
+    if (picker) picker.classList.add('open');
+    if (btn) btn.style.color = '#fff';
+    setTimeout(() => document.addEventListener('click', _closeShortsAdminStampOutside, {once:true}), 50);
+  } else {
+    closeShortsAdminStampPicker();
+  }
+}
+function closeShortsAdminStampPicker() {
+  _shortsAdminStampOpen = false;
+  const picker = document.getElementById('shorts-admin-stamp-picker');
+  const btn = document.getElementById('shorts-admin-stamp-btn');
+  if (picker) picker.classList.remove('open');
+  if (btn) btn.style.color = '';
+}
+function _closeShortsAdminStampOutside(e) {
+  const picker = document.getElementById('shorts-admin-stamp-picker');
+  const btn = document.getElementById('shorts-admin-stamp-btn');
+  if (picker && !picker.contains(e.target) && e.target !== btn) closeShortsAdminStampPicker();
+}
+function insertShortsAdminStamp(code) {
+  const input = document.getElementById('shorts-admin-caption');
+  if (!input) return;
+  if (typeof insertStampAtCursor === 'function') insertStampAtCursor(input, code);
+  else input.value += `[stamp:${code}]`;
+}
+
 function toggleExpandStampPicker() {
   _expandStampOpen = !_expandStampOpen;
   const picker = document.getElementById('expand-stamp-picker');
@@ -19050,7 +19149,7 @@ function _shortsBuildSlide(v) {
   info.className = 'shorts-bottom-info';
   info.innerHTML = `
     <div class="shorts-bottom-title">${(v.show || '').replace(/</g,'&lt;')}</div>
-    ${v._shortsCaption ? `<div class="shorts-bottom-caption">${v._shortsCaption.replace(/</g,'&lt;')}</div>` : ''}
+    ${v._shortsCaption ? `<div class="shorts-bottom-caption">${typeof renderStampTokens === 'function' ? renderStampTokens(v._shortsCaption.replace(/</g,'&lt;')) : v._shortsCaption.replace(/</g,'&lt;')}</div>` : ''}
     <div class="shorts-bottom-meta">${(v.efed || '').replace(/</g,'&lt;')}${v.date ? '  ·  ' + v.date : ''}</div>
   `;
   slide.appendChild(info);
