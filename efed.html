@@ -5679,6 +5679,11 @@ html.day-mode .tc-add-btn{border-color:rgba(168,130,10,.3);color:rgba(168,130,10
       <div style="position:relative;">
         <button class="efed-pm-tool-btn" title="Stamps" id="efed-pm-stamp-btn" onclick="efedFeedToggleStamp(event)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M7 14V10a5 5 0 0 1 10 0v4"/><circle cx="12" cy="17" r="1.2" fill="currentColor" stroke="none"/></svg></button>
         <div class="stamp-picker-popup" id="efed-pm-stamp-picker">
+          <div class="stamp-picker-recent-wrap" style="display:none;">
+            <div class="stamp-picker-efed-label">Recently Used</div>
+            <div class="stamp-picker-grid stamp-picker-recent-grid"></div>
+            <div class="stamp-picker-divider"></div>
+          </div>
           <div class="stamp-picker-efed-label" id="efed-pm-stamp-efed-label">Official Stamps</div>
           <div class="stamp-picker-grid" id="efed-pm-stamp-grid"></div>
           <div class="stamp-picker-divider"></div>
@@ -5701,6 +5706,11 @@ html.day-mode .tc-add-btn{border-color:rgba(168,130,10,.3);color:rgba(168,130,10
     <div id="efed-chat-messages"></div>
     <div id="efed-pickers-wrap">
       <div id="efed-stamp-picker" class="stamp-picker-popup" style="position:relative;bottom:auto;left:auto;width:100%;margin-bottom:6px;">
+        <div class="stamp-picker-recent-wrap" style="display:none;">
+          <div class="stamp-picker-efed-label">Recently Used</div>
+          <div class="stamp-picker-grid stamp-picker-recent-grid" style="grid-template-columns:repeat(10,1fr);"></div>
+          <div class="stamp-picker-divider"></div>
+        </div>
         <div class="stamp-picker-efed-label" id="efed-stamp-efed-label">Official Stamps</div>
         <div class="stamp-picker-grid" id="efed-stamp-grid" style="grid-template-columns:repeat(10,1fr);"></div>
         <div class="stamp-picker-divider"></div>
@@ -20198,26 +20208,80 @@ let _efedGifPickerOpen = false;
 let _efedGifSearchTimer = null;
 const EFED_GIPHY_KEY = 'thj9AyFQIpiYQZPscgYAQYZ9maQ4kRFJ';
 
-function efedBuildStampPicker(pickerEl, inputEl) {
+// ── ALL STAMPS (unlocked for everyone) + RECENT STAMPS (max 8, FIFO) ──
+let _allStampsCache = null;
+async function _getAllEfedNamesForStamps() {
+  try {
+    const rows = await sbGetCached('users', 'promo_name=not.is.null&select=promo_name', 60000);
+    return [...new Set(rows.map(r => r.promo_name).filter(Boolean))];
+  } catch (e) { return []; }
+}
+async function getAllStampsMerged() {
+  if (_allStampsCache) return _allStampsCache;
+  const names = await _getAllEfedNamesForStamps();
+  const seen = new Set(); const out = [];
+  names.forEach(name => {
+    const s = typeof getEfedStamps === 'function' ? getEfedStamps(name) : [];
+    s.forEach(st => { if (!seen.has(st.code)) { seen.add(st.code); out.push(st); } });
+  });
+  const gen = typeof getGeneralStamps === 'function' ? getGeneralStamps() : [];
+  gen.forEach(st => { if (!seen.has(st.code)) { seen.add(st.code); out.push(st); } });
+  _allStampsCache = out;
+  return out;
+}
+const RECENT_STAMPS_MAX = 8;
+function _recentStampsKey() {
+  const session = typeof getSession === 'function' ? getSession() : null;
+  return 'recent_stamps_' + (session?.username || 'guest');
+}
+function getRecentStamps() {
+  try { return JSON.parse(localStorage.getItem(_recentStampsKey())) || []; } catch (e) { return []; }
+}
+function addRecentStamp(code) {
+  let list = getRecentStamps().filter(c => c !== code);
+  list.push(code);
+  if (list.length > RECENT_STAMPS_MAX) list = list.slice(list.length - RECENT_STAMPS_MAX); // 9th use evicts the oldest
+  try { localStorage.setItem(_recentStampsKey(), JSON.stringify(list)); } catch (e) {}
+}
+function _renderRecentStampsRow(gridEl, allStamps, onPick) {
+  if (!gridEl) return;
+  gridEl.innerHTML = '';
+  const wrap = gridEl.closest('.stamp-picker-recent-wrap');
+  const codes = getRecentStamps().slice().reverse();
+  if (!codes.length) { if (wrap) wrap.style.display = 'none'; return; }
+  if (wrap) wrap.style.display = '';
+  codes.forEach(code => {
+    const s = allStamps.find(st => st.code === code) || { code, label: code };
+    const b = document.createElement('button');
+    b.className = 'stamp-picker-btn';
+    b.title = s.label;
+    b.innerHTML = typeof stampImg === 'function' ? stampImg(s.code, 20) : s.code;
+    b.onclick = () => onPick(s.code);
+    gridEl.appendChild(b);
+  });
+}
+
+async function efedBuildStampPicker(pickerEl, inputEl) {
   if (!pickerEl) return;
   const session = typeof getSession === 'function' ? getSession() : null;
   const username = session?.username || '';
-  const efedName = EFED_NAME || '';
+  const pick = (code) => { insertStampAtCursor(inputEl, code); addRecentStamp(code); pickerEl.classList.remove('open'); };
   const labelEl = pickerEl.querySelector('.stamp-picker-efed-label');
-  if (labelEl) labelEl.textContent = (efedName || 'eFed') + ' Official Stamps';
-  const grid = pickerEl.querySelector('.stamp-picker-grid');
+  if (labelEl) labelEl.textContent = 'All Stamps';
+  const stamps = await getAllStampsMerged();
+  const grid = pickerEl.querySelector('.stamp-picker-grid:not(.stamp-picker-recent-grid)');
   if (grid) {
     grid.innerHTML = '';
-    const stamps = getEfedStamps(efedName);
     stamps.forEach(s => {
       const btn = document.createElement('button');
       btn.className = 'stamp-picker-btn';
       btn.title = s.label;
       btn.innerHTML = stampImg(s.code, 28);
-      btn.onclick = () => { insertStampAtCursor(inputEl, s.code); pickerEl.classList.remove('open'); };
+      btn.onclick = () => pick(s.code);
       grid.appendChild(btn);
     });
   }
+  _renderRecentStampsRow(pickerEl.querySelector('.stamp-picker-recent-grid'), stamps, pick);
   const specialEl = pickerEl.querySelector('.stamp-picker-special-wrap');
   if (specialEl) {
     specialEl.innerHTML = '';
@@ -20227,7 +20291,7 @@ function efedBuildStampPicker(pickerEl, inputEl) {
       btn.className = 'stamp-picker-btn';
       btn.title = userStamp.label;
       btn.innerHTML = userStampImg(username, 32);
-      btn.onclick = () => { insertStampAtCursor(inputEl, userStamp.code); pickerEl.classList.remove('open'); };
+      btn.onclick = () => pick(userStamp.code);
       specialEl.appendChild(btn);
     } else {
       const empty = document.createElement('div');
@@ -20593,6 +20657,11 @@ html.day-mode #efed-lr-stamp-btn, html.day-mode #efed-lr-gif-btn { color: rgba(0
   <div id="efed-lr-messages"><div style="text-align:center;padding:40px 0;color:rgba(255,255,255,.3);font-family:"DM Sans",sans-serif;font-size:.8rem;">Loading…</div></div>
   <div id="efed-lr-pickers-wrap" style="display:none;flex-shrink:0;">
     <div id="efed-lr-stamp-picker" class="stamp-picker-popup" style="position:relative;bottom:auto;left:auto;width:100%;margin-bottom:6px;">
+      <div class="stamp-picker-recent-wrap" style="display:none;">
+        <div class="stamp-picker-efed-label">Recently Used</div>
+        <div class="stamp-picker-grid stamp-picker-recent-grid" style="grid-template-columns:repeat(10,1fr);"></div>
+        <div class="stamp-picker-divider"></div>
+      </div>
       <div class="stamp-picker-efed-label" id="efed-lr-stamp-efed-label">Official Stamps</div>
       <div class="stamp-picker-grid" id="efed-lr-stamp-grid" style="grid-template-columns:repeat(10,1fr);"></div>
       <div class="stamp-picker-divider"></div>
@@ -22615,7 +22684,12 @@ function _mcCloseVideoPopup() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M7 14V10a5 5 0 0 1 10 0v4"/><circle cx="12" cy="17" r="1.2" fill="currentColor" stroke="none"/></svg>
         </button>
         <div class="stamp-picker-popup" id="mc-stamp-picker">
-          <div class="stamp-picker-efed-label" id="mc-stamp-label">Stamps</div>
+          <div class="stamp-picker-recent-wrap" style="display:none;">
+            <div class="stamp-picker-efed-label">Recently Used</div>
+            <div class="stamp-picker-grid" id="mc-stamp-recent-grid"></div>
+            <div class="stamp-picker-divider"></div>
+          </div>
+          <div class="stamp-picker-efed-label" id="mc-stamp-label">All Stamps</div>
           <div class="stamp-picker-grid" id="mc-stamp-grid"></div>
           <div class="stamp-picker-divider"></div>
           <div class="stamp-picker-special-label">Your Special Stamp</div>
@@ -22684,32 +22758,29 @@ function mc_selectPill(val) {
   document.querySelectorAll('#mc-pills .mr-efed-pill').forEach(p=>{
     p.classList.toggle('active', p.dataset.val===val);
   });
-  // Refresh stamp picker for selected eFed
-  mc_buildStamps(val==='__myfeed__'||val==='__all__' ? null : val);
+  // Stamp picker always shows every stamp now, regardless of destination
+  mc_buildStamps();
 }
 
-function mc_buildStamps(efedName) {
-  if (typeof getEfedStamps !== 'function') return;
+async function mc_buildStamps() {
   const grid    = document.getElementById('mc-stamp-grid');
   const special = document.getElementById('mc-stamp-special');
   const label   = document.getElementById('mc-stamp-label');
   const ta      = document.getElementById('mc-text');
+  const stamps = await getAllStampsMerged();
+  const pick = (code) => { if (typeof insertStampAtCursor === 'function') insertStampAtCursor(ta, code); addRecentStamp(code); document.getElementById('mc-stamp-picker')?.classList.remove('open'); };
   if (grid) {
+    grid.style.display = '';
     grid.innerHTML = '';
-    if (efedName) {
-      const stamps = getEfedStamps(efedName);
-      stamps.forEach(s => {
-        const btn = document.createElement('button'); btn.className='stamp-picker-btn'; btn.title=s.label||s.code;
-        if (typeof stampImg==='function') btn.innerHTML=stampImg(s.code,28);
-        btn.onclick = () => { if(typeof insertStampAtCursor==='function') insertStampAtCursor(ta,s.code); document.getElementById('mc-stamp-picker')?.classList.remove('open'); };
-        grid.appendChild(btn);
-      });
-      if (label) label.textContent = efedName + ' Stamps';
-    } else {
-      grid.style.display='none';
-      if (label) label.textContent = 'Stamps';
-    }
+    stamps.forEach(s => {
+      const btn = document.createElement('button'); btn.className='stamp-picker-btn'; btn.title=s.label||s.code;
+      if (typeof stampImg==='function') btn.innerHTML=stampImg(s.code,28);
+      btn.onclick = () => pick(s.code);
+      grid.appendChild(btn);
+    });
+    if (label) label.textContent = 'All Stamps';
   }
+  _renderRecentStampsRow(document.getElementById('mc-stamp-recent-grid'), stamps, pick);
   if (special) {
     special.innerHTML='';
     const session = getSession();
@@ -22718,7 +22789,7 @@ function mc_buildStamps(efedName) {
       if (us) {
         const btn=document.createElement('button'); btn.className='stamp-picker-btn'; btn.title=us.label;
         btn.innerHTML=userStampImg(session.username,36);
-        btn.onclick=()=>{ if(typeof insertStampAtCursor==='function') insertStampAtCursor(ta,us.code); document.getElementById('mc-stamp-picker')?.classList.remove('open'); };
+        btn.onclick=()=>pick(us.code);
         special.appendChild(btn);
       }
     }
@@ -22764,7 +22835,7 @@ function openMatchRepostModal(match, avatarMap) {
       if ((u?.is_efed_owner||u?.role==='owner') && u?.promo_name) efeds.push(u.promo_name);
       rRows.forEach(r => { if(r.efed && !efeds.map(e=>e.toLowerCase()).includes(r.efed.toLowerCase())) efeds.push(r.efed); });
       mc_buildPills(efeds, matchEfed);
-      mc_buildStamps(matchEfed || efeds[0] || null);
+      mc_buildStamps();
     })).catch(()=>{});
   // Show
   const bg = document.getElementById('mc-bg');
