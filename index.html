@@ -4933,7 +4933,7 @@ function a2hsDismiss(){
     </div>
 
 
-    <!-- ── SHORTS ADMIN: PICK CLIP START + POOL MEMBERSHIP (admin-only) ── -->
+    <!-- ── SHORTS EDITOR: PICK CLIP START + POOL MEMBERSHIP (open to all logged-in accounts; edit/delete of an existing short restricted to poster, eFed owner, or admin) ── -->
     <style>
       #expand-shorts-admin {
         margin: 18px 0 24px; padding: 14px 16px; border-radius: 10px;
@@ -4972,7 +4972,7 @@ function a2hsDismiss(){
       #shorts-admin-status { width: 100%; font-size: .68rem; color: rgba(255,255,255,.5); }
     </style>
     <div id="expand-shorts-admin" style="display:none;">
-      <div class="expand-comments-title" style="margin-bottom:10px;">🔒 Shorts Admin</div>
+      <div class="expand-comments-title" style="margin-bottom:10px;">🎬 Shorts</div>
       <div id="shorts-admin-panel">
         <label>Clip start</label>
         <div id="shorts-admin-time-group">
@@ -11550,8 +11550,8 @@ function openExpand(v) {
   const tagBtn = document.getElementById('expand-tag-btn');
   const shortsAdminBox = document.getElementById('expand-shorts-admin');
   if (shortsAdminBox) {
-    shortsAdminBox.style.display = isAdmin ? 'block' : 'none';
-    if (isAdmin && typeof _shortsAdminLoadForVideo === 'function') _shortsAdminLoadForVideo(v);
+    shortsAdminBox.style.display = session ? 'block' : 'none';
+    if (session && typeof _shortsAdminLoadForVideo === 'function') _shortsAdminLoadForVideo(v);
   }
   if (editDateBtn) editDateBtn.style.display = (isAdmin || isOwner) ? 'flex' : 'none';
   if (delBtn) delBtn.style.display = (isAdmin || isOwner) ? 'flex' : 'none';
@@ -18933,6 +18933,21 @@ function _shortsIsAdmin() {
   return !!(session && session.username && session.username.toLowerCase() === ADMIN_USERNAME);
 }
 
+// Edit/delete of an existing shorts_pool row is restricted to: the poster
+// (row.added_by), the owner of the video's eFed, or the admin. Creating a
+// brand-new pool entry (no existing row for this video yet) is open to any
+// logged-in account.
+function _shortsCanManage(v, existingRow) {
+  const session = getSession();
+  if (!session || !session.username) return false;
+  if (!existingRow) return true;
+  if (session.username.toLowerCase() === ADMIN_USERNAME) return true;
+  if (existingRow.added_by && existingRow.added_by.toLowerCase() === session.username.toLowerCase()) return true;
+  const isEfedOwner = (session.is_efed_owner || session.role === 'owner') && session.promo_name
+    && v && v.efed && session.promo_name.toLowerCase() === v.efed.toLowerCase();
+  return !!isEfedOwner;
+}
+
 async function _shortsAdminLoadForVideo(v) {
   const sendBtn = document.getElementById('shorts-admin-send-btn');
   const removeBtn = document.getElementById('shorts-admin-remove-btn');
@@ -18941,9 +18956,12 @@ async function _shortsAdminLoadForVideo(v) {
   const captionEl = document.getElementById('shorts-admin-caption');
   if (!document.getElementById('shorts-admin-h') || !sendBtn) return;
   _shortsClearTimeBoxes();
-  if (captionEl) captionEl.value = '';
+  if (captionEl) { captionEl.value = ''; captionEl.disabled = false; }
   sendBtn.textContent = 'Send to Pool';
   sendBtn.classList.remove('in-pool');
+  sendBtn.style.display = '';
+  sendBtn.disabled = false;
+  ['shorts-admin-h','shorts-admin-m','shorts-admin-s'].forEach(id2 => { const el = document.getElementById(id2); if (el) el.disabled = false; });
   if (removeBtn) removeBtn.style.display = 'none';
   if (viewBtn) viewBtn.style.display = 'none';
   if (status) status.textContent = '';
@@ -18953,19 +18971,34 @@ async function _shortsAdminLoadForVideo(v) {
     const rows = await sbGet('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
     if (rows && rows.length) {
       const row = rows[0];
+      const canManage = _shortsCanManage(v, row);
       _shortsSecToTimeBoxes(row.clip_start);
       if (captionEl) captionEl.value = row.caption || '';
-      sendBtn.textContent = '✓ In Pool — Update';
-      sendBtn.classList.add('in-pool');
-      if (removeBtn) removeBtn.style.display = 'inline-block';
       if (viewBtn) viewBtn.style.display = 'inline-block';
-      if (status) status.textContent = 'Currently in the Shorts pool.';
+      if (canManage) {
+        sendBtn.style.display = '';
+        sendBtn.disabled = false;
+        sendBtn.textContent = '✓ In Pool — Update';
+        sendBtn.classList.add('in-pool');
+        if (removeBtn) removeBtn.style.display = 'inline-block';
+        if (captionEl) captionEl.disabled = false;
+        ['shorts-admin-h','shorts-admin-m','shorts-admin-s'].forEach(id2 => { const el = document.getElementById(id2); if (el) el.disabled = false; });
+        if (status) status.textContent = 'Currently in the Shorts pool.';
+      } else {
+        // Someone else's short — view only, no edit/delete controls.
+        sendBtn.style.display = 'none';
+        if (removeBtn) removeBtn.style.display = 'none';
+        if (captionEl) captionEl.disabled = true;
+        ['shorts-admin-h','shorts-admin-m','shorts-admin-s'].forEach(id2 => { const el = document.getElementById(id2); if (el) el.disabled = true; });
+        if (status) status.textContent = `In the Shorts pool — added by @${row.added_by || 'unknown'}. Only the poster, the eFed owner, or an admin can edit or remove it.`;
+      }
     }
   } catch(e) {}
 }
 
 async function shortsAdminSendToPool() {
-  if (!_shortsIsAdmin()) return;
+  const session = getSession();
+  if (!session || !session.username) return;
   const v = _expandVideo;
   if (!v) return;
   const id = extractId(v.url);
@@ -18987,17 +19020,23 @@ async function shortsAdminSendToPool() {
   [hEl, mEl, sEl].forEach(el => { if (el) el.style.borderColor = ''; });
   const clockLabel = _shortsSecToClock(sec);
   const caption = captionEl ? captionEl.value.trim() : '';
-  const session = getSession();
   const origLabel = sendBtn.textContent;
   sendBtn.disabled = true;
   sendBtn.textContent = 'Saving…';
   try {
     const existing = await sbGet('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
+    const existingRow = existing && existing.length ? existing[0] : null;
+    if (!_shortsCanManage(v, existingRow)) {
+      sendBtn.textContent = origLabel;
+      sendBtn.disabled = false;
+      if (status) status.textContent = 'Only the poster, the eFed owner, or an admin can edit this short.';
+      return;
+    }
     const payload = {
       video_id: id, video_url: v.url, clip_start: sec, clip_len: SHORTS_ADMIN_CLIP_LEN,
-      caption: caption, added_by: session ? session.username : ADMIN_USERNAME, added_at: Date.now()
+      caption: caption, added_by: existingRow ? existingRow.added_by : session.username, added_at: existingRow ? existingRow.added_at : Date.now()
     };
-    if (existing && existing.length) {
+    if (existingRow) {
       await sbUpdate('shorts_pool', payload, `video_id=eq.${encodeURIComponent(id)}`);
     } else {
       await sbInsert('shorts_pool', payload);
@@ -19017,7 +19056,8 @@ async function shortsAdminSendToPool() {
 }
 
 async function shortsAdminRemoveFromPool() {
-  if (!_shortsIsAdmin()) return;
+  const session = getSession();
+  if (!session || !session.username) return;
   const v = _expandVideo;
   if (!v) return;
   const id = extractId(v.url);
@@ -19028,6 +19068,12 @@ async function shortsAdminRemoveFromPool() {
   const status = document.getElementById('shorts-admin-status');
   const captionEl = document.getElementById('shorts-admin-caption');
   try {
+    const existing = await sbGet('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
+    const existingRow = existing && existing.length ? existing[0] : null;
+    if (!_shortsCanManage(v, existingRow)) {
+      if (status) status.textContent = 'Only the poster, the eFed owner, or an admin can remove this short.';
+      return;
+    }
     await sbDelete('shorts_pool', `video_id=eq.${encodeURIComponent(id)}`);
     if (sendBtn) { sendBtn.textContent = 'Send to Pool'; sendBtn.classList.remove('in-pool'); }
     if (removeBtn) removeBtn.style.display = 'none';
