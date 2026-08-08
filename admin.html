@@ -1331,6 +1331,7 @@ async function startScan(grp) {
   progressWrap.style.display='block';
   const sevenDaysAgo=new Date(Date.now()-7*24*60*60*1000).toISOString();
   const results=[];
+  const skipped=[];
   const existingIds=new Set();
   try {
     const ex=await sbGet('submissions','select=video_id,url');
@@ -1347,7 +1348,7 @@ async function startScan(grp) {
     label.textContent=`Scanning ${i+1} of ${channels.length}: ${ch.efed_name} — est. ${est}s remaining`;
     try {
       const cid=await resolveChannelId(ch.yt_channel_url);
-      if(!cid) continue;
+      if(!cid) { skipped.push(ch.efed_name); continue; }
       const r=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${cid}&type=video&publishedAfter=${sevenDaysAgo}&maxResults=10&order=date&key=${YT_API_KEY}`);
       if(r.status===403){fill.style.background='rgba(192,0,14,.8)';label.textContent='Quota exceeded — scanned '+i+' of '+channels.length+' channels. Try again tomorrow.';toast('YouTube quota exceeded!');break;}
       const d=await r.json();
@@ -1378,13 +1379,18 @@ async function startScan(grp) {
         });
         existingIds.add(vid);
       }
-    } catch(e){console.warn('Scan failed:',ch.efed_name,e);}
+    } catch(e){
+      if (e.message === 'YT_QUOTA_EXCEEDED') { fill.style.background='rgba(192,0,14,.8)'; label.textContent='Quota exceeded — scanned '+i+' of '+channels.length+' channels. Try again tomorrow.'; toast('YouTube quota exceeded!'); break; }
+      console.warn('Scan failed:',ch.efed_name,e);
+      skipped.push(ch.efed_name);
+    }
     await new Promise(r=>setTimeout(r,300));
   }
   fill.style.width='100%';
   const _totalCost = channels.length * 100;
   const _quotaLeft = 10000 - _totalCost;
-  label.textContent=`Group ${grp.toUpperCase()} scan complete — ${results.length} new video${results.length!==1?'s':''} found · Cost: ${_totalCost} units`;
+  label.textContent=`Group ${grp.toUpperCase()} scan complete — ${results.length} new video${results.length!==1?'s':''} found · Cost: ${_totalCost} units`
+    + (skipped.length ? ` · ⚠️ ${skipped.length} channel${skipped.length!==1?'s':''} couldn't be resolved: ${skipped.join(', ')}` : '');
   try { await sbInsert('scan_log',{channels_scanned:channels.length,videos_found:results.length,videos_added:0,scan_group:grp.toUpperCase(),scanned_at:new Date().toISOString()}); } catch(e){ console.error('[scan_log insert]',e); }
   localStorage.setItem('admin_last_scan_'+grp, Date.now().toString());
   loadStats(); loadScanLog();
@@ -1404,40 +1410,50 @@ async function resolveChannelId(url) {
   // Format 2: /@handle
   const hM = url.match(/@([A-Za-z0-9_.-]+)/);
   if (hM) {
-    try {
-      const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${hM[1]}&key=${YT_API_KEY}`);
-      const d = await r.json();
-      if (d.items?.[0]?.id) return d.items[0].id;
-    } catch {}
+    const id = await _ytResolveTry(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${hM[1]}&key=${YT_API_KEY}`);
+    if (id) return id;
   }
 
   // Format 3: /c/CustomName or /user/Username
   const cM2 = url.match(/\/(?:c|user)\/([A-Za-z0-9_.-]+)/);
   if (cM2) {
-    try {
-      const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forUsername=${cM2[1]}&key=${YT_API_KEY}`);
-      const d = await r.json();
-      if (d.items?.[0]?.id) return d.items[0].id;
-    } catch {}
+    let id = await _ytResolveTry(`https://www.googleapis.com/youtube/v3/channels?part=id&forUsername=${cM2[1]}&key=${YT_API_KEY}`);
+    if (id) return id;
     // Also try forHandle as fallback for /c/ URLs
-    try {
-      const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${cM2[1]}&key=${YT_API_KEY}`);
-      const d = await r.json();
-      if (d.items?.[0]?.id) return d.items[0].id;
-    } catch {}
+    id = await _ytResolveTry(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${cM2[1]}&key=${YT_API_KEY}`);
+    if (id) return id;
   }
 
   // Format 4: plain URL with no special path — try search as last resort
   const plainM = url.match(/youtube\.com\/([A-Za-z0-9_.-]+)\/?$/);
   if (plainM && !['watch','shorts','playlist','feed'].includes(plainM[1])) {
-    try {
-      const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forUsername=${plainM[1]}&key=${YT_API_KEY}`);
-      const d = await r.json();
-      if (d.items?.[0]?.id) return d.items[0].id;
-    } catch {}
+    const id = await _ytResolveTry(`https://www.googleapis.com/youtube/v3/channels?part=id&forUsername=${plainM[1]}&key=${YT_API_KEY}`);
+    if (id) return id;
   }
 
   return null;
+}
+
+// Shared fetch helper for channel-ID lookups. Previously each format above
+// swallowed every failure (including a 403 quota-exceeded response) the same
+// way a genuine "no such channel" was swallowed, so resolveChannelId()
+// silently returned null either way — a channel skipped a scan because its
+// URL was bad looked identical to one skipped because the day's quota was
+// already spent, and callers (addChannel/saveChannelUrl) showed the same
+// generic "Could not resolve channel" message for both, so a save attempt
+// that actually failed on quota looked like a bad-URL rejection and admins
+// re-typed a URL that was already correct. This throws a distinct error on
+// 403 so callers can tell the two cases apart.
+async function _ytResolveTry(apiUrl) {
+  try {
+    const r = await fetch(apiUrl);
+    if (r.status === 403) throw new Error('YT_QUOTA_EXCEEDED');
+    const d = await r.json();
+    return d.items?.[0]?.id || null;
+  } catch (e) {
+    if (e.message === 'YT_QUOTA_EXCEEDED') throw e;
+    return null;
+  }
 }
 
 function showScanResults(results, grp) {
@@ -2006,7 +2022,16 @@ async function addChannel() {
     const d=await r.json();
     const efedName=d.items?.[0]?.snippet?.title||'';
     if(!efedName){toast('❌ YouTube returned no channel name. Check the URL and try again.');return;}
-    await sbInsert('efed_channels',{efed_name:efedName,yt_channel_url:url});
+    // If a channel with this name already exists, update its URL instead of
+    // inserting a duplicate row — re-adding a channel the system already
+    // knows about (e.g. after a scan failed to resolve it) used to always
+    // create a second efed_channels row with the same name.
+    const existing = await sbGet('efed_channels', 'efed_name=eq.' + encodeURIComponent(efedName) + '&limit=1').catch(() => []);
+    if (existing.length) {
+      await sbUpdate('efed_channels', { yt_channel_url: url }, 'id=eq.' + existing[0].id);
+    } else {
+      await sbInsert('efed_channels',{efed_name:efedName,yt_channel_url:url});
+    }
     document.getElementById('ch-url').value='';
     document.getElementById('ch-name-preview').style.display='none';
     // Auto-assign new channel to the group with fewer shows (tie → Group A)
@@ -2018,8 +2043,11 @@ async function addChannel() {
       gs[efedName.toLowerCase()] = bCount < aCount ? 'b' : 'a';
       localStorage.setItem('efed_scan_groups', JSON.stringify(gs));
     }
-    toast('✅ Added: '+efedName); loadChannels(); loadStats();
-  } catch(e){toast('Error: '+e.message);}
+    toast((existing.length ? '✅ Updated: ' : '✅ Added: ')+efedName); loadChannels(); loadStats();
+  } catch(e){
+    if (e.message === 'YT_QUOTA_EXCEEDED') { toast('❌ YouTube quota exceeded for today — this channel can\'t be verified until it resets. Try again tomorrow.'); return; }
+    toast('Error: '+e.message);
+  }
   finally{btn.disabled=false;btn.textContent='+ Add';}
 }
 
@@ -2039,7 +2067,10 @@ async function previewChannelName() {
     if(!name){preview.style.color='#ff6b6b';preview.textContent='❌ No channel found';return;}
     preview.style.color='#4caf64';
     preview.textContent='✓ '+name;
-  } catch(e){preview.style.color='#ff6b6b';preview.textContent='❌ Error fetching name';}
+  } catch(e){
+    preview.style.color='#ff6b6b';
+    preview.textContent = e.message === 'YT_QUOTA_EXCEEDED' ? '❌ YouTube quota exceeded for today' : '❌ Error fetching name';
+  }
 }
 
 async function deleteChannel(id,name) {
@@ -2941,7 +2972,7 @@ async function saveChannelUrl(cbKey, efedName, existingId) {
 
   try {
     const cid = await resolveChannelId(url);
-    if (!cid) { showChEditStatus(status, '❌ Could not resolve channel. Check the URL.', 'error'); return; }
+    if (!cid) { showChEditStatus(status, "❌ Could not resolve channel — YouTube didn't recognize this URL. Check it and try again.", 'error'); return; }
     const r = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&id=' + cid + '&key=' + YT_API_KEY);
     const d = await r.json();
     const ytName = d.items?.[0]?.snippet?.title || '';
@@ -2962,7 +2993,11 @@ async function saveChannelUrl(cbKey, efedName, existingId) {
     showChEditStatus(status, '✓ Saved — verified channel: ' + ytName, 'success');
     setTimeout(() => loadChannels(), 1200);
   } catch(e) {
-    showChEditStatus(status, '❌ Error: ' + e.message, 'error');
+    if (e.message === 'YT_QUOTA_EXCEEDED') {
+      showChEditStatus(status, "❌ YouTube quota exceeded for today — this edit can't be verified until it resets, so it wasn't saved. Try again tomorrow.", 'error');
+    } else {
+      showChEditStatus(status, '❌ Error: ' + e.message, 'error');
+    }
   }
 }
 
