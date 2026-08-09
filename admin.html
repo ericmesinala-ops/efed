@@ -3412,6 +3412,15 @@ async function runHourCounter() {
       hcLog(`Fetching batch ${Math.floor(i/50)+1} of ${batches}…`);
       const ytRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${batch.join(',')}&key=${YT_KEY}`);
       const ytData = await ytRes.json();
+      if (ytData.error) {
+        // A failed batch used to silently contribute 0 seconds, which could
+        // make the total look like a real (much lower) number instead of an
+        // obvious error. Abort loudly instead so a bad count never gets
+        // mistaken for a real one and saved to the homepage.
+        const reason = ytData.error.errors?.[0]?.reason || ytData.error.message || 'unknown error';
+        const hint = reason === 'quotaExceeded' ? ' Daily YouTube API quota is exhausted — it resets at midnight Pacific.' : '';
+        throw new Error(`YouTube API failed on batch ${Math.floor(i/50)+1} of ${batches} (${reason}).${hint} Aborting — the count so far would be an undercount, not a real total.`);
+      }
       (ytData.items || []).forEach(item => {
         const dur = item.contentDetails?.duration || '';
         const m = dur.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
