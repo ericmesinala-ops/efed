@@ -1843,6 +1843,19 @@ async function loadChannels() {
       sbGet('submissions', 'status=eq.approved&select=efed,date,date_ms,url,show_name&order=date_ms.desc')
     ]);
 
+    // Diagnostic: flag any efed_channels rows sharing a name. Only one ever
+    // renders (see dupe-guard note in saveChannelUrl below), so the rest are
+    // invisible leftovers that can make edits on the shown row look like
+    // they didn't save. Check the console after this loads.
+    {
+      const byName = {};
+      channels.forEach(c => { const k = c.efed_name.trim().toLowerCase(); (byName[k] = byName[k] || []).push(c); });
+      const dupeGroups = Object.values(byName).filter(g => g.length > 1);
+      if (dupeGroups.length) {
+        console.warn('[efed_channels] duplicate name rows found:', dupeGroups.map(g => ({ name: g[0].efed_name, ids: g.map(c => c.id), urls: g.map(c => c.yt_channel_url) })));
+      }
+    }
+
     // Build a map: efed_name (lowercase) → { efed_name, yt_channel_url, id, lastUpload, lastUploadMs }
     const map = new Map();
 
@@ -2992,7 +3005,21 @@ async function saveChannelUrl(cbKey, efedName, existingId) {
     // already used to match rows in the `submissions` table. Overwriting it with
     // YouTube's official title (ytName) is what made saved links disappear on
     // reload — the row stopped matching and looked like the link was erased.
-    if (existingId) {
+    //
+    // DUPLICATE-ROW GUARD: earlier bugs (re-adding a "known" channel via the
+    // + Add box) could leave two efed_channels rows with the same efed_name.
+    // loadChannels() keys its display map by name, so only one of those rows
+    // ever renders — if your save patches the id that ISN'T the one that ends
+    // up displayed, the edit looks like it silently reverted. Whenever more
+    // than one row shares this name, update all of them and delete the extras
+    // so there's exactly one row left, and the edit sticks for good.
+    const dupes = await sbGet('efed_channels', 'efed_name=eq.' + encodeURIComponent(efedName)).catch(() => []);
+    if (dupes.length > 1) {
+      const keepId = existingId && dupes.some(d => d.id === existingId) ? existingId : dupes[0].id;
+      await sbUpdate('efed_channels', { yt_channel_url: url }, 'id=eq.' + keepId);
+      const extras = dupes.filter(d => d.id !== keepId);
+      for (const dup of extras) { await sbDelete('efed_channels', 'id=eq.' + dup.id).catch(() => {}); }
+    } else if (existingId) {
       // Update existing efed_channels row — URL only, name stays as-is
       await sbUpdate('efed_channels', { yt_channel_url: url }, 'id=eq.' + existingId);
     } else {
