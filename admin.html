@@ -225,6 +225,7 @@ html.day-mode .nav-tv-svg--day { display: inline; }
     <button class="tab-btn" onclick="switchTab('banned', this)">🚫 Banned</button>
     <button class="tab-btn" onclick="switchTab('maintenance', this)">🔧 Maintenance</button>
     <button class="tab-btn" onclick="switchTab('hourcounter', this)">⏱️ Hour Counter</button>
+    <button class="tab-btn" onclick="switchTab('untagged', this)">🏷️ Untagged</button>
 
   </div>
 
@@ -657,6 +658,20 @@ html.day-mode .nav-tv-svg--day { display: inline; }
         <button class="btn btn-ghost btn-sm" onclick="useCountedHours()" title="Fill the Hours field from the count above">↑ Use Counted Total</button>
         <span id="hs-status" style="display:none;font-size:.86rem;"></span>
       </div>
+    </div>
+  </div>
+
+  <!-- UNTAGGED VIDEOS -->
+  <div class="tab-panel" id="tab-untagged">
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>🏷️ Videos Missing Tags</div>
+      <div style="font-size:1.08rem;color:var(--muted);margin-bottom:20px;line-height:1.7;">Checks every approved video's <code>tags</code> field and lists any with none — the fastest way to see what actually needs (re-)tagging instead of guessing from memory.</div>
+      <button class="scan-btn" id="untagged-run-btn" onclick="runUntaggedCheck()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        Check for Untagged Videos
+      </button>
+      <div id="untagged-log" style="margin-top:16px;font-size:.88rem;color:rgba(255,255,255,.45);font-family:'JetBrains Mono',monospace;"></div>
+      <div id="untagged-results" style="margin-top:16px;display:none;"></div>
     </div>
   </div>
 
@@ -3095,6 +3110,66 @@ const HC_HARDCODED_IDS = [
 function hcLog(msg) {
   const el = document.getElementById('hc-log');
   if (el) el.innerHTML += msg + '<br>';
+}
+
+// Local tag-JSON parser (mirrors index.html's safeParseTagsJson — admin.html
+// doesn't share that file, so it needs its own copy).
+function _safeParseTagsJson(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') { try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; } }
+  return [];
+}
+
+async function runUntaggedCheck() {
+  const logEl = document.getElementById('untagged-log');
+  const resultsEl = document.getElementById('untagged-results');
+  const btn = document.getElementById('untagged-run-btn');
+  if (logEl) logEl.textContent = 'Fetching approved videos from Supabase…';
+  if (resultsEl) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; }
+  if (btn) btn.disabled = true;
+
+  try {
+    // Paginate — Supabase caps a single request at 1000 rows (same pattern as runHourCounter above)
+    let rows = [];
+    let offset = 0;
+    const page = 1000;
+    while (true) {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/submissions?status=eq.approved&select=url,show_name,efed,date,tags&offset=${offset}&limit=${page}`,
+        { headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Range': `${offset}-${offset + page - 1}` } }
+      );
+      const batch = await res.json();
+      rows = rows.concat(batch);
+      if (batch.length < page) break;
+      offset += page;
+    }
+
+    const untagged = rows.filter(r => _safeParseTagsJson(r.tags).length === 0);
+
+    if (logEl) logEl.textContent = `Checked ${rows.length} approved video${rows.length !== 1 ? 's' : ''} — ${untagged.length} missing tags.`;
+
+    if (resultsEl) {
+      if (!untagged.length) {
+        resultsEl.style.display = 'block';
+        resultsEl.innerHTML = '<div class="empty"><div class="empty-icon">✅</div>Every approved video has tags.</div>';
+      } else {
+        resultsEl.style.display = 'block';
+        resultsEl.innerHTML = untagged.map(r => `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);">
+            <div style="min-width:0;">
+              <div style="font-weight:600;color:#fff;font-size:.96rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${(r.show_name || '(untitled)').replace(/</g, '&lt;')}</div>
+              <div style="font-size:.8rem;color:var(--muted);">${(r.efed || '').replace(/</g, '&lt;')}${r.date ? ' · ' + r.date : ''}</div>
+            </div>
+            <a href="index.html?play=${encodeURIComponent(r.url)}" target="_blank" class="btn btn-ghost btn-sm" style="flex-shrink:0;white-space:nowrap;">Open & Tag</a>
+          </div>
+        `).join('');
+      }
+    }
+  } catch (e) {
+    if (logEl) logEl.textContent = '❌ Error: ' + e.message;
+  }
+  if (btn) btn.disabled = false;
 }
 
 async function runHourCounter() {
