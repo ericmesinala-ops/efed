@@ -16737,11 +16737,23 @@ async function saveVideoTags() {
     // Find the video object so we have show/efed info for upsert
     const vObj = videos.find(v => v.url === _tagVideoUrl);
 
-    // Try PATCH first — only trust it if rows were actually updated
+    // Try PATCH first — only trust it if rows were actually updated.
+    // IMPORTANT: a PATCH that's blocked by an RLS policy (e.g. anon role
+    // isn't allowed to UPDATE an already-approved submissions row) comes
+    // back as a normal, non-throwing response with an empty array — it
+    // looks IDENTICAL to "no row matched by video_id/url". Previously that
+    // meant a permissions block silently fell through to the INSERT branch
+    // below, which creates a brand-new stub row holding the tags — while
+    // the video's real row (the one actually displayed everywhere else)
+    // never gets touched. Tags "save" (no error, toast says success) but
+    // the video you're looking at never shows them, because the tags landed
+    // on an orphan row nobody reads from. Logging status + body here lets
+    // you tell a genuine 0-row-match apart from a blocked write.
     const patchRes = await fetch(
       SUPABASE_URL + '/rest/v1/submissions?video_id=eq.' + encodeURIComponent(vid),
       { method: 'PATCH', headers: { ...SB_HEADERS, 'Prefer': 'return=representation' }, body: JSON.stringify({ tags: tags }) }
     );
+    if (!patchRes.ok) console.warn('[tags] PATCH by video_id failed:', patchRes.status, await patchRes.clone().text().catch(()=>'?'));
     const patchRows = patchRes.ok ? await patchRes.json() : [];
 
     if (!patchRows.length) {
@@ -16750,9 +16762,19 @@ async function saveVideoTags() {
         SUPABASE_URL + '/rest/v1/submissions?url=eq.' + encodeURIComponent(_tagVideoUrl),
         { method: 'PATCH', headers: { ...SB_HEADERS, 'Prefer': 'return=representation' }, body: JSON.stringify({ tags: tags }) }
       );
+      if (!patchRes2.ok) console.warn('[tags] PATCH by url failed:', patchRes2.status, await patchRes2.clone().text().catch(()=>'?'));
       const patchRows2 = patchRes2.ok ? await patchRes2.json() : [];
 
       if (!patchRows2.length) {
+        // Confirm there really is no existing row before creating one —
+        // if a row DOES exist here, both PATCHes above were blocked
+        // (RLS/permissions), not "not found", and inserting a stub would
+        // silently hide that. Surface it instead of masking it.
+        const already = await sbGet('submissions', 'url=eq.' + encodeURIComponent(_tagVideoUrl) + '&select=id').catch(() => null);
+        if (already && already.length) {
+          console.error('[tags] A submissions row for this URL exists but PATCH updated 0 rows — likely blocked by an RLS policy, not a missing row.', already);
+          throw new Error('Update was blocked (row exists but PATCH matched 0 rows — check Supabase RLS policy on submissions UPDATE)');
+        }
         // No row at all — INSERT a stub row for this hardcoded video
         const insertRes = await fetch(
           SUPABASE_URL + '/rest/v1/submissions',
