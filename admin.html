@@ -634,28 +634,33 @@ html.day-mode .nav-tv-svg--day { display: inline; }
   <!-- HOUR COUNTER -->
   <div class="tab-panel" id="tab-hourcounter">
     <div class="card" style="background:linear-gradient(135deg,rgba(200,168,75,.08) 0%,rgba(7,7,10,0) 60%);border-color:rgba(200,168,75,.2);">
-      <div class="card-title"><div class="dot" style="background:var(--gold);"></div>📺 EFED Hour Counter</div>
-      <div style="font-size:1.08rem;color:var(--muted);margin-bottom:20px;line-height:1.7;">Counts total runtime of all approved Supabase submissions + the 20 hardcoded fallback IDs, deduplicated.</div>
+      <div class="card-title"><div class="dot" style="background:var(--gold);"></div>📺 EFED Hour & Channel Counter</div>
+      <div style="font-size:1.08rem;color:var(--muted);margin-bottom:20px;line-height:1.7;">Counts total runtime of all approved Supabase submissions + the 20 hardcoded fallback IDs (deduplicated), and the live number of registered eFed channels — in one pass.</div>
       <button class="scan-btn" id="hc-run-btn" onclick="runHourCounter()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        Count Hours
+        Count Hours & Channels
       </button>
       <div id="hc-log" style="margin-top:20px;font-size:.88rem;line-height:1.9;color:rgba(255,255,255,.45);font-family:'JetBrains Mono',monospace;"></div>
       <div id="hc-result" style="margin-top:16px;font-size:3rem;font-family:'Bebas Neue',sans-serif;letter-spacing:4px;color:#4caf8a;display:none;"></div>
+      <div id="hc-result-efed" style="margin-top:2px;font-size:1.1rem;font-family:'DM Sans',sans-serif;letter-spacing:1px;color:var(--gold);display:none;"></div>
     </div>
 
     <div class="card">
       <div class="card-title"><div class="dot"></div>🏠 Homepage Stats Band</div>
-      <div style="font-size:1.08rem;color:var(--muted);margin-bottom:20px;line-height:1.7;">Hours shows on the sign-in page (auth.html) above the login form. Set it here — changes go live immediately, no code edits needed. <strong>EFED Channels is no longer set here</strong> — it now counts live from the <code>efed_channels</code> table on every page load, so it can't go stale.</div>
+      <div style="font-size:1.08rem;color:var(--muted);margin-bottom:20px;line-height:1.7;">These two numbers show on the sign-in page (auth.html) above the login form. Edit them here — changes go live immediately, no code edits needed.</div>
       <div class="input-row">
         <div class="input-group" style="flex:1;">
           <label class="input-label">Hours Display Text</label>
           <input class="input-field" id="hs-hours-input" placeholder="e.g. 1,320+">
         </div>
+        <div class="input-group" style="flex:1;">
+          <label class="input-label">EFED Channels Display Text</label>
+          <input class="input-field" id="hs-efed-input" placeholder="e.g. 139">
+        </div>
       </div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;">
         <button class="btn btn-gold" onclick="saveHomepageStats()">Save Changes</button>
-        <button class="btn btn-ghost btn-sm" onclick="useCountedHours()" title="Fill the Hours field from the count above">↑ Use Counted Total</button>
+        <button class="btn btn-ghost btn-sm" onclick="useCountedTotals()" title="Fill both fields from the count above">↑ Use Counted Totals</button>
         <span id="hs-status" style="display:none;font-size:.86rem;"></span>
       </div>
     </div>
@@ -3430,11 +3435,32 @@ async function runHourCounter() {
 
     const totalHours = Math.floor(totalSeconds / 3600);
     const totalMins = Math.floor((totalSeconds % 3600) / 60);
-    hcLog(`Done! Total: ${totalSeconds} seconds.`);
+    hcLog(`Done counting runtime! Total: ${totalSeconds} seconds. Now counting eFed channels…`);
+
+    // eFed channel count — same exact-count pattern as the dashboard's
+    // "eFed Channels" stat box, just reused here so one button covers both.
+    const _chRes = await fetch(SUPABASE_URL + '/rest/v1/efed_channels?select=id', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Prefer': 'count=exact', 'Range': '0-0' }
+    });
+    const _chRange = _chRes.headers.get('Content-Range');
+    const channelCount = _chRange ? parseInt(_chRange.split('/')[1]) : null;
+    hcLog(`Done! ${channelCount === null || Number.isNaN(channelCount) ? 'Could not read channel count.' : channelCount + ' eFed channels found.'}`);
+
     if (resultEl) {
       resultEl.textContent = `${totalHours} HRS ${totalMins} MINS`;
       resultEl.style.display = 'block';
-      resultEl.dataset.hours = totalHours; // stashed for "Use Counted Total"
+      resultEl.dataset.hours = totalHours; // stashed for "Use Counted Totals"
+    }
+    const resultEfedEl = document.getElementById('hc-result-efed');
+    if (resultEfedEl) {
+      if (channelCount !== null && !Number.isNaN(channelCount)) {
+        resultEfedEl.textContent = `${channelCount} EFED CHANNELS`;
+        resultEfedEl.style.display = 'block';
+        resultEfedEl.dataset.efed = channelCount; // stashed for "Use Counted Totals"
+      } else {
+        resultEfedEl.style.display = 'none';
+        delete resultEfedEl.dataset.efed;
+      }
     }
   } catch(e) {
     hcLog(`<span style="color:#ff6b6b;">Error: ${e.message}</span>`);
@@ -3455,13 +3481,16 @@ function hsStatus(msg, ok) {
 
 async function loadHomepageStats() {
   const hoursInput = document.getElementById('hs-hours-input');
+  const efedInput = document.getElementById('hs-efed-input');
   try {
-    const rows = await sbGet('site_stats', 'id=eq.1&select=hours_label');
+    const rows = await sbGet('site_stats', 'id=eq.1&select=hours_label,efed_label');
     if (rows.length) {
       if (hoursInput) hoursInput.value = rows[0].hours_label || '';
-    } else if (hoursInput && !hoursInput.value) {
+      if (efedInput) efedInput.value = rows[0].efed_label || '';
+    } else {
       // No row yet — prefill with the current hardcoded fallback from auth.html
-      hoursInput.value = '1,320+';
+      if (hoursInput && !hoursInput.value) hoursInput.value = '1,320+';
+      if (efedInput && !efedInput.value) efedInput.value = '139';
     }
   } catch(e) {
     hsStatus('Could not load (has the site_stats table been created yet?)', false);
@@ -3470,14 +3499,24 @@ async function loadHomepageStats() {
 
 async function saveHomepageStats() {
   const hoursInput = document.getElementById('hs-hours-input');
+  const efedInput = document.getElementById('hs-efed-input');
   const hours_label = hoursInput ? hoursInput.value.trim() : '';
-  if (!hours_label) { hsStatus('Fill in the Hours field first.', false); return; }
+  const efed_label = efedInput ? efedInput.value.trim() : '';
+  if (!hours_label || !efed_label) { hsStatus('Fill in both fields first.', false); return; }
   try {
     const existing = await sbGet('site_stats', 'id=eq.1');
+    let result;
     if (existing.length) {
-      await sbUpdate('site_stats', { hours_label }, 'id=eq.1');
+      result = await sbUpdate('site_stats', { hours_label, efed_label }, 'id=eq.1');
     } else {
-      await sbInsert('site_stats', { id: 1, hours_label });
+      result = await sbInsert('site_stats', { id: 1, hours_label, efed_label });
+    }
+    // sbUpdate/sbInsert only throw on a non-2xx status — if RLS silently
+    // blocks the write, Postgres still returns 200 OK with an empty array,
+    // which looked like success before. Check the row actually came back.
+    if (!Array.isArray(result) || !result.length) {
+      hsStatus('Save reported success but no row came back — check Supabase RLS policy on site_stats (INSERT/UPDATE).', false);
+      return;
     }
     hsStatus('✓ Saved — live on the sign-in page now.', true);
   } catch(e) {
@@ -3485,11 +3524,16 @@ async function saveHomepageStats() {
   }
 }
 
-function useCountedHours() {
+function useCountedTotals() {
   const resultEl = document.getElementById('hc-result');
+  const resultEfedEl = document.getElementById('hc-result-efed');
   const hoursInput = document.getElementById('hs-hours-input');
-  if (!resultEl || !resultEl.dataset.hours) { hsStatus('Run "Count Hours" first.', false); return; }
+  const efedInput = document.getElementById('hs-efed-input');
+  if (!resultEl || !resultEl.dataset.hours) { hsStatus('Run "Count Hours & Channels" first.', false); return; }
   if (hoursInput) hoursInput.value = Number(resultEl.dataset.hours).toLocaleString() + '+';
+  if (resultEfedEl && resultEfedEl.dataset.efed && efedInput) {
+    efedInput.value = resultEfedEl.dataset.efed;
+  }
 }
 </script>
 
