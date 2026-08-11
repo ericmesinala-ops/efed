@@ -230,6 +230,7 @@ html.day-mode .nav-tv-svg--day { display: inline; }
     <button class="tab-btn" onclick="switchTab('hourcounter', this)">⏱️ Hour Counter</button>
     <button class="tab-btn" onclick="switchTab('untagged', this)">🏷️ Untagged</button>
     <button class="tab-btn" onclick="switchTab('shorts', this)">🎬 Shorts</button>
+    <button class="tab-btn" onclick="switchTab('bots', this)">🤖 Bots</button>
 
   </div>
 
@@ -691,6 +692,29 @@ html.day-mode .nav-tv-svg--day { display: inline; }
       </button>
       <div id="shorts-scan-log" style="margin-top:16px;font-size:.88rem;color:rgba(255,255,255,.45);font-family:'JetBrains Mono',monospace;"></div>
       <div id="shorts-scan-results" style="margin-top:16px;display:none;"></div>
+    </div>
+  </div>
+
+  <!-- BOT ACCOUNTS -->
+  <div class="tab-panel" id="tab-bots">
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>🤖 Bot Accounts & Activity</div>
+      <div style="font-size:1.08rem;color:var(--muted);margin-bottom:20px;line-height:1.7;">
+        Creates real, flagged (<code>is_bot</code>) accounts that leave comments, likes, bookmarks, and watch time spread across approved videos with randomized timing and amounts. Deliberately skipped: <strong>promo_name / is_efed_owner</strong> (so bots are never eligible for "I'm Part of This") and full-duration watches on every video (watch time is a random partial, not always 100%). Safe to re-run — it tops up existing bots and activity instead of duplicating.
+      </div>
+      <div style="font-size:.82rem;color:#ff9b6b;margin-bottom:16px;line-height:1.6;">⚠️ Requires an <code>is_bot boolean default false</code> column on <code>users</code> first — SQL is below the results after your first run, or ask me for it again.</div>
+      <div class="input-row">
+        <div class="input-group" style="flex:1;">
+          <label class="input-label">Target Bot Count</label>
+          <input class="input-field" id="bots-count-input" type="number" min="10" max="25" value="18">
+        </div>
+      </div>
+      <button class="scan-btn" id="bots-run-btn" onclick="runBotSeed()" style="margin-top:10px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg>
+        Generate / Top Up Bot Activity
+      </button>
+      <button class="btn btn-ghost btn-sm" id="bots-wipe-btn" onclick="wipeAllBots()" style="margin-top:10px;margin-left:10px;color:#ff6b6b;">Remove All Bots &amp; Their Activity</button>
+      <div id="bots-log" style="margin-top:20px;font-size:.88rem;line-height:1.9;color:rgba(255,255,255,.45);font-family:'JetBrains Mono',monospace;max-height:340px;overflow-y:auto;"></div>
     </div>
   </div>
 
@@ -3373,6 +3397,202 @@ async function _shortsDeleteOne(id) {
     toast('Deleted.');
   } catch (e) {
     toast('❌ Failed: ' + e.message);
+  }
+}
+
+// ── BOT ACCOUNTS & ACTIVITY ──
+// Real `users` rows flagged is_bot:true, with comments/likes/bookmarks/watch_time
+// spread across approved videos. Deliberately excluded: promo_name / is_efed_owner
+// (keeps bots out of "I'm Part of This" eligibility), and 100%-duration watches
+// (a bot watching every video to the exact second is the single most obvious tell).
+const BOT_NAMES = [
+  ['RingsideRick','Rick'],['SmackTalkSam','Sam'],['ChairShotChris','Chris'],['TitleBeltTina','Tina'],
+  ['HeelHeatHank','Hank'],['FaceTurnFiona','Fiona'],['MoonsaultMike','Mike'],['PiledriverPat','Pat'],
+  ['SubmissionSue','Sue'],['TurnbuckleTre','Tre'],['PromoPatty','Patty'],['BeltCollectorBen','Ben'],
+  ['TagTeamTara','Tara'],['MicDropMorgan','Morgan'],['SquaredCircleSy','Sy'],['HighFlyerHaley','Haley'],
+  ['MainEventMara','Mara'],['UnderdogUri','Uri'],['CardSubjectCarl','Carl'],['SpotMonkeySkyler','Skyler'],
+  ['FinisherFelix','Felix'],['KayfabeKay','Kay'],['RookieRosa','Rosa'],['VeteranVic','Vic'],
+  ['ManagerMaddie','Maddie'],['JobberJordan','Jordan'],['StableLeaderStace','Stace'],['ComebackCody','Cody']
+];
+const BOT_COMMENTS = [
+  "This show stole the whole card, no cap","Been waiting all week for this one",
+  "That main event finish had me yelling at my screen","Underrated promo work in this one",
+  "This fed keeps getting better every month","Rewatched this one twice already",
+  "The booking in this episode was chef's kiss","Can't believe this flew under the radar",
+  "This is why I still watch indie feds","Solid card top to bottom",
+  "That heel turn was set up perfectly","The commentary made this 10x better",
+  "This roster is stacked","Been following this fed since day one, never disappoints",
+  "That spot near the end was wild","Underrated talent on display here",
+  "This storyline is finally paying off","Best episode of the season so far",
+  "The crowd energy on this one was different","This deserves way more views",
+  "Watching this on repeat honestly","The production value keeps improving",
+  "That title match delivered","Been a fan of this promotion for a while now",
+  "This is must-watch stuff","The build to this match was so good",
+  "That ending left me speechless","This card had zero weak spots",
+  "Can't wait to see where this story goes","The chemistry between these two is unreal",
+  "This one's going in my favorites","Every time I think I've seen it all, this fed surprises me"
+];
+
+function _botLog(msg) {
+  const el = document.getElementById('bots-log');
+  if (el) { el.innerHTML += msg + '<br>'; el.scrollTop = el.scrollHeight; }
+}
+function _botRandInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function _botPick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+// Random timestamp somewhere in the last `days` days — spreads activity out
+// instead of a single dead giveaway burst all at the same instant.
+function _botPastTs(days) { return Date.now() - _botRandInt(0, days * 24 * 60 * 60 * 1000); }
+
+async function runBotSeed() {
+  const btn = document.getElementById('bots-run-btn');
+  const countInput = document.getElementById('bots-count-input');
+  const targetCount = Math.max(10, Math.min(25, parseInt(countInput?.value, 10) || 18));
+  const logEl = document.getElementById('bots-log');
+  if (logEl) logEl.innerHTML = '';
+  if (btn) btn.disabled = true;
+  _botLog('Checking existing bot accounts…');
+
+  try {
+    // 1. Existing bots — top up rather than duplicate on re-runs
+    const existingBots = await sbGet('users', 'is_bot=eq.true&select=username');
+    const existingUsernames = new Set(existingBots.map(u => u.username));
+    const needed = Math.max(0, targetCount - existingBots.length);
+    _botLog(`${existingBots.length} bot account(s) already exist. ${needed > 0 ? `Creating ${needed} more…` : 'Target already met — topping up activity only.'}`);
+
+    if (needed > 0) {
+      const pool = BOT_NAMES.filter(([u]) => !existingUsernames.has(u));
+      for (let i = 0; i < needed && i < pool.length; i++) {
+        const [username, displayName] = pool[i];
+        const pass = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+        const password_hash = await sha256(pass);
+        try {
+          await sbInsert('users', {
+            username, password_hash, email: `${username.toLowerCase()}@bot.local`,
+            display_name: displayName, joined_at: _botPastTs(120),
+            avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(username)}`,
+            is_efed_owner: false, promo_name: null, role: 'member', is_bot: true
+          });
+          existingUsernames.add(username);
+          _botLog(`✓ Created @${username}`);
+        } catch (e) {
+          _botLog(`<span style="color:#ff6b6b;">✗ Could not create @${username}: ${e.message}</span>`);
+          if (/is_bot/i.test(e.message)) {
+            _botLog(`<span style="color:#ff9b6b;">Looks like the is_bot column is missing. Run this in Supabase SQL editor, then try again:</span>`);
+            _botLog(`<span style="color:#ff9b6b;">alter table users add column if not exists is_bot boolean default false;</span>`);
+            throw e;
+          }
+        }
+      }
+    }
+
+    const allBots = await sbGet('users', 'is_bot=eq.true&select=username');
+    if (!allBots.length) { _botLog('No bot accounts to work with — stopping.'); return; }
+    _botLog(`Working with ${allBots.length} bot account(s). Fetching approved videos…`);
+
+    // 2. All approved videos, paginated (same cap workaround used elsewhere in this file)
+    let videos = [];
+    let offset = 0;
+    const page = 1000;
+    while (true) {
+      const batch = await sbGet('submissions', `status=eq.approved&select=url,video_id,show_name,efed,duration_seconds&offset=${offset}&limit=${page}`);
+      videos = videos.concat(batch);
+      if (batch.length < page) break;
+      offset += page;
+    }
+    if (!videos.length) { _botLog('No approved videos found — stopping.'); return; }
+    _botLog(`${videos.length} approved videos found. Seeding activity (this can take a bit)…`);
+
+    let counts = { comments: 0, likes: 0, bookmarks: 0, watch: 0 };
+
+    for (const bot of allBots) {
+      const enc = encodeURIComponent(bot.username);
+      // One existence-check query per table (not per video) — keeps re-runs
+      // idempotent without turning this into thousands of round-trips.
+      const [existingWatch, existingLikes, existingBookmarks, existingComments] = await Promise.all([
+        sbGet('watch_time', `username=eq.${enc}&select=video_id`),
+        sbGet('likes', `username=eq.${enc}&select=video_id`),
+        sbGet('bookmarks', `username=eq.${enc}&select=video_id`),
+        sbGet('comments', `username=eq.${enc}&select=video_id`)
+      ]).catch(() => [[], [], [], []]);
+      const doneWatch = new Set(existingWatch.map(r => r.video_id));
+      const doneLikes = new Set(existingLikes.map(r => r.video_id));
+      const doneBookmarks = new Set(existingBookmarks.map(r => r.video_id));
+      const doneComments = new Set(existingComments.map(r => r.video_id));
+
+      // Each bot touches a random 15–40% slice of the library, not everything —
+      // uniform 100% coverage per bot is another easy tell.
+      const shareCount = Math.floor(videos.length * (_botRandInt(15, 40) / 100));
+      const shuffled = [...videos].sort(() => Math.random() - 0.5).slice(0, shareCount);
+
+      const watchRows = [], likeRows = [], bookmarkRows = [], commentRows = [];
+      for (const v of shuffled) {
+        const vid = v.video_id || v.url;
+        // Watch time — 70% chance, partial duration (35–95% of runtime, or a
+        // plausible 3–30min guess if duration isn't on file), never a clean 100%.
+        if (!doneWatch.has(vid) && Math.random() < 0.7) {
+          const dur = v.duration_seconds;
+          const total = dur ? Math.floor(dur * (_botRandInt(35, 95) / 100)) : _botRandInt(180, 1800);
+          watchRows.push({ username: bot.username, video_url: v.url, video_id: vid, total_seconds: total, rating_unlocked: total >= 600 });
+        }
+        if (!doneLikes.has(vid) && Math.random() < 0.6) {
+          likeRows.push({ video_url: v.url, video_id: vid, username: bot.username, liked_at: _botPastTs(60) });
+        }
+        if (!doneBookmarks.has(vid) && Math.random() < 0.25) {
+          bookmarkRows.push({ video_url: v.url, video_id: vid, username: bot.username, saved_at: _botPastTs(60) });
+        }
+        // Comment — 25% chance, one per bot per video max
+        if (!doneComments.has(vid) && Math.random() < 0.25) {
+          commentRows.push({ video_url: v.url, video_id: vid, username: bot.username, text: _botPick(BOT_COMMENTS), created_at: _botPastTs(60), flagged: false, removed: false });
+        }
+      }
+
+      async function _botBulkInsert(table, rows) {
+        if (!rows.length) return;
+        const CHUNK = 200;
+        for (let i = 0; i < rows.length; i += CHUNK) await sbInsert(table, rows.slice(i, i + CHUNK));
+      }
+      try {
+        await _botBulkInsert('watch_time', watchRows);
+        await _botBulkInsert('likes', likeRows);
+        await _botBulkInsert('bookmarks', bookmarkRows);
+        await _botBulkInsert('comments', commentRows);
+        counts.watch += watchRows.length; counts.likes += likeRows.length;
+        counts.bookmarks += bookmarkRows.length; counts.comments += commentRows.length;
+        _botLog(`✓ @${bot.username}: ${watchRows.length} watch, ${likeRows.length} likes, ${bookmarkRows.length} bookmarks, ${commentRows.length} comments`);
+      } catch (e) {
+        _botLog(`<span style="color:#ff6b6b;">✗ @${bot.username}: ${e.message}</span>`);
+      }
+    }
+
+    _botLog(`<br><strong style="color:#4caf64;">Done — ${counts.watch} watch-time rows, ${counts.likes} likes, ${counts.bookmarks} bookmarks, ${counts.comments} comments added.</strong>`);
+  } catch (e) {
+    _botLog(`<span style="color:#ff6b6b;">Stopped: ${e.message}</span>`);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function wipeAllBots() {
+  if (!await adminConfirm('This deletes every is_bot account and all of their comments, likes, bookmarks, and watch time. This cannot be undone.', 'Remove all bots?')) return;
+  const btn = document.getElementById('bots-wipe-btn');
+  if (btn) btn.disabled = true;
+  _botLog('Removing bot accounts and activity…');
+  try {
+    const bots = await sbGet('users', 'is_bot=eq.true&select=username');
+    for (const bot of bots) {
+      const u = encodeURIComponent(bot.username);
+      await sbDelete('comments', `username=eq.${u}`);
+      await sbDelete('likes', `username=eq.${u}`);
+      await sbDelete('bookmarks', `username=eq.${u}`);
+      await sbDelete('watch_time', `username=eq.${u}`);
+      await sbDelete('users', `username=eq.${u}`);
+      _botLog(`✓ Removed @${bot.username} and their activity`);
+    }
+    _botLog(`<br><strong style="color:#4caf64;">Done — ${bots.length} bot account(s) fully removed.</strong>`);
+  } catch (e) {
+    _botLog(`<span style="color:#ff6b6b;">Stopped: ${e.message}</span>`);
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
