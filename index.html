@@ -5371,16 +5371,8 @@ function isMatch(v) {
 function isPreLive(v) {
   // Returns true if this upcoming video is within 15 min of its scheduled broadcast
   if (v.status !== 'upcoming' && v.sectionOverride !== 'upcoming') return false;
-  // date_ms isn't always saved on the submission — fall back to parsing the
-  // plain date string rather than treating a missing dateMs as "not due yet
-  // forever", which was silently hiding some upcoming videos permanently.
-  let ms = v.dateMs;
-  if (!ms && v.date) {
-    const parsed = new Date(v.date).getTime();
-    if (!Number.isNaN(parsed)) ms = parsed;
-  }
-  if (!ms) return false;
-  const msUntil = ms - Date.now();
+  if (!v.dateMs) return false;
+  const msUntil = v.dateMs - Date.now();
   return msUntil <= 15 * 60 * 1000; // within 15 min (or already past)
 }
 
@@ -8168,8 +8160,8 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
     console.warn('Could not load upcoming submissions:', e);
   }
 
-  // Back-mark any video already in the main videos[] array that also has an
-  // upcoming submission, so isLatest() correctly excludes it until air time.
+  // Back-mark any video in the main videos[] array that has a matching upcoming submission
+  // so isLatest() correctly excludes it from the Latest Videos row
   if (upcomingVideos.length) {
     const upcomingIds = new Set(upcomingVideos.map(u => extractId(u.url)).filter(Boolean));
     const upcomingUrls = new Set(upcomingVideos.map(u => u.url).filter(Boolean));
@@ -8177,22 +8169,6 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
       if (upcomingUrls.has(v.url) || (v.url && upcomingIds.has(extractId(v.url)))) {
         v.status = 'upcoming';
       }
-    });
-    // The normal case: an upcoming submission was never status='approved', so
-    // it was never in videos[] to begin with — it only exists in
-    // upcomingVideos[]. That means isLatest()/isPreLive() never get a chance
-    // to run on it, so it can never "graduate" into Latest Videos once its
-    // air time passes. Add these in too so that logic actually applies.
-    const existingVideoIds = new Set(videos.map(v => extractId(v.url)).filter(Boolean));
-    const existingVideoUrls = new Set(videos.map(v => v.url).filter(Boolean));
-    upcomingVideos.forEach(u => {
-      const uid = extractId(u.url);
-      if (existingVideoUrls.has(u.url) || (uid && existingVideoIds.has(uid))) return; // already handled above
-      videos.push({
-        url: u.url, show: u.show, efed: u.efed, date: u.date, dateMs: u.dateMs,
-        submittedBy: u.submittedBy, community: true, status: 'upcoming',
-        thumb: u.thumb, dbId: u.dbId
-      });
     });
   }
 
@@ -8229,6 +8205,20 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
   // ── BACKGROUND: fetch remaining videos + all durations/metadata in parallel ──
   (async () => {
     try {
+      // A failed page request used to be swallowed as `[]` (via .catch(() =>
+      // [])), which the loop below treated as "no more data" and stopped —
+      // silently truncating pagination on a transient network blip, with any
+      // video past that point simply never appearing, no error anywhere.
+      // Retry a few times before actually giving up on a page.
+      async function _fetchPageWithRetry(table, filters, tries = 3) {
+        for (let attempt = 1; attempt <= tries; attempt++) {
+          try { return await sbGet(table, filters); }
+          catch (e) {
+            if (attempt === tries) { console.warn('Page fetch failed after retries:', filters, e); return null; }
+            await new Promise(r => setTimeout(r, 400 * attempt));
+          }
+        }
+      }
       // Fetch rest of submissions (offset past the first page) + durations in parallel
       const FIRST_PAGE = 60;
       const [remainingSubs, dbDurRows] = await Promise.all([
@@ -8238,8 +8228,9 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
           let offset = FIRST_PAGE;
           const PAGE = 1000;
           while (true) {
-            const page = await sbGet('submissions',
-              `status=eq.approved&order=submitted_at.desc&select=url,show_name,efed,date,date_ms,submitted_at,submitted_by,thumb_url,tags&limit=${PAGE}&offset=${offset}`).catch(() => []);
+            const page = await _fetchPageWithRetry('submissions',
+              `status=eq.approved&order=submitted_at.desc&select=url,show_name,efed,date,date_ms,submitted_at,submitted_by,thumb_url,tags&limit=${PAGE}&offset=${offset}`);
+            if (page === null) break; // genuinely failed after retries — stop rather than loop forever
             all = all.concat(page);
             if (page.length < PAGE) break;
             offset += PAGE;
@@ -8251,8 +8242,9 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
           let all = [];
           let offset = 0;
           while (true) {
-            const page = await sbGet('submissions',
-              `status=eq.approved&select=url,duration_seconds,section_override,submission_type,tags&limit=1000&offset=${offset}`).catch(() => []);
+            const page = await _fetchPageWithRetry('submissions',
+              `status=eq.approved&select=url,duration_seconds,section_override,submission_type,tags&limit=1000&offset=${offset}`);
+            if (page === null) break;
             all = all.concat(page);
             if (page.length < 1000) break;
             offset += 1000;
