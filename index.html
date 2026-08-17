@@ -8160,8 +8160,8 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
     console.warn('Could not load upcoming submissions:', e);
   }
 
-  // Back-mark any video in the main videos[] array that has a matching upcoming submission
-  // so isLatest() correctly excludes it from the Latest Videos row
+  // Back-mark any video already in the main videos[] array that also has an
+  // upcoming submission, so isLatest() correctly excludes it until air time.
   if (upcomingVideos.length) {
     const upcomingIds = new Set(upcomingVideos.map(u => extractId(u.url)).filter(Boolean));
     const upcomingUrls = new Set(upcomingVideos.map(u => u.url).filter(Boolean));
@@ -8169,6 +8169,22 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
       if (upcomingUrls.has(v.url) || (v.url && upcomingIds.has(extractId(v.url)))) {
         v.status = 'upcoming';
       }
+    });
+    // The normal case: an upcoming submission was never status='approved', so
+    // it was never in videos[] to begin with — it only exists in
+    // upcomingVideos[]. That means isLatest()/isPreLive() never get a chance
+    // to run on it, so it can never "graduate" into Latest Videos once its
+    // air time passes. Add these in too so that logic actually applies.
+    const existingVideoIds = new Set(videos.map(v => extractId(v.url)).filter(Boolean));
+    const existingVideoUrls = new Set(videos.map(v => v.url).filter(Boolean));
+    upcomingVideos.forEach(u => {
+      const uid = extractId(u.url);
+      if (existingVideoUrls.has(u.url) || (uid && existingVideoIds.has(uid))) return; // already handled above
+      videos.push({
+        url: u.url, show: u.show, efed: u.efed, date: u.date, dateMs: u.dateMs,
+        submittedBy: u.submittedBy, community: true, status: 'upcoming',
+        thumb: u.thumb, dbId: u.dbId
+      });
     });
   }
 
