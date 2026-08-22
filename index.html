@@ -5131,6 +5131,13 @@ function togglePause() {
 </script>
 
 <script>
+// Resolved once initHub()'s Phase 1 community-video fetch has merged into
+// `videos[]` (or given up trying). Anything that needs the *full* video
+// list — not just the 20 hardcoded entries below — should `await` this
+// instead of reading `videos` immediately, or it'll race the network fetch.
+let _resolveVideosReady;
+const videosReady = new Promise(res => { _resolveVideosReady = res; });
+
 const videos = [
   // ── BANNED PROMOTIONS (do not add without checking with site owner first) ──
   // Pro Wrestling Enterprise (PWE) — BANNED
@@ -8109,6 +8116,7 @@ async function initHub() {
       loadEfedOwnerRow(); buildHeroDots(); loadSlide(); loadMostViewed(videos);
       loadHLRShows(videos); loadPLEShows(videos); loadRecentlyAdded(videos); loadSpotlight(videos);
 loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); loadPromosRow(videos); loadPodcastRow(videos);
+      _resolveVideosReady();
     }
     let subs = firstPage;
     const dbApprovedUrls = new Set(subs.map(s => s.url));
@@ -8148,6 +8156,7 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
   } catch(e) {
     console.warn('Could not load community submissions:', e);
   }
+  _resolveVideosReady();
 
   // Fetch upcoming submissions
   try {
@@ -19223,6 +19232,13 @@ async function _shortsEligibleVideos() {
 async function openShorts(jumpVideoId) {
   const overlay = document.getElementById('shorts-overlay');
   const scroll = document.getElementById('shorts-scroll');
+  // Wait for the full video list (community submissions included) to land
+  // before building the pool — otherwise, on a page that just loaded, this
+  // can run before initHub()'s fetch finishes and only the ~20 hardcoded
+  // videos are available yet, silently dropping any pool entry that points
+  // at a community-submitted video. Capped at 8s so a stuck fetch can't
+  // hang Shorts open forever — it'll just fall back to whatever's loaded.
+  await Promise.race([videosReady, new Promise(res => setTimeout(res, 8000))]);
   // Always refetch fresh — an admin may have just added/changed a pool entry.
   _shortsPool = _shortsShuffle(await _shortsEligibleVideos());
   if (jumpVideoId) {
