@@ -1136,16 +1136,16 @@ html, body { overscroll-behavior-y: none; }
   .upcoming-thumb { width: 100%; height: var(--card-h); border-radius: 8px; overflow: hidden; position: relative; background: var(--surface2); }
   .upcoming-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; filter: brightness(.55); }
 
-  /* Desktop: match best-matches card-grid--big size (260×146px, column layout) */
+  /* Desktop: match the XL tier (400×225px) used by Latest Videos/Most Viewed/HLR Shows */
   @media (min-width: 601px) {
     #row-upcoming { align-items: flex-start; }
     #row-upcoming .upcoming-card {
-      width: 260px;
+      width: 400px;
       display: flex; flex-direction: column;
     }
     #row-upcoming .upcoming-thumb {
-      width: 260px;
-      height: 146px; /* 16:9 */
+      width: 400px;
+      height: 225px; /* 16:9 */
       border-radius: 10px;
     }
     #row-upcoming .upcoming-overlay { border-radius: 10px; }
@@ -4360,7 +4360,7 @@ html, body { overscroll-behavior-y: none; }
       <div class="arr-col left">
         <button class="pill-arr left hidden" id="cw-arr-left" onclick="scrollNamedRow('cw',-1)">&#8249;</button>
       </div>
-      <div class="card-grid card-grid--big" id="row-cw"></div>
+      <div class="card-grid card-grid--big card-grid--xl" id="row-cw"></div>
       <div class="arr-col right">
         <button class="pill-arr right hidden" id="cw-arr-right" onclick="scrollNamedRow('cw',1)">&#8250;</button>
       </div>
@@ -5131,13 +5131,6 @@ function togglePause() {
 </script>
 
 <script>
-// Resolved once initHub()'s Phase 1 community-video fetch has merged into
-// `videos[]` (or given up trying). Anything that needs the *full* video
-// list — not just the 20 hardcoded entries below — should `await` this
-// instead of reading `videos` immediately, or it'll race the network fetch.
-let _resolveVideosReady;
-const videosReady = new Promise(res => { _resolveVideosReady = res; });
-
 const videos = [
   // ── BANNED PROMOTIONS (do not add without checking with site owner first) ──
   // Pro Wrestling Enterprise (PWE) — BANNED
@@ -5617,16 +5610,32 @@ async function updateLiveBadges() {
 
     // Move to Latest Videos 15 min before broadcast, or when live, or when VOD is ready
     if (within15Min || isNowLive || noLongerUpcoming) {
-      const promoted_v = { ...uv, status: 'approved', submittedAt: uv.dateMs || now };
+      // Once it's actually live (or confirmed done — no YT entry found, meaning
+      // the stream already happened), lock in "now" as the real air date. This
+      // is what the 30-day Latest Videos window (see filteredVideos()) counts
+      // from — using the originally scheduled time here would let the window
+      // drift if the broadcast started later/earlier than planned.
+      const wentLiveMs = (isNowLive || noLongerUpcoming) ? now : uv.dateMs;
+      const wentLiveDate = wentLiveMs
+        ? new Date(wentLiveMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        : uv.date;
+      const promoted_v = {
+        ...uv,
+        status: 'approved',
+        dateMs: wentLiveMs,
+        date: wentLiveDate,
+        submittedAt: wentLiveMs || now
+      };
       const alreadyPromoted = !!videos.find(v => v.url === promoted_v.url);
       if (!alreadyPromoted) {
         videos.push(promoted_v);
         promoted = true;
       }
       upcomingVideos.splice(i, 1);
-      // Update DB status to approved
+      // Update DB status + real air date so a page reload doesn't revert to
+      // the originally scheduled date_ms and mis-time the 30-day window.
       if (uv.dbId) {
-        sbUpdate('submissions', { status: 'approved' }, `id=eq.${uv.dbId}`).catch(() => {});
+        sbUpdate('submissions', { status: 'approved', date: wentLiveDate, date_ms: wentLiveMs }, `id=eq.${uv.dbId}`).catch(() => {});
       }
       promoted = true;
     }
@@ -8116,7 +8125,6 @@ async function initHub() {
       loadEfedOwnerRow(); buildHeroDots(); loadSlide(); loadMostViewed(videos);
       loadHLRShows(videos); loadPLEShows(videos); loadRecentlyAdded(videos); loadSpotlight(videos);
 loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); loadPromosRow(videos); loadPodcastRow(videos);
-      _resolveVideosReady();
     }
     let subs = firstPage;
     const dbApprovedUrls = new Set(subs.map(s => s.url));
@@ -8156,7 +8164,6 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
   } catch(e) {
     console.warn('Could not load community submissions:', e);
   }
-  _resolveVideosReady();
 
   // Fetch upcoming submissions
   try {
@@ -19232,13 +19239,6 @@ async function _shortsEligibleVideos() {
 async function openShorts(jumpVideoId) {
   const overlay = document.getElementById('shorts-overlay');
   const scroll = document.getElementById('shorts-scroll');
-  // Wait for the full video list (community submissions included) to land
-  // before building the pool — otherwise, on a page that just loaded, this
-  // can run before initHub()'s fetch finishes and only the ~20 hardcoded
-  // videos are available yet, silently dropping any pool entry that points
-  // at a community-submitted video. Capped at 8s so a stuck fetch can't
-  // hang Shorts open forever — it'll just fall back to whatever's loaded.
-  await Promise.race([videosReady, new Promise(res => setTimeout(res, 8000))]);
   // Always refetch fresh — an admin may have just added/changed a pool entry.
   _shortsPool = _shortsShuffle(await _shortsEligibleVideos());
   if (jumpVideoId) {
