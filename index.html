@@ -8095,6 +8095,16 @@ function loadPodcastRow(allVideos) {
   } catch(e) { console.error('Podcast row failed:', e); }
 }
 
+// Resolves once the FULL video catalog (all approved submissions, not just
+// the first page of 60) has been merged into videos[] by initHub()'s
+// background phase — see _catalogLoadedResolve() below. openShorts() awaits
+// this so it never builds its pool from a partial catalog (previously most
+// shorts_pool entries were silently dropped if Shorts opened before the
+// background load finished, which it usually was — Shorts opens
+// automatically on page load).
+let _catalogLoadedResolve;
+const _catalogLoaded = new Promise(res => { _catalogLoadedResolve = res; });
+
 async function initHub() {
   showSkeletons(8);
   buildPills();
@@ -8150,6 +8160,9 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
     });
   } catch(e) {
     console.warn('Could not load community submissions:', e);
+    // Phase 2 (and its catalog-loaded resolve) never runs on this path —
+    // resolve now so openShorts() doesn't wait forever.
+    if (typeof _catalogLoadedResolve === 'function') _catalogLoadedResolve();
   }
 
   // Fetch upcoming submissions
@@ -8298,6 +8311,11 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
         }
       });
 
+      // Full catalog is now in videos[] — safe for openShorts() to build its
+      // pool. Resolve here, not after the duration/metadata work below,
+      // since Shorts doesn't need durations and shouldn't wait on them.
+      if (typeof _catalogLoadedResolve === 'function') _catalogLoadedResolve();
+
       // Merge duration/metadata into existing videos
       dbDurRows.forEach(r => {
         const v = videos.find(v => v.url === r.url);
@@ -8363,7 +8381,12 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
         loadPromosRow(videos);
         loadPodcastRow(videos);
       }
-    } catch(e) { console.warn('Background fetch failed:', e); }
+    } catch(e) {
+      console.warn('Background fetch failed:', e);
+      // Resolve anyway — videos[] just stays at the first-page subset, but
+      // openShorts() must not hang forever waiting on a fetch that failed.
+      if (typeof _catalogLoadedResolve === 'function') _catalogLoadedResolve();
+    }
   })();
   // ?play= param handled before initHub for instant open
 }
@@ -19118,6 +19141,12 @@ async function _shortsEligibleVideos() {
 async function openShorts(jumpVideoId) {
   const overlay = document.getElementById('shorts-overlay');
   const scroll = document.getElementById('shorts-scroll');
+  // Wait for the full video catalog before building the pool — otherwise
+  // shorts_pool entries whose video hasn't loaded into videos[] yet get
+  // silently dropped (see _catalogLoaded above). Usually already resolved
+  // by the time someone manually opens Shorts; only matters on the
+  // automatic page-load open, which is exactly when it used to break.
+  await _catalogLoaded;
   // Always refetch fresh — an admin may have just added/changed a pool entry.
   _shortsPool = _shortsShuffle(await _shortsEligibleVideos());
   if (jumpVideoId) {
