@@ -1229,8 +1229,6 @@ html, body { overscroll-behavior-y: none; }
     .hero-vid-wrap iframe { opacity: 1 !important; }
     nav { padding: 14px 20px; gap: 0; }
     #online-counter { display: none; }
-@keyframes hubPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.2)} }
-
     .logo-eyebrow { display: none; }
     .nav-right { gap: 10px; }
     /* Move invite out of nav on mobile */
@@ -4833,17 +4831,6 @@ function a2hsDismiss(){
           <div id="expand-show"></div>
         </div>
         <div id="expand-meta"></div>
-        <!-- Hub watch time for this video -->
-        <div id="hub-video-stats" style="display:none;align-items:center;gap:8px;margin-top:5px;flex-wrap:wrap;">
-          <div style="display:flex;align-items:center;gap:5px;padding:3px 9px 3px 7px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:20px;">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.45;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            <span id="hub-video-time-label" style="font-size:.62rem;color:rgba(255,255,255,.4);font-family:DM Sans,sans-serif;font-weight:600;">—</span>
-          </div>
-          <div id="hub-video-live-wrap" style="display:none;align-items:center;gap:5px;padding:3px 9px 3px 7px;background:rgba(192,0,14,.1);border:1px solid rgba(192,0,14,.22);border-radius:20px;">
-            <div style="width:5px;height:5px;border-radius:50%;background:#ff4444;box-shadow:0 0 5px rgba(255,68,68,.8);animation:hubPulse 1.4s ease-in-out infinite;flex-shrink:0;"></div>
-            <span id="hub-video-live-label" style="font-size:.62rem;color:#ff7070;font-family:DM Sans,sans-serif;font-weight:700;letter-spacing:.5px;">2 watching now</span>
-          </div>
-        </div>
         <div id="expand-poster"></div>
         <div id="expand-twitch-note" style="display:none;align-items:center;gap:6px;margin-top:6px;padding:6px 10px;background:rgba(145,70,255,.1);border:1px solid rgba(145,70,255,.25);border-radius:6px;font-size:.62rem;color:rgba(145,70,255,.9);font-family:DM Sans,sans-serif;">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -8535,125 +8522,6 @@ window.addEventListener('popstate', function(e) {
 
 // ── ONLINE PRESENCE COUNTER removed — check Supabase Table Editor for live data ──
 
-// ═══════════════════════════════════════════════════════════════════
-// ── HUB VIEW TIMER — per-video hub watch time + live viewers
-// ═══════════════════════════════════════════════════════════════════
-(function() {
-  const HUB_TICK_SECS  = 60;    // push +60s to server every 60s while watching
-
-  let _hubWatching    = false;
-  let _hubCurrentUrl  = null;  // URL of video being watched
-  let _hubTickTimer   = null;
-  let _hubTotalSecs   = 0;
-  let _hubDbLoaded    = false;
-
-  // Unique per-tab session key
-  const _hubSessId = 'hvt_' + Math.random().toString(36).slice(2) + '_' + Date.now();
-
-  function _fmtTime(secs) {
-    if (!secs || secs < 60) return (secs || 0) + 's watched across the hub';
-    const m = Math.floor(secs / 60);
-    const h = Math.floor(m / 60);
-    const rm = m % 60;
-    const base = h > 0 ? h.toLocaleString() + 'h ' + (rm > 0 ? rm + 'm ' : '') : m.toLocaleString() + 'm ';
-    return base + 'watched across the hub';
-  }
-
-  function _render() {
-    const wrap     = document.getElementById('hub-video-stats');
-    const lbl      = document.getElementById('hub-video-time-label');
-    if (!lbl || !wrap) return;
-
-    // Show only when there's data or actively watching
-    if (_hubDbLoaded || _hubWatching) {
-      wrap.style.display = 'flex';
-      lbl.textContent = _fmtTime(_hubTotalSecs);
-    }
-
-    // Live watcher badge removed
-  }
-
-  // ── Load per-video collective total from hub_video_stats (best-effort) ──
-  async function _loadStats(url) {
-    if (!url) return;
-    try {
-      const encoded = encodeURIComponent(url);
-      const rows = await fetch(SUPABASE_URL + '/rest/v1/hub_video_stats?video_url=eq.' + encoded + '&select=total_seconds', {
-        headers: SB_HEADERS
-      }).then(r => r.ok ? r.json() : []).catch(() => []);
-      if (Array.isArray(rows) && rows.length > 0) {
-        const dbVal = Number(rows[0]?.total_seconds);
-        // Only upgrade if DB has a higher value (collective > local)
-        if (!isNaN(dbVal) && dbVal > _hubTotalSecs) _hubTotalSecs = dbVal;
-      }
-      _hubDbLoaded = true;
-    } catch(e) {}
-    _render();
-  }
-
-  // ── Tick: always increment locally first so display never freezes,
-  //         then try DB and use it if it's higher (other viewers added more) ──
-  async function _tick() {
-    if (!_hubWatching || !_hubCurrentUrl || document.visibilityState === 'hidden') return;
-    // Always count locally — works even when DB/RPC unavailable
-    _hubTotalSecs += HUB_TICK_SECS;
-    _hubDbLoaded = true;
-    _render();
-    try {
-      await fetch(SUPABASE_URL + '/rest/v1/rpc/increment_video_hub_seconds', {
-        method: 'POST',
-        headers: { ...SB_HEADERS, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vid_url: _hubCurrentUrl, inc: HUB_TICK_SECS })
-      }).catch(() => null);
-      // Re-read: if DB is higher, use it (collective across all viewers)
-      const encoded = encodeURIComponent(_hubCurrentUrl);
-      const fresh = await fetch(SUPABASE_URL + '/rest/v1/hub_video_stats?video_url=eq.' + encoded + '&select=total_seconds', {
-        headers: SB_HEADERS
-      }).then(r => r.ok ? r.json() : null).catch(() => null);
-      if (fresh && Array.isArray(fresh) && fresh.length > 0) {
-        const dbVal = Number(fresh[0]?.total_seconds);
-        if (!isNaN(dbVal) && dbVal > _hubTotalSecs) { _hubTotalSecs = dbVal; _render(); }
-      }
-    } catch(e) {}
-  }
-
-  // ── Public: called by openExpand ──
-  window.hubStartWatching = function(url) {
-    if (_hubWatching && _hubCurrentUrl === url) return;
-    _hubStopWatching(); // clean up previous if any
-    _hubWatching   = true;
-    _hubCurrentUrl = url;
-    _hubTotalSecs  = 0;
-    _hubDbLoaded   = false;
-    _hubLiveCount  = 0;
-
-    // Reset display
-    const wrap = document.getElementById('hub-video-stats');
-    if (wrap) wrap.style.display = 'none';
-
-    // Load existing DB total (non-blocking), then start ticking every 60s
-    _loadStats(url);
-    _hubTickTimer = setInterval(_tick, HUB_TICK_SECS * 1000);
-  };
-
-  // ── Public: called by closeExpand ──
-  window.hubStopWatching = function() { _hubStopWatching(); };
-  function _hubStopWatching() {
-    if (!_hubWatching) return;
-    _hubWatching = false;
-    clearInterval(_hubTickTimer); _hubTickTimer = null;
-    _hubCurrentUrl = null;
-  }
-
-  window.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      clearInterval(_hubTickTimer);
-    } else if (_hubWatching) {
-      _hubTickTimer = setInterval(_tick, HUB_TICK_SECS * 1000);
-    }
-  });
-  window.addEventListener('beforeunload', _hubStopWatching);
-})();
 
 
 function heroExtractId(url) {
@@ -11482,7 +11350,6 @@ function openExpand(v) {
   const tab = document.getElementById('chat-tab');
   if (tab) { tab.style.display = 'none'; tab.classList.remove('roster-visible'); }
   _expandVideo = v;
-  if (typeof hubStartWatching === 'function') hubStartWatching(v.url);
   cwSave(v); // ── Continue Watching ──
   if (v.efed) {
     _INDEX_EFED_SET = getEfedEmojis(v.efed);
@@ -12037,7 +11904,6 @@ function closeExpand(fromPopState) {
     stopWatchTimer(_expandVideo.url);
     delete _watchSessionSecs[_expandVideo.url];
   }
-  if (typeof hubStopWatching === 'function') hubStopWatching();
   overlay.classList.remove('open');
   document.body.classList.remove('video-open');
   document.body.style.overflow = '';
