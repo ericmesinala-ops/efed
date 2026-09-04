@@ -16601,7 +16601,7 @@ function triggerSubmitCelebration() {
 // ── TAG SYSTEM ──
 const TAG_CATEGORIES = [
   { label: 'Format', tags: ['AI Video', 'AI vs AI', 'Real Footage', 'HLR', 'Cinematic', 'Story Heavy', 'Live Event', 'Full-Capture', 'Fictional', 'Controlled', 'Supernatural'] },
-  { label: 'Presentation', tags: ['Silent Commentary', 'Custom Commentary', 'AI Commentary', 'Face Cam', 'In-Game Commentary', 'Live Play-by-Play', 'Custom Announcement', 'Entrance Video', 'Signature Video'] },
+  { label: 'Presentation', tags: ['Silent Commentary', 'Custom Commentary', 'AI Commentary', 'Face Cam', 'In-Game Commentary', 'Live Play-by-Play', 'Custom Announcement', 'Entrance Video', 'Signature Video', 'Show Decals'] },
   { label: 'Content', tags: ['Match', 'Episode', 'Special', 'PLE', 'Show Before PLE', 'Crossover', 'Season Finale', 'End of an Era', 'Awards', 'Tryouts', "Women's Division", 'Cruiserweight Division', 'Luchador', 'WWE Characters'] },
   { label: 'Match', tags: ['Singles', 'Tag-Team', 'Triple Threat', '4-Man', '6-Man', 'Multi-Man', 'Mixed', 'Championship', 'Battle Royale', 'Royal Rumble', 'Elimination', 'Elimination Chamber', 'Hardcore', 'Ladder', 'Money in the Bank', 'Cage', 'Ambulance', 'Inferno', 'Underground', 'Falls Count Anywhere', 'First-Blood', 'I Quit', 'Submission', 'Parking Lot Brawl', 'Special Ref', 'Opener', 'Main Event', 'Refresher'] },
   { label: 'Story', tags: ['Feud', 'Debut', 'Return', 'Promo', 'Backstage', 'Contract Signing', 'Open Challenge', 'Interference', 'Betrayal', 'Flashback', 'Post-Scenes', 'GM', 'Judges', '4th Wall', 'DQ', 'Count-Out', 'Pure Wrestling'] },
@@ -16617,32 +16617,75 @@ const TAG_REMAP = { 'In-Game Only': 'Full-Capture', 'Commentary': 'Custom Commen
 function remapTag(t) { return TAG_REMAP[t] || t; }
 
 // ── AUTO RATING FROM TAGS ──
-// Per-tag score deltas from a 3.0/5 baseline. Unlisted tags contribute 0.
-// Final score = clamp(3.0 + average delta of selected tags, 1, 5).
+// Per-tag score delta RANGES from a 3.0/5 baseline, as [min, max]. Each time a
+// video's tags are scored, every selected tag rolls an independent random
+// value within its own range — so the same set of tags can produce slightly
+// different scores from one save to the next. Unlisted tags contribute 0.
+// Final score = clamp(3.0 + average of rolled deltas, 1, 5).
 const TAG_SCORE_WEIGHTS = {
-  // Big-stakes match types
-  'Championship': 0.6, 'Main Event': 0.6, 'PLE': 0.6, 'Elimination Chamber': 0.6,
-  'Money in the Bank': 0.6, 'Royal Rumble': 0.6, 'Cage': 0.6, 'Ladder': 0.6,
-  'I Quit': 0.6, 'Falls Count Anywhere': 0.6, 'Inferno': 0.6, 'Underground': 0.6,
-  'Hardcore': 0.6, 'Ambulance': 0.6,
-  // Big story moments
-  'Feud': 0.5, 'Debut': 0.5, 'Return': 0.5, 'Betrayal': 0.5, 'Contract Signing': 0.5,
-  'End of an Era': 0.5, 'Season Finale': 0.5, 'Interference': 0.5,
-  // Production/format quality signals
-  'Cinematic': 0.4, 'Story Heavy': 0.4, 'Full-Capture': 0.4, 'HLR': 0.4,
-  // Presentation polish
-  'Custom Commentary': 0.3, 'AI Commentary': 0.3, 'Live Play-by-Play': 0.3, 'Custom Announcement': 0.3,
-  // Multi-competitor stakes
-  'Triple Threat': 0.3, '4-Man': 0.3, '6-Man': 0.3, 'Multi-Man': 0.3, 'Battle Royale': 0.3,
-  'Elimination': 0.3, 'Mixed': 0.3,
-  // Vibe
-  'Hype': 0.3, 'Emotional': 0.3, 'Gritty': 0.3, 'Grudge': 0.3, 'Dark': 0.3
+  // Format
+  'AI Video': [0.3, 0.5], 'AI vs AI': [0.0, 0.2], 'Real Footage': [0.1, 0.3],
+  'HLR': [0.6, 0.8], 'Cinematic': [0.4, 0.6], 'Story Heavy': [0.4, 0.6],
+  'Live Event': [0.1, 0.3], 'Full-Capture': [-0.3, -0.1], 'Fictional': [0.1, 0.3],
+  'Controlled': [0.0, 0.2], 'Supernatural': [0.2, 0.4],
+  // Presentation
+  'Silent Commentary': [0.0, 0.2], 'Custom Commentary': [0.6, 0.8], 'AI Commentary': [0.2, 0.4],
+  'Face Cam': [0.0, 0.2], 'In-Game Commentary': [0.0, 0.2], 'Live Play-by-Play': [0.2, 0.4],
+  'Custom Announcement': [0.3, 0.5], 'Entrance Video': [0.4, 0.6], 'Signature Video': [0.2, 0.4],
+  'Show Decals': [0.4, 0.6],
+  // Content
+  'Match': [0.1, 0.3], 'Episode': [0.1, 0.3], 'Special': [0.2, 0.4], 'PLE': [0.6, 0.8],
+  'Show Before PLE': [0.1, 0.3], 'Crossover': [0.2, 0.4], 'Season Finale': [0.5, 0.7],
+  'End of an Era': [0.5, 0.7], 'Awards': [0.2, 0.4], 'Tryouts': [0.1, 0.3],
+  "Women's Division": [0.1, 0.3], 'Cruiserweight Division': [0.1, 0.3], 'Luchador': [0.1, 0.3],
+  'WWE Characters': [0.0, 0.2],
+  // Match
+  'Singles': [0.1, 0.3], 'Tag-Team': [0.1, 0.3], 'Triple Threat': [0.2, 0.4], '4-Man': [0.2, 0.4],
+  '6-Man': [0.2, 0.4], 'Multi-Man': [0.2, 0.4], 'Mixed': [0.3, 0.5], 'Championship': [0.3, 0.5],
+  'Battle Royale': [0.3, 0.5], 'Royal Rumble': [0.3, 0.5], 'Elimination': [0.3, 0.5],
+  'Elimination Chamber': [0.4, 0.6], 'Hardcore': [0.3, 0.5], 'Ladder': [0.3, 0.5],
+  'Money in the Bank': [0.3, 0.5], 'Cage': [0.3, 0.5], 'Ambulance': [0.4, 0.6], 'Inferno': [0.4, 0.6],
+  'Underground': [0.3, 0.5], 'Falls Count Anywhere': [0.2, 0.4], 'First-Blood': [0.3, 0.5],
+  'I Quit': [0.3, 0.5], 'Submission': [0.2, 0.4], 'Parking Lot Brawl': [0.1, 0.3],
+  'Special Ref': [0.2, 0.4], 'Opener': [0.1, 0.3], 'Main Event': [0.3, 0.5], 'Refresher': [0.1, 0.3],
+  // Story
+  'Feud': [0.2, 0.4], 'Debut': [0.3, 0.5], 'Return': [0.3, 0.5], 'Promo': [0.4, 0.6],
+  'Backstage': [0.1, 0.3], 'Contract Signing': [0.4, 0.6], 'Open Challenge': [0.3, 0.5],
+  'Interference': [0.2, 0.4], 'Betrayal': [0.4, 0.6], 'Flashback': [0.2, 0.4],
+  'Post-Scenes': [0.2, 0.4], 'GM': [0.2, 0.4], 'Judges': [0.3, 0.5], '4th Wall': [0.1, 0.3],
+  'DQ': [0.1, 0.3], 'Count-Out': [0.1, 0.3], 'Pure Wrestling': [0.3, 0.5],
+  // Locations (all)
+  'Chicago': [0.2, 0.4], 'Las Vegas': [0.2, 0.4], 'Los Angeles': [0.2, 0.4], 'New York': [0.2, 0.4],
+  'Mexico': [0.2, 0.4], 'Japan': [0.2, 0.4], 'Atlanta': [0.2, 0.4], 'Miami': [0.2, 0.4],
+  'Dallas': [0.2, 0.4], 'Houston': [0.2, 0.4], 'Philadelphia': [0.2, 0.4], 'Boston': [0.2, 0.4],
+  'Toronto': [0.2, 0.4], 'Vancouver': [0.2, 0.4], 'London': [0.2, 0.4], 'Paris': [0.2, 0.4],
+  'Berlin': [0.2, 0.4], 'Rome': [0.2, 0.4], 'Madrid': [0.2, 0.4], 'Michigan': [0.2, 0.4],
+  'Minnesota': [0.2, 0.4], 'Texas': [0.2, 0.4], 'Missouri': [0.2, 0.4], 'North Carolina': [0.2, 0.4],
+  'Tennessee': [0.2, 0.4], 'Florida': [0.2, 0.4], 'Glasgow': [0.2, 0.4], 'Dublin': [0.2, 0.4],
+  'Seoul': [0.2, 0.4],
+  // Vibe (all)
+  'Hype': [0.3, 0.5], 'Dark': [0.3, 0.5], 'Emotional': [0.3, 0.5], 'Funny': [0.3, 0.5],
+  'Gritty': [0.3, 0.5], 'Fresh': [0.3, 0.5], 'Grudge': [0.3, 0.5], 'Clean': [0.3, 0.5],
+  'Loud': [0.3, 0.5], 'Relaxed': [0.3, 0.5], 'Chill': [0.3, 0.5], 'Violent': [0.3, 0.5],
+  'Goth': [0.3, 0.5],
+  // Music (all)
+  'Rock': [0.3, 0.5], 'Punk': [0.3, 0.5], 'Hip-Hop': [0.3, 0.5], 'Metal': [0.3, 0.5],
+  // Language (all)
+  'English': [0.1, 0.3], 'Spanish': [0.1, 0.3], 'Japanese': [0.1, 0.3], 'Korean': [0.1, 0.3],
+  'Portuguese': [0.1, 0.3], 'Foreign': [0.1, 0.3]
 };
 const AUTO_RATING_USERNAME = '__tag_auto__';
+// Rolls a random delta within [min, max] for a single tag.
+function rollTagDelta(tag) {
+  const range = TAG_SCORE_WEIGHTS[tag];
+  if (!range) return 0;
+  const [min, max] = range;
+  return min + Math.random() * (max - min);
+}
 function computeTagAutoScore(tags) {
   const list = (tags || []).map(remapTag);
   if (!list.length) return 3.0;
-  const total = list.reduce((sum, t) => sum + (TAG_SCORE_WEIGHTS[t] || 0), 0);
+  const total = list.reduce((sum, t) => sum + rollTagDelta(t), 0);
   const avgDelta = total / list.length;
   return Math.min(5, Math.max(1, parseFloat((3.0 + avgDelta).toFixed(2))));
 }
