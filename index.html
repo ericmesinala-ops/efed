@@ -13676,20 +13676,16 @@ async function loadVideoRating(url) {
           if (info) info.appendChild(ratingEl);
         }
         ratingEl.textContent = _formatRating(rounded);
-        // Update or create the thumbnail badge (only show >= 4.0)
+        // Update or create the thumbnail badge (show for any rated video)
         const thumb = card.querySelector('.card-thumb');
         if (thumb) {
           let badge = thumb.querySelector('.card-rating-badge');
-          if (rounded >= 4.0) {
-            if (!badge) {
-              badge = document.createElement('div');
-              badge.className = 'card-rating-badge';
-              thumb.appendChild(badge);
-            }
-            badge.innerHTML = _formatRating(rounded);
-          } else if (badge) {
-            badge.remove();
+          if (!badge) {
+            badge = document.createElement('div');
+            badge.className = 'card-rating-badge';
+            thumb.appendChild(badge);
           }
+          badge.innerHTML = _formatRating(rounded);
         }
       }
     });
@@ -13719,14 +13715,12 @@ async function loadAllCardRatings() {
       if (url && grouped[key] && grouped[key].length) {
         const avg = grouped[key].reduce((a,b) => a+b, 0) / grouped[key].length;
         const rounded = Math.round(avg * 10) / 10; // 0-5, round to 1 decimal
-        // Only show if 4.0 or above (on /5 scale)
-        if (rounded >= 4.0) {
-          const badge = document.createElement('div');
-          badge.className = 'card-rating-badge';
-          badge.innerHTML = _formatRating(rounded);
-          const thumb = card.querySelector('.card-thumb');
-          if (thumb) thumb.appendChild(badge);
-        }
+        // Show badge for any rated video, regardless of score
+        const badge = document.createElement('div');
+        badge.className = 'card-rating-badge';
+        badge.innerHTML = _formatRating(rounded);
+        const thumb = card.querySelector('.card-thumb');
+        if (thumb) thumb.appendChild(badge);
       }
     });
   } catch(e) {}
@@ -16621,6 +16615,65 @@ const TAG_CATEGORIES = [
 // how it's displayed/matched in the UI without touching stored data.
 const TAG_REMAP = { 'In-Game Only': 'Full-Capture', 'Commentary': 'Custom Commentary', 'Original Commentary': 'Custom Commentary' };
 function remapTag(t) { return TAG_REMAP[t] || t; }
+
+// ── AUTO RATING FROM TAGS ──
+// Per-tag score deltas from a 3.0/5 baseline. Unlisted tags contribute 0.
+// Final score = clamp(3.0 + average delta of selected tags, 1, 5).
+const TAG_SCORE_WEIGHTS = {
+  // Big-stakes match types
+  'Championship': 0.6, 'Main Event': 0.6, 'PLE': 0.6, 'Elimination Chamber': 0.6,
+  'Money in the Bank': 0.6, 'Royal Rumble': 0.6, 'Cage': 0.6, 'Ladder': 0.6,
+  'I Quit': 0.6, 'Falls Count Anywhere': 0.6, 'Inferno': 0.6, 'Underground': 0.6,
+  'Hardcore': 0.6, 'Ambulance': 0.6,
+  // Big story moments
+  'Feud': 0.5, 'Debut': 0.5, 'Return': 0.5, 'Betrayal': 0.5, 'Contract Signing': 0.5,
+  'End of an Era': 0.5, 'Season Finale': 0.5, 'Interference': 0.5,
+  // Production/format quality signals
+  'Cinematic': 0.4, 'Story Heavy': 0.4, 'Full-Capture': 0.4, 'HLR': 0.4,
+  // Presentation polish
+  'Custom Commentary': 0.3, 'AI Commentary': 0.3, 'Live Play-by-Play': 0.3, 'Custom Announcement': 0.3,
+  // Multi-competitor stakes
+  'Triple Threat': 0.3, '4-Man': 0.3, '6-Man': 0.3, 'Multi-Man': 0.3, 'Battle Royale': 0.3,
+  'Elimination': 0.3, 'Mixed': 0.3,
+  // Vibe
+  'Hype': 0.3, 'Emotional': 0.3, 'Gritty': 0.3, 'Grudge': 0.3, 'Dark': 0.3
+};
+const AUTO_RATING_USERNAME = '__tag_auto__';
+function computeTagAutoScore(tags) {
+  const list = (tags || []).map(remapTag);
+  if (!list.length) return 3.0;
+  const total = list.reduce((sum, t) => sum + (TAG_SCORE_WEIGHTS[t] || 0), 0);
+  const avgDelta = total / list.length;
+  return Math.min(5, Math.max(1, parseFloat((3.0 + avgDelta).toFixed(2))));
+}
+// Upsert (or clear) the reserved-username auto-rating row for a video.
+async function applyTagAutoRating(vid, tags) {
+  if (!vid) return;
+  const score = computeTagAutoScore(tags);
+  const clampStar = v => Math.min(5, Math.max(1, Math.round(v)));
+  const s = clampStar(score);
+  const scoreData = {
+    overall:         score,
+    production:      s * 10 + s,
+    promo_storyline: s * 100 + s * 10 + s,
+    match_quality:   s,
+    roster_talent:   s
+  };
+  try {
+    const existing = await sbGet('ratings', `username=eq.${encodeURIComponent(AUTO_RATING_USERNAME)}&video_id=eq.${encodeURIComponent(vid)}`);
+    if (existing.length) {
+      await sbUpdate('ratings', scoreData, `username=eq.${encodeURIComponent(AUTO_RATING_USERNAME)}&video_id=eq.${encodeURIComponent(vid)}`);
+    } else {
+      await sbInsert('ratings', {
+        username:   AUTO_RATING_USERNAME,
+        video_id:   vid,
+        video_url:  _tagVideoUrl,
+        created_at: Date.now(),
+        ...scoreData
+      });
+    }
+  } catch(e) { console.warn('[tags] auto-rating upsert failed:', e); }
+}
 let _tagSelected = new Set();
 let _tagVideoUrl = null;
 
@@ -16760,12 +16813,12 @@ async function saveVideoTags() {
     if (_expandVideo && _expandVideo.url === _tagVideoUrl) _expandVideo.tags = tags;
     renderExpandTags(tags);
     renderRecommended(_expandVideo);
-    // Tags just saved → the tag_auto_rating DB trigger has already computed
-    // and stored the rating by the time this PATCH/INSERT resolved, but
-    // nothing on the page knew to redraw the badge. loadVideoRating was
-    // previously only called after a user submits their own star rating —
-    // call it here too so the badge/text rating appear immediately instead
-    // of waiting for a page reload.
+    // Tags just saved → compute and upsert an auto-rating row (reserved
+    // username AUTO_RATING_USERNAME) so this video has a rating immediately
+    // instead of waiting on a real user to submit stars. Blends into the
+    // average alongside real ratings via loadVideoRating/loadAllCardRatings,
+    // which just average every row's `overall` column for this video_id.
+    await applyTagAutoRating(vid, tags);
     if (typeof loadVideoRating === 'function') loadVideoRating(_tagVideoUrl);
     // ── TAG A SHOW +4 CR (one-time per video) ──
     try {
