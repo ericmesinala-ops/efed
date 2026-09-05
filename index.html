@@ -8294,13 +8294,20 @@ loadMoreUpcomingRow();       loadBestMatches(videos); loadShowcaseRow(videos); l
           }
           return all;
         })(),
-        // All durations/metadata
+        // All durations/metadata — includes 'upcoming' as well as 'approved'.
+        // 'Upcoming' videos are loaded separately (their own query further
+        // up, which doesn't select `tags`), so without this an upcoming
+        // video's tags/duration/etc never merge into its video object no
+        // matter how correctly they're saved server-side — tags looked
+        // saved (toast said success, DB row had them) but silently
+        // vanished on every reload since this was the only query that
+        // fed tags back into videos[], and it was filtering them out.
         (async () => {
           let all = [];
           let offset = 0;
           while (true) {
             const page = await _fetchPageWithRetry('submissions',
-              `status=eq.approved&select=url,duration_seconds,section_override,submission_type,tags&limit=1000&offset=${offset}`);
+              `status=in.(approved,upcoming)&select=url,duration_seconds,section_override,submission_type,tags&limit=1000&offset=${offset}`);
             if (page === null) break;
             all = all.concat(page);
             if (page.length < 1000) break;
@@ -16782,7 +16789,7 @@ async function computeAutoScore(vid, tags) {
 // videoUrl defaults to the tag-modal's global for backward compatibility;
 // pass it explicitly when calling from elsewhere (e.g. Shorts admin).
 async function applyTagAutoRating(vid, tags, videoUrl) {
-  if (!vid) return { ok: false, error: 'no video id' };
+  if (!vid) return;
   const url = videoUrl || _tagVideoUrl;
   const score = await computeAutoScore(vid, tags);
   const clampStar = v => Math.min(5, Math.max(1, Math.round(v)));
@@ -16796,35 +16803,18 @@ async function applyTagAutoRating(vid, tags, videoUrl) {
   };
   try {
     const existing = await sbGet('ratings', `username=eq.${encodeURIComponent(AUTO_RATING_USERNAME)}&video_id=eq.${encodeURIComponent(vid)}`);
-    console.log('[auto-rating] existing row check', { vid, score, existing });
     if (existing.length) {
-      const updated = await sbUpdate('ratings', scoreData, `username=eq.${encodeURIComponent(AUTO_RATING_USERNAME)}&video_id=eq.${encodeURIComponent(vid)}`);
-      console.log('[auto-rating] UPDATE result', { updated });
-      if (!updated.length) {
-        const msg = 'UPDATE matched 0 rows even though the row was just confirmed to exist — RLS is likely blocking the write on the ratings table';
-        console.error('[auto-rating] ' + msg);
-        return { ok: false, error: msg };
-      }
+      await sbUpdate('ratings', scoreData, `username=eq.${encodeURIComponent(AUTO_RATING_USERNAME)}&video_id=eq.${encodeURIComponent(vid)}`);
     } else {
-      const inserted = await sbInsert('ratings', {
+      await sbInsert('ratings', {
         username:   AUTO_RATING_USERNAME,
         video_id:   vid,
         video_url:  url,
         created_at: Date.now(),
         ...scoreData
       });
-      console.log('[auto-rating] INSERT result', { inserted });
     }
-    return { ok: true, score };
-  } catch(e) {
-    // Surfaces the RAW Supabase error body — if this is a foreign key
-    // violation (ratings.username referencing a users table row that
-    // doesn't exist for the reserved AUTO_RATING_USERNAME), the message
-    // will say so explicitly (e.g. "violates foreign key constraint").
-    const msg = e.message || String(e);
-    console.error('[auto-rating] upsert failed — this is why the rating may not be showing:', msg);
-    return { ok: false, error: msg };
-  }
+  } catch(e) { console.warn('[tags] auto-rating upsert failed:', e); }
 }
 let _tagSelected = new Set();
 let _tagVideoUrl = null;
@@ -16899,81 +16889,79 @@ async function saveVideoTags() {
     const vid = extractId(_tagVideoUrl);
     if (!vid) throw new Error('Could not extract video ID');
 
-    // Find the video object so we have show/efed info for a fresh insert
+    // Find the video object so we have show/efed info for upsert
     const vObj = videos.find(v => v.url === _tagVideoUrl);
     let savePath = '';
 
-    // ── ROBUST LOOKUP (replaces the old exact-match PATCH-by-video_id →
-    // PATCH-by-url → INSERT cascade) ──
-    // The old approach required an EXACT string match on `url` as a
-    // fallback, but the url stored on a submissions row (from whenever it
-    // was originally submitted/approved) can differ from the url this page
-    // has for the same video — extra tracking params (?si=...), a mobile
-    // share link vs a canonical youtube.com/watch?v= link, a trailing
-    // timestamp (&t=123), youtu.be vs youtube.com, etc. When both the
-    // video_id match AND the exact-url match missed, the code assumed no
-    // row existed and INSERTed a brand new one — creating a duplicate for
-    // a video that already had a real row. From then on, whichever of the
-    // two rows the page happened to read on a later load "won", so tags
-    // could appear to save, then vanish next visit.
-    // Fix: match on video_id OR a substring match on url containing the
-    // 11-char YouTube ID — that ID is stable across all URL formatting
-    // differences — and PATCH every row that matches by its real primary
-    // key `id`, so it's impossible to miss the real row or create a
-    // duplicate for a video that already has one.
-    const matches = await sbGet('submissions',
-      `or=(video_id.eq.${encodeURIComponent(vid)},url.ilike.*${encodeURIComponent(vid)}*)&select=id,url,video_id,tags&order=id.asc`
-    ).catch(e => { console.error('[tags] lookup failed:', e); return null; });
-    console.log('[tags] lookup by video_id/url-contains', { vid, matches });
+    // Try PATCH first — only trust it if rows were actually updated.
+    // IMPORTANT: a PATCH that's blocked by an RLS policy (e.g. anon role
+    // isn't allowed to UPDATE an already-approved submissions row) comes
+    // back as a normal, non-throwing response with an empty array — it
+    // looks IDENTICAL to "no row matched by video_id/url". Previously that
+    // meant a permissions block silently fell through to the INSERT branch
+    // below, which creates a brand-new stub row holding the tags — while
+    // the video's real row (the one actually displayed everywhere else)
+    // never gets touched. Tags "save" (no error, toast says success) but
+    // the video you're looking at never shows them, because the tags landed
+    // on an orphan row nobody reads from. Logging status + body here lets
+    // you tell a genuine 0-row-match apart from a blocked write.
+    const patchRes = await fetch(
+      SUPABASE_URL + '/rest/v1/submissions?video_id=eq.' + encodeURIComponent(vid),
+      { method: 'PATCH', headers: { ...SB_HEADERS, 'Prefer': 'return=representation' }, body: JSON.stringify({ tags: tags }) }
+    );
+    const patchBody1 = await patchRes.clone().text().catch(()=>'?');
+    console.log('[tags] PATCH by video_id', { vid, status: patchRes.status, body: patchBody1 });
+    if (!patchRes.ok) console.warn('[tags] PATCH by video_id failed:', patchRes.status, patchBody1);
+    const patchRows = patchRes.ok ? await patchRes.json() : [];
+    if (patchRows.length) savePath = `PATCH by video_id (row id ${patchRows[0]?.id ?? '?'})`;
 
-    if (matches === null) throw new Error('Could not look up existing rows for this video (see console)');
-
-    if (matches.length) {
-      if (matches.length > 1) {
-        console.warn(`[tags] ${matches.length} duplicate submissions rows found for video_id ${vid} — updating all of them so tags show regardless of which one gets read elsewhere. Consider deleting the extras in Supabase.`, matches);
-      }
-      const ids = matches.map(m => m.id);
-      const patchRes = await fetch(
-        SUPABASE_URL + '/rest/v1/submissions?id=in.(' + ids.join(',') + ')',
+    if (!patchRows.length) {
+      // No row matched by video_id — try by URL
+      const patchRes2 = await fetch(
+        SUPABASE_URL + '/rest/v1/submissions?url=eq.' + encodeURIComponent(_tagVideoUrl),
         { method: 'PATCH', headers: { ...SB_HEADERS, 'Prefer': 'return=representation' }, body: JSON.stringify({ tags: tags }) }
       );
-      const patchBody = await patchRes.clone().text().catch(()=>'?');
-      console.log('[tags] PATCH by id(s)', { ids, status: patchRes.status, body: patchBody });
-      if (!patchRes.ok) throw new Error(patchBody);
-      const patchedRows = await patchRes.json();
-      if (!patchedRows.length) {
-        // We just looked these rows up by id, so 0 rows updated here means
-        // the UPDATE itself is being blocked (RLS policy), not "not found".
-        console.error('[tags] PATCH by id matched 0 rows even though the row(s) were just confirmed to exist — RLS is blocking the UPDATE.', { ids });
-        throw new Error('Update was blocked by Supabase (row exists but the UPDATE affected 0 rows — check the RLS policy on submissions UPDATE)');
-      }
-      savePath = matches.length > 1
-        ? `PATCH ${patchedRows.length}/${matches.length} duplicate rows (ids ${ids.join(',')})`
-        : `PATCH existing row (id ${ids[0]})`;
-    } else {
-      // Genuinely no row anywhere for this video — insert one.
-      const insertRes = await fetch(
-        SUPABASE_URL + '/rest/v1/submissions',
-        {
-          method: 'POST',
-          headers: { ...SB_HEADERS, 'Prefer': 'return=representation' },
-          body: JSON.stringify({
-            url: _tagVideoUrl,
-            video_id: vid,
-            show_name: vObj?.show || '',
-            efed: vObj?.efed || '',
-            date: vObj?.date || '',
-            status: 'approved',
-            tags: tags
-          })
+      const patchBody2 = await patchRes2.clone().text().catch(()=>'?');
+      console.log('[tags] PATCH by url', { url: _tagVideoUrl, status: patchRes2.status, body: patchBody2 });
+      if (!patchRes2.ok) console.warn('[tags] PATCH by url failed:', patchRes2.status, patchBody2);
+      const patchRows2 = patchRes2.ok ? await patchRes2.json() : [];
+      if (patchRows2.length) savePath = `PATCH by url (row id ${patchRows2[0]?.id ?? '?'})`;
+
+      if (!patchRows2.length) {
+        // Confirm there really is no existing row before creating one —
+        // if a row DOES exist here, both PATCHes above were blocked
+        // (RLS/permissions), not "not found", and inserting a stub would
+        // silently hide that. Surface it instead of masking it.
+        const already = await sbGet('submissions', 'url=eq.' + encodeURIComponent(_tagVideoUrl) + '&select=id').catch(() => null);
+        console.log('[tags] existing-row check', { already });
+        if (already && already.length) {
+          console.error('[tags] A submissions row for this URL exists but PATCH updated 0 rows — likely blocked by an RLS policy, not a missing row.', already);
+          throw new Error('Update was blocked (row exists but PATCH matched 0 rows — check Supabase RLS policy on submissions UPDATE)');
         }
-      );
-      const insertBody = await insertRes.clone().text().catch(()=>'?');
-      console.log('[tags] INSERT new row', { status: insertRes.status, body: insertBody });
-      if (!insertRes.ok) throw new Error(insertBody);
-      let insertedId = '?';
-      try { insertedId = JSON.parse(insertBody)?.[0]?.id ?? '?'; } catch {}
-      savePath = `INSERT new row (id ${insertedId}) — no existing row found for this video`;
+        // No row at all — INSERT a stub row for this hardcoded video
+        const insertRes = await fetch(
+          SUPABASE_URL + '/rest/v1/submissions',
+          {
+            method: 'POST',
+            headers: { ...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates,return=representation' },
+            body: JSON.stringify({
+              url: _tagVideoUrl,
+              video_id: vid,
+              show_name: vObj?.show || '',
+              efed: vObj?.efed || '',
+              date: vObj?.date || '',
+              status: 'approved',
+              tags: tags
+            })
+          }
+        );
+        const insertBody = await insertRes.clone().text().catch(()=>'?');
+        console.log('[tags] INSERT stub row', { status: insertRes.status, body: insertBody });
+        if (!insertRes.ok) throw new Error(insertBody);
+        let insertedId = '?';
+        try { insertedId = JSON.parse(insertBody)?.[0]?.id ?? '?'; } catch {}
+        savePath = `INSERT new row (row id ${insertedId}) — NO existing row was found for this video, a fresh one was created`;
+      }
     }
 
     const v = videos.find(v => v.url === _tagVideoUrl);
@@ -16991,8 +16979,8 @@ async function saveVideoTags() {
     // ratings table) can NEVER surface as "Could not save tags" — the tags
     // themselves are already safely saved by this point.
     try {
-      var _ratingResult = await applyTagAutoRating(vid, tags);
-    } catch(e) { _ratingResult = { ok: false, error: e.message || String(e) }; console.warn('[tags] auto-rating step threw (tags still saved):', e); }
+      await applyTagAutoRating(vid, tags);
+    } catch(e) { console.warn('[tags] auto-rating step failed (tags still saved):', e); }
     if (typeof loadVideoRating === 'function') loadVideoRating(_tagVideoUrl);
     if (typeof loadExpandRatingDisplay === 'function') loadExpandRatingDisplay(_tagVideoUrl);
     // ── TAG A SHOW +4 CR (one-time per video) ──
@@ -17011,10 +16999,7 @@ async function saveVideoTags() {
     } catch(e) { console.warn('[credits] tag award failed:', e); }
 
     closeTagModal();
-    const ratingNote = _ratingResult && _ratingResult.ok
-      ? `rating ✓ ${_ratingResult.score?.toFixed(1)}`
-      : `rating ✗ ${_ratingResult?.error || 'unknown error'}`;
-    showToast(`Tags saved — ${savePath || 'unknown path'} | ${ratingNote}`, 9000);
+    showToast(`Tags saved — ${savePath || 'unknown path'}`, 6000);
   } catch(e) { console.error('Tag save error:', e); showToast('Could not save tags: ' + e.message, 8000); }
   btn.disabled = false; btn.textContent = 'Save Tags';
 }
