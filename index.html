@@ -16689,20 +16689,22 @@ function rollTagDelta(tag) {
   const [min, max] = range;
   return min + Math.random() * (max - min);
 }
-// Average of freshly-rolled per-tag deltas — NOT baseline-adjusted or clamped,
+// Sum of all freshly-rolled per-tag deltas (not averaged) — more tags means
+// more added, so a video needs genuinely good tags across the board to
+// stack up; padding with irrelevant tags drags nothing down but also isn't
+// free since weak tags roll small deltas. NOT baseline-adjusted or clamped,
 // so this can be combined with other bonuses (e.g. the Short bonus) before
 // the final 1–5 clamp is applied once, at the end.
-function computeTagDeltaAvg(tags) {
+function computeTagDeltaSum(tags) {
   const list = (tags || []).map(remapTag);
   if (!list.length) return 0;
-  const total = list.reduce((sum, t) => sum + rollTagDelta(t), 0);
-  return total / list.length;
+  return list.reduce((sum, t) => sum + rollTagDelta(t), 0);
 }
 // Tag-only score (kept for any caller that just wants the tag contribution
 // with no Short bonus factored in).
 function computeTagAutoScore(tags) {
-  const avgDelta = computeTagDeltaAvg(tags);
-  return Math.min(5, Math.max(1, parseFloat((3.0 + avgDelta).toFixed(2))));
+  const totalDelta = computeTagDeltaSum(tags);
+  return Math.min(5, Math.max(1, parseFloat((3.0 + totalDelta).toFixed(2))));
 }
 
 // ── SHORT BONUS ──
@@ -16725,9 +16727,9 @@ async function hasShortForVideo(id) {
 // clamped once at the end so a Short bonus can't push a maxed-out tag score
 // silently over 5 without the clamp catching it.
 async function computeAutoScore(vid, tags) {
-  const avgDelta = computeTagDeltaAvg(tags);
+  const totalDelta = computeTagDeltaSum(tags);
   const shortBonus = (await hasShortForVideo(vid)) ? rollShortBonus() : 0;
-  return Math.min(5, Math.max(1, parseFloat((3.0 + avgDelta + shortBonus).toFixed(2))));
+  return Math.min(5, Math.max(1, parseFloat((3.0 + totalDelta + shortBonus).toFixed(2))));
 }
 // Upsert (or clear) the reserved-username auto-rating row for a video.
 // videoUrl defaults to the tag-modal's global for backward compatibility;
