@@ -19184,6 +19184,33 @@ if (typeof _catalogLoaded !== 'undefined') {
   _catalogLoaded.then(() => { if (_shortsIsAdmin()) backfillShortBonuses(); });
 }
 
+// ── ONE-TIME BACKFILL: auto-rating for every already-tagged video ──
+// Any video tagged before the tag-auto-rating feature existed never got a
+// `ratings` row, so its expand page shows no Rating section at all —
+// applyTagAutoRating only fires on a NEW tag save (or a shorts_pool
+// add/remove). This walks every video already carrying tags, once, and
+// upserts its auto-rating row so older tagged videos catch up. Admin-only,
+// gated by its own localStorage flag (separate from the Shorts one above).
+const TAG_RATING_BACKFILL_FLAG = 'tagAutoRatingBackfillDone_v1';
+async function backfillTagAutoRatings() {
+  if (localStorage.getItem(TAG_RATING_BACKFILL_FLAG)) return;
+  try {
+    const list = (typeof videos !== 'undefined' ? videos : []);
+    for (const v of list) {
+      let tags = v.tags;
+      if (typeof tags === 'string') { try { tags = JSON.parse(tags); } catch { tags = []; } }
+      if (!Array.isArray(tags) || !tags.length) continue;
+      const id = extractId(v.url);
+      if (!id) continue;
+      await applyTagAutoRating(id, tags, v.url);
+    }
+    localStorage.setItem(TAG_RATING_BACKFILL_FLAG, '1');
+  } catch(e) { console.warn('backfillTagAutoRatings failed:', e); }
+}
+if (typeof _catalogLoaded !== 'undefined') {
+  _catalogLoaded.then(() => { if (_shortsIsAdmin()) backfillTagAutoRatings(); });
+}
+
 async function _shortsAdminLoadForVideo(v) {
   const sendBtn = document.getElementById('shorts-admin-send-btn');
   const removeBtn = document.getElementById('shorts-admin-remove-btn');
