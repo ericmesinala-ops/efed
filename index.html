@@ -16869,6 +16869,7 @@ async function saveVideoTags() {
   const tags = [..._tagSelected];
   const btn = document.getElementById('tag-save-btn');
   btn.disabled = true; btn.textContent = 'Saving…';
+  console.log('[tags] saveVideoTags start', { url: _tagVideoUrl, tags });
   try {
     const vid = extractId(_tagVideoUrl);
     if (!vid) throw new Error('Could not extract video ID');
@@ -16892,7 +16893,9 @@ async function saveVideoTags() {
       SUPABASE_URL + '/rest/v1/submissions?video_id=eq.' + encodeURIComponent(vid),
       { method: 'PATCH', headers: { ...SB_HEADERS, 'Prefer': 'return=representation' }, body: JSON.stringify({ tags: tags }) }
     );
-    if (!patchRes.ok) console.warn('[tags] PATCH by video_id failed:', patchRes.status, await patchRes.clone().text().catch(()=>'?'));
+    const patchBody1 = await patchRes.clone().text().catch(()=>'?');
+    console.log('[tags] PATCH by video_id', { vid, status: patchRes.status, body: patchBody1 });
+    if (!patchRes.ok) console.warn('[tags] PATCH by video_id failed:', patchRes.status, patchBody1);
     const patchRows = patchRes.ok ? await patchRes.json() : [];
 
     if (!patchRows.length) {
@@ -16901,7 +16904,9 @@ async function saveVideoTags() {
         SUPABASE_URL + '/rest/v1/submissions?url=eq.' + encodeURIComponent(_tagVideoUrl),
         { method: 'PATCH', headers: { ...SB_HEADERS, 'Prefer': 'return=representation' }, body: JSON.stringify({ tags: tags }) }
       );
-      if (!patchRes2.ok) console.warn('[tags] PATCH by url failed:', patchRes2.status, await patchRes2.clone().text().catch(()=>'?'));
+      const patchBody2 = await patchRes2.clone().text().catch(()=>'?');
+      console.log('[tags] PATCH by url', { url: _tagVideoUrl, status: patchRes2.status, body: patchBody2 });
+      if (!patchRes2.ok) console.warn('[tags] PATCH by url failed:', patchRes2.status, patchBody2);
       const patchRows2 = patchRes2.ok ? await patchRes2.json() : [];
 
       if (!patchRows2.length) {
@@ -16910,6 +16915,7 @@ async function saveVideoTags() {
         // (RLS/permissions), not "not found", and inserting a stub would
         // silently hide that. Surface it instead of masking it.
         const already = await sbGet('submissions', 'url=eq.' + encodeURIComponent(_tagVideoUrl) + '&select=id').catch(() => null);
+        console.log('[tags] existing-row check', { already });
         if (already && already.length) {
           console.error('[tags] A submissions row for this URL exists but PATCH updated 0 rows — likely blocked by an RLS policy, not a missing row.', already);
           throw new Error('Update was blocked (row exists but PATCH matched 0 rows — check Supabase RLS policy on submissions UPDATE)');
@@ -16931,13 +16937,16 @@ async function saveVideoTags() {
             })
           }
         );
-        if (!insertRes.ok) throw new Error(await insertRes.text());
+        const insertBody = await insertRes.clone().text().catch(()=>'?');
+        console.log('[tags] INSERT stub row', { status: insertRes.status, body: insertBody });
+        if (!insertRes.ok) throw new Error(insertBody);
       }
     }
 
     const v = videos.find(v => v.url === _tagVideoUrl);
     if (v) v.tags = tags;
     if (_expandVideo && _expandVideo.url === _tagVideoUrl) _expandVideo.tags = tags;
+    console.log('[tags] client-side video object updated', { foundInVideosArray: !!v, tagsNowOnObject: v?.tags });
     renderExpandTags(tags);
     renderRecommended(_expandVideo);
     // Tags just saved → compute and upsert an auto-rating row (reserved
