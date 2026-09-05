@@ -266,7 +266,7 @@
       if (userBtn) userBtn.style.visibility = "hidden";
     }
   });
-function showToast(msg){const t=document.createElement("div");t.textContent=msg;t.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:8px 16px;border-radius:20px;font-size:.75rem;z-index:99999;opacity:0;transition:opacity .3s;";document.body.appendChild(t);setTimeout(()=>t.style.opacity="1",10);setTimeout(()=>{t.style.opacity="0";setTimeout(()=>t.remove(),300);},2500);}
+function showToast(msg,duration){const t=document.createElement("div");t.textContent=msg;t.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:8px 16px;border-radius:20px;font-size:.75rem;z-index:99999;opacity:0;transition:opacity .3s;max-width:90vw;text-align:center;";document.body.appendChild(t);setTimeout(()=>t.style.opacity="1",10);setTimeout(()=>{t.style.opacity="0";setTimeout(()=>t.remove(),300);},duration||2500);}
 function safeParseTagsJson(raw) { if (!raw) return []; if (Array.isArray(raw)) return raw; if (typeof raw === "string") { try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; } } return []; }
 </script>
 <style>
@@ -16876,6 +16876,7 @@ async function saveVideoTags() {
 
     // Find the video object so we have show/efed info for upsert
     const vObj = videos.find(v => v.url === _tagVideoUrl);
+    let savePath = '';
 
     // Try PATCH first — only trust it if rows were actually updated.
     // IMPORTANT: a PATCH that's blocked by an RLS policy (e.g. anon role
@@ -16897,6 +16898,7 @@ async function saveVideoTags() {
     console.log('[tags] PATCH by video_id', { vid, status: patchRes.status, body: patchBody1 });
     if (!patchRes.ok) console.warn('[tags] PATCH by video_id failed:', patchRes.status, patchBody1);
     const patchRows = patchRes.ok ? await patchRes.json() : [];
+    if (patchRows.length) savePath = `PATCH by video_id (row id ${patchRows[0]?.id ?? '?'})`;
 
     if (!patchRows.length) {
       // No row matched by video_id — try by URL
@@ -16908,6 +16910,7 @@ async function saveVideoTags() {
       console.log('[tags] PATCH by url', { url: _tagVideoUrl, status: patchRes2.status, body: patchBody2 });
       if (!patchRes2.ok) console.warn('[tags] PATCH by url failed:', patchRes2.status, patchBody2);
       const patchRows2 = patchRes2.ok ? await patchRes2.json() : [];
+      if (patchRows2.length) savePath = `PATCH by url (row id ${patchRows2[0]?.id ?? '?'})`;
 
       if (!patchRows2.length) {
         // Confirm there really is no existing row before creating one —
@@ -16940,6 +16943,9 @@ async function saveVideoTags() {
         const insertBody = await insertRes.clone().text().catch(()=>'?');
         console.log('[tags] INSERT stub row', { status: insertRes.status, body: insertBody });
         if (!insertRes.ok) throw new Error(insertBody);
+        let insertedId = '?';
+        try { insertedId = JSON.parse(insertBody)?.[0]?.id ?? '?'; } catch {}
+        savePath = `INSERT new row (row id ${insertedId}) — NO existing row was found for this video, a fresh one was created`;
       }
     }
 
@@ -16978,8 +16984,8 @@ async function saveVideoTags() {
     } catch(e) { console.warn('[credits] tag award failed:', e); }
 
     closeTagModal();
-    showToast('Tags saved!');
-  } catch(e) { console.error('Tag save error:', e); showToast('Could not save tags: ' + e.message); }
+    showToast(`Tags saved — ${savePath || 'unknown path'}`, 6000);
+  } catch(e) { console.error('Tag save error:', e); showToast('Could not save tags: ' + e.message, 8000); }
   btn.disabled = false; btn.textContent = 'Save Tags';
 }
 
