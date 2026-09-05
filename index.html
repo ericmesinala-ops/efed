@@ -5005,6 +5005,12 @@ function a2hsDismiss(){
       </div>
     </div>
 
+    <!-- ── RATING DISPLAY ── -->
+    <div id="expand-rating-section" style="display:none;margin-bottom:20px;">
+      <div class="expand-comments-title" style="margin-bottom:10px;">Rating</div>
+      <div id="expand-rating-value" style="font-size:.9rem;color:#c8a84b;font-weight:700;"></div>
+    </div>
+
     <!-- ── TAGS DISPLAY ── -->
     <div id="expand-tags-section" style="display:none;">
       <div class="expand-comments-title" style="margin-bottom:10px;">Tags</div>
@@ -11541,6 +11547,7 @@ function openExpand(v) {
   const _tags = safeParseTagsJson(v.tags);
   renderExpandTags(_tags);
   renderRecommended(v);
+  if (typeof loadExpandRatingDisplay === 'function') loadExpandRatingDisplay(v.url);
 
   // Actions state
   const videoKey = encodeURIComponent(v.url);
@@ -13425,6 +13432,7 @@ async function submitRating() {
     }
     // Update rating display on card
     loadVideoRating(url);
+    if (typeof loadExpandRatingDisplay === 'function') loadExpandRatingDisplay(url);
   } catch(e) {
     console.error('[submitRating] failed:', e);
     const msg = document.getElementById('rating-msg');
@@ -13697,6 +13705,24 @@ async function loadVideoRating(url) {
       }
     });
   } catch(e) {}
+}
+
+// Populates the expand modal's Rating section (separate from the card
+// badge — that only reaches `.card` elements, not the expand view).
+async function loadExpandRatingDisplay(url) {
+  const sec = document.getElementById('expand-rating-section');
+  const valEl = document.getElementById('expand-rating-value');
+  if (!sec || !valEl) return;
+  try {
+    const rows = await sbGet('ratings', `video_id=eq.${encodeURIComponent(extractId(url))}`);
+    if (!rows.length) { sec.style.display = 'none'; return; }
+    const avg = rows.reduce((sum, r) => sum + _normalizeRating(r.overall || 0), 0) / rows.length;
+    const rounded = Math.round(avg * 10) / 10;
+    const realCount = rows.filter(r => r.username !== AUTO_RATING_USERNAME).length;
+    const countLabel = realCount === 1 ? '1 rating' : `${realCount} ratings`;
+    valEl.textContent = _formatRating(rounded) + (realCount ? `  ·  ${countLabel}` : '  ·  auto-rated from tags');
+    sec.style.display = 'block';
+  } catch(e) { sec.style.display = 'none'; }
 }
 
 // Load ratings for all visible cards
@@ -16908,6 +16934,7 @@ async function saveVideoTags() {
     // which just average every row's `overall` column for this video_id.
     await applyTagAutoRating(vid, tags);
     if (typeof loadVideoRating === 'function') loadVideoRating(_tagVideoUrl);
+    if (typeof loadExpandRatingDisplay === 'function') loadExpandRatingDisplay(_tagVideoUrl);
     // ── TAG A SHOW +4 CR (one-time per video) ──
     try {
       const _tagKey = 'efed_tagged_' + (extractId(_tagVideoUrl) || _tagVideoUrl);
@@ -19232,6 +19259,7 @@ async function shortsAdminSendToPool() {
     // upsert it, then refresh the badge/text rating on screen.
     await _shortsRefreshAutoRating(v);
     if (typeof loadVideoRating === 'function') loadVideoRating(v.url);
+    if (typeof loadExpandRatingDisplay === 'function') loadExpandRatingDisplay(v.url);
   } catch(e) {
     sendBtn.textContent = origLabel;
     console.error('shortsAdminSendToPool failed:', e);
@@ -19270,6 +19298,7 @@ async function shortsAdminRemoveFromPool() {
     // it, then refresh the badge/text rating on screen.
     await _shortsRefreshAutoRating(v);
     if (typeof loadVideoRating === 'function') loadVideoRating(v.url);
+    if (typeof loadExpandRatingDisplay === 'function') loadExpandRatingDisplay(v.url);
     if (status) status.textContent = 'Removed from the Shorts pool.';
   } catch(e) {
     if (status) status.textContent = 'Failed to remove — try again.';
