@@ -247,7 +247,7 @@ const SLOTS=[3,3,4,4,5,5,6,8]; // matches per show
 const HV=1, MAXR=8; // cash value of one hype token; number of shows
 const sh=a=>a.map(x=>[Math.random(),x]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
 const cl=o=>JSON.parse(JSON.stringify(o));
-const fxT=f=>({atk:`+${f.n} ATK`,def:`+${f.n} DEF`,win:`+$${f.n} win`,perPower:`+${f.n} ${(f.s||'').toUpperCase()} per attached power`,vp:`+${f.n} VP at end`,draw:`Draw ${f.n} power card${f.n>1?'s':''}`,pwLimit:`Your Power Card limit for this match is ${f.n}.`}[f.k])+(f.tag?` if ${f.tag}`:'');
+const fxT=f=>({atk:`+${f.n} ATK`,def:`+${f.n} DEF`,win:`+$${f.n} win`,perPower:`+${f.n} ${(f.s||'').toUpperCase()} per attached power`,vp:`+${f.n} VP at end`,draw:`Draw ${f.n} power card${f.n>1?'s':''}`,pwLimit:`Your Power Card limit for this match is ${f.n}.`,vpTag:`End Game: ${f.n}VP per ${f.tag||'?'} Tag in your deck.`}[f.k])+(f.tag&&f.k!=='vpTag'?` if ${f.tag}`:'');
 const me=()=>G.pl[G.cur];
 let G;
 // ---------- CARD DATABASE (editable in the in-game Card Editor, saved in this browser) ----------
@@ -276,7 +276,8 @@ let toastT;function toast(m){const t=document.getElementById('toast');t.textCont
 
 // ---------- SETUP ----------
 function newGame(){
- const exp=(a,n)=>a.flatMap(c=>Array(c.copies||n).fill(c)),wd=sh(cl(exp(DB.wr,3).map(c=>({...c,hype:0,champ:false})))), pd=sh(cl(exp(DB.pw,2))), ed=sh(cl(DB.ef));
+ const exp=a=>a.slice(), // one copy of each card
+  wd=sh(cl(exp(DB.wr).map(c=>({...c,hype:0,champ:false})))), pd=sh(cl(exp(DB.pw))), ed=sh(cl(DB.ef));
  const pl=[0,1].map(()=>({cash:0,inc:0,hyp:0,tok:0,vp:0,hand:[],pw:pd.splice(0,3),signed:[],efed:null,opts:ed.splice(0,2),done:false,passed:false,last:null}));
  G={ph:'efed',cur:0,ready:false,wd,pd,disc:[],market:[],pool:[],round:1,pl,slots:[],log:'',sel:null,scouted:null};
  ui();
@@ -385,7 +386,8 @@ function nextShow(){G.round++;if(G.round>MAXR){G.ph='end';ui();}else startDraft(
 const ENABLE_SCOUT=false, ENABLE_DRAW=false; // turn on later
 let AI=[false,true],SHOW_TXT=false,ART_ONLY=true; // ART_ONLY: cards that have real art show only the picture (their art already prints name and stats) // SHOW_TXT: print power text on wrestler/eFed faces // which players are AI (set both false for hot-seat)
 let aiT;
-const score=p=>p.vp+[...new Set([...p.signed,...p.hand])].reduce((s,c)=>s+c.vp+c.fx.filter(f=>f.k==='vp').reduce((a,f)=>a+f.n,0),0);
+const score=p=>{const ws=[...new Set([...p.signed,...p.hand])],tc=t=>ws.filter(c=>hasT(c,t)).length,vt=f=>f.k==='vpTag'?f.n*tc(f.tag):0; // 'vpTag' = +n VP per owned wrestler with that tag
+ return p.vp+ws.reduce((s,c)=>s+c.vp+c.fx.reduce((a,f)=>a+(f.k==='vp'?f.n:vt(f)),0),0)+((p.efed&&p.efed.fx)||[]).reduce((a,f)=>a+vt(f),0)};
 const chip=t=>`<span class="chip">${t}</span>`;
 const IMG_BASE='images/',IMG_EXT='.png'; // card art: images/<card-name-slug>.png, e.g. images/iron-mako.png
 const slug=n=>n.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
@@ -614,9 +616,9 @@ function edADel(j,x){R(j).do.splice(x,1);edRender()}
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 // Effect kinds the engine understands. To add a NEW kind, ask Claude: "please wire this card" and paste the exported JSON.
-const FXK={atk:'+ ATK',def:'+ DEF',win:'+ $ when this wrestler wins',perPower:'+ per attached power card',vp:'+ VP at game end',draw:'Draw power cards (on play or attach; eFeds: every show)',pwLimit:'Power card limit for this wrestler in a match (number = new limit)'};
-const NEWC={wr:()=>({n:'New Wrestler',atk:4,def:4,vp:1,cost:3,win:3,promo:2,tags:[],fx:[],img:'',txt:'',copies:3}),
- pw:()=>({n:'New Power',cat:'Action',fx:[],txt:'',img:'',copies:2}),
+const FXK={atk:'+ ATK',def:'+ DEF',win:'+ $ when this wrestler wins',perPower:'+ per attached power card',vp:'+ VP at game end',draw:'Draw power cards (on play or attach; eFeds: every show)',pwLimit:'Power card limit for this wrestler in a match (number = new limit)',vpTag:'+ VP at game end per wrestler with a tag in your deck (tag box = tag to count)'};
+const NEWC={wr:()=>({n:'New Wrestler',atk:4,def:4,vp:1,cost:3,win:3,promo:2,tags:[],fx:[],img:'',txt:''}),
+ pw:()=>({n:'New Power',cat:'Action',fx:[],txt:'',img:''}),
  ef:()=>({n:'New eFed',cash:12,inc:1,hyp:1,fx:[],txt:'',img:''})};
 const TABN={wr:'Wrestlers',pw:'Power cards',ef:'eFeds'};
 let ED={tab:'wr',i:0,d:null};
@@ -643,7 +645,7 @@ function edForm(d){
  h+=`<div class="img"><b>Art</b><div class="acts"><input type="file" accept="image/*" onchange="edImg(this)"><input type="text" placeholder="…or image path or URL (default: images/${slug(d.n)}.png)" value="${esc(d.img&&!d.img.startsWith('data:')?d.img:'')}" oninput="edSet('img',this.value)">${d.img?'<button class="ghost" onclick="edSet(\'img\',\'\');edRender()">Remove art</button>':''}</div></div>`;
  return h+`<div class="acts"><button onclick="edSave()">Save card</button><button class="ghost" onclick="edDup()">Duplicate</button><button class="ghost" onclick="edDel()">Delete</button></div></div><div class="edp"><div id="edp"></div></div>`;
 }
-const fxRow=(x,j)=>`<div class="fxr"><select onchange="edFxSet(${j},'k',this.value)"><option value="">Choose effect…</option>${Object.keys(FXK).map(k=>`<option value="${k}" ${x.k===k?'selected':''}>${FXK[k]}</option>`).join('')}</select><input type="number" value="${x.n}" oninput="edFxSet(${j},'n',this.value)">${x.k==='perPower'?`<select onchange="edFxSet(${j},'s',this.value)"><option value="atk" ${x.s!=='def'?'selected':''}>to ATK</option><option value="def" ${x.s==='def'?'selected':''}>to DEF</option></select>`:''}<input type="text" placeholder="only if wrestler has tag (optional)" value="${esc(x.tag||'')}" oninput="edFxSet(${j},'tag',this.value)"><button class="ghost" onclick="edFxDel(${j})">✕</button></div>`;
+const fxRow=(x,j)=>`<div class="fxr"><select onchange="edFxSet(${j},'k',this.value)"><option value="">Choose effect…</option>${Object.keys(FXK).map(k=>`<option value="${k}" ${x.k===k?'selected':''}>${FXK[k]}</option>`).join('')}</select><input type="number" value="${x.n}" oninput="edFxSet(${j},'n',this.value)">${x.k==='perPower'?`<select onchange="edFxSet(${j},'s',this.value)"><option value="atk" ${x.s!=='def'?'selected':''}>to ATK</option><option value="def" ${x.s==='def'?'selected':''}>to DEF</option></select>`:''}<input type="text" placeholder="${x.k==='vpTag'?'tag to count (e.g. Metal)':'only if wrestler has tag (optional)'}" value="${esc(x.tag||'')}" oninput="edFxSet(${j},'tag',this.value)"><button class="ghost" onclick="edFxDel(${j})">✕</button></div>`;
 const NUMK=['atk','def','cost','vp','win','promo','copies','cash','inc','hyp'];
 function edSet(k,v){ED.d[k]=k==='tags'?v.split(',').map(s=>s.trim()).filter(Boolean):NUMK.includes(k)?+v||0:v;edPrev()}
 function edFx(){ED.d.fx.push({k:'',n:1});edRender()}
@@ -662,8 +664,8 @@ function edCopy(){navigator.clipboard.writeText(JSON.stringify(DB,null,1)).then(
 function edExport(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['window.CARDS='+JSON.stringify(DB,null,1)+';\n'],{type:'text/javascript'}));a.download='cards.js';a.click()}
 function edImport(inp){const f=inp.files[0];if(!f)return;f.text().then(s=>{try{const o=JSON.parse(s.replace(/^\s*window\.CARDS\s*=\s*/,'').replace(/;\s*$/,''));if(!o.wr||!o.pw||!o.ef)throw 0;DB={wr:o.wr.map(norm),pw:o.pw.map(norm),ef:o.ef.map(norm)};persist();edSel('wr',0);toast('Imported')}catch(e){toast('That file is not a card export')}});inp.value=''}
 function edReset(){if(!confirm('Discard your working copy and go back to the published cards?'))return;DB=defDB();localStorage.removeItem(LS);edSel(ED.tab,0)}
-function edApply(){const n=DB.wr.reduce((a,c)=>a+(c.copies||3),0);
- if(n<10||DB.ef.length<4||!DB.pw.length)return alert('You need at least 10 wrestler copies, 4 eFeds and 1 power card to play.');
+function edApply(){const n=DB.wr.length;
+ if(n<10||DB.ef.length<4||!DB.pw.length)return alert('You need at least 10 wrestlers, 4 eFeds and 1 power card to play.');
  persist();closeEd();newGame()}
 if(document.body.classList)document.body.classList.add('artonly');
 newGame();
