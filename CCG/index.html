@@ -514,11 +514,18 @@ function nextMatch(){
  const cx=isA=>({trig:'reveal',get role(){return isA!==!!s.swap?'atk':'def'},main:i===G.slots.length-1,lines:pre,slot:s});
  runRules('reveal',s.atk,s.def,cx(true),()=>runRules('reveal',s.def,s.atk,cx(false),()=>askFlip(s,pre,go)));
 }
+const fakeE=(i,f)=>({p:i,c:{n:(G.pl[i].efed&&G.pl[i].efed.n)||'Player',tags:[],rules:[]},pw:[],fake:!!f}); // stands in for a player when no wrestler is involved (end of show / end of game)
 function finishShow(){
- G.eos=G.pl.map((p,i)=>{p.cash+=p.inc;p.tok+=p.hyp;const d=drawP(p,3+(p.efed.fx||[]).filter(f=>f.k==='draw').reduce((a,f)=>a+f.n,0));const ex=[];runRules('endshow',{p:i,c:{n:p.efed.n,tags:[],rules:[]},pw:[]},null,{trig:'endshow',lines:ex},()=>{});return `${who(i)}: +$${p.inc} merch income, +${p.hyp} hype tokens, drew ${d} power cards`+(ex.length?' · '+ex.join(', '):'')});
+ const dr=G.pl.map(p=>{p.cash+=p.inc;p.tok+=p.hyp;return drawP(p,3+(p.efed.fx||[]).filter(f=>f.k==='draw').reduce((a,f)=>a+f.n,0))}); // both players are paid first, so end-of-show rules can compare cash fairly
+ G.eos=G.pl.map((p,i)=>{const ex=[];runRules('endshow',fakeE(i),fakeE(1-i,1),{trig:'endshow',lines:ex},()=>{});return `${who(i)}: +$${p.inc} merch income, +${p.hyp} hype tokens, drew ${dr[i]} power cards`+(ex.length?' · '+ex.join(', '):'')});
  G.fin=true;G.res=null;ui();
 }
-function nextShow(){G.round++;if(G.round>MAXR){G.ph='end';ui();}else startDraft();}
+function nextShow(){G.round++;if(G.round>MAXR)endGame();else startDraft();}
+function endGame(){ // runs every 'At the end of the game' rule once (owned wrestlers + eFed), then shows the final scores
+ G.ph='end';G.endBase=G.pl.map(score);G.end=G.pl.map(()=>[]);
+ const jobs=[];G.pl.forEach((p,i)=>{jobs.push([fakeE(i),false]);ownedW(p).forEach(w=>jobs.push([{p:i,c:w,pw:[]},true]))});
+ let k=0;const next=()=>{if(k>=jobs.length)return;const [e,ne]=jobs[k++];runRules('endgame',e,fakeE(1-e.p,1),{trig:'endgame',noEfed:ne,lines:G.end[e.p]},next)};next();
+ G.endBase=null;ui()}
 
 // ---------- UI ----------
 const ENABLE_SCOUT=false, ENABLE_DRAW=false; // turn on later
@@ -628,7 +635,7 @@ function resolveH(){
  if(G.fin)return `<div class="bar">SHOW ${G.round} COMPLETE</div><div id="log">${G.sum.join('\n')||'No matches were played.'}\n\n${G.eos.join('\n')}</div><button onclick="nextShow()">${G.round===MAXR?'Final scores':'Next: draft'}</button>`;
  return `<div class="bar">SHOW ${G.round} · RESOLUTION</div><p class="hint big">${G.rq.length?G.rq.length+' match'+(G.rq.length>1?'es':'')+' to resolve, one at a time.':'No matches were played this show.'}</p><button onclick="nextMatch()">${G.rq.length?'Start':'Continue'}</button>`;
 }
-function endH(){const a=score(G.pl[0]),b=score(G.pl[1]);return `<div class="bar">GAME OVER</div><div class="hud"><div class="pp ${a>=b?'on':''}"><div class="pn">PLAYER 1</div><div class="pills"><span>🏆 ${a} VP</span></div></div><div class="pp ${b>=a?'on':''}"><div class="pn">PLAYER 2</div><div class="pills"><span>🏆 ${b} VP</span></div></div></div><h3>${a===b?'Tie game':'Player '+(a>b?1:2)+' wins'}</h3><button onclick="newGame()">New game</button>`;}
+function endH(){const a=score(G.pl[0]),b=score(G.pl[1]),lg=(G.end||[]).map((l,i)=>l.length?who(i)+' — end-of-game abilities\n'+l.join('\n'):'').filter(Boolean).join('\n\n');return `<div class="bar">GAME OVER</div><div class="hud"><div class="pp ${a>=b?'on':''}"><div class="pn">PLAYER 1</div><div class="pills"><span>🏆 ${a} VP</span></div></div><div class="pp ${b>=a?'on':''}"><div class="pn">PLAYER 2</div><div class="pills"><span>🏆 ${b} VP</span></div></div></div><h3>${a===b?'Tie game':'Player '+(a>b?1:2)+' wins'}</h3>${lg?`<div id="log">${esc(lg)}</div>`:''}<button onclick="newGame()">New game</button>`;}
 // ---------- AI (player 2) ----------
 const fxVal=(c,w,role)=>c.fx.reduce((t,f)=>(f.tag&&!w.tags.includes(f.tag))?t:t+(f.k===role||f.k==='win'||(f.k==='perPower'&&f.s===role)?f.n:0),0);
 function aiStep(){
@@ -671,27 +678,43 @@ function ui(){
 
 
 // ---------- RULE ENGINE: WHEN trigger, IF conditions, DO actions ----------
-const WHEN={reveal:'At reveal (before totals)',win:'When this wrestler wins',lose:'When this wrestler loses',resolve:'After this match resolves (win or lose)',endshow:'At the end of every show'};
-const CNDG=who=>who==='match'?{'Match':{main:'is the main event',hasOpp:'has an opposing wrestler'}}:{'Power cards':{power:'has power cards attached…'},'Wrestler':{align:'is a Heel / Face…',tag:'has tag…',role:'is attacking / defending…',atkHigher:who==='me'?'has higher Attack than the opponent':'has higher Attack than you'},'Player':{cash:'has cash…'}};
-const ACT={stat:'Add ATK or DEF this match',cash:'Gain $',opCash:'Take $ from the opponent',vp:'Gain VP',draw:'Draw power cards',discard:'Discard opposing power cards',swap:'Switch roles in this match',steal:'Take opposing power cards (by name) and attach to this wrestler',flip:'Offer to flip the match result (you choose; number = VP change)',discardMine:'Discard your own power cards (you choose; number = how many)',drawOpp:'Draw power cards for each power card attached to the opponent (number = per card)',cashOpp:'Gain $ for each power card attached to the opponent (number = $ per card)',injure:'Place injury tokens on the opposing wrestler (number = tokens)'};
+const WHEN={reveal:'At reveal (before totals)',win:'When this wrestler wins',lose:'When this wrestler loses',resolve:'After this match resolves (win or lose)',endshow:'At the end of the show',endgame:'At the end of the game'};
+const LIVEW=['reveal','win','lose','resolve']; // triggers that happen inside a match
+const whenFor=t=>t==='pw'?LIVEW:t==='wr'?[...LIVEW,'endgame']:Object.keys(WHEN); // power cards only act in matches; wrestlers can also score at game end; only eFeds act at the end of a show
+const ACT={stat:'Add ATK or DEF this match',cash:'Gain $',opCash:'Take $ from the opponent',vp:'Gain VP',draw:'Draw power cards',discard:'Discard opposing power cards',swap:'Switch roles in this match',steal:'Take opposing power cards (by name) and attach to this wrestler',flip:'Offer to flip the match result (you choose; number = VP change)',discardMine:'Discard your own power cards (you choose; number = how many)',drawOpp:'Draw power cards for each power card attached to the opponent (number = per card)',cashOpp:'Gain $ for each power card attached to the opponent (number = $ per card)',injure:'Place injury tokens on the opposing wrestler (number = tokens)',vpPer:'Gain VP for each… (wrestler you own, power card in hand, $, hype token)',opVp:'Opponent loses VP'};
+const ACTGROUPS={'Victory points':['vp','vpPer','opVp'],'Money & cards':['cash','opCash','draw','cashOpp','drawOpp'],'In the match':['stat','swap','injure','flip'],'Power cards':['discard','discardMine','steal']};
+const ALLOW=w=>w==='endgame'?['vp','vpPer','opVp']:w==='endshow'?['vp','vpPer','opVp','cash','opCash','draw','discardMine','discard']:Object.keys(ACT);
+const MOST={cash:'cash',vp:'VP',owned:'wrestlers',hand:'power cards in hand',tok:'hype tokens'};
+const NUMC={power:1,stat:6,hype:1,inj:1,cash:3,vp:10,owned:3,hand:1,round:4}; // default number when a numeric condition is picked
+const perT=a=>({owned:`wrestler you own${a.v?' with tag "'+a.v+'"':''}`,align:`${a.v==='face'?'Face':'Heel'} you own`,hand:'power card in your hand',cash:`$${+a.d||5} you have`,tok:'hype token you have'})[a.per||'owned'];
 const hasT=(c,t)=>(c.tags||[]).some(x=>String(x).trim().toLowerCase()===String(t||'').trim().toLowerCase()); // tag match ignores capitals
 const plural=(n,w)=>n+' '+w+(n==1?'':'s');
 const alignOf=c=>String(c.align||(c.tags||[]).find(t=>/^(heel|face)$/i.test(String(t)))||'').toLowerCase(); // legacy Heel/Face tags still count
 const AL=c=>c.v==='face'?'face':'heel';
-function condT(c){c=nc(c);const n=c.n??1,me=c.who==='me',w=me?'you':'the opponent',h=me?'have':'has',is=me?'are':'is',op=CMP[c.op||'ge'],ty=c.v&&c.v!=='Any'?c.v+' ':'';
- const t=({power:()=>`${w} ${h} ${op} ${plural(n,ty+'power card')} attached`,align:()=>`${w} ${is} a ${AL(c)}`,tag:()=>`${w} ${is} ${c.v||'?'}`,cash:()=>`${w} ${h} ${op} $${n}`,role:()=>`${w} ${is} ${c.v==='def'?'defending':'attacking'}`,atkHigher:()=>`${w} ${h} a higher Attack than ${me?'the opponent':'you'}`,main:()=>'it is the main event',hasOpp:()=>'there is an opposing wrestler'})[c.c];
+const ownedW=p=>[...new Set([...p.signed,...p.hand])];
+const vpNow=p=>G.endBase?G.endBase[G.pl.indexOf(p)]:score(p); // during end-game abilities every check uses the VP from before they ran, so player order never matters
+const pv=(k,p)=>k==='cash'?p.cash:k==='vp'?vpNow(p):k==='owned'?ownedW(p).length:k==='hand'?p.pw.length:k==='tok'?p.tok:0;
+function condT(c){c=nc(c);const n=c.n??1,me=c.who==='me',w=me?'you':'the opponent',h=me?'have':'has',is=me?'are':'is',op=CMP[c.op||'ge'],ty=c.v&&c.v!=='Any'?c.v+' ':'',wr=me?'this wrestler has':'the opposing wrestler has';
+ const t=({power:()=>`${w} ${h} ${op} ${plural(n,ty+'power card')} attached`,align:()=>`${w} ${is} a ${AL(c)}`,tag:()=>`${w} ${is} ${c.v||'?'}`,cash:()=>`${w} ${h} ${op} $${n}`,role:()=>`${w} ${is} ${c.v==='def'?'defending':'attacking'}`,atkHigher:()=>`${w} ${h} a higher Attack than ${me?'the opponent':'you'}`,main:()=>'it is the main event',hasOpp:()=>'there is an opposing wrestler',
+  stat:()=>`${me?'this wrestler has':'the opposing wrestler has'} ${op} ${n} printed ${c.s==='def'?'DEF':'ATK'}`,hype:()=>`${wr} ${op} ${plural(n,'hype token')}`,inj:()=>`${wr} ${op} ${plural(n,'injury token')}`,
+  vp:()=>`${w} ${h} ${op} ${n} VP`,owned:()=>`${me?'you own':'the opponent owns'} ${op} ${plural(n,(c.v?c.v+' ':'')+'wrestler')}`,hand:()=>`${w} ${h} ${op} ${plural(n,'power card')} in hand`,
+  most:()=>`${w} ${h} more ${MOST[c.s]||'cash'} than ${me?'the opponent':'you'}`,champ:()=>`${me?'you hold':'the opponent holds'} the championship token`,
+  round:()=>`it is show ${n}${c.op==='le'?' or earlier':c.op==='eq'?'':' or later'}`})[c.c];
  const s=t&&t();return s&&(c.not?'NOT ('+s+')':s)}
-function actT(a){const n=a.n??1,t={stat:`${n<0?n:'+'+n} ${a.k==='def'?'DEF (when defending)':'ATK (when attacking)'}`,cash:`gain $${n}`,opCash:`take up to $${n} from the opponent`,vp:`gain ${n} VP`,draw:`draw ${plural(n,'power card')}`,discard:`discard ${plural(n,a.from==='hand'?'power card':'opposing power card')} ${a.from==='hand'?'from the opponent\'s hand':'from this match'} (${a.who==='me'?'you choose':a.who==='random'?'random':'opponent chooses'})`,swap:'switch roles in this match (attacker and defender swap)',injure:`place ${plural(n,'injury token')} on the opposing wrestler`,cashOpp:`gain $${n} for each power card attached to the opponent`,drawOpp:`draw ${n>1?n+' power cards':'a power card'} for each power card attached to the opponent`,discardMine:`discard ${n} of your power card${n>1?'s':''} (your choice)`,flip:`you may choose to flip the match result, rewards included (${n>0?'gain '+n+' VP':n<0?'lose '+(-n)+' VP':'no VP change'})`,steal:`take ${n?'up to '+n:'any'} opposing power card${n==1?'':'s'} matching "${a.v||'?'}" and attach ${n==1?'it':'them'} to this wrestler`}[a.a];return t&&((a.ifPrev?'if that worked, ':'')+t)}
+function actT(a){const n=a.n??1,t={stat:`${n<0?n:'+'+n} ${a.k==='def'?'DEF (when defending)':'ATK (when attacking)'}`,cash:`gain $${n}`,opCash:`take up to $${n} from the opponent`,vp:`gain ${n} VP`,draw:`draw ${plural(n,'power card')}`,discard:`discard ${plural(n,a.from==='hand'?'power card':'opposing power card')} ${a.from==='hand'?'from the opponent\'s hand':'from this match'} (${a.who==='me'?'you choose':a.who==='random'?'random':'opponent chooses'})`,swap:'switch roles in this match (attacker and defender swap)',injure:`place ${plural(n,'injury token')} on the opposing wrestler`,vpPer:`gain ${n} VP for each ${perT(a)}`,opVp:`the opponent loses ${n} VP`,cashOpp:`gain $${n} for each power card attached to the opponent`,drawOpp:`draw ${n>1?n+' power cards':'a power card'} for each power card attached to the opponent`,discardMine:`discard ${n} of your power card${n>1?'s':''} (your choice)`,flip:`you may choose to flip the match result, rewards included (${n>0?'gain '+n+' VP':n<0?'lose '+(-n)+' VP':'no VP change'})`,steal:`take ${n?'up to '+n:'any'} opposing power card${n==1?'':'s'} matching "${a.v||'?'}" and attach ${n==1?'it':'them'} to this wrestler`}[a.a];return t&&((a.ifPrev?'if that worked, ':'')+t)}
 function ruleT(r){if(!r||!WHEN[r.when]||!(r.do||[]).length)return '';const cs=(r.if||[]).filter(c=>c.c).map(condT).filter(Boolean),a=r.do.filter(x=>x.a).map(actT).filter(Boolean).join('; ');if(!a)return '';const t=WHEN[r.when].replace(/ \(.*\)/,'')+(cs.length?', if '+cs.join(r.mode==='any'?' or ':' and '):'')+': '+a+'.';return t}
 function condOK(r,e,opp,ctx){const cs=(r.if||[]).filter(c=>c.c);if(!cs.length)return true;
- const f=c=>{c=nc(c);const n=c.n??1,me=c.who==='me',x=me?e:opp,cmp=a=>({ge:a>=n,eq:a===n,le:a<=n})[c.op||'ge'];
-  let v=({power:()=>!!x&&cmp(x.pw.filter(p=>ptOK(p,c.v)).length),align:()=>!!x&&alignOf(x.c)===AL(c),tag:()=>!!x&&hasT(x.c,c.v),cash:()=>!!x&&cmp(G.pl[x.p].cash),
-   role:()=>!!x&&ctx.role===(me?(c.v==='def'?'def':'atk'):(c.v==='def'?'atk':'def')),atkHigher:()=>!!opp&&(me?e.c.atk>opp.c.atk:opp.c.atk>e.c.atk),main:()=>!!ctx.main,hasOpp:()=>!!opp})[c.c];
+ const f=c=>{c=nc(c);const n=c.n??1,me=c.who==='me',x=me?e:opp,pi=me?e.p:1-e.p,P=G.pl[pi],cmp=a=>({ge:a>=n,eq:a===n,le:a<=n})[c.op||'ge'],sk=c.s==='def'?'def':'atk';
+  let v=({power:()=>!!x&&cmp(x.pw.filter(p=>ptOK(p,c.v)).length),align:()=>!!x&&alignOf(x.c)===AL(c),tag:()=>!!x&&hasT(x.c,c.v),role:()=>!!x&&ctx.role===(me?(c.v==='def'?'def':'atk'):(c.v==='def'?'atk':'def')),atkHigher:()=>!!opp&&(me?e.c.atk>opp.c.atk:opp.c.atk>e.c.atk),
+   stat:()=>!!x&&x.c[sk]!==undefined&&cmp(x.c[sk]),hype:()=>!!x&&cmp(x.c.hype||0),inj:()=>!!x&&cmp(x.c.inj||0),
+   cash:()=>cmp(P.cash),vp:()=>cmp(vpNow(P)),owned:()=>cmp(ownedW(P).filter(w=>!c.v||hasT(w,c.v)).length),hand:()=>cmp(P.pw.length),champ:()=>ownedW(P).some(w=>w.champ),
+   most:()=>me?pv(c.s,G.pl[e.p])>pv(c.s,G.pl[1-e.p]):pv(c.s,G.pl[1-e.p])>pv(c.s,G.pl[e.p]),
+   main:()=>!!ctx.main,hasOpp:()=>!!opp&&!opp.fake,round:()=>cmp(Math.min(G.round,MAXR))})[c.c];
   v=v?v():false;return c.not?!v:v};
  return r.mode==='any'?cs.some(f):cs.every(f)}
 function runRules(trig,e,opp,ctx,done){
  const p=G.pl[e.p];
- const jobs=[...(e.c.rules||[]).map(r=>[r,e.c.n]),...e.pw.flatMap(x=>(x.rules||[]).map(r=>[r,x.n])),...((p.efed&&p.efed.rules)||[]).map(r=>[r,p.efed.n])].filter(([r])=>r.when===trig&&(r.do||[]).length);
+ const jobs=[...(e.c.rules||[]).map(r=>[r,e.c.n]),...e.pw.flatMap(x=>(x.rules||[]).map(r=>[r,x.n])),...(ctx.noEfed?[]:((p.efed&&p.efed.rules)||[]).map(r=>[r,p.efed.n]))].filter(([r])=>r.when===trig&&(r.do||[]).length);
  let ji=0;
  const nextJob=()=>{
   if(ji>=jobs.length)return done();
@@ -703,8 +726,11 @@ function runRules(trig,e,opp,ctx,done){
  nextJob()}
 function doAct(a,e,opp,ctx,src,cb){
  const p=G.pl[e.p],n=+a.n||0,L=ctx.lines;
+ if(ctx.trig==='endgame'&&!['vp','vpPer','opVp'].includes(a.a))return cb(false); // the game is over: only VP can change
+ if(a.a==='vpPer'){const w=ownedW(p),k=({owned:()=>w.filter(x=>!a.v||hasT(x,a.v)).length,align:()=>w.filter(x=>alignOf(x)===(a.v==='face'?'face':'heel')).length,hand:()=>p.pw.length,cash:()=>Math.floor(p.cash/Math.max(1,+a.d||5)),tok:()=>p.tok})[a.per||'owned'],c=k?k():0,g=c*n;p.vp+=g;L.push(`${src}: ${c} × ${perT(a)} → +${g} VP`);return cb(g>0)}
+ if(a.a==='opVp'){G.pl[1-e.p].vp-=n;L.push(`${src}: ${who(1-e.p)} loses ${n} VP`);return cb(n>0)}
  if(a.a==='stat'){if(ctx.trig!=='reveal')return cb(false);(e.xs=e.xs||[]).push({k:a.k==='def'?'def':'atk',n,src});return cb(true)}
- if(a.a==='injure'){if(!opp)return cb(false);opp.c.inj=(opp.c.inj||0)+n;L.push(`${src}: ${plural(n,'injury token')} placed on ${opp.c.n}`);return cb(n>0)}
+ if(a.a==='injure'){if(!opp||opp.fake)return cb(false);opp.c.inj=(opp.c.inj||0)+n;L.push(`${src}: ${plural(n,'injury token')} placed on ${opp.c.n}`);return cb(n>0)}
  if(a.a==='swap'){if(ctx.trig!=='reveal'||!ctx.slot||!opp)return cb(false);ctx.slot.swap=!ctx.slot.swap;L.push(`${src}: roles are switched in this match`);return cb(true)}
  if(a.a==='steal'){
   if(ctx.trig!=='reveal'||!opp)return cb(false);
@@ -781,49 +807,74 @@ function pendH(){const q=G.pend,own=q.chooser===q.owner;
 const opts=(o,v)=>Object.keys(o).map(k=>`<option value="${k}" ${v===k?'selected':''}>${o[k]}</option>`).join('');
 const cleanC=d=>{d.fx=(d.fx||[]).filter(x=>x.k);d.rules=(d.rules||[]).map(r=>({...r,if:(r.if||[]).filter(c=>c.c).map(nc),do:(r.do||[]).filter(a=>a.a)})).filter(r=>r.when&&r.do.length);return d};
 const optg=(g,v)=>Object.keys(g).map(n=>`<optgroup label="${n}">${opts(g[n],v)}</optgroup>`).join('');
-const condRow=(c,j,x)=>{c=nc(c);const k=c.c,who=c.who||'me',n=c.n??1;
- const num=`<input type="number" min="0" value="${n}" oninput="edCS(${j},${x},'n',this.value)">`,cmp=`<select onchange="edCS(${j},${x},'op',this.value)">${opts(CMP,c.op||'ge')}</select>`;
+const CNDG=(who,when)=>{const live=!when||LIVEW.includes(when),P={'Player':{cash:'has cash…',vp:'has VP (before end-game abilities)…',owned:'owns wrestlers…',hand:'has power cards in hand…',most:'has MORE … than the other player',champ:'holds the championship token'}};
+ if(who==='match')return {...(live?{'Match':{main:'is the main event',hasOpp:'has an opposing wrestler'}}:{}),'Timing':{round:'is show number…'}};
+ return live?{'Power cards':{power:'has power cards attached…'},'Wrestler':{align:'is a Heel / Face…',tag:'has tag…',role:'is attacking / defending…',atkHigher:who==='me'?'has higher Attack than the opponent':'has higher Attack than you',stat:'has printed ATK / DEF…',hype:'has hype tokens on the wrestler…',inj:'has injury tokens on the wrestler…'},...P}:P};
+const condRow=(c,j,x)=>{c=nc(c);const k=c.c,who=c.who||'me',n=c.n??1,wh=(ED.d.rules[j]||{}).when;
+ const num=`<input type="number" min="0" value="${n}" oninput="edCS(${j},${x},'n',this.value)">`,cmp=`<select onchange="edCS(${j},${x},'op',this.value)">${opts(CMP,c.op||'ge')}</select>`,sel=(key,o,val)=>`<select onchange="edCS(${j},${x},'${key}',this.value)">${opts(o,val)}</select>`,h=t=>`<small class="hint">${t}</small>`,
+  txt=(ph,val)=>`<input type="text" placeholder="${ph}" value="${esc(val||'')}" oninput="edCS(${j},${x},'v',this.value)">`;
  let p='';
- if(k==='power')p=cmp+num+`<select onchange="edCS(${j},${x},'v',this.value)">${PTYPES.map(t=>`<option value="${t}" ${(c.v||'Any')===t?'selected':''}>${t==='Any'?'any type':t}</option>`).join('')}</select><small class="hint">power card(s) attached</small>`;
- else if(k==='cash')p=cmp+`<small class="hint">$</small>`+num;
- else if(k==='tag')p=`<input type="text" placeholder="tag name" value="${esc(c.v||'')}" oninput="edCS(${j},${x},'v',this.value)">`;
+ if(k==='power')p=cmp+num+`<select onchange="edCS(${j},${x},'v',this.value)">${PTYPES.map(t=>`<option value="${t}" ${(c.v||'Any')===t?'selected':''}>${t==='Any'?'any type':t}</option>`).join('')}</select>`+h('power card(s) attached');
+ else if(k==='cash')p=cmp+h('$')+num;
+ else if(k==='tag')p=txt('tag name',c.v);
  else if(k==='align')p=`<select onchange="edCS(${j},${x},'v',this.value)"><option value="heel" ${c.v!=='face'?'selected':''}>Heel</option><option value="face" ${c.v==='face'?'selected':''}>Face</option></select>`;
  else if(k==='role')p=`<select onchange="edCS(${j},${x},'v',this.value)"><option value="atk" ${c.v!=='def'?'selected':''}>attacking</option><option value="def" ${c.v==='def'?'selected':''}>defending</option></select>`;
- return `<div class="fxr"><label class="chk"><input type="checkbox" ${c.not?'checked':''} onchange="edCS(${j},${x},'not',this.checked)"> NOT</label><select onchange="edCS(${j},${x},'who',this.value)">${opts(SUBJ,who)}</select><select onchange="edCS(${j},${x},'c',this.value)"><option value="">Choose condition…</option>${optg(CNDG(who),k)}</select>${p}<button class="ghost" onclick="edCDel(${j},${x})">✕</button></div>`};
-const actRow=(a,j,x)=>{const k=a.a;return `<div class="fxr">${x?`<label class="chk"><input type="checkbox" ${a.ifPrev?'checked':''} onchange="edAS(${j},${x},'ifPrev',this.checked)"> only if previous worked</label>`:''}<select onchange="edAS(${j},${x},'a',this.value)"><option value="">Choose action…</option>${opts(ACT,k)}</select>${k==='stat'?`<select onchange="edAS(${j},${x},'k',this.value)"><option value="atk" ${a.k!=='def'?'selected':''}>ATK</option><option value="def" ${a.k==='def'?'selected':''}>DEF</option></select>`:''}${k&&k!=='swap'?`<input type="number" min="0" title="${k==='steal'?'0 = take every match':''}" value="${a.n??1}" oninput="edAS(${j},${x},'n',this.value)">`:''}${k==='steal'?`<input type="text" placeholder="name or category contains (e.g. Chair)" value="${esc(a.v||'')}" oninput="edAS(${j},${x},'v',this.value)"><small class="hint">number 0 = take every match</small>`:''}${k==='discard'?`<select onchange="edAS(${j},${x},'from',this.value)"><option value="att" ${a.from!=='hand'?'selected':''}>attached to the match</option><option value="hand" ${a.from==='hand'?'selected':''}>from their hand</option></select><select onchange="edAS(${j},${x},'who',this.value)"><option value="opp" ${a.who!=='me'&&a.who!=='random'?'selected':''}>opponent chooses</option><option value="me" ${a.who==='me'?'selected':''}>I choose</option><option value="random" ${a.who==='random'?'selected':''}>random</option></select>`:''}${k==='flip'?'<small class="hint">VP if flipped (negative = lose VP). Use with WHEN: wins / loses.</small>':''}<button class="ghost" onclick="edADel(${j},${x})">✕</button></div>`};
-const ruleRow=(r,j)=>`<div class="rule"><div class="rh"><b>WHEN</b><select onchange="edRS(${j},'when',this.value)"><option value="">Choose a trigger…</option>${opts(WHEN,r.when)}</select><button class="ghost" onclick="edReroll(${j})" title="Replace this rule with a new random one (keeps the trigger)">🎲 Re-roll</button><button class="ghost" onclick="edRuleDel(${j})">Delete rule</button></div><div class="rb"><b>IF</b><select onchange="edRS(${j},'mode',this.value)"><option value="all" ${r.mode!=='any'?'selected':''}>ALL of these are true</option><option value="any" ${r.mode==='any'?'selected':''}>ANY of these is true</option></select>${(r.if||[]).map((c,x)=>condRow(c,j,x)).join('')}<button class="ghost" onclick="edCond(${j})">+ Add condition</button><small class="hint">No conditions means the rule always runs.</small></div><div class="rb"><b>DO</b>${(r.do||[]).map((a,x)=>actRow(a,j,x)).join('')}<button class="ghost" onclick="edAct(${j})">+ Add action</button></div>${ruleT(cleanC({rules:[cl(r)]}).rules[0]||{})?`<div class="hint">Reads as: ${esc(ruleT(cleanC({rules:[cl(r)]}).rules[0]))}</div>`:''}</div>`;
+ else if(k==='stat')p=sel('s',{atk:'printed ATK',def:'printed DEF'},c.s||'atk')+cmp+num;
+ else if(k==='hype')p=cmp+num+h('hype token(s) on the wrestler');
+ else if(k==='inj')p=cmp+num+h('injury token(s) on the wrestler');
+ else if(k==='vp')p=cmp+num+h('VP');
+ else if(k==='owned')p=cmp+num+h('wrestler(s) owned')+txt('with tag (optional)',c.v);
+ else if(k==='hand')p=cmp+num+h('power card(s) in hand');
+ else if(k==='most')p=sel('s',MOST,c.s||'cash')+h('than the other player');
+ else if(k==='round')p=cmp+num+h('show number (1–'+MAXR+')');
+ const g=CNDG(who,wh),okc=Object.values(g).some(o=>k in o),bad=k&&!okc?`<optgroup label="Doesn't apply to this trigger"><option value="${k}" selected>${k}</option></optgroup>`:'';
+ return `<div class="fxr"><label class="chk"><input type="checkbox" ${c.not?'checked':''} onchange="edCS(${j},${x},'not',this.checked)"> NOT</label><select onchange="edCS(${j},${x},'who',this.value)">${opts(SUBJ,who)}</select><select onchange="edCS(${j},${x},'c',this.value)"><option value="">Choose condition…</option>${optg(g,k)}${bad}</select>${p}<button class="ghost" onclick="edCDel(${j},${x})">✕</button></div>`};
+const actSel=(j,x,k,when)=>{const ok=ALLOW(when),g={};for(const nm in ACTGROUPS){const o={};ACTGROUPS[nm].filter(a=>ok.includes(a)).forEach(a=>o[a]=ACT[a]);if(Object.keys(o).length)g[nm]=o}
+ const bad=k&&!ok.includes(k)?`<optgroup label="Doesn't apply to this trigger"><option value="${k}" selected>${ACT[k]||k}</option></optgroup>`:'';
+ return `<select onchange="edAS(${j},${x},'a',this.value)"><option value="">Choose action…</option>${optg(g,k)}${bad}</select>`};
+const whenSel=v=>{const ok=whenFor(ED.tab),o={};ok.forEach(k=>o[k]=WHEN[k]);return opts(o,v)+(v&&WHEN[v]&&!ok.includes(v)?`<option value="${v}" selected>⚠ ${WHEN[v]} (never runs on this card type)</option>`:'')};
+const actRow=(a,j,x)=>{const k=a.a;return `<div class="fxr">${x?`<label class="chk"><input type="checkbox" ${a.ifPrev?'checked':''} onchange="edAS(${j},${x},'ifPrev',this.checked)"> only if previous worked</label>`:''}${actSel(j,x,k,(ED.d.rules[j]||{}).when)}${k==='stat'?`<select onchange="edAS(${j},${x},'k',this.value)"><option value="atk" ${a.k!=='def'?'selected':''}>ATK</option><option value="def" ${a.k==='def'?'selected':''}>DEF</option></select>`:''}${k&&k!=='swap'?`<input type="number" min="0" title="${k==='steal'?'0 = take every match':''}" value="${a.n??1}" oninput="edAS(${j},${x},'n',this.value)">`:''}${k==='vpPer'?`<small class="hint">VP for each</small><select onchange="edAS(${j},${x},'per',this.value)">${opts({owned:'wrestler I own',align:'Heel / Face I own',hand:'power card in my hand',cash:'$ I have (per step)',tok:'hype token I have'},a.per||'owned')}</select>${(a.per||'owned')==='owned'?`<input type="text" placeholder="with tag (optional)" value="${esc(a.v||'')}" oninput="edAS(${j},${x},'v',this.value)">`:''}${a.per==='align'?`<select onchange="edAS(${j},${x},'v',this.value)"><option value="heel" ${a.v!=='face'?'selected':''}>Heel</option><option value="face" ${a.v==='face'?'selected':''}>Face</option></select>`:''}${a.per==='cash'?`<input type="number" min="1" value="${+a.d||5}" oninput="edAS(${j},${x},'d',this.value)"><small class="hint">$ per step</small>`:''}`:''}${k==='steal'?`<input type="text" placeholder="name or category contains (e.g. Chair)" value="${esc(a.v||'')}" oninput="edAS(${j},${x},'v',this.value)"><small class="hint">number 0 = take every match</small>`:''}${k==='discard'?`<select onchange="edAS(${j},${x},'from',this.value)"><option value="att" ${a.from!=='hand'?'selected':''}>attached to the match</option><option value="hand" ${a.from==='hand'?'selected':''}>from their hand</option></select><select onchange="edAS(${j},${x},'who',this.value)"><option value="opp" ${a.who!=='me'&&a.who!=='random'?'selected':''}>opponent chooses</option><option value="me" ${a.who==='me'?'selected':''}>I choose</option><option value="random" ${a.who==='random'?'selected':''}>random</option></select>`:''}${k==='flip'?'<small class="hint">VP if flipped (negative = lose VP). Use with WHEN: wins / loses.</small>':''}<button class="ghost" onclick="edADel(${j},${x})">✕</button></div>`};
+const ruleRow=(r,j)=>`<div class="rule"><div class="rh"><b>WHEN</b><select onchange="edRS(${j},'when',this.value)"><option value="">Choose a trigger…</option>${whenSel(r.when)}</select><button class="ghost" onclick="edReroll(${j})" title="Replace this rule with a new random one (keeps the trigger)">🎲 Re-roll</button><button class="ghost" onclick="edRuleDel(${j})">Delete rule</button></div><div class="rb"><b>IF</b><select onchange="edRS(${j},'mode',this.value)"><option value="all" ${r.mode!=='any'?'selected':''}>ALL of these are true</option><option value="any" ${r.mode==='any'?'selected':''}>ANY of these is true</option></select>${(r.if||[]).map((c,x)=>condRow(c,j,x)).join('')}<button class="ghost" onclick="edCond(${j})">+ Add condition</button><small class="hint">No conditions means the rule always runs.</small></div><div class="rb"><b>DO</b>${r.when==='endgame'?'<small class="hint">End of the game: only VP actions apply (gain VP, VP for each…, opponent loses VP).</small>':''}${(r.do||[]).map((a,x)=>actRow(a,j,x)).join('')}<button class="ghost" onclick="edAct(${j})">+ Add action</button></div>${ruleT(cleanC({rules:[cl(r)]}).rules[0]||{})?`<div class="hint">Reads as: ${esc(ruleT(cleanC({rules:[cl(r)]}).rules[0]))}</div>`:''}</div>`;
 const R=j=>ED.d.rules[j];
 function edRule(){ED.d.rules=ED.d.rules||[];ED.d.rules.push({when:'',mode:'all',if:[],do:[]});edRender()}
 function edRuleDel(j){ED.d.rules.splice(j,1);edRender()}
-function edRS(j,k,v){R(j)[k]=v;edRender()}
+function edRS(j,k,v){const r=R(j);r[k]=v;if(k==='when'&&v){const before=(r.if||[]).length+(r.do||[]).length,ok=ALLOW(v);
+ r.if=(r.if||[]).filter(c=>{c=nc(c);return !c.c||Object.values(CNDG(c.who||'me',v)).some(g=>c.c in g)});r.do=(r.do||[]).filter(a=>!a.a||ok.includes(a.a));
+ const d=before-r.if.length-r.do.length;if(d)toast('Removed '+d+' condition/action'+(d>1?'s':'')+' that do not apply to this trigger')}
+ edRender()}
 function edCond(j){R(j).if.push({c:'',who:'me',n:1,op:'ge',v:'Any'});edRender()}
 function edCS(j,x,k,v){const c=R(j).if[x];Object.assign(c,nc(c));
  if(k==='n')c.n=+v||0;else if(k==='not')c.not=!!v;else c[k]=v;
- if(k==='who'){if(!Object.values(CNDG(v)).some(g=>c.c in g))c.c='';edRender();return}
- if(k==='c'){c.v=c.c==='align'?'heel':c.c==='role'?'atk':c.c==='power'?'Any':'';if(c.c==='power'||c.c==='cash')c.op=c.op||'ge';edRender();return}
+ if(k==='who'){if(!Object.values(CNDG(v,R(j).when)).some(g=>c.c in g))c.c='';edRender();return}
+ if(k==='c'){c.v=c.c==='align'?'heel':c.c==='role'?'atk':c.c==='power'?'Any':'';if(c.c==='stat')c.s='atk';if(c.c==='most')c.s='cash';if(NUMC[c.c]!==undefined){c.n=NUMC[c.c];c.op='ge'}edRender();return}
  edPrev()}
 function edCDel(j,x){R(j).if.splice(x,1);edRender()}
 function edAct(j){R(j).do.push({a:'',n:1});edRender()}
-function edAS(j,x,k,v){const a=R(j).do[x];if(k==='n')a.n=+v||0;else a[k]=v;if(k==='a'){a.who='opp';a.k='atk';if(v==='steal'){a.n=0;a.v=''}if(v==='flip'||v==='drawOpp')a.n=1;edRender()}else edPrev()}
+function edAS(j,x,k,v){const a=R(j).do[x];if(k==='n')a.n=+v||0;else a[k]=v;
+ if(k==='a'){a.who='opp';a.k='atk';if(v==='steal'){a.n=0;a.v=''}if(v==='flip'||v==='drawOpp')a.n=1;if(v==='vpPer'){a.n=1;a.per='owned';a.v='';a.d=5}edRender()}
+ else if(k==='per'){a.v=v==='align'?'heel':'';edRender()}else edPrev()}
 function edADel(j,x){R(j).do.splice(x,1);edRender()}
 // ---- 🎲 randomizer: builds a complete, valid rule (WHEN / IF / DO) and wires it into the card ----
 const pick=a=>a[Math.floor(Math.random()*a.length)],rint=(a,b)=>a+Math.floor(Math.random()*(b-a+1)),shuf=a=>[...a].sort(()=>Math.random()-.5);
-function randRule(keep){
- const all=Object.keys(WHEN),when=keep&&WHEN[keep]?keep:pick(all),LIVE=['reveal','win','lose','resolve'];
- const CP=[()=>({c:'power',who:pick(['me','opp']),op:'ge',n:rint(1,2),v:pick(PTYPES)}),()=>({c:'align',who:pick(['me','opp']),v:pick(['heel','face'])}),()=>({c:'role',who:'me',v:pick(['atk','def'])}),()=>({c:'cash',who:'me',op:'ge',n:rint(2,6)}),()=>({c:'atkHigher',who:pick(['me','opp'])}),()=>({c:'main',who:'match'}),()=>({c:'hasOpp',who:'match'})];
- const conds=[];
- if(when==='endshow'){if(Math.random()<.5)conds.push(CP[3]())} // no opponent or role exists at the end of a show
- else{const used=new Set();for(let i=rint(0,2);i>0;i--){const c=pick(CP)();if(used.has(c.c))continue;used.add(c.c);conds.push(c)}}
- const AP=[[()=>({a:'stat',k:pick(['atk','def']),n:rint(1,3)}),['reveal']],[()=>({a:'cash',n:rint(1,3)}),all],[()=>({a:'vp',n:1}),all],[()=>({a:'draw',n:rint(1,2)}),all],
-  [()=>({a:'opCash',n:rint(1,2)}),LIVE],[()=>({a:'injure',n:1}),LIVE],[()=>({a:'discard',n:1,from:'att',who:pick(['opp','me','random'])}),['reveal']],[()=>({a:'discard',n:1,from:'hand',who:pick(['opp','me','random'])}),LIVE],
-  [()=>({a:'discardMine',n:1}),LIVE],[()=>({a:'swap',n:1}),['reveal']],[()=>({a:'steal',n:rint(1,2),v:pick(PTYPES.slice(1))}),['reveal']],[()=>({a:'drawOpp',n:1}),LIVE],[()=>({a:'cashOpp',n:1}),LIVE]];
+function randRule(keep,tab){
+ tab=tab||ED.tab;const okW=whenFor(tab),when=keep&&okW.includes(keep)?keep:pick(okW),live=LIVEW.includes(when),all=Object.keys(WHEN),pl2=['me','opp'];
+ const CN=[[()=>({c:'power',who:pick(pl2),op:'ge',n:rint(1,2),v:pick(PTYPES)}),1],[()=>({c:'align',who:pick(pl2),v:pick(['heel','face'])}),1],[()=>({c:'role',who:'me',v:pick(['atk','def'])}),1],[()=>({c:'atkHigher',who:pick(pl2)}),1],
+  [()=>({c:'stat',who:pick(pl2),s:pick(['atk','def']),op:pick(['ge','le']),n:rint(4,9)}),1],[()=>({c:'hype',who:pick(pl2),op:'ge',n:rint(1,2)}),1],[()=>({c:'inj',who:pick(pl2),op:'ge',n:1}),1],[()=>({c:'main',who:'match'}),1],[()=>({c:'hasOpp',who:'match'}),1],
+  [()=>({c:'cash',who:pick(pl2),op:pick(['ge','le']),n:rint(2,8)}),0],[()=>({c:'vp',who:pick(pl2),op:'ge',n:rint(5,20)}),0],[()=>({c:'owned',who:pick(pl2),op:'ge',n:rint(2,5),v:''}),0],[()=>({c:'hand',who:pick(pl2),op:pick(['ge','le']),n:rint(1,3)}),0],
+  [()=>({c:'most',who:pick(pl2),s:pick(Object.keys(MOST))}),0],[()=>({c:'champ',who:pick(pl2)}),0],[()=>({c:'round',who:'match',op:pick(['ge','le','eq']),n:rint(1,MAXR)}),0]].filter(x=>live||!x[1]); // outside a match only player-level conditions exist
+ const conds=[],used=new Set();for(let i=live?rint(0,2):rint(1,2);i>0;i--){const c=pick(CN)[0]();if(used.has(c.c))continue;used.add(c.c);conds.push(c)}
+ const LV=LIVEW,LE=[...LIVEW,'endshow'],eg=when==='endgame';
+ const AP=[[()=>({a:'stat',k:pick(['atk','def']),n:rint(1,3)}),['reveal']],[()=>({a:'cash',n:rint(1,3)}),LE],[()=>({a:'vp',n:eg?rint(1,3):1}),all],[()=>({a:'draw',n:rint(1,2)}),LE],[()=>({a:'opCash',n:rint(1,2)}),LE],[()=>({a:'injure',n:1}),LV],
+  [()=>({a:'discard',n:1,from:'att',who:pick(['opp','me','random'])}),['reveal']],[()=>({a:'discard',n:1,from:'hand',who:pick(['opp','me','random'])}),LV],[()=>({a:'discardMine',n:1}),LV],[()=>({a:'swap',n:1}),['reveal']],
+  [()=>({a:'steal',n:rint(1,2),v:pick(PTYPES.slice(1))}),['reveal']],[()=>({a:'drawOpp',n:1}),LV],[()=>({a:'cashOpp',n:1}),LV],
+  [()=>{const per=pick(['owned','align','hand','tok','cash']);return {a:'vpPer',n:1,per,v:per==='align'?pick(['heel','face']):'',d:per==='cash'?pick([3,5,10]):5}},all],[()=>({a:'opVp',n:rint(1,2)}),all]];
  if(Math.random()<.15)AP.push([()=>({a:'flip',n:pick([0,1,2])}),['win','lose']]);
  const acts=shuf(AP.filter(a=>a[1].includes(when))).slice(0,Math.random()<.6?1:2).map(a=>a[0]());
  if(acts.length>1&&Math.random()<.4)acts[1].ifPrev=true;
  return {when,mode:conds.length>1?pick(['all','any']):'all',if:conds,do:acts}}
 function clearTxt(){if(ED.d.txt&&confirm('This card has printed power text, which would hide the new ability. Clear it so the text is written automatically?'))ED.d.txt=''}
-function edRand(){ED.d.rules=ED.d.rules||[];ED.d.rules.push(randRule());clearTxt();edRender()}
-function edReroll(j){ED.d.rules[j]=randRule(ED.d.rules[j].when);clearTxt();edRender()}
+function edRand(){ED.d.rules=ED.d.rules||[];ED.d.rules.push(randRule(undefined,ED.tab));clearTxt();edRender()}
+function edReroll(j){ED.d.rules[j]=randRule(ED.d.rules[j].when,ED.tab);clearTxt();edRender()}
 // 🎲 whole-card randomizer: random effects + rules (condition + action), then types the power text for you
 const PNAMES={Weapon:['Steel Chair','Barbed Bat','Ladder','Kendo Stick','Trash Can','Steel Pipe'],'Match Stipulation':['Cage Match','No DQ','Last Man Standing','Iron Man','Street Fight','Falls Count Anywhere'],Technique:['Suplex','Powerbomb','Piledriver','Sleeper Hold','Superkick','DDT'],Counter:['Reversal','Kick Out','Escape Artist','Roll-Up','Block','Dodge'],Support:['Manager','Valet','Run-In','Cheap Shot','Distraction','Tag Partner']};
 const PADJ=['Brutal','Sneaky','Desperate','Perfect','Savage','Last-Second','Reckless','Legendary','Dirty','Surprise'];
@@ -835,7 +886,7 @@ function edRandPower(){
  const nfx=t==='wr'?0:t==='ef'?rint(1,2):rint(0,2),fx=[],seen=new Set();
  for(const g of shuf(FX).slice(0,nfx)){const f=g();if(!seen.has(f.k)){seen.add(f.k);fx.push(f)}}
  const nr=t==='wr'?rint(1,2):t==='ef'?rint(0,1):(fx.length?rint(0,1):rint(1,2)),rules=[];
- for(let i=0;i<nr;i++)rules.push(randRule());
+ for(let i=0;i<nr;i++)rules.push(randRule(undefined,t));
  d.fx=fx;d.rules=rules;
  if(t==='pw'){if(!d.cat||d.cat==='Action')d.cat=pick(PTYPES.slice(1));if(!d.n||/^New /.test(d.n)){const k=PNAMES[d.cat]?d.cat:pick(Object.keys(PNAMES));d.n=pick(PADJ)+' '+pick(PNAMES[k])}if(!d.pcost)d.pcost=pick([0,0,1,2])}
  d.txt=[...fx.map(fxT),...rules.map(ruleT)].filter(Boolean).join('\n'); // typed into the Power text box
@@ -845,7 +896,7 @@ function edRandPower(){
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 // Effect kinds the engine understands. To add a NEW kind, ask Claude: "please wire this card" and paste the exported JSON.
-const FXK={atk:'+ ATK',def:'+ DEF',win:'+ $ when this wrestler wins',perPower:'+ per attached power card',vp:'+ VP at game end',draw:'Draw power cards (on play or attach; eFeds: every show)',pwLimit:'Power card limit for this wrestler in a match (number = new limit)',pwAtk:'+ ATK for each attached power card that grants ATK (number = bonus per card)',vpTag:'+ VP at game end per wrestler with a tag in your deck (tag box = tag to count)'};
+const FXK={atk:'+ ATK',def:'+ DEF',win:'+ $ when this wrestler wins',perPower:'+ per attached power card',vp:'+ VP at game end',draw:'Draw power cards (on play or attach; eFeds: at the end of the show)',pwLimit:'Power card limit for this wrestler in a match (number = new limit)',pwAtk:'+ ATK for each attached power card that grants ATK (number = bonus per card)',vpTag:'+ VP at game end per wrestler with a tag in your deck (tag box = tag to count)'};
 const NEWC={wr:()=>({n:'New Wrestler',atk:4,def:4,vp:1,cost:3,win:3,promo:2,tags:[],fx:[],img:'',txt:''}),
  pw:()=>({n:'New Power',cat:'Action',copies:1,fx:[],txt:'',img:''}),
  ef:()=>({n:'New eFed',cash:12,inc:1,hyp:1,fx:[],txt:'',img:''})};
@@ -871,7 +922,7 @@ function edForm(d){
  if(t==='pw')h+=f('Category','cat')+f('Cost to play $','pcost','number','min=0')+f('Copies in deck','copies','number','min=1')+`<label class="chk"><input type="checkbox" ${d.keep?'checked':''} onchange="edSet('keep',this.checked)"> Returns to hand after use</label>`;
  if(t==='ef')h+=f('Starting cash','cash','number')+f('Income per show','inc','number')+f('Hype tokens per show','hyp','number');
  h+=`</div><div class="acts"><button onclick="edRandPower()" title="Builds a random power from every parameter (effects, conditions, actions), wires it and types the power text">🎲 Random power</button><small class="hint">Fills in effects, rules and the power text below in one click.</small></div><label>Power text (printed on the card)<textarea rows="3" placeholder="Leave empty to auto-write it from the effects below" oninput="edSet('txt',this.value)">${esc(d.txt)}</textarea></label>`;
- h+=`<div class="fxs"><b>Simple stat bonuses</b><small class="hint">Always-on bonuses while this card is on the board. The second box is optional: only if the wrestler has that tag. Leave empty for none.</small>${(d.fx||[]).map(fxRow).join('')}<button class="ghost" onclick="edFx()">+ Add effect</button></div><div class="fxs" style="width:100%"><b>Abilities (rules)</b><small class="hint">Build a rule: WHEN something happens, IF conditions are true, DO actions. Example: at reveal, if the opponent has power cards here, discard 1 (opponent chooses), then if that worked, gain $2. Or press 🎲 Random rule and it builds and wires one for you.</small>${(d.rules||[]).map(ruleRow).join('')}<button class="ghost" onclick="edRule()">+ Add rule</button><button onclick="edRand()" title="Generates a complete random ability and wires it automatically">🎲 Random rule</button></div>`;
+ h+=`<div class="fxs"><b>Simple stat bonuses</b><small class="hint">Always-on bonuses while this card is on the board. The second box is optional: only if the wrestler has that tag. Leave empty for none.</small>${(d.fx||[]).map(fxRow).join('')}<button class="ghost" onclick="edFx()">+ Add effect</button></div><div class="fxs" style="width:100%"><b>Abilities (rules)</b><small class="hint">Build a rule: WHEN something happens, IF conditions are true, DO actions. Example: at reveal, if the opponent has power cards here, discard 1 (opponent chooses), then if that worked, gain $2. Pick "At the end of the game" to score VP from conditions (cash, VP, wrestlers owned, tags, championship…). Or press 🎲 Random rule and it builds and wires one for you.</small>${(d.rules||[]).map(ruleRow).join('')}<button class="ghost" onclick="edRule()">+ Add rule</button><button onclick="edRand()" title="Generates a complete random ability and wires it automatically">🎲 Random rule</button></div>`;
  h+=`<div class="img"><b>Art</b><div class="acts"><input type="file" accept="image/*" onchange="edImg(this)"><input type="text" placeholder="…or image path or URL (default: images/${slug(d.n)}.png)" value="${esc(d.img&&!d.img.startsWith('data:')?d.img:'')}" oninput="edSet('img',this.value)">${d.img?'<button class="ghost" onclick="edSet(\'img\',\'\');edRender()">Remove art</button>':''}</div></div>`;
  return h+`<div class="acts"><button onclick="edSave()">Save card</button><button class="ghost" onclick="edDup()">Duplicate</button><button class="ghost" onclick="edDel()">Delete</button></div></div><div class="edp"><div id="edp"></div></div>`;
 }
