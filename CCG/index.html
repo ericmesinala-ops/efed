@@ -242,11 +242,12 @@ const DEF_E=[
 
 // ---------- CONFIG / HELPERS ----------
 const MAX_PW=3; // max power cards attached to one wrestler in a match
+const maxPw=e=>Math.max(MAX_PW,...[...(e.c.fx||[]),...e.pw.flatMap(x=>x.fx||[]),...((G.pl[e.p].efed||{}).fx||[])].filter(f=>f.k==='pwLimit').map(f=>+f.n||0)); // 'pwLimit' effect raises the cap for that wrestler
 const SLOTS=[3,3,4,4,5,5,6,8]; // matches per show
 const HV=1, MAXR=8; // cash value of one hype token; number of shows
 const sh=a=>a.map(x=>[Math.random(),x]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
 const cl=o=>JSON.parse(JSON.stringify(o));
-const fxT=f=>({atk:`+${f.n} ATK`,def:`+${f.n} DEF`,win:`+$${f.n} win`,perPower:`+${f.n} ${(f.s||'').toUpperCase()} per attached power`,vp:`+${f.n} VP at end`,draw:`Draw ${f.n} power card${f.n>1?'s':''}`}[f.k])+(f.tag?` if ${f.tag}`:'');
+const fxT=f=>({atk:`+${f.n} ATK`,def:`+${f.n} DEF`,win:`+$${f.n} win`,perPower:`+${f.n} ${(f.s||'').toUpperCase()} per attached power`,vp:`+${f.n} VP at end`,draw:`Draw ${f.n} power card${f.n>1?'s':''}`,pwLimit:`Your Power Card limit for this match is ${f.n}.`}[f.k])+(f.tag?` if ${f.tag}`:'');
 const me=()=>G.pl[G.cur];
 let G;
 // ---------- CARD DATABASE (editable in the in-game Card Editor, saved in this browser) ----------
@@ -425,9 +426,9 @@ function showH(){
  if(busy)return turn+`<p class="hint big">Opponent is thinking…</p><div class="acts">${view}</div><h3>The show so far</h3>${preview()}`;
  const w=st==='place'&&s&&s.t==='w'?p.hand[s.i]:null;
  if(w)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(w)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Where should ${w.n} go?</h3><p class="hint">${locked(G.cur)?'You have an unanswered attacker, so '+w.n+' must defend an open match.':'An empty match: '+w.n+' attacks. A match with an open opposing attacker: '+w.n+' defends.'} Scroll sideways for more matches.</p></div></div>`+board(w);
- const mine=G.slots.flatMap((sl,i)=>['atk','def'].filter(r=>sl[r]&&sl[r].p===G.cur&&sl[r].pw.length<MAX_PW).map(r=>({e:sl[r],i,r})));
+ const mine=G.slots.flatMap((sl,i)=>['atk','def'].filter(r=>sl[r]&&sl[r].p===G.cur&&sl[r].pw.length<maxPw(sl[r])).map(r=>({e:sl[r],i,r})));
  const pc=st==='attach'&&s&&s.t==='p'?p.pw[s.i]:null;
- if(pc)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(pc)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Attach ${pc.n} to which wrestler?</h3><p class="hint">${mine.length?'Choose one of your wrestlers on the board. Max '+MAX_PW+' power cards per wrestler in a match.':'You have no wrestler on the board that can take it.'}</p></div></div><h3>The show so far</h3><p class="hint">Orange border = your wrestlers, blue = your opponent's. The number is how many power cards are attached.</p>${preview()}<h3>Your wrestlers on the board</h3><div class="row">${mine.map(m=>cardH(m.e.c,{btn:`<button onclick="attach(${m.i},'${m.r}')">Attach · Match ${m.i+1} ${m.r==='atk'?'attacker':'defender'} · ${m.e.pw.length}/${MAX_PW}</button>`})).join('')}</div>`;
+ if(pc)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(pc)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Attach ${pc.n} to which wrestler?</h3><p class="hint">${mine.length?'Choose one of your wrestlers on the board. Max '+MAX_PW+' power cards per wrestler in a match (some cards raise this).':'You have no wrestler on the board that can take it.'}</p></div></div><h3>The show so far</h3><p class="hint">Orange border = your wrestlers, blue = your opponent's. The number is how many power cards are attached.</p>${preview()}<h3>Your wrestlers on the board</h3><div class="row">${mine.map(m=>cardH(m.e.c,{btn:`<button onclick="attach(${m.i},'${m.r}')">Attach · Match ${m.i+1} ${m.r==='atk'?'attacker':'defender'} · ${m.e.pw.length}/${maxPw(m.e)}</button>`})).join('')}</div>`;
  const canAct=(p.hand.length&&canPlace())||(p.pw.length&&mine.length);
  let h=turn+`<p class="hint big">${canAct?'Your turn — pick a wrestler to play'+(p.pw.length?', or a power card to attach':'')+'. Press Pass when you are done: you cannot play again this show.'+(locked(G.cur)?' You have an unanswered attacker, so any wrestler you play next must defend.':''):'You are out of cards to play. Press Pass to finish your show. When both players pass, the matches are resolved.'}</p><div class="acts"><button ${canAct?'class="ghost"':''} onclick="pass()">${canAct?'Pass — I am done':'Pass'}</button>${view}${ENABLE_SCOUT&&!G.scouted?`<button onclick="scoutDeck()">Scout</button>`:''}${ENABLE_DRAW&&!G.scouted?`<button onclick="drawPower()">Draw a power card</button>`:''}</div>`;
  if(G.scouted){const k=G.scouted;h+=`<div class="row">${cardH(k)}</div><div class="acts"><button ${k.cost>p.cash?'disabled':''} onclick="buy('s')">Sign for $${k.cost}</button><button onclick="toMarket()">Decline — send to market</button></div>`;}
@@ -484,7 +485,7 @@ function aiStep(){
  }
  if(G.ph==='show'){
   const sl=G.slots;
-  if(p.last&&p.last.pw.length<MAX_PW&&p.pw.length){
+  if(p.last&&p.last.pw.length<maxPw(p.last)&&p.pw.length){
    const e=p.last,role=sl.some(x=>x.atk===e)?'atk':'def';
    const best=p.pw.map((c,i)=>[fxVal(c,e.c,role),i]).sort((a,b)=>b[0]-a[0])[0];
    if(best[0]>0){G.sel={t:'p',i:best[1]};return attach(sl.findIndex(x=>x[role]===e),role);}
@@ -547,7 +548,7 @@ function doAct(a,e,opp,ctx,src,cb){
   let left=n>0?n:99,got=0;
   for(let i=0;i<opp.pw.length&&left>0;){const c=opp.pw[i];
    if([c.n,c.cat].some(x=>String(x||'').toLowerCase().includes(q))){opp.pw.splice(i,1);left--;got++;
-    if(e.pw.length<MAX_PW){e.pw.push(c);L.push(`${src}: took ${c.n} and attached it to ${e.c.n}`)}else{G.disc.push(c);L.push(`${src}: took ${c.n} but there was no room, so it was discarded`)}}
+    if(e.pw.length<maxPw(e)){e.pw.push(c);L.push(`${src}: took ${c.n} and attached it to ${e.c.n}`)}else{G.disc.push(c);L.push(`${src}: took ${c.n} but there was no room, so it was discarded`)}}
    else i++}
   return cb(got>0)}
  if(a.a==='cash'){p.cash+=n;L.push(`${src}: gain $${n}`);return cb(n>0)}
@@ -591,7 +592,7 @@ function edADel(j,x){R(j).do.splice(x,1);edRender()}
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 // Effect kinds the engine understands. To add a NEW kind, ask Claude: "please wire this card" and paste the exported JSON.
-const FXK={atk:'+ ATK',def:'+ DEF',win:'+ $ when this wrestler wins',perPower:'+ per attached power card',vp:'+ VP at game end',draw:'Draw power cards (on play or attach; eFeds: every show)'};
+const FXK={atk:'+ ATK',def:'+ DEF',win:'+ $ when this wrestler wins',perPower:'+ per attached power card',vp:'+ VP at game end',draw:'Draw power cards (on play or attach; eFeds: every show)',pwLimit:'Power card limit for this wrestler in a match (number = new limit)'};
 const NEWC={wr:()=>({n:'New Wrestler',atk:4,def:4,vp:1,cost:3,win:3,promo:2,tags:[],fx:[],img:'',txt:'',copies:3}),
  pw:()=>({n:'New Power',cat:'Action',fx:[],txt:'',img:'',copies:2}),
  ef:()=>({n:'New eFed',cash:12,inc:1,hyp:1,fx:[],txt:'',img:''})};
