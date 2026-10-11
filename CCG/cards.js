@@ -8,6 +8,7 @@ window.CARDS={
      "tag": "Brawler"
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Iron Mako",
@@ -29,6 +30,7 @@ window.CARDS={
      "tag": "Technical"
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Vex Valentine",
@@ -44,6 +46,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Big Tombstone",
@@ -65,6 +68,7 @@ window.CARDS={
      "tag": "High Flyer"
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Luna Blaze",
@@ -80,6 +84,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Rex Hammer",
@@ -96,6 +101,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Kid Nitro",
@@ -116,6 +122,7 @@ window.CARDS={
      "n": 2
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Mad Dog Morgan",
@@ -131,6 +138,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Silk Sebastian",
@@ -151,6 +159,7 @@ window.CARDS={
      "n": 1
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "The Warden",
@@ -172,6 +181,7 @@ window.CARDS={
      "n": 1
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Cobra Quinn",
@@ -187,6 +197,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Saint Rowan",
@@ -202,6 +213,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Dynamo Dee",
@@ -217,6 +229,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Grizzly Pete",
@@ -238,6 +251,7 @@ window.CARDS={
      "n": 1
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Phantom X",
@@ -253,6 +267,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Hurricane Hana",
@@ -274,6 +289,7 @@ window.CARDS={
      "tag": "Veteran"
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Old Boy Gus",
@@ -289,6 +305,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Titan Okoro",
@@ -304,6 +321,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Slick Rick Rivers",
@@ -326,6 +344,7 @@ window.CARDS={
      "n": 2
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Steel Chair",
@@ -338,6 +357,7 @@ window.CARDS={
      "n": 3
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Barbed Bat",
@@ -354,6 +374,7 @@ window.CARDS={
      "n": 1
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Cage Match",
@@ -367,6 +388,7 @@ window.CARDS={
      "tag": "High Flyer"
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Ladder Match",
@@ -380,6 +402,7 @@ window.CARDS={
      "tag": "Brawler"
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Street Fight",
@@ -392,6 +415,7 @@ window.CARDS={
      "n": 2
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Slick Manager",
@@ -406,6 +430,7 @@ window.CARDS={
      "n": 1
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Mastermind",
@@ -419,6 +444,7 @@ window.CARDS={
      "n": 2
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Hard Ref",
@@ -431,6 +457,7 @@ window.CARDS={
      "n": 2
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Fast Count",
@@ -444,6 +471,7 @@ window.CARDS={
      "tag": "Technical"
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Sleeper Hold",
@@ -456,6 +484,7 @@ window.CARDS={
      "n": 3
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Brick Wall",
@@ -468,6 +497,7 @@ window.CARDS={
      "n": 3
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Crowd Pop",
@@ -481,6 +511,7 @@ window.CARDS={
      "tag": "Veteran"
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Veteran Savvy",
@@ -497,6 +528,7 @@ window.CARDS={
      "n": 1
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Title Shot",
@@ -509,15 +541,48 @@ window.CARDS={
      "n": 2
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Backstage Deal",
+   "cat": "Action"
+  },
+  {
+   "fx": [],
+   "rules": [
+    {
+     "when": "reveal",
+     "mode": "all",
+     "if": [
+      {
+       "c": "oppPower",
+       "n": 1
+      }
+     ],
+     "do": [
+      {
+       "a": "discard",
+       "n": 1,
+       "who": "opp"
+      },
+      {
+       "a": "cash",
+       "n": 2,
+       "ifPrev": true
+      }
+     ]
+    }
+   ],
+   "txt": "",
+   "img": "",
+   "n": "Sabotage",
    "cat": "Action"
   }
  ],
  "ef": [
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Rising Stars",
@@ -533,6 +598,7 @@ window.CARDS={
      "tag": "Veteran"
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Old Guard Wrestling",
@@ -542,6 +608,7 @@ window.CARDS={
   },
   {
    "fx": [],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Hype Machine",
@@ -557,6 +624,7 @@ window.CARDS={
      "tag": "Brawler"
     }
    ],
+   "rules": [],
    "txt": "",
    "img": "",
    "n": "Brawl Co.",

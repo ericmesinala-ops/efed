@@ -188,22 +188,6 @@ button.ghost{border:1px solid #4a4f5a;color:var(--ink)}button.ghost:hover:not(:d
 .rule{border:1px solid var(--line);border-radius:8px;padding:10px;background:#0d0e11;display:flex;flex-direction:column;gap:8px;width:100%}
 .rh,.rb{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.rb{flex-direction:column;align-items:flex-start}.rule b{color:var(--acc);letter-spacing:2px;min-width:44px}
 .rule .fxr{align-items:center}.rule .hint{margin:0}
-/* full-art cards: when the image loads, hide every overlay and the border; click a card to zoom */
-.c.full{border:0!important;background:none!important;box-shadow:none!important;border-radius:10px;overflow:hidden}
-.c.full.sel{box-shadow:0 0 0 3px var(--acc),0 10px 22px #000c!important}
-.c.full .top,.c.full .stat,.c.full .tx,.c.full .vps,.c.full .flag,.c.full .im span{display:none!important}
-.c.full .im{position:absolute!important;inset:0!important;display:block!important;background:none!important}
-.c.full .im img{position:absolute!important;inset:0;width:100%;height:100%;object-fit:contain}
-.cap{margin-top:4px;text-align:center;font-weight:700;color:var(--gold);font-size:13px}
-.c:not(.full)+.cap{display:none}
-.c:not(.back){cursor:zoom-in}
-#zm{position:fixed;inset:0;background:#000d;display:none;place-items:center;z-index:99;cursor:zoom-out;overflow:auto;padding:16px}
-#zm.on{display:grid}
-#zm .c{transform:none!important;cursor:zoom-out;box-shadow:0 0 50px #000!important}
-#zm .c:not(.full){zoom:2.2}
-#zm .c.full{height:min(90vh,820px);width:calc(min(90vh,820px)*190/285)}
-.tg em.sp{background:var(--acc);color:#1a0d05}
-.idb{grid-column:1/-1;font-weight:700;color:var(--acc);letter-spacing:1px}
 </style></head><body><div id="app"></div><div id="ed"></div><input type="file" id="imp" accept=".js,.json" hidden onchange="edImport(this)"><div id="toast"></div><script src="cards.js"></script>
 <script>
 // ---------- CARD DATA (placeholder test set; later loaded from Supabase) ----------
@@ -252,6 +236,7 @@ const DEF_E=[
 {n:'Brawl Co.',cash:14,inc:1,hyp:1,fx:[{k:'atk',n:1,tag:'Brawler'}]}];
 
 // ---------- CONFIG / HELPERS ----------
+const MAX_PW=3; // max power cards attached to one wrestler in a match
 const SLOTS=[3,3,4,4,5,5,6,8]; // matches per show
 const HV=1, MAXR=8; // cash value of one hype token; number of shows
 const sh=a=>a.map(x=>[Math.random(),x]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
@@ -261,9 +246,9 @@ const me=()=>G.pl[G.cur];
 let G;
 // ---------- CARD DATABASE (editable in the in-game Card Editor, saved in this browser) ----------
 const LS='wtcg_cards_v2';
-const TC={Brawler:'#a8372d',Technical:'#3f6f9a',Giant:'#6d4a96','High Flyer':'#2a8f86',Veteran:'#a98a3c'};
+const TC={Brawler:'#a8372d',Technical:'#3f6f9a',Giant:'#6d4a96','High Flyer':'#2a8f86',Veteran:'#a98a3c',Heel:'#8c2a3a',Face:'#2a6f9c'};
 const tagC=t=>!t?'var(--w)':TC[t]||`hsl(${[...t].reduce((a,ch)=>(a*31+ch.charCodeAt(0))%360,7)} 40% 40%)`;
-const norm=c=>{const n={fx:[],rules:[],txt:'',img:'',...c};if(n.atk!==undefined)n.fx=[];return n};
+const norm=c=>({fx:[],rules:[],txt:'',img:'',...c});
 // cards.js (next to this file) holds the published card set: window.CARDS={wr:[],pw:[],ef:[]}. Without it, the built-in cards are used.
 const PUB=(typeof window!=='undefined'&&window.CARDS&&window.CARDS.wr&&window.CARDS.pw&&window.CARDS.ef)?window.CARDS:null;
 const fromObj=o=>({wr:o.wr.map(norm),pw:o.pw.map(norm),ef:o.ef.map(norm)});
@@ -275,14 +260,13 @@ function unlockEd(){EDIT=true;try{localStorage.setItem('wtcg_edit','1')}catch(e)
 let tapN=0,tapT;function titleTap(){tapN++;clearTimeout(tapT);tapT=setTimeout(()=>tapN=0,1500);if(tapN>=5){tapN=0;unlockEd()}}
 document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==='e')unlockEd()}); // editor button: always on your computer, on the public site only with ?edit
 function loadDB(){try{const s=JSON.parse(localStorage.getItem(LS));if(s&&s.wr&&s.pw&&s.ef)return{wr:s.wr.map(norm),pw:s.pw.map(norm),ef:s.ef.map(norm)}}catch(e){}return defDB()}
-function ensureIds(db){const T=['wr','pw','ef'],seen=new Set();let m=0;T.forEach(t=>db[t].forEach(c=>{if(c.id>m)m=c.id}));T.forEach(t=>db[t].forEach(c=>{if(!(c.id>0)||seen.has(c.id))c.id=++m;seen.add(c.id)}));return db}
-let DB=ensureIds(loadDB());
+let DB=loadDB();
 function persist(){try{localStorage.setItem(LS,JSON.stringify(DB));return true}catch(e){toast('Storage full: use smaller images or Export JSON');return false}}
 let toastT;function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200)}
 
 // ---------- SETUP ----------
 function newGame(){
- const wd=sh(cl(DB.wr.map(c=>({...c,hype:0,champ:false})))), pd=sh(cl(DB.pw)), ed=sh(cl(DB.ef));
+ const exp=(a,n)=>a.flatMap(c=>Array(c.copies||n).fill(c)),wd=sh(cl(exp(DB.wr,3).map(c=>({...c,hype:0,champ:false})))), pd=sh(cl(exp(DB.pw,2))), ed=sh(cl(DB.ef));
  const pl=[0,1].map(()=>({cash:0,inc:0,hyp:0,tok:0,vp:0,hand:[],pw:pd.splice(0,3),signed:[],efed:null,opts:ed.splice(0,2),done:false,passed:false,last:null}));
  G={ph:'efed',cur:0,ready:false,wd,pd,disc:[],market:[],pool:[],round:1,pl,slots:[],log:'',sel:null,scouted:null};
  ui();
@@ -321,13 +305,11 @@ function endTurn(){
 }
 function play(si){
  const p=me(),c=p.hand.splice(G.sel.i,1)[0],s=G.slots[si],role=s.atk?'def':'atk';
- s[role]={p:G.cur,c,pw:[]};p.last=s[role];c.fx.forEach(f=>{if(f.k==='draw'&&(!f.tag||hasTag(c,f.tag)))drawP(p,f.n)});
- const en=s[role],ctx={trig:'play',role,main:si===G.slots.length-1,lines:[]};
- runRules('play',en,s[role==='atk'?'def':'atk'],ctx,()=>{});if(!AI[en.p]&&ctx.lines.length)toast(ctx.lines.join(' · '));
+ s[role]={p:G.cur,c,pw:[]};p.last=s[role];c.fx.forEach(f=>{if(f.k==='draw'&&(!f.tag||c.tags.includes(f.tag)))drawP(p,f.n)});
  if(c.champ&&si===G.slots.length-1)p.tok++;
  endTurn();
 }
-function attach(si,r){const p=me(),pc=p.pw.splice(G.sel.i,1)[0],e=G.slots[si][r];e.pw.push(pc);p.last=e;pc.fx.forEach(f=>{if(f.k==='draw'&&(!f.tag||hasTag(e.c,f.tag)))drawP(p,f.n)});endTurn();}
+function attach(si,r){const p=me(),pc=p.pw.splice(G.sel.i,1)[0],e=G.slots[si][r];e.pw.push(pc);p.last=e;pc.fx.forEach(f=>{if(f.k==='draw'&&(!f.tag||e.c.tags.includes(f.tag)))drawP(p,f.n)});endTurn();}
 function drawPower(){if(!G.pd.length){G.pd=sh(G.disc.filter(c=>c.cat));G.disc=G.disc.filter(c=>!c.cat);}
  if(G.pd.length)me().pw.push(G.pd.shift());endTurn();}
 function scoutDeck(){if(!G.wd.length)return;G.scouted=G.wd.shift();ui();}
@@ -345,7 +327,7 @@ function calc(e,role){
  const fx=[...w.fx.map(f=>({f,src:w.n})),...e.pw.flatMap(x=>x.fx.map(f=>({f,src:x.n}))),...(p.efed.fx||[]).map(f=>({f,src:p.efed.n})),...(e.xs||[]).map(x=>({f:{k:x.k,n:x.n},src:x.src}))];
  let v=role==='atk'?w.atk:w.def,win=w.win;
  const st=[{t:`${w.n} base ${role==='atk'?'attack':'defense'}`,n:v,run:v}],ws=[{t:'base',n:w.win}];
- fx.forEach(({f,src})=>{if(f.tag&&!hasTag(w,f.tag))return;
+ fx.forEach(({f,src})=>{if(f.tag&&!w.tags.includes(f.tag))return;
   if(f.k===role){v+=f.n;st.push({t:`${src}: ${fxT(f)}`,n:f.n,run:v})}
   if(f.k==='perPower'&&f.s===role){const n=f.n*e.pw.length;if(n){v+=n;st.push({t:`${src}: ${e.pw.length} attached`,n,run:v})}}
   if(f.k==='win'){win+=f.n;ws.push({t:src,n:f.n})}});
@@ -397,13 +379,11 @@ const score=p=>p.vp+[...new Set([...p.signed,...p.hand])].reduce((s,c)=>s+c.vp+c
 const chip=t=>`<span class="chip">${t}</span>`;
 const IMG_BASE='images/',IMG_EXT='.png'; // card art: images/<card-name-slug>.png, e.g. images/iron-mako.png
 const slug=n=>n.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-const artSrc=c=>c.img||IMG_BASE+(c.id||slug(c.n))+IMG_EXT,artAlt=c=>(c.img||!c.id)?'':IMG_BASE+slug(c.n)+IMG_EXT;
-const artErr=c=>artAlt(c)?`if(!this.dataset.f){this.dataset.f=1;this.src='${artAlt(c)}'}else this.remove()`:'this.remove()';
 function cardH(c,o={}){
  const w=c.atk!==undefined,e=c.cash!==undefined,k=w?tagC((c.tags||[])[0]):e?'var(--e)':'var(--p)';
  const src=c.img||IMG_BASE+slug(c.n)+IMG_EXT;
  const fx=(c.txt?c.txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>'):[...(c.fx||[]).map(fxT),...(c.rules||[]).map(ruleT)].filter(Boolean).join('<br>'))+(c.keep?'<br><i>Returns to hand after use</i>':'');
- return `<div class="cw"><div class="c ${e?'ef ':''}${o.sel?'sel':''} ${o.off?'off':''} ${c.champ?'champ':''}" style="--k:${k}"><div class="im"><span>${c.n[0]}</span><img src="${artSrc(c)}" alt="" onload="this.closest('.c').classList.add('full')" onerror="${artErr(c)}"></div><div class="top">${w?`<i class="coin" title="Signing cost">${c.cost}</i>`:''}<b>${c.n}</b>${w?`<span class="tg">${c.spec?`<em class="sp">${c.spec}</em>`:''}${c.tags.map(t=>`<em>${t}</em>`).join('')}</span>`:''}</div>${w?`<div class="stat a" title="Attack">⚔ <b>${c.atk}</b></div><div class="stat d" title="Defense"><b>${c.def}</b> 🛡</div>`:''}${c.champ?'<div class="flag cr">★ CHAMPION</div>':''}${c.hype?`<div class="flag hy">🔥 ${c.hype}</div>`:''}<div class="tx">${c.cat?`<small>${c.cat}</small>`:''}${w?`<div class="pay"><span>🏆 Win $${c.win}</span><span>🎤 Promo $${c.promo}</span></div>`:''}${e?`<div class="pay"><span>💵 $${c.cash}</span><span>📈 +${c.inc}</span><span>🔥 +${c.hyp}</span></div>`:''}${fx&&(SHOW_TXT||!(w||e))?`<p>${fx}</p>`:''}</div>${w&&c.vp?`<i class="vps" title="Victory points">${c.vp}</i>`:''}</div>${(c.champ||c.hype)?`<div class="cap">${c.champ?'★ Champion':''}${c.champ&&c.hype?' · ':''}${c.hype?'🔥 '+c.hype+' hype':''}</div>`:''}${o.btn?`<div class="bt">${o.btn}</div>`:''}</div>`;
+ return `<div class="cw"><div class="c ${e?'ef ':''}${o.sel?'sel':''} ${o.off?'off':''} ${c.champ?'champ':''}" style="--k:${k}"><div class="im"><span>${c.n[0]}</span><img src="${src}" alt="" onerror="this.remove()"></div><div class="top">${w?`<i class="coin" title="Signing cost">${c.cost}</i>`:''}<b>${c.n}</b>${w?`<span class="tg">${c.tags.map(t=>`<em>${t}</em>`).join('')}</span>`:''}</div>${w?`<div class="stat a" title="Attack">⚔ <b>${c.atk}</b></div><div class="stat d" title="Defense"><b>${c.def}</b> 🛡</div>`:''}${c.champ?'<div class="flag cr">★ CHAMPION</div>':''}${c.hype?`<div class="flag hy">🔥 ${c.hype}</div>`:''}<div class="tx">${c.cat?`<small>${c.cat}</small>`:''}${w?`<div class="pay"><span>🏆 Win $${c.win}</span><span>🎤 Promo $${c.promo}</span></div>`:''}${e?`<div class="pay"><span>💵 $${c.cash}</span><span>📈 +${c.inc}</span><span>🔥 +${c.hyp}</span></div>`:''}${fx&&(SHOW_TXT||!(w||e))?`<p>${fx}</p>`:''}</div>${w&&c.vp?`<i class="vps" title="Victory points">${c.vp}</i>`:''}</div>${o.btn?`<div class="bt">${o.btn}</div>`:''}</div>`;
 }
 const setMode=v=>{if(!confirm('Switching mode starts a new game. Continue?'))return ui();AI=v==='ai'?[false,true]:[false,false];newGame()};
 const head=()=>`<h1 onclick="titleTap()">WRESTLING <span>TCG</span></h1><div class="tb">${EDIT?'<button onclick="openEd()">✎ Card editor</button>':''}<button class="ghost" onclick="if(confirm('Start a new game?'))newGame()">New game</button><select title="Game mode" onchange="setMode(this.value)"><option value="ai" ${AI[1]?'selected':''}>vs AI</option><option value="hs" ${AI[1]?'':'selected'}>2 players (hot-seat)</option></select><select title="Animation speed" onchange="ANIM_SPEED=+this.value"><option value="0" ${ANIM_SPEED==0?'selected':''}>Instant results</option><option value="1" ${ANIM_SPEED==1?'selected':''}>Normal speed</option><option value="2" ${ANIM_SPEED==2?'selected':''}>Slow</option></select><select title="Card face" onchange="SHOW_TXT=this.value==='1';ui()"><option value="0" ${SHOW_TXT?'':'selected'}>Card face: stats only</option><option value="1" ${SHOW_TXT?'selected':''}>Card face: stats + power text</option></select></div><div class="hud">${G.pl.map((p,i)=>`<div class="pp ${G.ph==='show'&&i===G.cur?'on':''}"><div class="pn">${AI[i]?'OPPONENT (AI)':'PLAYER '+(i+1)}<small>${p.efed?p.efed.n:'choosing eFed…'}</small></div><div class="tiles"><div class="tile"><small>CASH</small><b>$${p.cash}</b><i>+${p.inc}/show</i></div><div class="tile"><small>HYPE</small><b>${p.tok}</b><i>+${p.hyp}/show</i></div><div class="tile"><small>VP</small><b>${p.vp}</b><i>&nbsp;</i></div><div class="tile"><small>HAND</small><b>${p.hand.length}</b><i>wrestlers</i></div></div></div>`).join('')}</div>`;
@@ -421,7 +401,7 @@ function miniH(e,r){
  if(!e)return `<div class="mc none">${r==='atk'?'ATK':'DEF'}<br>—</div>`;
  const mine=e.p===VW();
  
- return `<div class="mc ${mine?'me':'op'}" title="${e.c.n}"><div class="im"><span>${e.c.n[0]}</span><img src="${artSrc(e.c)}" alt="" onerror="${artErr(e.c)}"></div><b>${e.c.n}</b><u>⚔${e.c.atk} 🛡${e.c.def}</u>${e.pw.length?`<i>+${e.pw.length}</i>`:''}</div>`;
+ return `<div class="mc ${mine?'me':'op'}" title="${e.c.n}"><div class="im"><span>${e.c.n[0]}</span><img src="${e.c.img||IMG_BASE+slug(e.c.n)+IMG_EXT}" alt="" onerror="this.remove()"></div><b>${e.c.n}</b><u>⚔${e.c.atk} 🛡${e.c.def}</u>${e.pw.length?`<i>+${e.pw.length}</i>`:''}</div>`;
 }
 const preview=()=>`<div class="pv">${G.slots.map((sl,i)=>`<div class="pt ${i===G.slots.length-1?'main':''}"><small>MATCH ${i+1}${i===G.slots.length-1?' ★':''}</small><div>${miniH(sl.atk,'atk')}${miniH(sl.def,'def')}</div></div>`).join('')}</div>`;
 const locked=p=>G.slots.some(s=>s.atk&&!s.def&&s.atk.p===p); // you have an unanswered attacker
@@ -436,9 +416,9 @@ function showH(){
  if(busy)return turn+`<p class="hint big">Opponent is thinking…</p><div class="acts">${view}</div><h3>The show so far</h3>${preview()}`;
  const w=st==='place'&&s&&s.t==='w'?p.hand[s.i]:null;
  if(w)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(w)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Where should ${w.n} go?</h3><p class="hint">${locked(G.cur)?'You have an unanswered attacker, so '+w.n+' must defend an open match.':'An empty match: '+w.n+' attacks. A match with an open opposing attacker: '+w.n+' defends.'} Scroll sideways for more matches.</p></div></div>`+board(w);
- const mine=G.slots.flatMap((sl,i)=>['atk','def'].filter(r=>sl[r]&&sl[r].p===G.cur&&sl[r].pw.length<(sl[r].lim||MAX_ATT)).map(r=>({e:sl[r],i,r})));
+ const mine=G.slots.flatMap((sl,i)=>['atk','def'].filter(r=>sl[r]&&sl[r].p===G.cur&&sl[r].pw.length<MAX_PW).map(r=>({e:sl[r],i,r})));
  const pc=st==='attach'&&s&&s.t==='p'?p.pw[s.i]:null;
- if(pc)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(pc)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Attach ${pc.n} to which wrestler?</h3><p class="hint">${mine.length?'Choose one of your wrestlers on the board. Each button shows power cards used / limit (normally '+MAX_ATT+').':'You have no wrestler on the board that can take it.'}</p></div></div><h3>The show so far</h3><p class="hint">Orange border = your wrestlers, blue = your opponent's. The number is how many power cards are attached.</p>${preview()}<h3>Your wrestlers on the board</h3><div class="row">${mine.map(m=>cardH(m.e.c,{btn:`<button onclick="attach(${m.i},'${m.r}')">Attach · Match ${m.i+1} ${m.r==='atk'?'attacker':'defender'} · ${m.e.pw.length}/${m.e.lim||MAX_ATT}</button>`})).join('')}</div>`;
+ if(pc)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(pc)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Attach ${pc.n} to which wrestler?</h3><p class="hint">${mine.length?'Choose one of your wrestlers on the board. Max '+MAX_PW+' power cards per wrestler in a match.':'You have no wrestler on the board that can take it.'}</p></div></div><h3>The show so far</h3><p class="hint">Orange border = your wrestlers, blue = your opponent's. The number is how many power cards are attached.</p>${preview()}<h3>Your wrestlers on the board</h3><div class="row">${mine.map(m=>cardH(m.e.c,{btn:`<button onclick="attach(${m.i},'${m.r}')">Attach · Match ${m.i+1} ${m.r==='atk'?'attacker':'defender'} · ${m.e.pw.length}/${MAX_PW}</button>`})).join('')}</div>`;
  const canAct=(p.hand.length&&canPlace())||(p.pw.length&&mine.length);
  let h=turn+`<p class="hint big">${canAct?'Your turn — pick a wrestler to play'+(p.pw.length?', or a power card to attach':'')+'. Press Pass when you are done: you cannot play again this show.'+(locked(G.cur)?' You have an unanswered attacker, so any wrestler you play next must defend.':''):'You are out of cards to play. Press Pass to finish your show. When both players pass, the matches are resolved.'}</p><div class="acts"><button ${canAct?'class="ghost"':''} onclick="pass()">${canAct?'Pass — I am done':'Pass'}</button>${view}${ENABLE_SCOUT&&!G.scouted?`<button onclick="scoutDeck()">Scout</button>`:''}${ENABLE_DRAW&&!G.scouted?`<button onclick="drawPower()">Draw a power card</button>`:''}</div>`;
  if(G.scouted){const k=G.scouted;h+=`<div class="row">${cardH(k)}</div><div class="acts"><button ${k.cost>p.cash?'disabled':''} onclick="buy('s')">Sign for $${k.cost}</button><button onclick="toMarket()">Decline — send to market</button></div>`;}
@@ -482,7 +462,7 @@ function resolveH(){
 }
 function endH(){const a=score(G.pl[0]),b=score(G.pl[1]);return `<div class="bar">GAME OVER</div><div class="hud"><div class="pp ${a>=b?'on':''}"><div class="pn">PLAYER 1</div><div class="pills"><span>🏆 ${a} VP</span></div></div><div class="pp ${b>=a?'on':''}"><div class="pn">PLAYER 2</div><div class="pills"><span>🏆 ${b} VP</span></div></div></div><h3>${a===b?'Tie game':'Player '+(a>b?1:2)+' wins'}</h3><button onclick="newGame()">New game</button>`;}
 // ---------- AI (player 2) ----------
-const fxVal=(c,w,role)=>c.fx.reduce((t,f)=>(f.tag&&!hasTag(w,f.tag))?t:t+(f.k===role||f.k==='win'||(f.k==='perPower'&&f.s===role)?f.n:0),0);
+const fxVal=(c,w,role)=>c.fx.reduce((t,f)=>(f.tag&&!w.tags.includes(f.tag))?t:t+(f.k===role||f.k==='win'||(f.k==='perPower'&&f.s===role)?f.n:0),0);
 function aiStep(){
  if(!AI[G.cur])return;
  const p=me();
@@ -495,7 +475,7 @@ function aiStep(){
  }
  if(G.ph==='show'){
   const sl=G.slots;
-  if(p.last&&p.last.pw.length<(p.last.lim||MAX_ATT)&&p.pw.length){
+  if(p.last&&p.last.pw.length<MAX_PW&&p.pw.length){
    const e=p.last,role=sl.some(x=>x.atk===e)?'atk':'def';
    const best=p.pw.map((c,i)=>[fxVal(c,e.c,role),i]).sort((a,b)=>b[0]-a[0])[0];
    if(best[0]>0){G.sel={t:'p',i:best[1]};return attach(sl.findIndex(x=>x[role]===e),role);}
@@ -523,17 +503,16 @@ function ui(){
 
 
 // ---------- RULE ENGINE: WHEN trigger, IF conditions, DO actions ----------
-const WHEN={reveal:'At reveal (before totals)',win:'When this wrestler wins',lose:'When this wrestler loses',endshow:'At the end of every show',play:'When this wrestler is played'};
+const WHEN={reveal:'At reveal (before totals)',win:'When this wrestler wins',lose:'When this wrestler loses',endshow:'At the end of every show'};
 const CND={oppPower:'Opponent has at least N power cards here',myPower:'This wrestler has at least N power cards',tag:'This wrestler has tag',oppTag:'Opposing wrestler has tag',role:'This wrestler is',main:'This is the main event',cash:'I have at least $N',hasOpp:'There is an opposing wrestler'};
-const ACT={stat:'Add ATK or DEF this match',cash:'Gain $',opCash:'Take $ from the opponent',vp:'Gain VP',draw:'Draw power cards',discard:'Discard opposing power cards',limit:'Raise the Power Card limit for this match to N'};
+const ACT={stat:'Add ATK or DEF this match',cash:'Gain $',opCash:'Take $ from the opponent',vp:'Gain VP',draw:'Draw power cards',discard:'Discard opposing power cards'};
+const hasT=(c,t)=>(c.tags||[]).some(x=>String(x).trim().toLowerCase()===String(t||'').trim().toLowerCase()); // tag match ignores capitals
 const plural=(n,w)=>n+' '+w+(n==1?'':'s');
-const MAX_ATT=3; // max power cards attached to one wrestler per match
-const hasTag=(c,v)=>(c.tags||[]).includes(v)||String(c.spec||'').split(',').map(x=>x.trim()).includes(v);
 function condT(c){const n=c.n??1,t={oppPower:`the opponent has ${plural(n,'power card')}+ here`,myPower:`this wrestler has ${plural(n,'power card')}+`,tag:`this wrestler is ${c.v||'?'}`,oppTag:`the opponent is ${c.v||'?'}`,role:c.v==='def'?'this wrestler is defending':'this wrestler is attacking',main:'it is the main event',cash:`you have $${n}+`,hasOpp:'there is an opposing wrestler'}[c.c];return c.not?'NOT ('+t+')':t}
-function actT(a){const n=a.n??1,t={stat:`+${n} ${a.k==='def'?'DEF (when defending)':'ATK (when attacking)'}`,cash:`gain $${n}`,opCash:`take up to $${n} from the opponent`,vp:`gain ${n} VP`,draw:`draw ${plural(n,'power card')}`,limit:`the Power Card limit for this match is ${n}`,discard:`discard ${plural(n,'opposing power card')} from this match (${a.who==='me'?'you choose':a.who==='random'?'random':'opponent chooses'})`}[a.a];return (a.ifPrev?'if that worked, ':'')+t}
+function actT(a){const n=a.n??1,t={stat:`+${n} ${a.k==='def'?'DEF (when defending)':'ATK (when attacking)'}`,cash:`gain $${n}`,opCash:`take up to $${n} from the opponent`,vp:`gain ${n} VP`,draw:`draw ${plural(n,'power card')}`,discard:`discard ${plural(n,'opposing power card')} from this match (${a.who==='me'?'you choose':a.who==='random'?'random':'opponent chooses'})`}[a.a];return (a.ifPrev?'if that worked, ':'')+t}
 function ruleT(r){if(!r.when||!(r.do||[]).length)return '';const cs=(r.if||[]).filter(c=>c.c).map(condT),a=r.do.filter(x=>x.a).map(actT).join('; ');const t=WHEN[r.when].replace(/ \(.*\)/,'')+(cs.length?', if '+cs.join(r.mode==='any'?' or ':' and '):'')+': '+a+'.';return t}
 function condOK(r,e,opp,ctx){const cs=(r.if||[]).filter(c=>c.c);if(!cs.length)return true;
- const f=c=>{const n=c.n??1;let v=({oppPower:()=>opp&&opp.pw.length>=n,myPower:()=>e.pw.length>=n,tag:()=>hasTag(e.c,c.v),oppTag:()=>!!opp&&hasTag(opp.c,c.v),role:()=>ctx.role===(c.v==='def'?'def':'atk'),main:()=>!!ctx.main,cash:()=>G.pl[e.p].cash>=n,hasOpp:()=>!!opp})[c.c]();return c.not?!v:v};
+ const f=c=>{const n=c.n??1;let v=({oppPower:()=>opp&&opp.pw.length>=n,myPower:()=>e.pw.length>=n,tag:()=>hasT(e.c,c.v),oppTag:()=>!!opp&&hasT(opp.c,c.v),role:()=>ctx.role===(c.v==='def'?'def':'atk'),main:()=>!!ctx.main,cash:()=>G.pl[e.p].cash>=n,hasOpp:()=>!!opp})[c.c]();return c.not?!v:v};
  return r.mode==='any'?cs.some(f):cs.every(f)}
 function runRules(trig,e,opp,ctx,done){
  const p=G.pl[e.p];
@@ -550,7 +529,6 @@ function runRules(trig,e,opp,ctx,done){
 function doAct(a,e,opp,ctx,src,cb){
  const p=G.pl[e.p],n=+a.n||0,L=ctx.lines;
  if(a.a==='stat'){if(ctx.trig!=='reveal')return cb(false);(e.xs=e.xs||[]).push({k:a.k==='def'?'def':'atk',n,src});return cb(true)}
- if(a.a==='limit'){e.lim=Math.max(e.lim||MAX_ATT,n);L.push(`${src}: Power Card limit is ${e.lim}`);return cb(true)}
  if(a.a==='cash'){p.cash+=n;L.push(`${src}: gain $${n}`);return cb(n>0)}
  if(a.a==='opCash'){const o=G.pl[1-e.p],t=Math.min(n,o.cash);o.cash-=t;p.cash+=t;L.push(`${src}: took $${t} from ${who(1-e.p)}`);return cb(t>0)}
  if(a.a==='vp'){p.vp+=n;L.push(`${src}: +${n} VP`);return cb(n>0)}
@@ -593,8 +571,8 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 // Effect kinds the engine understands. To add a NEW kind, ask Claude: "please wire this card" and paste the exported JSON.
 const FXK={atk:'+ ATK',def:'+ DEF',win:'+ $ when this wrestler wins',perPower:'+ per attached power card',vp:'+ VP at game end',draw:'Draw power cards (on play or attach; eFeds: every show)'};
-const NEWC={wr:()=>({n:'New Wrestler',atk:4,def:4,vp:1,cost:3,win:3,promo:2,spec:'',tags:[],fx:[],img:'',txt:''}),
- pw:()=>({n:'New Power',cat:'Action',fx:[],txt:'',img:''}),
+const NEWC={wr:()=>({n:'New Wrestler',atk:4,def:4,vp:1,cost:3,win:3,promo:2,tags:[],fx:[],img:'',txt:'',copies:3}),
+ pw:()=>({n:'New Power',cat:'Action',fx:[],txt:'',img:'',copies:2}),
  ef:()=>({n:'New eFed',cash:12,inc:1,hyp:1,fx:[],txt:'',img:''})};
 const TABN={wr:'Wrestlers',pw:'Power cards',ef:'eFeds'};
 let ED={tab:'wr',i:0,d:null};
@@ -605,19 +583,19 @@ function edSel(t,i){ED.tab=t;ED.i=Math.max(0,i);ED.d=DB[t][ED.i]?cl(DB[t][ED.i])
 function edRender(){
  const t=ED.tab,d=ED.d,un=c=>c.txt&&!(c.fx||[]).length&&!(c.rules||[]).length;
  let h=`<div class="edh"><h2>✎ Card editor</h2><div class="tabs">${Object.keys(TABN).map(x=>`<button class="${x===t?'':'ghost'}" onclick="edSel('${x}',0)">${TABN[x]} (${DB[x].length})</button>`).join('')}</div><span style="flex:1"></span><button class="ghost" onclick="edCopy()">Copy JSON</button><button class="ghost" onclick="edExport()">Export cards.js</button><button class="ghost" onclick="$('imp').click()">Import cards</button><button class="ghost" onclick="edReset()">Revert to published</button><button onclick="edApply()">Apply &amp; new game</button><button class="ghost" onclick="closeEd()" title="Close (Esc)">✕</button></div>`;
- h+=`<div class="edb"><div class="edl"><button onclick="edNew()">+ New card</button>${DB[t].map((c,i)=>`<div class="eli ${i===ED.i?'on':''}" onclick="edSel('${t}',${i})"><span><small style="color:var(--mute)">#${c.id}</small> ${esc(c.n)}</span>${un(c)?'<em title="Has power text but no effects yet. Ask Claude to wire it.">needs wiring</em>':''}</div>`).join('')}</div>`;
+ h+=`<div class="edb"><div class="edl"><button onclick="edNew()">+ New card</button>${DB[t].map((c,i)=>`<div class="eli ${i===ED.i?'on':''}" onclick="edSel('${t}',${i})"><span>${esc(c.n)}</span>${un(c)?'<em title="Has power text but no effects yet. Ask Claude to wire it.">needs wiring</em>':''}</div>`).join('')}</div>`;
  h+=d?edForm(d):'<p class="hint">No cards here yet. Click + New card.</p>';
  $('ed').innerHTML=h+'</div>';edPrev();
 }
 function edForm(d){
  const t=ED.tab,f=(l,k,type='text',x='')=>`<label>${l}<input type="${type}" ${x} value="${esc(Array.isArray(d[k])?d[k].join(', '):d[k])}" oninput="edSet('${k}',this.value)"></label>`;
- let h=`<div class="edf"><div class="grid"><div class="idb">Card #${d.id}</div>${f('Name','n')}`;
- if(t==='wr')h+=f('Attack','atk','number','min=0')+f('Defense','def','number','min=0')+f('Signing cost','cost','number','min=0')+f('Victory points','vp','number','min=0')+f('Win payout $','win','number','min=0')+f('Promo payout $','promo','number','min=0')+f('Specialty (e.g. Brawler)','spec')+f('Other tags (comma separated)','tags');
- if(t==='pw')h+=f('Category','cat')+`<label class="chk"><input type="checkbox" ${d.keep?'checked':''} onchange="edSet('keep',this.checked)"> Returns to hand after use</label>`;
+ let h=`<div class="edf"><div class="grid">${f('Name','n')}`;
+ if(t==='wr')h+=f('Attack','atk','number','min=0')+f('Defense','def','number','min=0')+f('Signing cost','cost','number','min=0')+f('Victory points','vp','number','min=0')+f('Win payout $','win','number','min=0')+f('Promo payout $','promo','number','min=0')+f('Tags (comma separated)','tags')+f('Copies in deck','copies','number','min=1');
+ if(t==='pw')h+=f('Category','cat')+f('Copies in deck','copies','number','min=1')+`<label class="chk"><input type="checkbox" ${d.keep?'checked':''} onchange="edSet('keep',this.checked)"> Returns to hand after use</label>`;
  if(t==='ef')h+=f('Starting cash','cash','number')+f('Income per show','inc','number')+f('Hype tokens per show','hyp','number');
  h+=`</div><label>Power text (printed on the card)<textarea rows="3" placeholder="Leave empty to auto-write it from the effects below" oninput="edSet('txt',this.value)">${esc(d.txt)}</textarea></label>`;
- h+=`${t==='ef'||(t==='pw'&&(d.fx||[]).length)?`<div class="fxs"><b>Simple stat bonuses${t==='ef'?'':' (old card: use Abilities below instead)'}</b><small class="hint">Always-on bonuses while this card is on the board. The second box is optional: only if the wrestler has that tag. Leave empty for none.</small>${(d.fx||[]).map(fxRow).join('')}${t==='ef'?'<button class="ghost" onclick="edFx()">+ Add effect</button>':''}</div>`:''}<div class="fxs" style="width:100%"><b>Abilities (rules)</b><small class="hint">Build a rule: WHEN something happens, IF conditions are true, DO actions. Example: at reveal, if the opponent has power cards here, discard 1 (opponent chooses), then if that worked, gain $2.</small>${(d.rules||[]).map(ruleRow).join('')}<button class="ghost" onclick="edRule()">+ Add rule</button></div>`;
- h+=`<div class="img"><b>Art</b><div class="acts"><input type="file" accept="image/*" onchange="edImg(this)"><input type="text" placeholder="…or image path or URL (default: images/${d.id}.png)" value="${esc(d.img&&!d.img.startsWith('data:')?d.img:'')}" oninput="edSet('img',this.value)">${d.img?'<button class="ghost" onclick="edSet(\'img\',\'\');edRender()">Remove art</button>':''}</div></div>`;
+ h+=`<div class="fxs"><b>Simple stat bonuses</b><small class="hint">Always-on bonuses while this card is on the board. The second box is optional: only if the wrestler has that tag. Leave empty for none.</small>${(d.fx||[]).map(fxRow).join('')}<button class="ghost" onclick="edFx()">+ Add effect</button></div><div class="fxs" style="width:100%"><b>Abilities (rules)</b><small class="hint">Build a rule: WHEN something happens, IF conditions are true, DO actions. Example: at reveal, if the opponent has power cards here, discard 1 (opponent chooses), then if that worked, gain $2.</small>${(d.rules||[]).map(ruleRow).join('')}<button class="ghost" onclick="edRule()">+ Add rule</button></div>`;
+ h+=`<div class="img"><b>Art</b><div class="acts"><input type="file" accept="image/*" onchange="edImg(this)"><input type="text" placeholder="…or image path or URL (default: images/${slug(d.n)}.png)" value="${esc(d.img&&!d.img.startsWith('data:')?d.img:'')}" oninput="edSet('img',this.value)">${d.img?'<button class="ghost" onclick="edSet(\'img\',\'\');edRender()">Remove art</button>':''}</div></div>`;
  return h+`<div class="acts"><button onclick="edSave()">Save card</button><button class="ghost" onclick="edDup()">Duplicate</button><button class="ghost" onclick="edDel()">Delete</button></div></div><div class="edp"><div id="edp"></div></div>`;
 }
 const fxRow=(x,j)=>`<div class="fxr"><select onchange="edFxSet(${j},'k',this.value)"><option value="">Choose effect…</option>${Object.keys(FXK).map(k=>`<option value="${k}" ${x.k===k?'selected':''}>${FXK[k]}</option>`).join('')}</select><input type="number" value="${x.n}" oninput="edFxSet(${j},'n',this.value)">${x.k==='perPower'?`<select onchange="edFxSet(${j},'s',this.value)"><option value="atk" ${x.s!=='def'?'selected':''}>to ATK</option><option value="def" ${x.s==='def'?'selected':''}>to DEF</option></select>`:''}<input type="text" placeholder="only if wrestler has tag (optional)" value="${esc(x.tag||'')}" oninput="edFxSet(${j},'tag',this.value)"><button class="ghost" onclick="edFxDel(${j})">✕</button></div>`;
@@ -631,26 +609,15 @@ function edFxSet(j,k,v){const x=ED.d.fx[j];
 function edPrev(){const p=$('edp');if(p&&ED.d)p.innerHTML=cardH({...cleanC(cl(ED.d)),n:ED.d.n||'?',hype:0,champ:false})+'<p class="hint">Live preview</p>'}
 function edImg(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const s=Math.min(1,500/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);ED.d.img=c.toDataURL('image/jpeg',.82);edRender()};im.src=r.result};r.readAsDataURL(f)}
 function edSave(){if(!ED.d.n.trim())return toast('Give the card a name');DB[ED.tab][ED.i]=cleanC(cl(ED.d));if(persist())toast('Saved '+ED.d.n);edRender()}
-function edNew(){DB[ED.tab].push(NEWC[ED.tab]());ensureIds(DB);persist();edSel(ED.tab,DB[ED.tab].length-1)}
-function edDup(){const c=cl(ED.d);c.n+=' copy';c.id=0;DB[ED.tab].splice(ED.i+1,0,c);ensureIds(DB);persist();edSel(ED.tab,ED.i+1)}
+function edNew(){DB[ED.tab].push(norm(NEWC[ED.tab]()));persist();edSel(ED.tab,DB[ED.tab].length-1)}
+function edDup(){const c=cl(ED.d);c.n+=' copy';DB[ED.tab].splice(ED.i+1,0,c);persist();edSel(ED.tab,ED.i+1)}
 function edDel(){if(!confirm('Delete '+ED.d.n+'?'))return;DB[ED.tab].splice(ED.i,1);persist();edSel(ED.tab,ED.i-1)}
 function edCopy(){navigator.clipboard.writeText(JSON.stringify(DB,null,1)).then(()=>toast('Card JSON copied'),()=>toast('Copy blocked: use Export file'))}
 function edExport(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['window.CARDS='+JSON.stringify(DB,null,1)+';\n'],{type:'text/javascript'}));a.download='cards.js';a.click()}
-function edImport(inp){const f=inp.files[0];if(!f)return;f.text().then(s=>{try{const o=JSON.parse(s.replace(/^\s*window\.CARDS\s*=\s*/,'').replace(/;\s*$/,''));if(!o.wr||!o.pw||!o.ef)throw 0;DB={wr:o.wr.map(norm),pw:o.pw.map(norm),ef:o.ef.map(norm)};ensureIds(DB);persist();edSel('wr',0);toast('Imported')}catch(e){toast('That file is not a card export')}});inp.value=''}
+function edImport(inp){const f=inp.files[0];if(!f)return;f.text().then(s=>{try{const o=JSON.parse(s.replace(/^\s*window\.CARDS\s*=\s*/,'').replace(/;\s*$/,''));if(!o.wr||!o.pw||!o.ef)throw 0;DB={wr:o.wr.map(norm),pw:o.pw.map(norm),ef:o.ef.map(norm)};persist();edSel('wr',0);toast('Imported')}catch(e){toast('That file is not a card export')}});inp.value=''}
 function edReset(){if(!confirm('Discard your working copy and go back to the published cards?'))return;DB=defDB();localStorage.removeItem(LS);edSel(ED.tab,0)}
-function edApply(){const n=DB.wr.length;
- if(n<10||DB.ef.length<4||!DB.pw.length)return alert('You need at least 10 wrestlers, 4 eFeds and 1 power card to play.');
+function edApply(){const n=DB.wr.reduce((a,c)=>a+(c.copies||3),0);
+ if(n<10||DB.ef.length<4||!DB.pw.length)return alert('You need at least 10 wrestler copies, 4 eFeds and 1 power card to play.');
  persist();closeEd();newGame()}
-// click a card to zoom it; click anywhere or press Esc to close
-document.addEventListener('click',e=>{
- let z=document.getElementById('zm');
- if(z&&z.classList.contains('on')){z.classList.remove('on');z.innerHTML='';return}
- const c=e.target.closest('.c');
- if(!c||c.classList.contains('back')||e.target.closest('button'))return;
- if(!z){z=document.createElement('div');z.id='zm';document.body.appendChild(z)}
- const k=c.cloneNode(true);k.classList.remove('sel');k.style.cssText='';k.style.setProperty('--k',c.style.getPropertyValue('--k'));
- z.innerHTML='';z.appendChild(k);z.classList.add('on');
-});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){const z=document.getElementById('zm');if(z){z.classList.remove('on');z.innerHTML=''}}});
 newGame();
 </script></body></html>
