@@ -319,6 +319,10 @@ body.artonly .c:has(.im img):hover{box-shadow:0 20px 34px #000e,0 0 24px #ff2442
 .tk b{position:absolute;right:-22%;bottom:-14%;min-width:1.5em;padding:0 .3em;border-radius:1em;background:#ff2442;color:#fff;font:700 calc(var(--cw)*.075) 'Barlow Semi Condensed',sans-serif;text-align:center;line-height:1.5}
 .tkr{display:flex;gap:14px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:12px;background:#0d0e11}
 .tkp{width:72px;height:72px;flex:none;border-radius:50%;display:grid;place-items:center;background:#000;border:1px solid #4b505c;font-size:30px;overflow:hidden}.tkp img{width:100%;height:100%;object-fit:contain}
+
+/* power cards shown as small cards on the results screen */
+.atts .mc{flex:none;width:58px;margin:0 2px;--k:var(--acc);box-shadow:0 4px 10px #000a}
+.atts:has(.mc){gap:4px;margin-top:10px}
 </style></head><body><div id="app"></div><div id="ed"></div><input type="file" id="imp" accept=".js,.json" hidden onchange="edImport(this)"><div id="toast"></div><script src="cards.js"></script>
 <script>
 // ---------- CARD DATA (placeholder test set; later loaded from Supabase) ----------
@@ -404,7 +408,7 @@ let toastT;function toast(m){const t=document.getElementById('toast');t.textCont
 // ---------- SETUP ----------
 function newGame(){
  const exp=a=>a.slice(), // one copy of each card
-  wd=sh(cl(exp(DB.wr).map(c=>({...c,hype:0,champ:false,inj:0})))), pd=sh(cl(exp(DB.pw))), ed=sh(cl(DB.ef));
+  wd=sh(cl(exp(DB.wr).map(c=>({...c,hype:0,champ:false,inj:0})))), pd=sh(cl(DB.pw.flatMap(c=>Array.from({length:Math.max(1,Math.floor(+c.copies)||1)},()=>c)))), ed=sh(cl(DB.ef));
  const pl=[0,1].map(()=>({cash:0,inc:0,hyp:0,tok:0,vp:0,hand:[],pw:pd.splice(0,3),signed:[],efed:null,opts:ed.splice(0,2),done:false,passed:false,last:null}));
  G={ph:'efed',cur:0,ready:false,wd,pd,disc:[],market:[],pool:[],round:1,pl,slots:[],log:'',sel:null,scouted:null};
  ui();
@@ -478,11 +482,11 @@ function resolveOne(i,pre=[]){
  const s=G.slots[i],main=i===G.slots.length-1,r={i,main};
  if(!s.def){
   const e=s.atk,p=G.pl[e.p],tok=p.tok;
-  Object.assign(r,{kind:'promo',ec:cl(e.c),pw:e.pw.map(x=>x.n),winner:e.p,promo:e.c.promo,tok});
+  Object.assign(r,{kind:'promo',ec:cl(e.c),pw:e.pw.map(cl),winner:e.p,promo:e.c.promo,tok});
   p.cash+=r.promo;r.drew=drawP(p,1);e.c.hype+=tok;p.tok=0;r.hype=e.c.hype;
   G.sum.push(`Match ${i+1}: PROMO by ${who(e.p)} ${e.c.n}, +$${r.promo}`);done(e);return r;}
  const ea=s.swap?s.def:s.atk,ed=s.swap?s.atk:s.def,A=calc(ea,'atk'),D=calc(ed,'def'),aw=(A.v>D.v)!==!!s.flip,w=aw?ea:ed,W=aw?A:D,wp=G.pl[w.p]; // ea/ed = who acts as attacker/defender (roles may be switched)
- Object.assign(r,{kind:'match',ac:cl(ea.c),dc:cl(ed.c),ap:ea.p,dp:ed.p,apw:ea.pw.map(x=>x.n),dpw:ed.pw.map(x=>x.n),A,D,aw,wn:w.c.n,wp:w.p,tie:A.v===D.v,flipped:!!s.flip,lines:[]});
+ Object.assign(r,{kind:'match',ac:cl(ea.c),dc:cl(ed.c),ap:ea.p,dp:ed.p,apw:ea.pw.map(cl),dpw:ed.pw.map(cl),A,D,aw,wn:w.c.n,wp:w.p,tie:A.v===D.v,flipped:!!s.flip,lines:[]});
  wp.cash+=W.win;let got=W.win;
  r.lines.push(`Win payout +$${W.win}`+(W.ws.length>1?` (${W.ws.map(x=>x.n).join(' + ')})`:''));
  const hy=(s.atk.c.hype+s.def.c.hype)*HV;
@@ -601,7 +605,7 @@ function resH(r=G.res,tail=null){
  const n=G.rq.length;
  const head=`<div class="bar">SHOW ${G.round} · MATCH ${r.i+1}${r.main?' ★ MAIN EVENT':''}<span>${G.rn} of ${n}</span></div>`;
  const flip=(c,t)=>`<div class="flip" data-t="${t}"><div class="in"><div class="f">${cardH(c)}</div><div class="b"><div class="c back"><b>?</b><small>face-down</small></div></div></div></div>`;
- const chips=(a,t0)=>a.map((x,j)=>`<span class="att rv" data-t="${t0+j*250}">+ ${x}</span>`).join('');
+ const chips=(a,t0)=>a.map((x,j)=>`<div class="mc rv" data-t="${t0+j*250}" title="${esc(x.n)}"${zd(x)}><div class="im"><span>${esc(x.n[0])}</span><img src="${x.img||IMG_BASE+slug(x.n)+IMG_EXT}" alt="" onerror="this.remove()"></div><b>${esc(x.n)}</b></div>`).join('');
  const btn=t=>`<div class="acts" style="margin-top:18px;justify-content:center"><button id="skip" class="ghost" data-t="${t}" data-hide="1" onclick="skipAnim()">Skip animation</button><button id="nx" disabled data-t="${t}" data-en="1" onclick="nextMatch()">${G.rn<n?'Next match':'Show summary'}</button></div>`;
  const rw=(arr,t0)=>`<div class="rewards">${arr.map((x,j)=>`<div class="rw rv" data-t="${t0+j*650}">${x}</div>`).join('')}</div>`;
  if(r.kind==='promo'){
@@ -742,7 +746,7 @@ function askFlip(s,pre,go){
    const a=(r.do||[]).find(x=>x.a==='flip');if(a)return{e,src,n:+a.n||0,win:trig==='win'}}
   return null};
  const offers=[find(W,L,'win',wr),find(L,W,'lose',lr)].filter(Boolean);
- const r0={i:G.slots.indexOf(s),main,kind:'match',ac:cl(ea.c),dc:cl(ed.c),ap:ea.p,dp:ed.p,apw:ea.pw.map(x=>x.n),dpw:ed.pw.map(x=>x.n),A,D,aw,wn:W.c.n,wp:W.p,tie:A.v===D.v,flipped:false,preview:true,
+ const r0={i:G.slots.indexOf(s),main,kind:'match',ac:cl(ea.c),dc:cl(ed.c),ap:ea.p,dp:ed.p,apw:ea.pw.map(cl),dpw:ed.pw.map(cl),A,D,aw,wn:W.c.n,wp:W.p,tie:A.v===D.v,flipped:false,preview:true,
   lines:[`Win payout +$${WC.win}`+(WC.ws.length>1?` (${WC.ws.map(x=>x.n).join(' + ')})`:''),...(hy?[`Hype tokens cashed in +$${hy}`]:[]),...(cp?['Takes the championship token +3 VP']:[])]}; // the normal result, shown first
  let k=0,shown=false;
  const next=()=>{
@@ -781,7 +785,7 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&g
 // Effect kinds the engine understands. To add a NEW kind, ask Claude: "please wire this card" and paste the exported JSON.
 const FXK={atk:'+ ATK',def:'+ DEF',win:'+ $ when this wrestler wins',perPower:'+ per attached power card',vp:'+ VP at game end',draw:'Draw power cards (on play or attach; eFeds: every show)',pwLimit:'Power card limit for this wrestler in a match (number = new limit)',pwAtk:'+ ATK for each attached power card that grants ATK (number = bonus per card)',vpTag:'+ VP at game end per wrestler with a tag in your deck (tag box = tag to count)'};
 const NEWC={wr:()=>({n:'New Wrestler',atk:4,def:4,vp:1,cost:3,win:3,promo:2,tags:[],fx:[],img:'',txt:''}),
- pw:()=>({n:'New Power',cat:'Action',fx:[],txt:'',img:''}),
+ pw:()=>({n:'New Power',cat:'Action',copies:1,fx:[],txt:'',img:''}),
  ef:()=>({n:'New eFed',cash:12,inc:1,hyp:1,fx:[],txt:'',img:''})};
 const TABN={wr:'Wrestlers',pw:'Power cards',ef:'eFeds'};
 let ED={tab:'wr',i:0,d:null};
@@ -794,7 +798,7 @@ function edRender0(){
  const t=ED.tab,d=ED.d,un=c=>c.txt&&!(c.fx||[]).length&&!(c.rules||[]).length;
  let h=`<div class="edh"><h2>✎ Card editor</h2><div class="tabs">${Object.keys(TABN).map(x=>`<button class="${x===t?'':'ghost'}" onclick="edSel('${x}',0)">${TABN[x]} (${DB[x].length})</button>`).join('')}<button class="${t==='tk'?'':'ghost'}" onclick="edTokens()">Tokens</button></div><span style="flex:1"></span><button class="ghost" onclick="edCopy()">Copy JSON</button><button class="ghost" onclick="edExport()">Export cards.js</button><button class="ghost" onclick="$('imp').click()">Import cards</button><button class="ghost" onclick="edReset()">Revert to published</button><button onclick="edApply()">Apply &amp; new game</button><button class="ghost" onclick="closeEd()" title="Close (Esc)">✕</button></div>`;
  if(t==='tk'){$('ed').innerHTML=h+tokPanel();return}
-  h+=`<div class="edb"><div class="edl"><button onclick="edNew()">+ New card</button>${DB[t].map((c,i)=>`<div class="eli ${i===ED.i?'on':''}" onclick="edSel('${t}',${i})"><span>${esc(c.n)}</span>${un(c)?'<em title="Has power text but no effects yet. Ask Claude to wire it.">needs wiring</em>':''}</div>`).join('')}</div>`;
+  h+=`<div class="edb"><div class="edl"><button onclick="edNew()">+ New card</button>${DB[t].map((c,i)=>`<div class="eli ${i===ED.i?'on':''}" onclick="edSel('${t}',${i})"><span>${esc(c.n)}${t==='pw'&&c.copies>1?' ×'+c.copies:''}</span>${un(c)?'<em title="Has power text but no effects yet. Ask Claude to wire it.">needs wiring</em>':''}</div>`).join('')}</div>`;
  h+=d?edForm(d):'<p class="hint">No cards here yet. Click + New card.</p>';
  $('ed').innerHTML=h+'</div>';edPrev();
 }
@@ -802,7 +806,7 @@ function edForm(d){
  const t=ED.tab,f=(l,k,type='text',x='')=>`<label>${l}<input type="${type}" ${x} value="${esc(Array.isArray(d[k])?d[k].join(', '):d[k])}" oninput="edSet('${k}',this.value)"></label>`;
  let h=`<div class="edf"><div class="grid">${f('Name','n')}`;
  if(t==='wr')h+=f('Attack','atk','number','min=0')+f('Defense','def','number','min=0')+f('Signing cost','cost','number','min=0')+f('Victory points','vp','number','min=0')+f('Win payout $','win','number','min=0')+f('Promo payout $','promo','number','min=0')+f('Tags (comma separated)','tags')+`<label>Alignment<select onchange="edSet('align',this.value)"><option value="">None</option><option value="heel" ${d.align==='heel'?'selected':''}>Heel</option><option value="face" ${d.align==='face'?'selected':''}>Face</option></select></label>`+f('Gimmick tag','gimmick');
- if(t==='pw')h+=f('Category','cat')+`<label class="chk"><input type="checkbox" ${d.keep?'checked':''} onchange="edSet('keep',this.checked)"> Returns to hand after use</label>`;
+ if(t==='pw')h+=f('Category','cat')+f('Copies in deck','copies','number','min=1')+`<label class="chk"><input type="checkbox" ${d.keep?'checked':''} onchange="edSet('keep',this.checked)"> Returns to hand after use</label>`;
  if(t==='ef')h+=f('Starting cash','cash','number')+f('Income per show','inc','number')+f('Hype tokens per show','hyp','number');
  h+=`</div><label>Power text (printed on the card)<textarea rows="3" placeholder="Leave empty to auto-write it from the effects below" oninput="edSet('txt',this.value)">${esc(d.txt)}</textarea></label>`;
  h+=`<div class="fxs"><b>Simple stat bonuses</b><small class="hint">Always-on bonuses while this card is on the board. The second box is optional: only if the wrestler has that tag. Leave empty for none.</small>${(d.fx||[]).map(fxRow).join('')}<button class="ghost" onclick="edFx()">+ Add effect</button></div><div class="fxs" style="width:100%"><b>Abilities (rules)</b><small class="hint">Build a rule: WHEN something happens, IF conditions are true, DO actions. Example: at reveal, if the opponent has power cards here, discard 1 (opponent chooses), then if that worked, gain $2.</small>${(d.rules||[]).map(ruleRow).join('')}<button class="ghost" onclick="edRule()">+ Add rule</button></div>`;
