@@ -577,6 +577,30 @@ window.CARDS={
    "img": "",
    "n": "Sabotage",
    "cat": "Action"
+  },
+  {
+   "fx": [],
+   "rules": [
+    {
+     "mode": "all",
+     "when": "reveal",
+     "if": [],
+     "do": [
+      {
+       "a": "swap"
+      },
+      {
+       "a": "steal",
+       "v": "Chair",
+       "n": 0
+      }
+     ]
+    }
+   ],
+   "txt": "",
+   "img": "",
+   "n": "Role Reversal",
+   "cat": "Action"
   }
  ],
  "ef": [
