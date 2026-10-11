@@ -824,6 +824,22 @@ function randRule(keep){
 function clearTxt(){if(ED.d.txt&&confirm('This card has printed power text, which would hide the new ability. Clear it so the text is written automatically?'))ED.d.txt=''}
 function edRand(){ED.d.rules=ED.d.rules||[];ED.d.rules.push(randRule());clearTxt();edRender()}
 function edReroll(j){ED.d.rules[j]=randRule(ED.d.rules[j].when);clearTxt();edRender()}
+// 🎲 whole-card randomizer: random effects + rules (condition + action), then types the power text for you
+const PNAMES={Weapon:['Steel Chair','Barbed Bat','Ladder','Kendo Stick','Trash Can','Steel Pipe'],'Match Stipulation':['Cage Match','No DQ','Last Man Standing','Iron Man','Street Fight','Falls Count Anywhere'],Technique:['Suplex','Powerbomb','Piledriver','Sleeper Hold','Superkick','DDT'],Counter:['Reversal','Kick Out','Escape Artist','Roll-Up','Block','Dodge'],Support:['Manager','Valet','Run-In','Cheap Shot','Distraction','Tag Partner']};
+const PADJ=['Brutal','Sneaky','Desperate','Perfect','Savage','Last-Second','Reckless','Legendary','Dirty','Surprise'];
+function edRandPower(){
+ const d=ED.d,t=ED.tab;if(!d||t==='tk')return;
+ if(((d.fx||[]).length||(d.rules||[]).length||d.txt)&&!confirm('Replace this card\'s effects, rules and power text with a random power?'))return;
+ const FX={pw:[()=>({k:'atk',n:rint(1,3)}),()=>({k:'def',n:rint(1,3)}),()=>({k:'win',n:rint(1,3)}),()=>({k:'draw',n:1}),()=>({k:'pwLimit',n:rint(4,5)})],
+  ef:[()=>({k:'atk',n:rint(1,2)}),()=>({k:'def',n:rint(1,2)}),()=>({k:'win',n:rint(1,2)}),()=>({k:'vp',n:1}),()=>({k:'draw',n:1})],wr:[]}[t]||[];
+ const nfx=t==='wr'?0:t==='ef'?rint(1,2):rint(0,2),fx=[],seen=new Set();
+ for(const g of shuf(FX).slice(0,nfx)){const f=g();if(!seen.has(f.k)){seen.add(f.k);fx.push(f)}}
+ const nr=t==='wr'?rint(1,2):t==='ef'?rint(0,1):(fx.length?rint(0,1):rint(1,2)),rules=[];
+ for(let i=0;i<nr;i++)rules.push(randRule());
+ d.fx=fx;d.rules=rules;
+ if(t==='pw'){if(!d.cat||d.cat==='Action')d.cat=pick(PTYPES.slice(1));if(!d.n||/^New /.test(d.n)){const k=PNAMES[d.cat]?d.cat:pick(Object.keys(PNAMES));d.n=pick(PADJ)+' '+pick(PNAMES[k])}if(!d.pcost)d.pcost=pick([0,0,1,2])}
+ d.txt=[...fx.map(fxT),...rules.map(ruleT)].filter(Boolean).join('\n'); // typed into the Power text box
+ edRender()}
 
 // ---------- CARD EDITOR ----------
 const $=id=>document.getElementById(id);
@@ -854,7 +870,7 @@ function edForm(d){
  if(t==='wr')h+=f('Attack','atk','number','min=0')+f('Defense','def','number','min=0')+f('Signing cost','cost','number','min=0')+f('Victory points','vp','number','min=0')+f('Win payout $','win','number','min=0')+f('Promo payout $','promo','number','min=0')+f('Tags (comma separated)','tags')+`<label>Alignment<select onchange="edSet('align',this.value)"><option value="">None</option><option value="heel" ${d.align==='heel'?'selected':''}>Heel</option><option value="face" ${d.align==='face'?'selected':''}>Face</option></select></label>`+f('Gimmick tag','gimmick');
  if(t==='pw')h+=f('Category','cat')+f('Cost to play $','pcost','number','min=0')+f('Copies in deck','copies','number','min=1')+`<label class="chk"><input type="checkbox" ${d.keep?'checked':''} onchange="edSet('keep',this.checked)"> Returns to hand after use</label>`;
  if(t==='ef')h+=f('Starting cash','cash','number')+f('Income per show','inc','number')+f('Hype tokens per show','hyp','number');
- h+=`</div><label>Power text (printed on the card)<textarea rows="3" placeholder="Leave empty to auto-write it from the effects below" oninput="edSet('txt',this.value)">${esc(d.txt)}</textarea></label>`;
+ h+=`</div><div class="acts"><button onclick="edRandPower()" title="Builds a random power from every parameter (effects, conditions, actions), wires it and types the power text">🎲 Random power</button><small class="hint">Fills in effects, rules and the power text below in one click.</small></div><label>Power text (printed on the card)<textarea rows="3" placeholder="Leave empty to auto-write it from the effects below" oninput="edSet('txt',this.value)">${esc(d.txt)}</textarea></label>`;
  h+=`<div class="fxs"><b>Simple stat bonuses</b><small class="hint">Always-on bonuses while this card is on the board. The second box is optional: only if the wrestler has that tag. Leave empty for none.</small>${(d.fx||[]).map(fxRow).join('')}<button class="ghost" onclick="edFx()">+ Add effect</button></div><div class="fxs" style="width:100%"><b>Abilities (rules)</b><small class="hint">Build a rule: WHEN something happens, IF conditions are true, DO actions. Example: at reveal, if the opponent has power cards here, discard 1 (opponent chooses), then if that worked, gain $2. Or press 🎲 Random rule and it builds and wires one for you.</small>${(d.rules||[]).map(ruleRow).join('')}<button class="ghost" onclick="edRule()">+ Add rule</button><button onclick="edRand()" title="Generates a complete random ability and wires it automatically">🎲 Random rule</button></div>`;
  h+=`<div class="img"><b>Art</b><div class="acts"><input type="file" accept="image/*" onchange="edImg(this)"><input type="text" placeholder="…or image path or URL (default: images/${slug(d.n)}.png)" value="${esc(d.img&&!d.img.startsWith('data:')?d.img:'')}" oninput="edSet('img',this.value)">${d.img?'<button class="ghost" onclick="edSet(\'img\',\'\');edRender()">Remove art</button>':''}</div></div>`;
  return h+`<div class="acts"><button onclick="edSave()">Save card</button><button class="ghost" onclick="edDup()">Duplicate</button><button class="ghost" onclick="edDel()">Delete</button></div></div><div class="edp"><div id="edp"></div></div>`;
