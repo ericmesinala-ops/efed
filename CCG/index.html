@@ -118,7 +118,7 @@ button:not(.ghost):not(:disabled):active{transform:translateY(1px);box-shadow:no
 .tx{max-height:60%;overflow:hidden}
 @media (prefers-reduced-motion:reduce){.pp.on,.c::after{animation:none;transition:none}}
 /* ---- card editor ---- */
-#ed{display:none;position:fixed;inset:0;z-index:50;background:#070b14f5;overflow:auto;padding:14px}
+#ed{color:var(--ink);display:none;position:fixed;inset:0;z-index:50;background:#070b14f5;overflow:auto;padding:14px}
 .edh{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}.edh h2{margin:0 12px 0 0;font-size:24px;color:var(--acc)}
 .tabs{display:flex;gap:4px}
 .edb{display:grid;grid-template-columns:230px 1fr 230px;gap:16px;align-items:start}
@@ -248,7 +248,11 @@ let G;
 const LS='wtcg_cards_v2';
 const TC={Brawler:'#a8372d',Technical:'#3f6f9a',Giant:'#6d4a96','High Flyer':'#2a8f86',Veteran:'#a98a3c',Heel:'#8c2a3a',Face:'#2a6f9c'};
 const tagC=t=>!t?'var(--w)':TC[t]||`hsl(${[...t].reduce((a,ch)=>(a*31+ch.charCodeAt(0))%360,7)} 40% 40%)`;
-const norm=c=>({fx:[],rules:[],txt:'',img:'',...c});
+const norm=c=>{const o={fx:[],rules:[],txt:'',img:'',...c}; // repairs older or damaged saved cards
+ o.fx=(Array.isArray(o.fx)?o.fx:[]).filter(x=>x&&typeof x==='object');
+ o.rules=(Array.isArray(o.rules)?o.rules:[]).filter(r=>r&&typeof r==='object').map(r=>({mode:'all',...r,if:Array.isArray(r.if)?r.if.filter(Boolean):[],do:Array.isArray(r.do)?r.do.filter(Boolean):[]}));
+ if(o.atk!==undefined)o.tags=Array.isArray(o.tags)?o.tags:String(o.tags||'').split(',').map(t=>t.trim()).filter(Boolean);
+ return o};
 // cards.js (next to this file) holds the published card set: window.CARDS={wr:[],pw:[],ef:[]}. Without it, the built-in cards are used.
 const PUB=(typeof window!=='undefined'&&window.CARDS&&window.CARDS.wr&&window.CARDS.pw&&window.CARDS.ef)?window.CARDS:null;
 const fromObj=o=>({wr:o.wr.map(norm),pw:o.pw.map(norm),ef:o.ef.map(norm)});
@@ -580,7 +584,8 @@ function openEd(){$('ed').style.display='block';document.body.style.overflow='hi
 function closeEd(){$('ed').style.display='none';document.body.style.overflow=''}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('ed').style.display==='block')closeEd()});
 function edSel(t,i){ED.tab=t;ED.i=Math.max(0,i);ED.d=DB[t][ED.i]?cl(DB[t][ED.i]):null;edRender()}
-function edRender(){
+function edRender(){try{edRender0()}catch(e){$('ed').innerHTML='<div class="edh"><h2>Editor problem</h2><button onclick="closeEd()">Close</button><button class="ghost" onclick="edReset()">Revert to published</button></div><p class="hint">Please send a screenshot of this message.</p><pre style="white-space:pre-wrap;color:#f99;padding:8px">'+esc(e&&e.stack||e)+'</pre>'}}
+function edRender0(){
  const t=ED.tab,d=ED.d,un=c=>c.txt&&!(c.fx||[]).length&&!(c.rules||[]).length;
  let h=`<div class="edh"><h2>✎ Card editor</h2><div class="tabs">${Object.keys(TABN).map(x=>`<button class="${x===t?'':'ghost'}" onclick="edSel('${x}',0)">${TABN[x]} (${DB[x].length})</button>`).join('')}</div><span style="flex:1"></span><button class="ghost" onclick="edCopy()">Copy JSON</button><button class="ghost" onclick="edExport()">Export cards.js</button><button class="ghost" onclick="$('imp').click()">Import cards</button><button class="ghost" onclick="edReset()">Revert to published</button><button onclick="edApply()">Apply &amp; new game</button><button class="ghost" onclick="closeEd()" title="Close (Esc)">✕</button></div>`;
  h+=`<div class="edb"><div class="edl"><button onclick="edNew()">+ New card</button>${DB[t].map((c,i)=>`<div class="eli ${i===ED.i?'on':''}" onclick="edSel('${t}',${i})"><span>${esc(c.n)}</span>${un(c)?'<em title="Has power text but no effects yet. Ask Claude to wire it.">needs wiring</em>':''}</div>`).join('')}</div>`;
@@ -606,7 +611,8 @@ function edFxDel(j){ED.d.fx.splice(j,1);edRender()}
 function edFxSet(j,k,v){const x=ED.d.fx[j];
  if(k==='n')x.n=+v||0;else if(k==='k'){x.k=v;if(v==='perPower')x.s=x.s||'atk';else delete x.s;edRender();return}
  else if(v==='')delete x[k];else x[k]=v;edPrev()}
-function edPrev(){const p=$('edp');if(p&&ED.d)p.innerHTML=cardH({...cleanC(cl(ED.d)),n:ED.d.n||'?',hype:0,champ:false})+'<p class="hint">Live preview</p>'}
+function edPrev(){const p=$('edp');if(!p||!ED.d)return;try{p.innerHTML=cardH({...cleanC(cl(ED.d)),n:ED.d.n||'?',hype:0,champ:false})+'<p class="hint">Live preview</p>'}catch(e){p.innerHTML='<p class="hint">Preview unavailable: '+esc(e.message)+'</p>'}}
+if(typeof window!=='undefined'&&window.addEventListener)window.addEventListener('error',e=>{try{toast('Error: '+e.message)}catch(_){}});
 function edImg(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const s=Math.min(1,500/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);ED.d.img=c.toDataURL('image/jpeg',.82);edRender()};im.src=r.result};r.readAsDataURL(f)}
 function edSave(){if(!ED.d.n.trim())return toast('Give the card a name');DB[ED.tab][ED.i]=cleanC(cl(ED.d));if(persist())toast('Saved '+ED.d.n);edRender()}
 function edNew(){DB[ED.tab].push(norm(NEWC[ED.tab]()));persist();edSel(ED.tab,DB[ED.tab].length-1)}

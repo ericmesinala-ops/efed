@@ -551,8 +551,8 @@ window.CARDS={
    "fx": [],
    "rules": [
     {
-     "when": "reveal",
      "mode": "all",
+     "when": "reveal",
      "if": [
       {
        "c": "oppPower",
