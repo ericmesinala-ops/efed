@@ -569,6 +569,15 @@ const score=p=>{const ws=[...new Set([...p.signed,...p.hand])],tc=t=>ws.filter(c
 const chip=t=>`<span class="chip">${t}</span>`;
 const IMG_BASE='images/',IMG_EXT='.png'; // card art: images/<card-name-slug>.png, e.g. images/iron-mako.png
 const slug=n=>n.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+// ---------- Cloudflare R2 (card art lives in the safehouse-images bucket under cards/, uploaded through this Worker) ----------
+const R2_URL='https://carduploads.fswfirststrikewrestling.workers.dev';
+function r2Tok(){let t='';try{t=localStorage.getItem('wtcg_r2')||''}catch(e){}if(!t){t=(prompt('Paste your EDITOR_TOKEN (the upload password you set in Cloudflare)')||'').trim();if(t)try{localStorage.setItem('wtcg_r2',t)}catch(e){}}return t}
+async function r2Up(blob,name){
+ const tok=r2Tok();if(!tok)throw new Error('no token');
+ const r=await fetch(R2_URL+'/upload',{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':blob.type,'X-Name':encodeURIComponent(name||'card')},body:blob});
+ if(r.status===401){try{localStorage.removeItem('wtcg_r2')}catch(e){}throw new Error('wrong token')}
+ const j=await r.json().catch(()=>({}));if(!r.ok||!j.url)throw new Error(j.error||'upload failed '+r.status);return j.url}
+const cvBlob=(c,t,q)=>new Promise(ok=>c.toBlob(ok,t,q));
 const zd=c=>{const w=c.atk!==undefined,e=c.cash!==undefined,enc=encodeURIComponent,
  fx=(c.txt?c.txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>'):[...(c.fx||[]).map(fxT),...(c.rules||[]).map(ruleT)].filter(Boolean).join('<br>'))+(c.keep?'<br><i>Returns to hand after use</i>':''),
  st=w?`⚔ ${c.atk} · 🛡 ${c.def} · ${c.vp} VP<br>Sign $${c.cost} · Win $${c.win} · Promo $${c.promo}${(c.tags||[]).length?'<br>'+c.tags.join(', '):''}`:e?`$${c.cash} start · +${c.inc}/show · 🔥 +${c.hyp}`:(c.cat||'')+(c.pcost?` · Play $${c.pcost}`:'');
@@ -1003,7 +1012,7 @@ function edSel(t,i){ED.tab=t;ED.i=Math.max(0,i);ED.d=DB[t][ED.i]?cl(DB[t][ED.i])
 function edRender(){try{edRender0()}catch(e){$('ed').innerHTML='<div class="edh"><h2>Editor problem</h2><button onclick="closeEd()">Close</button><button class="ghost" onclick="edReset()">Revert to published</button></div><p class="hint">Please send a screenshot of this message.</p><pre style="white-space:pre-wrap;color:#f99;padding:8px">'+esc(e&&e.stack||e)+'</pre>'}}
 function edRender0(){
  const t=ED.tab,d=ED.d,un=c=>c.txt&&!(c.fx||[]).length&&!(c.rules||[]).length;
- let h=`<div class="edh"><h2>✎ Card editor</h2><div class="tabs">${Object.keys(TABN).map(x=>`<button class="${x===t?'':'ghost'}" onclick="edSel('${x}',0)">${TABN[x]} (${DB[x].length})</button>`).join('')}<button class="${t==='tk'?'':'ghost'}" onclick="edTokens()">Tokens</button></div><span style="flex:1"></span><button class="ghost" onclick="edCopy()">Copy JSON</button><button class="ghost" onclick="edExport()">Export cards.js</button><button class="ghost" onclick="$('imp').click()">Import cards</button><button class="ghost" onclick="edReset()">Revert to published</button><button onclick="edApply()">Apply &amp; new game</button><button class="ghost" onclick="closeEd()" title="Close (Esc)">✕</button></div>`;
+ let h=`<div class="edh"><h2>✎ Card editor</h2><div class="tabs">${Object.keys(TABN).map(x=>`<button class="${x===t?'':'ghost'}" onclick="edSel('${x}',0)">${TABN[x]} (${DB[x].length})</button>`).join('')}<button class="${t==='tk'?'':'ghost'}" onclick="edTokens()">Tokens</button></div><span style="flex:1"></span><button class="ghost" onclick="edCopy()">Copy JSON</button><button class="ghost" onclick="edExport()">Export cards.js</button><button class="ghost" onclick="$('imp').click()">Import cards</button><button class="ghost" onclick="edToR2()" title="Upload the card art saved inside this browser to R2">Move images to R2</button><button class="ghost" onclick="edReset()">Revert to published</button><button onclick="edApply()">Apply &amp; new game</button><button class="ghost" onclick="closeEd()" title="Close (Esc)">✕</button></div>`;
  if(t==='tk'){$('ed').innerHTML=h+tokPanel();return}
   h+=`<div class="edb"><div class="edl"><button onclick="edNew()">+ New card</button>${DB[t].map((c,i)=>`<div class="eli ${i===ED.i?'on':''}" onclick="edSel('${t}',${i})"><span>${esc(c.n)}${t==='pw'&&c.copies>1?' ×'+c.copies:''}</span>${un(c)?'<em title="Has power text but no effects yet. Ask Claude to wire it.">needs wiring</em>':''}</div>`).join('')}</div>`;
  h+=d?edForm(d):'<p class="hint">No cards here yet. Click + New card.</p>';
@@ -1031,7 +1040,8 @@ function edFxSet(j,k,v){const x=ED.d.fx[j];
 function edHints(){document.querySelectorAll('#ed .rd').forEach(el=>{const r=ED.d&&ED.d.rules[+el.dataset.j];if(r)el.textContent='Reads as: '+ruleT(cleanC({rules:[cl(r)]}).rules[0]||{})})} // keeps the 'Reads as' line current while typing numbers
 function edPrev(){try{edHints()}catch(e){}const p=$('edp');if(!p||!ED.d)return;try{p.innerHTML=cardH({...cleanC(cl(ED.d)),n:ED.d.n||'?',hype:0,champ:false})+'<p class="hint">Live preview</p>'}catch(e){p.innerHTML='<p class="hint">Preview unavailable: '+esc(e.message)+'</p>'}}
 if(typeof window!=='undefined'&&window.addEventListener)window.addEventListener('error',e=>{try{toast('Error: '+e.message)}catch(_){}});
-function edImg(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const s=Math.min(1,500/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);ED.d.img=c.toDataURL('image/jpeg',.82);edRender()};im.src=r.result};r.readAsDataURL(f)}
+function edImg(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=async()=>{const z=Math.min(1,900/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*z);c.height=Math.round(im.height*z);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+ try{toast('Uploading art…');ED.d.img=await r2Up(await cvBlob(c,'image/jpeg',.9),ED.d.n);toast('Art uploaded: press Save')}catch(e){ED.d.img=c.toDataURL('image/jpeg',.7);toast('Upload failed ('+e.message+'): art kept on this device only')}edRender()};im.src=r.result};r.readAsDataURL(f)}
 function edSave(){if(!ED.d.n.trim())return toast('Give the card a name');DB[ED.tab][ED.i]=cleanC(cl(ED.d));if(persist())toast('Saved '+ED.d.n);edRender()}
 function edNew(){DB[ED.tab].push(norm(NEWC[ED.tab]()));persist();edSel(ED.tab,DB[ED.tab].length-1)}
 function edDup(){const c=cl(ED.d);c.n+=' copy';DB[ED.tab].splice(ED.i+1,0,c);persist();edSel(ED.tab,ED.i+1)}
@@ -1039,6 +1049,11 @@ function edDel(){if(!confirm('Delete '+ED.d.n+'?'))return;DB[ED.tab].splice(ED.i
 function edCopy(){navigator.clipboard.writeText(JSON.stringify(DB,null,1)).then(()=>toast('Card JSON copied'),()=>toast('Copy blocked: use Export file'))}
 function edExport(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['window.CARDS='+JSON.stringify(DB,null,1)+';\n'],{type:'text/javascript'}));a.download='cards.js';a.click()}
 function edImport(inp){const f=inp.files[0];if(!f)return;f.text().then(s=>{try{const o=JSON.parse(s.replace(/^\s*window\.CARDS\s*=\s*/,'').replace(/;\s*$/,''));if(!o.wr||!o.pw||!o.ef)throw 0;DB={wr:o.wr.map(norm),pw:o.pw.map(norm),ef:o.ef.map(norm),tk:o.tk||{}};persist();edSel('wr',0);toast('Imported')}catch(e){toast('That file is not a card export')}});inp.value=''}
+async function edToR2(){
+ const up=async(v,n)=>r2Up(await (await fetch(v)).blob(),n);let ok=0,bad=0,err='';
+ try{for(const t of ['wr','pw','ef'])for(const c of DB[t])if(c.img&&c.img.startsWith('data:')){try{c.img=await up(c.img,c.n);ok++;toast('Moved '+ok+'…')}catch(e){bad++;err=e.message;if(err==='wrong token'||err==='no token')throw e}}
+  for(const k of Object.keys(DB.tk||{}))if(String(DB.tk[k]).startsWith('data:')){try{DB.tk[k]=await up(DB.tk[k],'token-'+k);ok++}catch(e){bad++;err=e.message;if(err==='wrong token'||err==='no token')throw e}}}catch(e){}
+ persist();edSel(ED.tab,ED.i);toast(!ok&&!bad?'Nothing to move: no images are stored on this device':'Moved '+ok+' image'+(ok==1?'':'s')+' to R2'+(bad?', '+bad+' failed ('+err+')':'')+'. Export cards.js to publish.')}
 function edReset(){if(!confirm('Discard your working copy and go back to the published cards?'))return;DB=defDB();localStorage.removeItem(LS);edSel(ED.tab,0)}
 function edApply(){const n=DB.wr.length;
  if(n<10||DB.ef.length<4||!DB.pw.length)return alert('You need at least 10 wrestlers, 4 eFeds and 1 power card to play.');
@@ -1046,7 +1061,9 @@ function edApply(){const n=DB.wr.length;
 const TOKD={hype:['Hype token','Added by promos. Cashes in for $1 each when the wrestler\'s match is decided.'],champ:['Championship token','Held by the last title winner. Worth +3 VP to whoever wins it.'],inj:['Injury token','Each token lowers that wrestler\'s Attack and Defense by 1.']};
 const tokPanel=()=>`<div class="edf" style="max-width:640px;margin:0 auto"><b>Token art</b><small class="hint">Square PNG with a transparent background looks best. It is shown as a circle on the card. Export cards.js to publish it.</small>${Object.keys(TOKD).map(k=>{const im=(DB.tk||{})[k];return `<div class="tkr"><div class="tkp">${im?`<img src="${im}" alt="">`:`<span>${TKF[k]}</span>`}</div><div><b>${TOKD[k][0]}</b><small class="hint">${TOKD[k][1]}</small><div class="acts"><input type="file" accept="image/*" onchange="edTokImg('${k}',this)">${im?`<button class="ghost" onclick="edTokClear('${k}')">Remove</button>`:''}</div></div></div>`}).join('')}</div>`;
 function edTokens(){ED.tab='tk';ED.d=null;edRender()}
-function edTokImg(k,inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const z=Math.min(1,160/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*z);c.height=Math.round(im.height*z);c.getContext('2d').drawImage(im,0,0,c.width,c.height);DB.tk=DB.tk||{};DB.tk[k]=c.toDataURL('image/png');if(persist())toast('Saved '+TOKD[k][0]+' art');edRender();ui()};im.src=r.result};r.readAsDataURL(f)}
+function edTokImg(k,inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=async()=>{const z=Math.min(1,160/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*z);c.height=Math.round(im.height*z);c.getContext('2d').drawImage(im,0,0,c.width,c.height);DB.tk=DB.tk||{};
+ try{toast('Uploading…');DB.tk[k]=await r2Up(await cvBlob(c,'image/png'),'token-'+k)}catch(e){DB.tk[k]=c.toDataURL('image/png');toast('Upload failed ('+e.message+'): art kept on this device only')}
+ if(persist())toast('Saved '+TOKD[k][0]+' art');edRender();ui()};im.src=r.result};r.readAsDataURL(f)}
 function edTokClear(k){if(DB.tk)delete DB.tk[k];persist();edRender();ui()}
 if(document.body.classList)document.body.classList.add('artonly');
 newGame();
