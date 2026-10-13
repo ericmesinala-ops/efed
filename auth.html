@@ -1082,6 +1082,25 @@ function togglePass(inputId, btn) {
 }
 
 
+// CAW Card Game sign-in: the game opens this page in a popup (?game=<its address>); once signed in, send it who signed in and close
+const GAME_ORIGINS = []; // empty = any https site may ask; or list the card game's address(es) to restrict it, e.g. ['https://ccg.example.com']
+function gameHandoff() {
+  const g = new URLSearchParams(window.location.search).get('game');
+  if (!g || !window.opener) return false;
+  let origin; try { origin = new URL(g).origin; } catch (e) { return false; }
+  if (!/^(https:\/\/[^/]+|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?)$/.test(origin)) return false;
+  if (GAME_ORIGINS.length && !GAME_ORIGINS.includes(origin)) return false;
+  const s = getSession();
+  if (!s || !s.username) return false;
+  window.opener.postMessage({ type: 'efed-login', session: { username: s.username, displayName: s.displayName || s.username } }, origin);
+  window.close();
+  return true;
+}
+// after a successful sign-in: hand off to the card game if it asked, otherwise go to the Hub
+function goAfterLogin() {
+  if (gameHandoff()) return;
+  window.location.replace('index.html');
+}
 function getSession() {
   try { return JSON.parse(localStorage.getItem('efed_session')); } catch { return null; }
 }
@@ -1191,10 +1210,10 @@ async function doLogin() {
       const idx = saved.findIndex(a => a.username === newSession.username);
       if (idx >= 0) saved[idx] = newSession; else saved.push(newSession);
       localStorage.setItem('efed_saved_accounts', JSON.stringify(saved));
-      window.location.replace('index.html');
+      goAfterLogin();
     } else {
       setSession(newSession);
-      window.location.replace('index.html');
+      goAfterLogin();
     }
   } catch(e) {
     showErr('login-err', 'Could not connect. Try again.');
@@ -1318,7 +1337,7 @@ async function doRegister() {
 
     setSession({ username: user, displayName: cawName });
     showOk('reg-ok', 'Account created! Welcome to the Hub.');
-    setTimeout(() => window.location.replace('index.html'), 800);
+    setTimeout(() => goAfterLogin(), 800);
   } catch(e) {
     let errMsg = 'Could not connect. Try again.';
     try {
@@ -1502,6 +1521,7 @@ async function init() {
           session.displayName = user.display_name;
           setSession(session);
         }
+        if (gameHandoff()) return; // already signed in and the card game asked: send it straight back
         showLoggedIn(session.username);
         return;
       }
@@ -1808,7 +1828,7 @@ async function apcCheck() {
       } else {
         setSession(_apcPendingSession);
       }
-      window.location.replace('index.html');
+      goAfterLogin();
     } else {
       document.getElementById('apc-error').textContent = 'Incorrect passcode';
       const dots = document.getElementById('auth-pc-dots');
@@ -2069,7 +2089,7 @@ async function handleGoogleCredential(response) {
       document.getElementById('auth-passcode-gate').style.display = 'flex';
     } else {
       setSession(session);
-      window.location.replace('index.html');
+      goAfterLogin();
     }
     return;
   }
@@ -2245,7 +2265,7 @@ async function doGoogleProfileSubmit() {
 
   const session = buildSession(created || newUser);
   setSession(session);
-  window.location.replace('index.html');
+  goAfterLogin();
 }
 
 // Helper: build a session object from a users row (matches doLogin format)
