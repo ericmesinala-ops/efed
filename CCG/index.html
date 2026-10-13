@@ -720,14 +720,16 @@ const PUB=(typeof window!=='undefined'&&window.CARDS&&window.CARDS.wr&&window.CA
 const fromObj=o=>({wr:o.wr.map(norm),pw:o.pw.map(norm),ef:o.ef.map(norm),tk:{...(o.tk||{})}});
 const builtinDB=()=>({wr:DEF_W.map(({hype,champ,...r})=>norm(r)),pw:cl(DEF_P).map(norm),ef:cl(DEF_E).map(norm),tk:{}});
 const defDB=()=>PUB?fromObj(cl(PUB)):builtinDB();
-// ---------- EFED Streaming Hub account (the Hub's own login page signs people in, in a popup, and sends the game who signed in) ----------
-const HUB_URL='https://osbarvhklizidsffytye.supabase.co',HUB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM',HUB_OWNER='derrick_maximus',HUB_AUTH='https://efed-stream.vercel.app/auth.html',HUB_ORIGIN=new URL(HUB_AUTH).origin,HUB_LS='ccg_hub'; // HUB_LS: this game's own copy of the Hub login (the Hub is a different website)
-const HUBSESS=(()=>{try{return JSON.parse(localStorage.getItem(HUB_LS))}catch(e){return null}})(),HUBADMIN=()=>!!(HUBSESS&&HUBSESS.username&&String(HUBSESS.username).toLowerCase()===HUB_OWNER);
+// ---------- EFED Streaming Hub account: the game lives on the Hub's own site (/CCG/), so it reads the Hub's login directly (localStorage efed_session) ----------
+const HUB_URL='https://osbarvhklizidsffytye.supabase.co',HUB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zYmFydmhrbGl6aWRzZmZ5dHllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNjQ4MzksImV4cCI6MjA4ODg0MDgzOX0.c9EDHCFY50VzSTmz0EUTq1XrX0AvJdynFPxIWT5K7JM',HUB_OWNER='derrick_maximus',HUB_AUTH='/auth.html',HUB_LS='efed_session'; // HUB_LS: the Hub's own login, the one source of truth
+try{localStorage.removeItem('ccg_hub')}catch(e){} // the old copy this game kept when it ran on a separate site
+if(/[#&]efed=/.test(location.hash))try{history.replaceState(null,'',location.pathname+location.search)}catch(e){} // old hand-off links: just tidy the address bar
+const hubSess=()=>{try{return JSON.parse(localStorage.getItem(HUB_LS))}catch(e){return null}},HUBADMIN=()=>{const s=hubSess();return !!(s&&s.username&&String(s.username).toLowerCase()===HUB_OWNER)};
 let HUB={u:null,pcOk:false}; // HUB.u = the signed-in Hub user (username, display name, avatar) once loaded
 let EDIT=typeof location==='undefined'||location.protocol==='file:'||HUBADMIN(); // the editor belongs to the owner's Hub account only (the old tap-the-title / ?edit / Ctrl+Shift+E unlocks are gone)
 try{localStorage.removeItem('wtcg_edit')}catch(e){}
 // secret unlock for the editor: tap the title 5 times, or press Ctrl+Shift+E (remembered in this browser)
-function unlockEd(){if(HUBADMIN()){EDIT=true;ui()}else toast(HUBSESS?'The card editor is for the owner account only':'Sign in with the owner account to use the card editor')}
+function unlockEd(){if(HUBADMIN()){EDIT=true;ui()}else toast(hubSess()?'The card editor is for the owner account only':'Sign in with the owner account to use the card editor')}
 function toggleMenu(e){if(e)e.stopPropagation();const m=document.getElementById('mnu'),b=document.getElementById('hbtn');if(!m)return;const o=m.classList.toggle('open');if(b)b.setAttribute('aria-expanded',o)}
 function closeMenu(){const m=document.getElementById('mnu'),b=document.getElementById('hbtn');if(m)m.classList.remove('open');if(b)b.setAttribute('aria-expanded','false')}
 document.addEventListener('click',e=>{if(!e.target.closest('#mnu')&&!e.target.closest('#hbtn'))closeMenu()});
@@ -1586,32 +1588,30 @@ if(document.body.classList)document.body.classList.add('artonly');
 // ---------- Hub sign-in: start screen, avatar, owner passcode ----------
 const avH=i=>{if(AI[i]||!HUB.u||i!==AI.findIndex(x=>!x))return '';const u=HUB.u,n=String(u.display_name||u.username||'?');return `<span class="gp-av" title="${esc(n)}"><b>${esc(n[0].toUpperCase())}</b>${/^https?:\/\//.test(u.avatar_url||'')?`<img src="${esc(u.avatar_url)}" alt="" onerror="this.remove()">`:''}</span>`};
 async function hubInit(){ // look up the signed-in Hub user (avatar, display name); a banned or unknown account is treated as a guest
- if(!HUBSESS||!HUBSESS.username)return;
+ HUB.u=null;const S=hubSess();if(!S||!S.username)return;
  try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),3500);
-  const r=await fetch(HUB_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(HUBSESS.username)+'&select=username,display_name,avatar_url,banned',{headers:{apikey:HUB_KEY,Authorization:'Bearer '+HUB_KEY},signal:ctl.signal});clearTimeout(t);
-  const j=r.ok?await r.json():null;if(j&&j.length&&!j[0].banned)HUB.u=j[0];else if(j&&j.length===0)HUB.u=null;
-  else if(j&&j[0]&&j[0].banned)HUB.u=null}
- catch(e){HUB.u={username:HUBSESS.username,display_name:HUBSESS.displayName||HUBSESS.username,avatar_url:''}} // offline: still show who is signed in}
+  const r=await fetch(HUB_URL+'/rest/v1/users?username=eq.'+encodeURIComponent(S.username)+'&select=username,display_name,avatar_url,banned',{headers:{apikey:HUB_KEY,Authorization:'Bearer '+HUB_KEY},signal:ctl.signal});clearTimeout(t);
+  const j=r.ok?await r.json():null;
+  if(j)HUB.u=j.length&&!j[0].banned?j[0]:null; // found → use the Hub profile; unknown or banned → guest
+  else HUB.u=hubBasic(S)} // the lookup failed: still treat you as signed in (no avatar)
+ catch(e){HUB.u=hubBasic(S)} // offline: still show who is signed in
 }
+const hubBasic=S=>({username:S.username,display_name:S.displayName||S.username,avatar_url:''});
 function startGate(){
  let guest=false;try{guest=sessionStorage.getItem('ccg_guest')==='1'}catch(e){}
  if(HUB.u||guest||location.protocol==='file:')return newGame();
  document.getElementById('app').innerHTML=`<div class="pass"><h2>CAW Card Game</h2><p class="hint">Sign in with your EFED Streaming Hub account to show your avatar, or jump straight in as a guest.</p><button onclick="hubLogin()">Sign in with EFED Streaming Hub</button><br><button class="ghost" onclick="hubGuest()">Play as guest</button></div>`}
 function hubGuest(){try{sessionStorage.setItem('ccg_guest','1')}catch(e){}newGame()}
-function hubLogin(){ // opens the Hub's login page in a popup; it posts back {type:'efed-login',session} and closes itself
- if(G&&G.ph&&(G.ph!=='efed'||G.round>1)&&!confirm('Signing in reloads the page and ends this game. Continue?'))return;
- const w=window.open(HUB_AUTH+'?game='+encodeURIComponent(location.origin),'efedlogin','width=480,height=760');
- if(!w)toast('Allow pop-ups for this site to sign in with the Hub')}
-window.addEventListener('message',e=>{
- if(e.origin!==HUB_ORIGIN||!e.data||e.data.type!=='efed-login'||!e.data.session||!e.data.session.username)return;
- const s={username:String(e.data.session.username),displayName:String(e.data.session.displayName||e.data.session.username)};
- try{localStorage.setItem(HUB_LS,JSON.stringify(s));sessionStorage.removeItem('ccg_guest')}catch(x){}
- location.reload()});
-function hubOut(){if(!confirm('Sign out of your EFED Streaming Hub account in this game? (You stay signed in on the Hub itself.)'))return;try{localStorage.removeItem(HUB_LS)}catch(e){}try{sessionStorage.removeItem('ccg_guest')}catch(e){}location.reload()}
+function hubLogin(){ // goes to the Hub's login page; after signing in the Hub sends you back to this page
+ if(G&&G.ph&&(G.ph!=='efed'||G.round>1)&&!confirm('Signing in leaves this page and ends this game. Continue?'))return;
+ location.href=HUB_AUTH+'?return='+encodeURIComponent(location.pathname+location.search)}
+function hubOut(){if(!confirm('Sign out of your EFED Streaming Hub account? This signs you out of the Hub too.'))return;try{localStorage.removeItem(HUB_LS)}catch(e){}try{sessionStorage.removeItem('ccg_guest')}catch(e){}location.reload()}
+// signed in, out or switched accounts on the Hub in another tab: follow it here without restarting the game
+addEventListener('storage',e=>{if(e.key!==HUB_LS&&e.key!==null)return;HUB.pcOk=false;EDIT=location.protocol==='file:'||HUBADMIN();if(!EDIT)closeEd();hubInit().then(()=>{if(G)ui();else startGate()})});
 // the owner's 4-digit passcode: the same one the Hub asks for (SHA-256 compared with admin_config.passcode_hash in the Hub's database)
 let PCBAD=0,PCLOCK=0;
 function hubGate(){return new Promise(done=>{
- if(!HUBADMIN()){toast(HUBSESS?'The card editor is for the owner account only':'Sign in with the owner account to use the card editor');return done(false)}
+ if(!HUBADMIN()){toast(hubSess()?'The card editor is for the owner account only':'Sign in with the owner account to use the card editor');return done(false)}
  if(HUB.pcOk)return done(true);
  const o=document.createElement('div');o.className='pcg';let e='';
  o.innerHTML=`<div class="pcb"><h3>Owner passcode</h3><p class="hint">Enter your 4-digit passcode</p><div class="pcd">${'<i></i>'.repeat(4)}</div><div class="pck">${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>k===''?'<span></span>':`<button type="button" data-k="${k}">${k}</button>`).join('')}</div><div class="pce"></div><button type="button" class="ghost pcx">Cancel</button></div>`;
