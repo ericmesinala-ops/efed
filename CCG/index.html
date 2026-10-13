@@ -495,7 +495,7 @@ let tapN=0,tapT;function titleTap(){tapN++;clearTimeout(tapT);tapT=setTimeout(()
 document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==='e')unlockEd()}); // editor button: always on your computer, on the public site only with ?edit
 function loadDB(){try{const s=JSON.parse(localStorage.getItem(LS));if(s&&s.wr&&s.pw&&s.ef)return{wr:s.wr.map(norm),pw:s.pw.map(norm),ef:s.ef.map(norm),tk:s.tk||{}}}catch(e){}return defDB()}
 let DB=loadDB();
-function persist(){try{localStorage.setItem(LS,JSON.stringify(DB));return true}catch(e){toast('Storage full: use smaller images or Export JSON');return false}}
+function persist(){let ok=true;try{localStorage.setItem(LS,JSON.stringify(DB))}catch(e){ok=false;if(!EDAUTH)toast('Storage full: use smaller images or Export JSON')}if(EDAUTH)cloudSave();return ok||EDAUTH}
 let toastT;function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200)}
 
 // ---------- SETUP ----------
@@ -640,13 +640,46 @@ const IMG_BASE='images/',IMG_EXT='.png'; // card art: images/<card-name-slug>.pn
 const slug=n=>n.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 // ---------- Cloudflare R2 (card art lives in the safehouse-images bucket under cards/, uploaded through this Worker) ----------
 const R2_URL='https://carduploads.fswfirststrikewrestling.workers.dev';
-function r2Tok(){let t='';try{t=localStorage.getItem('wtcg_r2')||''}catch(e){}if(!t){t=(prompt('Paste your EDITOR_TOKEN (the upload password you set in Cloudflare)')||'').trim();if(t)try{localStorage.setItem('wtcg_r2',t)}catch(e){}}return t}
+function r2Tok(){let t='';try{t=localStorage.getItem('wtcg_r2')||''}catch(e){}if(!t){t=(prompt('Editor password (the EDITOR_TOKEN you set in Cloudflare)')||'').trim();if(t)try{localStorage.setItem('wtcg_r2',t)}catch(e){}}return t}
 async function r2Up(blob,name){
  const tok=r2Tok();if(!tok)throw new Error('no token');
  const r=await fetch(R2_URL+'/upload',{method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':blob.type,'X-Name':encodeURIComponent(name||'card')},body:blob});
  if(r.status===401){try{localStorage.removeItem('wtcg_r2')}catch(e){}throw new Error('wrong token')}
  const j=await r.json().catch(()=>({}));if(!r.ok||!j.url)throw new Error(j.error||'upload failed '+r.status);return j.url}
 const cvBlob=(c,t,q)=>new Promise(ok=>c.toBlob(ok,t,q));
+// ---------- cloud card set: everyone loads it, only the editor (password) can save it ----------
+let CLOUD={rev:0},EDAUTH=false,DIRTY=false,cloudT=null,cloudBusy=false;
+const setCloudMsg=(m,bad)=>{const e=document.getElementById('cst');if(e)e.textContent=m;if(bad)toast(m)};
+async function loadCloud(){ // returns true when a saved card set was found and is now in use
+ try{const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),3500);
+  const r=await fetch(R2_URL+'/deck.json',{cache:'no-cache',signal:ctl.signal});clearTimeout(t);if(!r.ok)return false;
+  const j=await r.json();if(!j||!j.db||!j.db.wr||!j.db.pw||!j.db.ef)return false;
+  CLOUD={rev:j.rev|0,saved:j.saved};DB=fromObj(j.db);return true}catch(e){return false}}
+async function edLogin(){ // the editor's own login: the password is checked by the Worker, nothing else is needed
+ if(EDAUTH)return true;
+ const tok=r2Tok();if(!tok)return false;
+ try{const r=await fetch(R2_URL+'/auth',{headers:{Authorization:'Bearer '+tok}});
+  if(r.ok){EDAUTH=true;if(!DIRTY)await loadCloud();return true}
+  if(r.status===401){try{localStorage.removeItem('wtcg_r2')}catch(e){}toast('Wrong password');return false}
+  toast('Could not reach the server ('+r.status+')');return false}
+ catch(e){toast('No connection: the editor needs the internet');return false}}
+function edLogout(){EDAUTH=false;try{localStorage.removeItem('wtcg_r2')}catch(e){}closeEd();toast('Logged out of the editor')}
+function cloudSave(){DIRTY=true;clearTimeout(cloudT);cloudT=setTimeout(cloudPush,900)}
+async function cloudNow(){if(await edLogin()){DIRTY=true;await cloudPush()}}
+async function cloudPush(){
+ if(cloudBusy){cloudSave();return}
+ cloudBusy=true;setCloudMsg('☁ Saving…');
+ try{
+  const r=await fetch(R2_URL+'/deck',{method:'PUT',headers:{Authorization:'Bearer '+r2Tok(),'Content-Type':'application/json'},body:JSON.stringify({base:CLOUD.rev,db:DB})});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok){CLOUD.rev=j.rev;DIRTY=false;setCloudMsg('☁ Saved to the cloud')}
+  else if(r.status===409){
+   if(confirm('The cards in the cloud were changed from another device after you opened this page.\n\nOK = replace the cloud copy with what you have here.\nCancel = load the cloud copy (edits made here since are lost).')){CLOUD.rev=j.rev;cloudBusy=false;return cloudPush()}
+   DIRTY=false;await loadCloud();edSel(ED.tab,0);setCloudMsg('☁ Loaded the cloud copy')}
+  else if(r.status===401){EDAUTH=false;try{localStorage.removeItem('wtcg_r2')}catch(e){}setCloudMsg('Wrong password: not saved to the cloud',1)}
+  else setCloudMsg('Cloud save failed ('+(j.error||r.status)+'): kept on this device',1)}
+ catch(e){setCloudMsg('No connection: kept on this device, press Save to cloud later',1)}
+ cloudBusy=false}
 const zd=c=>{const w=c.atk!==undefined,e=c.cash!==undefined,enc=encodeURIComponent,
  fx=(c.txt?c.txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>'):[...(c.fx||[]).map(fxT),...(c.rules||[]).map(ruleT)].filter(Boolean).join('<br>'))+(c.keep?'<br><i>Returns to hand after use</i>':''),
  st=w?`⚔ ${c.atk} · 🛡 ${c.def} · ${c.vp} VP<br>Sign $${c.cost} · Win $${c.win} · Promo $${c.promo}${(c.tags||[]).length?'<br>'+c.tags.join(', '):''}`:e?`$${c.cash} start · 🔥 ${c.hyp} hype`:(c.cat||'')+(c.pcost?` · Play $${c.pcost}`:'');
@@ -1121,14 +1154,14 @@ const NEWC={wr:()=>({n:'New Wrestler',atk:4,def:4,vp:1,cost:3,win:3,promo:2,tags
  ef:()=>({n:'New Manager',cash:12,hyp:1,fx:[],txt:'',img:''})};
 const TABN={wr:'Wrestlers',pw:'Power cards',ef:'Managers'};
 let ED={tab:'wr',i:0,d:null};
-function openEd(){$('ed').style.display='block';document.body.style.overflow='hidden';if(ED.tab==='tk')return edTokens();edSel(ED.tab,Math.min(ED.i,DB[ED.tab].length-1))}
+async function openEd(){if(!await edLogin())return;$('ed').style.display='block';document.body.style.overflow='hidden';if(ED.tab==='tk')return edTokens();edSel(ED.tab,Math.min(ED.i,DB[ED.tab].length-1))}
 function closeEd(){$('ed').style.display='none';document.body.style.overflow=''}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('ed').style.display==='block')closeEd()});
 function edSel(t,i){ED.tab=t;ED.i=Math.max(0,i);ED.d=DB[t][ED.i]?cl(DB[t][ED.i]):null;if(ED.d)ED.d.rules=(ED.d.rules||[]).map(r=>({...r,if:(r.if||[]).map(nc)}));edRender()}
 function edRender(){try{edRender0()}catch(e){$('ed').innerHTML='<div class="edh"><h2>Editor problem</h2><button onclick="closeEd()">Close</button><button class="ghost" onclick="edReset()">Revert to published</button></div><p class="hint">Please send a screenshot of this message.</p><pre style="white-space:pre-wrap;color:#f99;padding:8px">'+esc(e&&e.stack||e)+'</pre>'}}
 function edRender0(){
  const t=ED.tab,d=ED.d,un=c=>c.txt&&!(c.fx||[]).length&&!(c.rules||[]).length;
- let h=`<div class="edh"><h2>✎ Card editor</h2><div class="tabs">${Object.keys(TABN).map(x=>`<button class="${x===t?'':'ghost'}" onclick="edSel('${x}',0)">${TABN[x]} (${DB[x].length})</button>`).join('')}<button class="${t==='tk'?'':'ghost'}" onclick="edTokens()">Tokens</button></div><span style="flex:1"></span><button class="ghost" onclick="edCopy()">Copy JSON</button><button class="ghost" onclick="edExport()">Export cards.js</button><button class="ghost" onclick="$('imp').click()">Import cards</button><button class="ghost" onclick="edToR2()" title="Upload the card art saved inside this browser to R2">Move images to R2</button><button class="ghost" onclick="edReset()">Revert to published</button><button onclick="edApply()">Apply &amp; new game</button><button class="ghost" onclick="closeEd()" title="Close (Esc)">✕</button></div>`;
+ let h=`<div class="edh"><h2>✎ Card editor</h2><div class="tabs">${Object.keys(TABN).map(x=>`<button class="${x===t?'':'ghost'}" onclick="edSel('${x}',0)">${TABN[x]} (${DB[x].length})</button>`).join('')}<button class="${t==='tk'?'':'ghost'}" onclick="edTokens()">Tokens</button></div><span style="flex:1"></span><button class="ghost" onclick="edCopy()">Copy JSON</button><button class="ghost" onclick="edExport()">Export cards.js</button><button class="ghost" onclick="$('imp').click()">Import cards</button><button class="ghost" onclick="cloudNow()" title="Upload every card and rule to the cloud now">☁ Save to cloud</button><button class="ghost" onclick="edToR2()" title="Upload the card art saved inside this browser to R2">Move images to R2</button><button class="ghost" onclick="edLogout()">Log out</button><small class="hint" id="cst"></small><button class="ghost" onclick="edReset()">Revert to published</button><button onclick="edApply()">Apply &amp; new game</button><button class="ghost" onclick="closeEd()" title="Close (Esc)">✕</button></div>`;
  if(t==='tk'){$('ed').innerHTML=h+tokPanel();return}
   h+=`<div class="edb"><div class="edl"><button onclick="edNew()">+ New card</button>${DB[t].map((c,i)=>`<div class="eli ${i===ED.i?'on':''}" onclick="edSel('${t}',${i})"><span>${esc(c.n)}${t==='pw'&&c.copies>1?' ×'+c.copies:''}</span>${un(c)?'<em title="Has power text but no effects yet. Ask Claude to wire it.">needs wiring</em>':''}</div>`).join('')}</div>`;
  h+=d?edForm(d):'<p class="hint">No cards here yet. Click + New card.</p>';
@@ -1180,7 +1213,7 @@ async function edToR2(){
  try{for(const t of ['wr','pw','ef'])for(const c of DB[t])if(c.img&&c.img.startsWith('data:')){try{c.img=await up(c.img,c.n);ok++;toast('Moved '+ok+'…')}catch(e){bad++;err=e.message;if(err==='wrong token'||err==='no token')throw e}}
   for(const k of Object.keys(DB.tk||{}))if(String(DB.tk[k]).startsWith('data:')){try{DB.tk[k]=await up(DB.tk[k],'token-'+k);ok++}catch(e){bad++;err=e.message;if(err==='wrong token'||err==='no token')throw e}}}catch(e){}
  persist();edSel(ED.tab,ED.i);toast(!ok&&!bad?'Nothing to move: no images are stored on this device':'Moved '+ok+' image'+(ok==1?'':'s')+' to R2'+(bad?', '+bad+' failed ('+err+')':'')+'. Export cards.js to publish.')}
-function edReset(){if(!confirm('Discard your working copy and go back to the published cards?'))return;DB=defDB();localStorage.removeItem(LS);edSel(ED.tab,0)}
+async function edReset(){if(!confirm('Discard unsaved changes and reload the cards saved in the cloud?'))return;localStorage.removeItem(LS);DIRTY=false;if(!await loadCloud())DB=defDB();edSel(ED.tab,0)}
 function edApply(){const n=DB.wr.length;
  if(n<10||DB.ef.length<4||!DB.pw.length)return alert('You need at least 10 wrestlers, 4 managers and 1 power card to play.');
  persist();closeEd();newGame()}
@@ -1192,5 +1225,6 @@ function edTokImg(k,inp){const f=inp.files[0];if(!f)return;const r=new FileReade
  if(persist())toast('Saved '+TOKD[k][0]+' art');edRender();ui()};im.src=r.result};r.readAsDataURL(f)}
 function edTokClear(k){if(DB.tk)delete DB.tk[k];persist();edRender();ui()}
 if(document.body.classList)document.body.classList.add('artonly');
-newGame();
+document.getElementById('app').innerHTML='<p class="hint" style="text-align:center;margin-top:30vh">Loading cards…</p>';
+loadCloud().then(()=>newGame());
 </script></body></html>
