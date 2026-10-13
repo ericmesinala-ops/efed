@@ -634,6 +634,31 @@ b[data-cu]{display:inline-block}.cpop{animation:cpop .28s ease-out}.bump b.cpop{
 .slog summary::-webkit-details-marker{display:none}.slog summary::after{content:' ▾'}.slog[open] summary::after{content:' ▴'}
 @media(max-width:760px){.stg{grid-template-columns:repeat(2,1fr)}.sti>b{font-size:28px}.str{grid-template-columns:86px 1fr 24px;gap:8px}.swl>b{font-size:15px}.swl>span{gap:8px}}
 @media (prefers-reduced-motion:reduce){.cpop,.bump b.cpop,.str .tb2 i.lit{animation:none}.sum [data-at]{transition:none}}
+
+/* ---- drag-scroll rows: no scrollbar, grab cursor ---- */
+.row.sw{scrollbar-width:none;-ms-overflow-style:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.row.sw::-webkit-scrollbar{display:none;width:0;height:0}
+.row.sw.dragging{cursor:grabbing;scroll-snap-type:none}
+.row.sw.dragging *{cursor:grabbing!important}
+.row.sw img{-webkit-user-drag:none;user-drag:none}
+/* ---- power cards drawn: reveal overlay ---- */
+.pwbd{cursor:pointer}
+.pwl{position:fixed;top:calc(env(safe-area-inset-top) + 22px);left:0;right:0;z-index:9999;text-align:center;pointer-events:none;font:600 15px var(--lab);letter-spacing:4px;text-transform:uppercase;color:#f4f6f9;text-shadow:0 2px 6px #000}
+.pwl b{display:block;margin-top:2px;font:400 30px var(--disp);letter-spacing:3px;color:#fff;text-shadow:var(--emboss)}
+.pwl i{display:block;margin-top:2px;font:500 11px var(--lab);letter-spacing:2px;color:#9aa1ad;font-style:normal}
+/* ---- power cards tab: a fanned hand ---- */
+.pwfan{width:100%;--cw:clamp(78px,min(calc((100svh - 690px)/1.5),27vw),132px);--sp:min(calc(var(--cw)*.6),calc((100cqw - var(--cw) - 20px)/var(--k)));container-type:inline-size;position:relative;height:calc(var(--cw)*1.5 + 10px);margin:34px 0 4px}
+.pwfan .pwfc{position:absolute;left:50%;bottom:0;width:var(--cw);margin-left:calc(var(--cw)/-2);z-index:var(--z);cursor:pointer;-webkit-tap-highlight-color:transparent;transform-origin:50% 140%;
+ transform:translateX(calc(var(--d)*var(--sp))) rotate(calc(var(--d)*var(--ang))) translateY(calc(var(--d)*var(--d)*2.5px));transition:transform .24s cubic-bezier(.2,.8,.2,1)}
+.pwfan .pwfc.up{transform:translateX(calc(var(--d)*var(--sp))) rotate(calc(var(--d)*var(--ang)*.25)) translateY(-30px) scale(1.07)}
+.pwfan .pwfc .c{pointer-events:none;box-shadow:0 8px 18px #000c}
+.pwfan .pwfc.up .c{box-shadow:0 0 0 2px #fff,0 0 26px #ff2442aa,0 16px 32px #000d}
+.pwfp{max-width:440px;margin:6px auto 4px;padding:8px 14px 10px;text-align:center;border:2px solid transparent;border-radius:8px;background:var(--hex) padding-box,var(--plate) padding-box,var(--chrome) border-box;box-shadow:0 0 0 1px #000,0 10px 24px #000b}
+.pwfp .pwfph b{font:400 20px var(--disp);letter-spacing:1px;color:#fff;text-shadow:var(--emboss)}
+.pwfp .pwfph small{display:block;font:500 12px var(--lab);letter-spacing:2px;color:#9aa1ad;text-transform:uppercase}
+.pwfp p{margin:4px 0;font:500 13px/1.3 var(--lab);color:#d9dde3}
+.pwfp p.pwwhy{font-size:12px;color:#9aa1ad;margin-top:2px}.pwfp p.pwwhy i{font-style:normal;color:#ff8a99}
+.pwfp .acts{justify-content:center;margin-top:6px}
 </style></head><body><div id="app"></div><div id="ed"></div><input type="file" id="imp" accept=".js,.json" hidden onchange="edImport(this)"><div id="toast"></div><script src="/admins.js"></script><script src="cards.js"></script>
 <script>
 // ---------- CARD DATA (placeholder test set; later loaded from Supabase) ----------
@@ -746,6 +771,7 @@ function newGame(){
  const exp=a=>a.slice(), // one copy of each card
   wd=sh(cl(exp(DB.wr).map(c=>({...c,hype:0,champ:false,inj:0})))), pd=sh(cl(DB.pw.flatMap(c=>Array.from({length:Math.max(1,Math.floor(+c.copies)||1)},()=>c)))), ed=sh(cl(DB.ef));
  const pl=[0,1].map(()=>({cash:0,inc:0,hyp:0,tok:0,vp:0,hand:[],pw:pd.splice(0,3),signed:[],efed:null,tr:{rat:1,fan:1,spo:1},opts:ed.splice(0,2),done:false,passed:false,last:null}));
+ pl.forEach(p=>p.fresh=p.pw.slice()); // fresh = power cards drawn since the player last saw them (shown one by one when booking starts)
  G={ph:'efed',cur:0,ready:false,wd,pd,disc:[],market:[],pool:[],round:1,pl,slots:[],log:'',sel:null,scouted:null};
  ui();
 }
@@ -790,6 +816,33 @@ function signDraft(i){ // human picks only: the card zooms to the middle, stays 
   t.style.opacity=0;
   k.animate([{transform:mid,opacity:1},{transform:to,opacity:1,offset:.8},{transform:to,opacity:0}],{duration:600,easing:'cubic-bezier(.5,0,.2,1)',fill:'forwards'}).onfinish=()=>{t.style.opacity='';end()};
  },2450)}
+let PWFX=null; // the running power-card reveal (null when idle)
+function pwReveal(){ // when booking starts: each newly drawn power card zooms to the middle, holds, then flies into the Power cards tab
+ const g=G;if(g.ph!=='show'||!g.ready||AI[g.cur]||PWFX||g.signing||g.step||g.sel)return;
+ const p=me(),L=(p.fresh||[]).filter(c=>p.pw.includes(c));
+ if(!L.length)return;p.fresh=[];
+ if(ANIM_SPEED===0||matchMedia('(prefers-reduced-motion:reduce)').matches)return;
+ const W=160,H=W*1.5,m=ANIM_SPEED===2?1.5:1,S=Math.min(2.8,innerHeight*.72/H,innerWidth*.86/W),cx=innerWidth/2,cy=innerHeight/2,
+  bd=document.createElement('div'),lb=document.createElement('div');let cur=null,dead=false;
+ bd.className='signbd pwbd';lb.className='pwl';document.body.append(bd,lb);
+ bd.animate([{opacity:0},{opacity:1}],{duration:300,fill:'forwards'});
+ const end=()=>{dead=true;PWFX=null;bd.remove();lb.remove();if(cur)cur.remove()};
+ PWFX={skip:()=>{dead=true;if(cur&&cur.an)cur.an.cancel()}};
+ bd.onclick=()=>PWFX&&PWFX.skip();
+ const tabBtn=()=>[...document.querySelectorAll('#app .ftabs button')][1],
+  one=(c,n)=>new Promise(done=>{
+   lb.innerHTML=`Power cards drawn<b>${n} / ${L.length}</b><i>tap to skip</i>`;
+   const t=document.createElement('div');t.innerHTML=cardH(c);const k=t.querySelector('.cw');
+   const cd=k.querySelector('.c');cd.removeAttribute('onclick');cd.classList.add('signfx');
+   Object.assign(k.style,{position:'fixed',left:(cx-W/2)+'px',top:(cy-H/2)+'px',width:W+'px',height:H+'px',margin:'0',zIndex:9998,pointerEvents:'none'});
+   k.style.setProperty('--cw',W+'px');cd.style.width=W+'px';
+   const b=tabBtn(),r=b&&b.getBoundingClientRect(),tx=r?r.left+r.width/2-cx:0,ty=r?r.top+r.height/2-cy:innerHeight*.3,
+    s0=.3,from=`translate(${tx}px,${ty}px) scale(${s0})`,mid=`translate(0,0) scale(${S})`,T=(450+1200+550)*m;
+   document.body.append(k);cur=k;
+   k.an=k.animate([{transform:from,opacity:0},{transform:mid,opacity:1,offset:450*m/T,easing:'cubic-bezier(.2,.8,.2,1)'},{transform:mid,opacity:1,offset:(450+1200)*m/T,easing:'cubic-bezier(.5,0,.2,1)'},{transform:from,opacity:1,offset:.97},{transform:from,opacity:0}],{duration:T,fill:'forwards'});
+   k.an.finished.catch(()=>{}).then(()=>{k.remove();cur=null;const b2=tabBtn();if(b2&&!dead){b2.classList.remove('cpop');void b2.offsetWidth;b2.classList.add('cpop')}done()})});
+ (async()=>{for(let i=0;i<L.length;i++){if(dead||G!==g)break;await one(L[i],i+1)}
+  if(bd.isConnected)bd.animate([{opacity:1},{opacity:0}],{duration:300,fill:'forwards'}).finished.catch(()=>{}).then(end);else end();lb.remove()})()}
 function nextDraft(){const o=1-G.cur;if(!G.pl[o].done){G.cur=o;G.ready=false}autoDone();}
 
 // ---------- SHOW ----------
@@ -884,6 +937,7 @@ function nextMatch(){
 const fakeE=(i,f)=>({p:i,c:{n:(G.pl[i].efed&&G.pl[i].efed.n)||'Player',tags:[],rules:[]},pw:[],fake:!!f,efed:true}); // stands in for a player when no wrestler is involved (end of show / end of game)
 function finishShow(){ // pay everyone, then run every 'At the end of the show' rule: your manager first, then each wrestler you own (tokens on them are still there)
  const dr=G.pl.map(p=>{return drawP(p,3+(p.efed.fx||[]).filter(f=>f.k==='draw').reduce((a,f)=>a+f.n,0))});
+ G.pl.forEach((p,i)=>p.fresh=p.pw.slice(p.pw.length-dr[i]));
  G.eosL=G.pl.map(()=>[]);G.fin=true;G.res=null;
  const mk=()=>{G.eos=G.pl.map((p,i)=>`${who(i)}: drew ${dr[i]} power cards`+(merchOf(p)>0&&G.round<MAXR?` · merch income +$${merchOf(p)}`:'')+(G.eosL[i].length?' · '+G.eosL[i].join(', '):''))};
  const jobs=[];G.pl.forEach((p,i)=>{jobs.push([fakeE(i),false]);ownedW(p).forEach(w=>jobs.push([{p:i,c:w,pw:[]},true]))});
@@ -955,8 +1009,9 @@ async function cloudPush(){
   else setCloudMsg('Cloud save failed ('+(j.error||r.status)+'): kept on this device',1)}
  catch(e){setCloudMsg('No connection: kept on this device, press Save to cloud later',1)}
  cloudBusy=false}
+const fxOf=c=>(c.txt?c.txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>'):[...(c.fx||[]).map(fxT),...(c.rules||[]).map(ruleT)].filter(Boolean).join('<br>'))+(c.keep?'<br><i>Returns to hand after use</i>':''); // a card's power text, one place for the card face, the zoom view and the power-card fan
 const zd=c=>{const w=c.atk!==undefined,e=c.cash!==undefined,enc=encodeURIComponent,
- fx=(c.txt?c.txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>'):[...(c.fx||[]).map(fxT),...(c.rules||[]).map(ruleT)].filter(Boolean).join('<br>'))+(c.keep?'<br><i>Returns to hand after use</i>':''),
+ fx=fxOf(c),
  st=w?`⚔ ${c.atk} · 🛡 ${c.def} · ${c.vp} VP<br>Sign $${c.cost} · Win $${c.win} · Promo $${c.promo}${(c.tags||[]).length?'<br>'+c.tags.join(', '):''}`:e?`$${c.cash} start · 🔥 ${c.hyp} hype${c.merch?` · 👕 Merch +${c.merch}`:''}`:(c.cat||'')+(c.pcost?` · Play $${c.pcost}`:'');
  return ` data-zn="${enc(c.n)}" data-zi="${enc(imgOf(c))}" data-zs="${enc(st)}" data-zf="${enc(fx||'No special power.')}" onclick="zoomC(this)"`};
 function zoomC(el){const d=el.dataset,g=k=>decodeURIComponent(d[k]||''),o=document.createElement('div');o.className='zv';o.onclick=()=>o.remove();
@@ -968,7 +1023,7 @@ const tkH=c=>{const it=(k,n)=>n?`<span class="tk ${k}" title="${TKN[k]}${n>1?' x
 function cardH(c,o={}){
  const w=c.atk!==undefined,e=c.cash!==undefined,k=w?tagC((c.tags||[])[0]):e?'var(--e)':'var(--p)';
  const src=imgOf(c);
- const fx=(c.txt?c.txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>'):[...(c.fx||[]).map(fxT),...(c.rules||[]).map(ruleT)].filter(Boolean).join('<br>'))+(c.keep?'<br><i>Returns to hand after use</i>':'');
+ const fx=fxOf(c);
  return `<div class="cw"><div class="c ${e?'ef ':''}${o.sel?'sel':''} ${o.off?'off':''} ${c.champ?'champ':''}" style="--k:${k}"${zd(c)}><div class="im"><span>${c.n[0]}</span><img src="${src}" alt="" onerror="this.remove()"></div><div class="top">${w?`<i class="coin" title="Signing cost">${c.cost}</i>`:''}<b>${c.n}</b>${w?`<span class="tg">${[...(c.align?[c.align[0].toUpperCase()+c.align.slice(1)]:[]),...c.tags].map(t=>`<em>${t}</em>`).join('')}</span>`:''}</div>${w?`<div class="stat a" title="Attack">⚔ <b>${c.atk}</b></div><div class="stat d" title="Defense"><b>${c.def}</b> 🛡</div>`:''}${c.champ?'<div class="flag cr">★ CHAMPION</div>':''}${c.hype?`<div class="flag hy">🔥 ${c.hype}</div>`:''}<div class="tx">${rqB(c)}${c.cat?`<small>${c.cat}${c.pcost?' · $'+c.pcost:''}</small>`:''}${w?`<div class="pay"><span>🏆 Win $${c.win}</span><span>🎤 Promo $${c.promo}</span>${c.merch?`<span>👕 Merch +${c.merch}</span>`:''}</div>`:''}${e?`<div class="pay"><span>💵 $${c.cash}</span><span>🔥 ${c.hyp}</span>${c.merch?`<span>👕 Merch +${c.merch}</span>`:''}</div>`:''}${fx&&(SHOW_TXT||!(w||e))?`<p>${fx}</p>`:''}</div>${w&&c.vp?`<i class="vps" title="Victory points">${c.vp}</i>`:''}${tkH(c)}</div>${o.btn?`<div class="bt">${o.btn}</div>`:''}</div>`;
 }
 const setMode=v=>{if(!confirm('Switching mode starts a new game. Continue?'))return ui();AI=v==='ai'?[false,true]:[false,false];newGame()};
@@ -1023,10 +1078,10 @@ function showH(){
  const back=`<button class="ghost" onclick="G.sel=null;G.step=null;ui()">← Back</button>`;
  const view=`<button class="ghost" onclick="G.sel=null;G.step='board';ui()">View matches</button>`;
  const board=c=>`<div class="slots">${G.slots.map((sl,i)=>{const can=c&&((!sl.atk&&!locked(G.cur))||(sl.atk&&!sl.def&&sl.atk.p!==G.cur));return `<div class="slot ${i===last?'main':''}"><div class="sh"><b>MATCH ${i+1}</b>${i===last?'<em>★ MAIN EVENT</em>':''}${can?`<button onclick="play(${i})">Play here</button>`:''}</div><div class="cols">${slotCol(sl,'atk')}${slotCol(sl,'def')}</div></div>`}).join('')}</div>`;
- if(st==='board')return turn+`<div class="acts">${back}</div><p class="hint">All matches this show. Scroll sideways.</p>`+board(null);
+ if(st==='board')return turn+`<div class="acts">${back}</div><p class="hint">All matches this show. Drag sideways.</p>`+board(null);
  if(busy)return turn+`<p class="hint big">Opponent is thinking…</p><div class="acts">${view}</div><h3>The show so far</h3>${preview()}`;
  const w=st==='place'&&s&&s.t==='w'?p.hand[s.i]:null;
- if(w)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(w)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Where should ${w.n} go?</h3><p class="hint">${locked(G.cur)?'You have an unanswered attacker, so '+w.n+' must defend an open match.':'An empty match: '+w.n+' attacks. A match with an open opposing attacker: '+w.n+' defends.'} Scroll sideways for more matches.</p></div></div>`+board(w);
+ if(w)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(w)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Where should ${w.n} go?</h3><p class="hint">${locked(G.cur)?'You have an unanswered attacker, so '+w.n+' must defend an open match.':'An empty match: '+w.n+' attacks. A match with an open opposing attacker: '+w.n+' defends.'} Drag sideways for more matches.</p></div></div>`+board(w);
  const mine=G.slots.flatMap((sl,i)=>['atk','def'].filter(r=>sl[r]&&sl[r].p===G.cur&&sl[r].pw.length<maxPw(sl[r])).map(r=>({e:sl[r],i,r})));
  const pc=st==='attach'&&s&&s.t==='p'?p.pw[s.i]:null;
  if(pc)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(pc)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Attach ${pc.n} to which wrestler?</h3><p class="hint">${mine.length?'Choose one of your wrestlers on the board. Max '+MAX_PW+' power cards per wrestler in a match (some cards raise this).':'You have no wrestler on the board that can take it.'}</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${mine.map(m=>cardH(m.e.c,{btn:`<button ${(pc.pcost||0)>p.cash?'disabled':''} onclick="attach(${m.i},'${m.r}')">Attach${pc.pcost?' $'+pc.pcost:''} · Match ${m.i+1} ${m.r==='atk'?'attacker':'defender'} · ${m.e.pw.length}/${maxPw(m.e)}</button>`})).join('')}</div>`;
@@ -1038,11 +1093,17 @@ function showH(){
   tab=FT&&(FT!=='m'||mN)?FT:(wN&&canPlace()?'w':pN&&mine.length?'p':wN?'w':'p'),tb=(k,l,n)=>`<button class="${tab===k?'':'ghost'}" onclick="FT='${k}';ui()">${l} <b>${n}</b></button>`;
  h+=`<div class="ftabs">${tb('w','Wrestlers',wN)}${tb('p','Power cards',pN)}${mN?tb('m','Market',mN):''}</div>`;
  if(tab==='w')h+=wN?`<div class="row sw bk">${p.hand.map((c,i)=>cardH(c,{off:!reqOK(c,p),btn:`<button ${canPlace()&&reqOK(c,p)?'':'disabled'} onclick="G.sel={t:'w',i:${i}};G.step='place';ui()">Play</button>`})).join('')}</div>`:'<p class="hint">No wrestlers in hand.</p>';
- if(tab==='p')h+=pN?`<p class="hint">${mine.length?'Pick a power card, then choose which of your wrestlers on the board it goes on.':'Play a wrestler first — power cards attach to your wrestlers on the board.'}</p><div class="row sw bk">${p.pw.map((c,i)=>cardH(c,{off:!reqOK(c,p),btn:`<button ${mine.length&&(c.pcost||0)<=p.cash&&reqOK(c,p)?'':'disabled'} onclick="G.sel={t:'p',i:${i}};G.step='attach';ui()">Attach${c.pcost?' $'+c.pcost:''}</button>`})).join('')}</div>`:'<p class="hint">No power cards in hand.</p>';
+ if(tab==='p')h+=pN?fanH(p,mine.length):'<p class="hint">No power cards in hand.</p>';
  if(tab==='m')h+=`<div class="row sw bk">${G.market.map((c,i)=>cardH(c,{off:c.cost>p.cash,btn:`<button ${c.cost>p.cash?'disabled':''} onclick="buy('m',${i})">Sign $${c.cost}</button>`})).join('')}</div>`;
  return h;
 }
 
+// ---------- booking: your power cards as a fanned hand (tap a card to lift it, then attach) ----------
+function fanH(p,hasW){
+ const n=p.pw.length;FP=Math.max(0,Math.min(FP,n-1));const c=p.pw[FP],ok=reqOK(c,p),pay=(c.pcost||0)<=p.cash,can=hasW&&ok&&pay,
+  why=!ok?'Your rating track is too low for this card.':!pay?'Not enough cash to play it.':!hasW?'Play a wrestler first: power cards attach to your wrestlers on the board.':'';
+ return `<div class="pwfan" style="--n:${n};--k:${Math.max(1,n-1)};--ang:${Math.min(6,24/n)}deg">${p.pw.map((x,i)=>`<div class="pwfc${i===FP?' up':''}${reqOK(x,p)?'':' off'}" style="--d:${i-(n-1)/2};--z:${i===FP?60:i+1}" onclick="FP=${i};ui()">${cardH(x,{off:!reqOK(x,p)}).replace(' onclick="zoomC(this)"','')}</div>`).join('')}</div>
+ <div class="pwfp"><div class="pwfph"><b>${esc(c.n)}</b><small>${esc(c.cat||'')}${c.pcost?' · play $'+c.pcost:''}</small></div><p>${fxOf(c)||'No special power.'}</p>${can?'':`<p class="pwwhy"><i>${why}</i></p>`}<div class="acts"><button ${can?'':'disabled'} onclick="G.sel={t:'p',i:${FP}};G.step='attach';ui()">Attach${c.pcost?' $'+c.pcost:''}</button><button class="ghost"${zd(c)}>Details</button></div></div>`}
 // ---------- show summary: what the show did for you, counted up (the opponent gets one line; the full log is one tap away) ----------
 const snapP=p=>({vp:p.vp,cash:p.cash,tok:p.tok,hand:p.pw.length,tr:{...p.tr},w:Object.fromEntries(ownedW(p).map(c=>[c.n,{h:c.hype||0,j:c.inj||0,ch:!!c.champ}]))});
 const cuH=(from,to,pre,at)=>`<b data-cu data-from="${from}" data-to="${to}" data-pre="${pre||''}" data-at="${at||0}">${pre||''}${from}</b>`;
@@ -1100,7 +1161,15 @@ function stsFill(){if(!STS||!G)return;let o=document.getElementById('sts');if(!o
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&STS)closeStatus()});
 // sideways card rows: a mouse wheel scrolls them sideways too
 document.addEventListener('wheel',e=>{const r=e.target.closest&&e.target.closest('.row.sw');if(!r||Math.abs(e.deltaX)>=Math.abs(e.deltaY))return;const mx=r.scrollWidth-r.clientWidth;if(mx<=0||(e.deltaY<0&&r.scrollLeft<=0)||(e.deltaY>0&&r.scrollLeft>=mx))return;e.preventDefault();r.scrollLeft+=e.deltaY},{passive:false});
-let FT=null,FT_K=0; // booking tab: 'w' wrestlers, 'p' power cards, 'm' market (null = pick the useful one)
+// sideways card rows: click, hold and drag with the mouse to scroll (touch keeps its normal swipe; no scrollbar)
+(()=>{let r=null,x0=0,s0=0,moved=false,block=false;
+ document.addEventListener('pointerdown',e=>{if(e.pointerType!=='mouse'||e.button!==0)return;const t=e.target.closest&&e.target.closest('.row.sw');if(!t||t.scrollWidth<=t.clientWidth)return;r=t;x0=e.clientX;s0=t.scrollLeft;moved=false});
+ document.addEventListener('pointermove',e=>{if(!r)return;const dx=e.clientX-x0;if(!moved){if(Math.abs(dx)<6)return;moved=true;r.classList.add('dragging')}r.scrollLeft=s0-dx;e.preventDefault()});
+ const up=()=>{if(!r)return;r.classList.remove('dragging');r=null;if(moved){block=true;setTimeout(()=>block=false,80)}};
+ document.addEventListener('pointerup',up);document.addEventListener('pointercancel',up);
+ document.addEventListener('click',e=>{if(block){e.stopPropagation();e.preventDefault();block=false}},true); // a drag is not a tap on a card or button
+ document.addEventListener('dragstart',e=>{if(e.target.closest&&e.target.closest('.row.sw'))e.preventDefault()})})();
+let FT=null,FT_K=0,FP=0; // booking tab: 'w' wrestlers, 'p' power cards, 'm' market (null = pick the useful one)
 let animT=[];
 function stopAnim(){animT.forEach(clearTimeout);animT=[];}
 function reveal(el){
@@ -1209,6 +1278,7 @@ function ui(){
  clearTimeout(aiT);if(ai)aiT=setTimeout(aiStep,900);
  if(G.ph==='resolve'&&(G.res||(G.pend&&G.pend.r0))){if(G.noAnim){G.noAnim=false;skipAnim()}else startAnim()}
  playMerchFx();
+ if(G.ph==='show')queueMicrotask(pwReveal);
 }
 
 
