@@ -903,6 +903,7 @@ b[data-cu]{display:inline-block}.cpop{animation:cpop .28s ease-out}.bump b.cpop{
 #app .rost{margin:2px 0 4px!important}#app .rost .rs{padding:4px 8px!important}#app .rost .rm{min-height:36px!important}#app .rost .rm .mc{width:28px!important}#app .rost .rm .mc u{display:none}
 
 #app .hint.dhn{max-width:860px;margin-bottom:8px}@media(max-width:760px){#app .hint.dhn{font-size:12.5px;line-height:1.35}}
+.ifly{position:fixed;z-index:9999;pointer-events:none;display:flex;align-items:center;gap:4px;font:800 26px 'Big Shoulders Display',Impact,sans-serif;text-shadow:0 0 12px currentColor,0 2px 4px #000}.ifly svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8}
 </style></head><body><div id="app"></div><div id="ed"></div><input type="file" id="imp" accept=".js,.json" hidden onchange="edImport(this)"><div id="toast"></div><script src="/admins.js"></script><script src="cards.js"></script>
 <script>
 // ---------- CARD DATA (placeholder test set; later loaded from Supabase) ----------
@@ -1063,7 +1064,7 @@ function startDraft(){
  G.pool=G.wd.splice(0,10);
  if(G.pd.length<PSHOP){G.pd.push(...sh(G.disc.filter(c=>c.cat&&!c.fin)));G.disc=G.disc.filter(c=>!c.cat)}
  G.pshop=G.pd.splice(0,PSHOP); // power cards for sale this draft
- G.pl.forEach(p=>{p.done=false;p.picks=0;p.rp=[];p.bp=[];p.inc={};delete p.incT});
+ G.pl.forEach(p=>{p.done=false;p.picks=0;p.rp=[];p.bp=[];p.inc={};delete p.incT});G.incPaid=false;
  G.ph='draft';G.cur=(G.round-1)%2;G.ready=false;autoDone();
 }
 function autoDone(){
@@ -1153,7 +1154,8 @@ function play(si){ // book a wrestler: an empty match = he attacks; an open oppo
  incAdd(G.cur,c);
  endTurn();
 }
-const itfOK=(c,e)=>!!e&&!e.fake&&e.c!==c&&e.pw.length<maxPw(e)&&alignOf(c)===alignOf(e.c); // a heel only helps a heel, a face only a face
+const itfFree=e=>{const i=(G.slots||[]).findIndex(x=>x.atk===e||x.def===e);return i<0||i===G.slots.length-1||![G.slots[i].atk,G.slots[i].def].some(x=>x&&x.pw.some(y=>y.itf))}; // one interference per match, except the main event
+const itfOK=(c,e)=>!!e&&!e.fake&&e.c!==c&&e.pw.length<maxPw(e)&&alignOf(c)===alignOf(e.c)&&itfFree(e); // a heel only helps a heel, a face only a face
 const itfT=c=>(G.slots||[]).flatMap((sl,i)=>['atk','def'].filter(r=>sl[r]&&sl[r].p===G.cur&&itfOK(c,sl[r])).map(r=>({e:sl[r],i,r})));
 const itfB=(c,r)=>Math.floor((+(r==='atk'?c.atk:c.def)||0)/2); // half his base Attack (helping an attacker) or Defense (helping a defender), rounded down
 function interfere(si,r){ // a wrestler from your hand goes in as a face-down card on one of your booked wrestlers; he is used up for the show but still earns his income pip
@@ -1270,8 +1272,8 @@ function finishShow(){ // pay everyone, then run every 'At the end of the show' 
 function nextShow(){ // this show's income (tickets, merch, sponsorships) is paid just before the next draft, with a '+$' animation per track
  if(G.paying)return;
  const m=G.pl.map(incTot);
- if(G.round>=MAXR||!m.some(x=>x>0)){G.round++;if(G.round>MAXR)endGame();else startDraft();return}
- const g=G;G.paying=true;
+ if(G.round>=MAXR||!m.some(x=>x>0)||G.incPaid){G.round++;if(G.round>MAXR)endGame();else startDraft();return}
+ const g=G;G.paying=true;G.incPaid=true;
  G.pl.forEach((p,i)=>{p.cash+=m[i];Object.keys(TR).forEach(k=>{const n=((p.inc||{})[k]|0)*INCV;if(n)MERCH_FX.push({i,n,k})})});
  ui();
  setTimeout(()=>{if(G!==g)return;g.paying=false;g.round++;startDraft()},ANIM_SPEED===0?900:1700);}
@@ -1378,8 +1380,8 @@ function playHypeFx(){const q=HYPE_FX;HYPE_FX=[]; // a booked defender's hype to
 const hudP=(p,i)=>{const act=['efed','draft','show'].includes(G.ph)&&i===G.cur,pv=HP_PREV[i]||{},now={cash:p.cash,tok:p.tok,vp:p.vp,hand:p.hand.length},b=k=>pv[k]!==undefined&&pv[k]!==now[k]?' bump':'';HP_PREV[i]=now;
  const st=(k,ic,lab,val,sub)=>`<div class="hs ${ic}${b(k)}"><span class="hi">${(ic==='hype'||ic==='vp')&&(DB.tk||{})[ic]?`<img src="${DB.tk[ic]}" alt="">`:IC[ic]}</span><div class="ht"><small>${lab}</small><span><b${b(k)?` data-cu data-from="${pv[k]}" data-to="${now[k]}" data-pre="${k==='cash'?'$':''}"`:''}>${val}</b>${sub?`<i>${sub}</i>`:''}</span></div></div>`;
  return `<div class="gp ${i?'r':''} ${act?'on':''}" data-i="${i}"><div class="gp-hd">${avH(i)||`<span class="gp-em"><span>${p.efed?esc(p.efed.n[0]):'?'}</span></span>`}<span class="gp-n">${AI[i]?'Opponent':'Player '+(i+1)}</span><span class="gp-f">${esc(p.efed?p.efed.n:'Choosing manager…')}</span><span class="gp-r2">${act?`<span class="gp-t">${AI[i]?'Thinking':'To act'}</span>`:''}<span class="gp-hand${b('hand')}" title="Power cards in hand">${IC.hand}<small>Hand</small><b>${now.hand}</b></span></span></div><div class="gp-bd"><div class="gp-st"><div class="hero">${st('vp','vp','<span class="l">Victory points</span><span class="s">VP</span>',p.vp,'')}</div><div class="gp-sub" data-cap="Ready">${st('cash','cash','Cash','$'+p.cash,'')}${st('tok','hype','Hype',p.tok,'')}</div></div>${ixH(p)}</div></div>`};
-const ixH=p=>{const lit=p.incT&&Date.now()-p.incT.t<1500?p.incT.k:'',pip=(v,lt)=>Array.from({length:10},(_,x)=>`<i class="${x<v?'on':''}${lt&&x===v-1?' lit':''}" style="--p:${(x/9).toFixed(2)}"></i>`).join(''); // each income sits in front of the win track that drives it
- return `<div class="ixg"><div class="ixc"><span>Income this show</span><span>Win track</span></div>${Object.keys(TR).map(k=>{const I=INC[k],n=(p.inc||{})[k]|0,t=p.tr[k]|0;
+const ixH=p=>{const paid=G.incPaid;const lit=p.incT&&Date.now()-p.incT.t<1500?p.incT.k:'',pip=(v,lt)=>Array.from({length:10},(_,x)=>`<i class="${x<v?'on':''}${lt&&x===v-1?' lit':''}" style="--p:${(x/9).toFixed(2)}"></i>`).join(''); // each income sits in front of the win track that drives it
+ return `<div class="ixg"><div class="ixc"><span>Income this show</span><span>Win track</span></div>${Object.keys(TR).map(k=>{const I=INC[k],n=paid?0:(p.inc||{})[k]|0,t=p.tr[k]|0;
   return `<div class="ix ${k}${trLead(p,k)?' ld':''}" title="${I.n}: +$${INCV} for each of your ${TR[k].n} wrestlers booked this show (paid at the end of the show). ${TR[k].n} win track: ${t} / 10, +1 when one of them wins."><span class="ixl"><i class="inci">${I.ic}</i><em class="tn">${I.n}</em><em class="ts">${I.s}</em></span><span class="ixp tb2">${pip(Math.min(10,n),lit===k)}</span><b class="ixa">$${n*INCV}</b><svg class="ixar" viewBox="0 0 24 24"><path d="M4 12h14M13 6l6 6-6 6"/></svg><span class="ixl t">${trI(k)}<em class="tn">${TR[k].n}</em><em class="ts">${TR[k].n.slice(0,3)}</em></span><span class="ixq tb2">${pip(t)}</span><b class="ixn">${t}</b></div>`}).join('')}${wtbH(p)}</div>`};
 const hudC=()=>`<div class="gc"><small>Show</small><b>${G.round}<em>/${MAXR}</em></b><div class="rp">${Array.from({length:MAXR},(_,k)=>`<i class="${k<G.round-1?'done':k===G.round-1?'now':''}"></i>`).join('')}</div><small class="ph">${G.round===MAXR&&G.ph!=='end'?'PLE · ':''}${({efed:'Setup',draft:'Draft',show:'Booking',resolve:'Results',end:'Final'})[G.ph]||''}</small></div>`;
 // the HUD shows one player at a time: you by default, the chevron on the right switches to the other player
@@ -1426,7 +1428,7 @@ function showH(){
  const pc=st==='attach'&&s&&s.t==='p'?p.pw[s.i]:null;
  if(pc){const wp=isWpn(pc);return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(pc)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Attach ${pc.n} to which wrestler?</h3>${wp&&mine.some(m=>!legalW(m.i,G.cur))?'<p class="dqw">⚠ Weapons are illegal in this match. Unless a Referee Down card comes before it, this card causes a DQ and the opponent wins.</p>':''}<p class="hint">${mine.length?'Choose one of your wrestlers on the board. It stays face-down until the results. Max '+MAX_PW+' cards per wrestler in a match (some cards raise this).':'You have no wrestler on the board that can take it.'}</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${mine.map(m=>cardH(m.e.c,{btn:`<button onclick="attach(${m.i},'${m.r}')">Attach · Match ${m.i+1} ${m.r==='atk'?'attacker':'defender'} · ${m.e.pw.length}/${maxPw(m.e)}</button>${wp?legT(legalW(m.i,G.cur),G.hc===m.i,'w'):''}`})).join('')}</div>`}
  const iw=st==='itf'&&s&&s.t==='i'?p.hand[s.i]:null;
- if(iw){const T=itfT(iw),al=({heel:'Heel',face:'Face'})[alignOf(iw)];return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(iw,{nm:1})}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Send ${esc(iw.n)} in to help which wrestler?</h3>${T.some(m=>!legalI(m.i,G.cur))?'<p class="dqw">⚠ Interference is illegal in this match. Unless a Distract card comes before it, it causes a DQ and the opponent wins.</p>':''}<p class="hint">${al?'Only a '+al+' can help a '+al+'.':'A wrestler with no alignment can only help another one with no alignment.'} He goes in face-down like a power card and adds half his Attack (helping an attacker) or half his Defense (helping a defender), rounded down. He is used up for this show but still earns his income pip.</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${T.map(m=>cardH(m.e.c,{btn:`<button onclick="interfere(${m.i},'${m.r}')">Interfere · Match ${m.i+1} · +${itfB(iw,m.r)} ${m.r==='atk'?'ATK':'DEF'}</button>${legT(legalI(m.i,G.cur),G.hc===m.i,'i')}`})).join('')}</div>`}
+ if(iw){const T=itfT(iw),al=({heel:'Heel',face:'Face'})[alignOf(iw)];return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(iw,{nm:1})}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Send ${esc(iw.n)} in to help which wrestler?</h3>${T.some(m=>!legalI(m.i,G.cur))?'<p class="dqw">⚠ Interference is illegal in this match. Unless a Distract card comes before it, it causes a DQ and the opponent wins.</p>':''}<p class="hint">${al?'Only a '+al+' can help a '+al+'.':'A wrestler with no alignment can only help another one with no alignment.'} He goes in face-down like a power card and adds half his Attack (helping an attacker) or half his Defense (helping a defender), rounded down. He is used up for this show but still earns his income pip. Only 1 wrestler can interfere in each match, except the main event (no limit).</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${T.map(m=>cardH(m.e.c,{btn:`<button onclick="interfere(${m.i},'${m.r}')">Interfere · Match ${m.i+1} · +${itfB(iw,m.r)} ${m.r==='atk'?'ATK':'DEF'}</button>${legT(legalI(m.i,G.cur),G.hc===m.i,'i')}`})).join('')}</div>`}
  const canAct=p.hand.some(c=>!c.trn&&!injOut(c))||p.pw.some(c=>pwOK(c,p,mine.length));
  let h=turn+`<p class="hint big">${canAct?'Your turn: book a wrestler, send one in to interfere, train one, or attach a power card. Press Pass when you are done: you cannot act again this show.'+(locked(G.cur)?' You have an unanswered attacker, so the next wrestler you book must defend.':''):'Nothing left to do. Press Pass to finish your show. When both players pass, the matches are resolved.'}</p><div class="fbar"><button ${canAct?'class="ghost"':''} onclick="pass()">${canAct?'Pass — I am done':'Pass'}</button>${view}${ENABLE_SCOUT&&!G.scouted?`<button onclick="scoutDeck()">Scout</button>`:''}${ENABLE_DRAW&&!G.scouted?`<button onclick="drawPower()">Draw a power card</button>`:''}</div>`;
  if(G.scouted){const k=G.scouted;h+=`<div class="row">${cardH(k)}</div><div class="acts"><button ${k.cost>p.cash?'disabled':''} onclick="buy('s')">Sign for $${k.cost}</button><button onclick="toMarket()">Decline — send to market</button></div>`;}
@@ -1451,7 +1453,7 @@ const cuH=(from,to,pre,at)=>`<b data-cu data-from="${from}" data-to="${to}" data
 const sth=c=>`<span class="sth"><span>${esc(c.n[0])}</span><img src="${imgOf(c)}" alt="" onerror="this.remove()"></span>`;
 function sumH(){
  const P=[0,1].filter(i=>!AI[i]),O=[0,1].filter(i=>AI[i]),R=G.mres||[];let at=0;const nx=()=>(at+=240);
- const base=i=>{const p=G.pl[i],a=(G.s0||[])[i]||snapP(p),b=(G.s1||[])[i]||a,cash=p.cash-(G.paying?incTot(p):0),tok=p.tok;return {p,a,b,cash,tok}}; // while merch is being paid the summary keeps showing the results-only cash
+ const base=i=>{const p=G.pl[i],a=(G.s0||[])[i]||snapP(p),b=(G.s1||[])[i]||a,cash=p.cash-(G.paying||G.incPaid?incTot(p):0),tok=p.tok;return {p,a,b,cash,tok}}; // while merch is being paid the summary keeps showing the results-only cash
  const panel=i=>{const {p,a,b,cash,tok}=base(i),mine=R.filter(r=>r.kind==='promo'?r.winner===i:(r.ap===i||r.dp===i));
   const mt=mine.map(r=>{const t=nx();if(r.kind==='promo')return `<div class="smr pr" data-at="${t}">${sth(r.ec)}<div><b>Promo</b><small>${esc(r.ec.n)} · +$${r.promo}</small></div></div>`;
    const meA=r.ap===i,c=meA?r.ac:r.dc,my=meA?r.A.v:r.D.v,th=meA?r.D.v:r.A.v,res=r.draw?'draw':r.wp===i?'win':'loss';
@@ -1461,7 +1463,7 @@ function sumH(){
   const dv=p.vp-a.vp,dc=cash-b.cash,m=incTot(p),dh=p.pw.length-b.hand;
   const tiles=tile('Victory points',a.vp,p.vp,'',dv?(dv>0?'+':'')+dv+' this show':'',dv>0?'up':dv<0?'dn':'',1)
    +tile('Cash',b.cash,cash,'$',dc?(dc>0?'+$':'−$')+Math.abs(dc)+' from the results':'',dc>0?'up':dc<0?'dn':'',1)
-   +(m>0&&G.round<MAXR?tile('Income',0,m,'+$',Object.keys(TR).filter(k=>(p.inc||{})[k]).map(k=>INC_N[k]+' $'+p.inc[k]*INCV).join(' · ')+' · paid before the next draft','up',1):'')
+   +(m>0&&G.round<MAXR?`<div class="sti up inc" data-pi="${i}" data-at="${nx()}"><small>Income</small><b class="incb" data-final="+$${m}">+$0</b><i>${Object.keys(TR).filter(k=>(p.inc||{})[k]).map(k=>INC_N[k]+' $'+p.inc[k]*INCV).join(' · ')} · added to your cash</i></div>`:'')
    +(tok>a.tok?tile('Hype tokens',a.tok,tok,'','unplaced, ready for your next promo','up'):'')
    +tile('Power cards',b.hand,p.pw.length,'',dh>0?'drew '+dh:'','');
   const wl=ownedW(p).map(c=>{const o=a.w[c.n]||{h:0,j:0,ch:false,fm:0},h=(c.hype||0)-o.h,j=(c.inj||0)-o.j,ch=!!c.champ!==o.ch?(c.champ?'won':'lost'):'',F=finOf(c),fired=F&&R.some(r=>r.kind==='match'&&((r.ap===i&&r.ac.n===c.n&&r.afin)||(r.dp===i&&r.dc.n===c.n&&r.dfin))),fmv=F&&((c.fm||0)!==(o.fm||0)||fired),elN=!!c.elite&&!o.el,emv=elOn(c)&&(c.em||0)!==(o.em||0),trv=(G.trs||[]).find(x=>x.p===i&&x.c===c);
@@ -1484,13 +1486,36 @@ function cu(el,f){if(el.dataset.done)return;el.dataset.done='1';const a=+el.data
  set(a);const n=Math.abs(b-a),steps=Math.min(n,14),step=Math.max(40,Math.min(110,460/steps))*f;let k=0;
  const go=()=>{if(!el.isConnected)return;k++;set(k>=steps?b:Math.round(a+(b-a)*k/steps));if(k<steps)animT.push(setTimeout(go,step));else pop()};
  animT.push(setTimeout(go,(+el.dataset.at||0)*f+(n===1?0:step)))}
+let INCFLY=[];
+function incDone(){ // the pills are empty, the Income box is full and the money is in your cash
+ INCFLY.forEach(e=>e.remove());INCFLY=[];
+ document.querySelectorAll('#app .incb').forEach(b=>{b.textContent=b.dataset.final});
+ if(G.incPaid||!document.querySelector('#app .sti.inc'))return;
+ G.incPaid=true;G.pl.forEach(p=>{p.cash+=incTot(p)});
+ const g=document.querySelector('#app>.gh');if(g){g.innerHTML=hudInner();g.querySelectorAll('[data-cu]').forEach(el=>cu(el,cuF()))}}
+function incFly(root,f){ // ticket / merch / sponsorship money travels from the header pills into the Income box, each pill empties as its money lands
+ const tl=[...root.querySelectorAll('.sti.inc')];if(!tl.length)return;
+ if(!f||matchMedia('(prefers-reduced-motion:reduce)').matches)return incDone();
+ const vi=hudIdx(),tile=tl.find(t=>+t.dataset.pi===vi)||tl[0],p=G.pl[+tile.dataset.pi],ks=Object.keys(TR).filter(k=>((p.inc||{})[k]|0)>0),T=+tile.dataset.at;
+ if(!ks.length||+tile.dataset.pi!==hudIdx())return animT.push(setTimeout(incDone,(T+500)*f));
+ let tot=0,left=ks.length;
+ ks.forEach((k,j)=>animT.push(setTimeout(()=>{
+  const src=document.querySelector('#app>.gh .ix.'+k+' .ixa'),dst=tile.querySelector('.incb');if(!src||!dst||G.incPaid)return;
+  const a=src.getBoundingClientRect(),b=dst.getBoundingClientRect(),n=((p.inc||{})[k]|0)*INCV,sx=a.left+a.width/2,sy=a.top+a.height/2;
+  const d=document.createElement('div');d.className='ifly';d.style.left=sx+'px';d.style.top=sy+'px';d.style.color=INC_C[k]||'';d.innerHTML='$'+n+(INC[k]?INC[k].ic:'');document.body.appendChild(d);INCFLY.push(d);
+  const an=d.animate([{transform:'translate(-50%,-50%) scale(1.2)',opacity:1},{transform:`translate(calc(-50% + ${(b.left+b.width/2-sx)*.5}px),calc(-50% + ${(b.top+b.height/2-sy)*.35-30}px)) scale(1.35)`,opacity:1,offset:.45},{transform:`translate(calc(-50% + ${b.left+b.width/2-sx}px),calc(-50% + ${b.top+b.height/2-sy}px)) scale(.8)`,opacity:.9}],{duration:750*f,easing:'ease-in-out',fill:'forwards'});
+  an.onfinish=()=>{if(!d.isConnected)return;d.remove();INCFLY=INCFLY.filter(x=>x!==d);tot+=n;
+   dst.textContent='+$'+tot;dst.classList.remove('cpop');void dst.offsetWidth;dst.classList.add('cpop');
+   const px=document.querySelector('#app>.gh .ix.'+k);if(px){px.querySelector('.ixa').textContent='$0';px.querySelectorAll('.ixp i').forEach(i=>i.classList.remove('on','lit'))}
+   if(--left<=0)animT.push(setTimeout(incDone,350*f))};
+ },(T+450+j*320)*f)))}
 function sumRun(root,f){
  root.querySelectorAll('[data-at]:not([data-cu])').forEach(el=>{const t=+el.dataset.at*f;if(!t)el.classList.add('in');else animT.push(setTimeout(()=>el.classList.add('in'),t))});
  root.querySelectorAll('[data-lit]').forEach(el=>{const t=+el.dataset.lit*f;if(!t)el.classList.add('on');else animT.push(setTimeout(()=>el.classList.add('on','lit'),t))});
  root.querySelectorAll('[data-cu]').forEach(el=>cu(el,f))}
 function sumSkip(){const r=document.querySelector('#app .sum');if(!r)return;
  r.querySelectorAll('[data-at]').forEach(el=>el.classList.add('in'));r.querySelectorAll('[data-lit]').forEach(el=>el.classList.add('on'));
- r.querySelectorAll('[data-cu]').forEach(el=>{el.dataset.done='1';el.textContent=(el.dataset.pre||'')+el.dataset.to})}
+ r.querySelectorAll('[data-cu]').forEach(el=>{el.dataset.done='1';el.textContent=(el.dataset.pre||'')+el.dataset.to});incDone()}
 // the main sideways card row gets the biggest card size (max 300px) that still leaves its buttons above the bottom bar without scrolling
 function fitRow(){const r=document.querySelector('#app .row.sw');if(!r)return;r.style.removeProperty('--cw');
  const its=[...r.children].filter(e=>e.classList.contains('cw')&&e.querySelector('.c'));if(!its.length)return;
@@ -1503,7 +1528,7 @@ addEventListener('resize',()=>{clearTimeout(fitRow.t);fitRow.t=setTimeout(fitRow
 if(document.fonts)document.fonts.ready.then(()=>fitRow());
 function postUi(){ // after each redraw: the summary plays once per show (later redraws show it finished), the header counts up whatever changed
  const r=document.querySelector('#app .sum');
- if(r){if(!G.sumDone){G.sumDone=true;sumRun(r,cuF())}else sumSkip()}
+ if(r){if(!G.sumDone){G.sumDone=true;sumRun(r,cuF());incFly(r,cuF())}else sumSkip()}
  document.querySelectorAll('#app>.gh [data-cu]').forEach(el=>cu(el,cuF()))}
 let STS=false; // Status sheet open
 function openStatus(){closeMenu();STS=true;stsFill()}
