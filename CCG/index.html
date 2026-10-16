@@ -1100,12 +1100,13 @@ const injOut=c=>!!c&&c.injR===G.round; // injured: misses this show
 const titleUp=(s,main)=>!!(s.atk.c.champ||s.def.c.champ||(main&&!G.pl.some(q=>ownedW(q).some(c=>c.champ)))); // the title is on the line: the champion is in this match, or it is vacant (first show, or the champion was stripped) and this is the main event. A DQ never moves it
 const PSHOP=6; // power cards for sale in each draft
 const prc=c=>Math.max(1,Math.floor(+c.pcost)||0); // a power card's price in the draft (paid once; playing it later is free). No price set = $1
-const TRN=2,trP=(c,k)=>{const v=+c[k]||0;return v<=6?4:v<=8?6:8}; // training: +2, priced by how high that stat already is
+const fxSum=(c,k)=>((c&&c.fx)||[]).filter(f=>f.k===k).reduce((t,f)=>t+(+f.n||0),0); // total of one passive effect on a card
+const TRN=2,trP=(c,k)=>{const v=+c[k]||0,b=v<=6?4:v<=8?6:8;return Math.max(1,b-fxSum(c,'trCost'))}; // training: +2, priced by how high that stat already is; a 'trCost' effect makes it cheaper (never below $1)
 const SLOTS=[3,3,4,4,5,5,6,8]; // matches per show
 const HV=1, MAXR=8; // cash value of one hype token; number of shows
 const sh=a=>a.map(x=>[Math.random(),x]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
 const cl=o=>JSON.parse(JSON.stringify(o));
-const fxT=f=>({atk:`${f.n<0?f.n:'+'+f.n} ATK`,def:`${f.n<0?f.n:'+'+f.n} DEF`,win:`+$${f.n} win`,promo:`+$${f.n} promo`,perPower:`+${f.n} ${(f.s||'').toUpperCase()} per attached power`,vp:`+${f.n} VP at end`,draw:`Draw ${f.n} power card${f.n>1?'s':''}`,pwLimit:`Your Power Card limit for this match is ${f.n}.`,pwAtk:`All Power Cards attached to this card that grant an attack bonus gain an additional +${f.n} Attack each.`,vpTag:`End Game: ${f.n}VP per ${f.tag||'?'} Tag in your deck.`}[f.k])+(f.tag&&f.k!=='vpTag'?` if ${f.tag}`:'');
+const fxT=f=>({atk:`${f.n<0?f.n:'+'+f.n} ATK`,def:`${f.n<0?f.n:'+'+f.n} DEF`,win:`+$${f.n} win`,promo:`+$${f.n} promo`,perPower:`+${f.n} ${(f.s||'').toUpperCase()} per attached power`,vp:`+${f.n} VP at end`,draw:`Draw ${f.n} power card${f.n>1?'s':''}`,pwLimit:`Your Power Card limit for this match is ${f.n}.`,trLimit:`This wrestler can be trained ${f.n} more time${f.n==1?'':'s'}.`,trCost:`His Train cost is $${f.n} less (never below $1).`,pwAtk:`All Power Cards attached to this card that grant an attack bonus gain an additional +${f.n} Attack each.`,vpTag:`End Game: ${f.n}VP per ${f.tag||'?'} Tag in your deck.`}[f.k])+(f.tag&&f.k!=='vpTag'?` if ${f.tag}`:'');
 const me=()=>G.pl[G.cur];
 // ---- players: everything works off the player list. NP is how many players a new game has (the rules are balanced for 2) ----
 const NP=2;
@@ -1329,12 +1330,12 @@ function toMarket(){G.market.push(G.scouted);if(G.market.length>5)G.disc.push(G.
 let TRO=-1; // hand index whose Train button is open (showing Attack / Defense)
 const trKey=k=>k==='def'?'DEFENSE':'ATTACK';
 function trainOpen(i){TRO=TRO===i?-1:i;ui()}
-const trained=c=>!!(c.ta||c.td); // a wrestler can be trained one time only
+const trCnt=c=>c.tn!=null?c.tn:((c.ta||c.td)?1:0), trained=c=>trCnt(c)>=1+Math.max(0,fxSum(c,'trLimit')); // how many times he has been trained; one time only, unless a 'trLimit' effect on his card allows more
 function train(i,k){const p=me(),c=p.hand[i];k=k==='def'?'def':'atk';if(!c||c.trn||trained(c)||injOut(c))return;const pr=trP(c,k);if(pr>p.cash)return;p.cash-=pr;c.trn=k;TRO=-1;G.sel=null;G.step=null;actFx('train',{c,on:c,k},()=>endTurn())}
 function actFx(trig,A,done){ // your own action: every card of yours on play (booked, or attached to a booked wrestler) runs its rules for it. A: {c: the wrestler it happens to, on: the card it is 'done to', role, k, pc, main}
  const ents=(G.slots||[]).flatMap(s=>['atk','def'].map(r=>s[r]).filter(x=>x&&x.p===G.cur)),L=[],ctx={trig,lines:L,noEfed:true,main:!!A.main,on:A.on,actRole:A.role,actK:A.k,actPc:A.pc,actE:A.c?{c:A.c,pw:[],p:G.cur}:null};let k=0;
  const nx=()=>{if(k>=ents.length){if(L.length&&!AI[G.cur])toast(L.join(' · '));return done()}const e=ents[k++];runRules(trig,e,null,ctx,()=>{if((trig==='book'||trig==='attach')&&e.c===A.on)runRules(trig==='book'?'bookS':'attS',e,null,ctx,nx);else nx()})};nx()}
-function trainApply(){G.trs=[];G.pl.forEach((p,pi)=>ownedW(p).forEach(c=>{if(!c.trn)return;const k=c.trn,f=+c[k]||0;c[k]=f+TRN;if(k==='atk')c.ta=(c.ta||0)+TRN;else c.td=(c.td||0)+TRN;G.trs.push({p:pi,c,k,from:f,to:f+TRN});delete c.trn}))} // runs once at the end of the show
+function trainApply(){G.trs=[];G.pl.forEach((p,pi)=>ownedW(p).forEach(c=>{if(!c.trn)return;const k=c.trn,f=+c[k]||0;c.tn=trCnt(c)+1;c[k]=f+TRN;if(k==='atk')c.ta=(c.ta||0)+TRN;else c.td=(c.td||0)+TRN;G.trs.push({p:pi,c,k,from:f,to:f+TRN});delete c.trn}))} // runs once at the end of the show
 function pass(){actFx('pass',{},()=>{me().passed=true;endTurn()})}
 
 // ---------- RESOLUTION (one match at a time, animated) ----------
@@ -2205,7 +2206,7 @@ function edRandPower(){
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 // Effect kinds the engine understands. To add a NEW kind, ask Claude: "please wire this card" and paste the exported JSON.
-const FXK={atk:'+ ATK',def:'+ DEF',win:'+ $ when this wrestler wins',perPower:'+ per attached power card',vp:'+ VP at game end',draw:'Draw power cards (on play or attach; managers: at the end of the show)',pwLimit:'Power card limit for this wrestler in a match (number = new limit)',pwAtk:'+ ATK for each attached power card that grants ATK (number = bonus per card)',promo:'+ $ when this wrestler cuts a promo',vpTag:'+ VP at game end per wrestler with a tag in your deck (tag box = tag to count)'};
+const FXK={atk:'+ ATK',def:'+ DEF',win:'+ $ when this wrestler wins',perPower:'+ per attached power card',vp:'+ VP at game end',draw:'Draw power cards (on play or attach; managers: at the end of the show)',pwLimit:'Power card limit for this wrestler in a match (number = new limit)',trLimit:'Train limit + (number = extra times this wrestler can be trained)',trCost:'Train cost - (number = $ off each training)',pwAtk:'+ ATK for each attached power card that grants ATK (number = bonus per card)',promo:'+ $ when this wrestler cuts a promo',vpTag:'+ VP at game end per wrestler with a tag in your deck (tag box = tag to count)'};
 const NEWC={wr:()=>({n:'New Wrestler',atk:4,def:4,vp:1,cost:3,win:3,promo:2,tags:[],fx:[],img:'',txt:''}),
  pw:()=>({n:'New Power',cat:'Weapon',copies:1,fx:[],txt:'',img:''}),
  ef:()=>({n:'New Manager',cash:12,hyp:1,fx:[],txt:'',img:''})};
