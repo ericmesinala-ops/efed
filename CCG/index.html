@@ -1197,9 +1197,13 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElement
 let toastT;function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200)}
 
 // ---------- SETUP ----------
+const rdy=a=>(a||[]).filter(c=>c&&c.allDone); // only cards marked '✓ All done' in the editor (the green button) are in the game
+const rdyShort=()=>{const w=rdy(DB.wr).length,e=rdy(DB.ef).length,p=rdy(DB.pw).length,m=[];if(w<10)m.push(`${w} of 10 wrestlers`);if(e<2*NP)m.push(`${e} of ${2*NP} managers`);if(!p)m.push('0 of 1 power cards');return m} // what is still missing, empty when the game can start
 function newGame(){
+ const sh0=rdyShort();
+ if(sh0.length){G=null;document.getElementById('app').innerHTML=`<div class="pass"><h2>Not enough finished cards</h2><p class="hint">Only cards marked ✓ All done (the green button in the card editor) are in the game. Ready so far: ${sh0.join(', ')}.</p><button onclick="openEd()">Open card editor</button></div>`;return}
  const exp=a=>a.slice(), // one copy of each card
-  wd=sh(cl(exp(DB.wr).map(c=>({...c,hype:0,champ:false,inj:0,fm:0,em:0,elv:0})))), pd=sh(cl(DB.pw.flatMap(c=>Array.from({length:Math.max(1,Math.floor(+c.copies)||1)},()=>c)))), ed=sh(cl(DB.ef));
+  wd=sh(cl(exp(rdy(DB.wr)).map(c=>({...c,hype:0,champ:false,inj:0,fm:0,em:0,elv:0})))), pd=sh(cl(rdy(DB.pw).flatMap(c=>Array.from({length:Math.max(1,Math.floor(+c.copies)||1)},()=>c)))), ed=sh(cl(rdy(DB.ef)));
  const pl=Array.from({length:NP},()=>({cash:0,inc:0,hyp:0,tok:0,vp:0,hand:[],pw:[],inc:{},signed:[],efed:null,tr:{rat:0,fan:0,spo:0},opts:ed.splice(0,2),done:false,passed:false,last:null}));
  pl.forEach(p=>p.fresh=[]); // fresh = power cards drawn by a card effect since the player last saw them (shown one by one when booking starts)
  G={ph:'efed',cur:0,ready:false,wd,pd,disc:[],market:[],pool:[],round:1,pl,slots:[],log:'',sel:null,scouted:null,pshop:[],hc:-1};
@@ -2289,8 +2293,8 @@ async function edToR2(){
   for(const k of Object.keys(DB.tk||{}))if(String(DB.tk[k]).startsWith('data:')){try{DB.tk[k]=await up(DB.tk[k],'token-'+k);ok++}catch(e){bad++;err=e.message;if(err==='wrong token'||err==='no token')throw e}}}catch(e){}
  persist();edSel(ED.tab,ED.i);toast(!ok&&!bad?'Nothing to move: no images are stored on this device':'Moved '+ok+' image'+(ok==1?'':'s')+' to R2'+(bad?', '+bad+' failed ('+err+')':'')+'. Export cards.js to publish.')}
 async function edReset(){if(!confirm('Discard unsaved changes and reload the cards saved in the cloud?'))return;localStorage.removeItem(LS);DIRTY=false;if(!await loadCloud())DB=defDB();edSel(ED.tab,0)}
-function edApply(){const n=DB.wr.length;
- if(n<10||DB.ef.length<4||!DB.pw.length)return alert('You need at least 10 wrestlers, 4 managers and 1 power card to play.');
+function edApply(){const m=rdyShort();
+ if(m.length)return alert('Only cards marked ✓ All done are in the game. You still need at least 10 wrestlers, '+2*NP+' managers and 1 power card marked. Ready so far: '+m.join(', ')+'.');
  persist();closeEd();newGame()}
 const TOKD={hype:['Hype token','Added by promos. Cashes in for $1 each when the wrestler\'s match is decided.'],champ:['Championship token','Held by the last title winner. Worth +3 VP to whoever wins it.'],rat:['Ratings icon','Small icon shown before the word Ratings on the reader and on cards.'],fan:['Fanbase icon','Small icon shown before the word Fanbase on the reader and on cards.'],spo:['Sponsors icon','Small icon shown before the word Sponsors on the reader and on cards.'],vp:['VP icon','Small icon shown in the header next to each player\'s victory points (and wherever VP is shown).'],inj:['Injury token','Each token lowers that wrestler\'s Attack and Defense by 1.'],pwc:['Power card icon','The label shown wherever the words Power Card appear in card text. A wide pill about 480 × 120 px (4:1) works best; transparent PNG.'],promo:['Promo payout icon','Shown on the elite tab in place of the word PROMO.'],win:['Win payout icon','Shown on the elite tab in place of the word WIN.']};
 const tokPanel=()=>`<div class="edf" style="max-width:640px;margin:0 auto"><b>Token art</b><small class="hint">Square PNG with a transparent background looks best. It is shown as a circle on the card. Export cards.js to publish it.</small>${Object.keys(TOKD).map(k=>{const im=(DB.tk||{})[k];return `<div class="tkr"><div class="tkp${k==='pwc'?' wide':''}">${im?`<img src="${im}" alt="">`:`<span>${TKF[k]||'–'}</span>`}</div><div><b>${TOKD[k][0]}</b><small class="hint">${TOKD[k][1]}</small><div class="acts"><input type="file" accept="image/*" onchange="edTokImg('${k}',this)">${im?`<button class="ghost" onclick="edTokClear('${k}')">Remove</button>`:''}</div></div></div>`}).join('')}</div>`;
