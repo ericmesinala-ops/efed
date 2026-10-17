@@ -232,6 +232,18 @@ body.artonly .c:has(.im img) .im{position:absolute;inset:0}
 .hs.merch .hi{color:#7fb6e8;border-color:#27425c}
 .signfx{transform-origin:center;transition:none!important;box-shadow:0 0 0 2px var(--gold),0 0 40px #f0c23c99,0 20px 50px #000!important}
 .signbd{position:fixed;inset:0;z-index:9997;background:rgba(5,6,10,.72);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+.bkintro{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.bkintro::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(5,6,10,.88),rgba(5,6,10,.97));animation:bkbd .35s ease var(--d,0s) both}
+.bkintro.out{animation:bkout .45s ease forwards}
+.bki{position:relative;text-align:center;font-family:'Big Shoulders Display',Impact,sans-serif;text-transform:uppercase}
+.bki small{display:block;letter-spacing:.5em;font-size:clamp(12px,3vw,18px);color:var(--mute);margin-bottom:6px;animation:bksm .5s ease calc(var(--d,0s) + .15s) both}
+.bki b{display:block;font-weight:900;font-size:clamp(44px,13vw,120px);line-height:1;color:var(--ink);text-shadow:0 0 28px var(--acc),0 4px 10px #000;animation:bkin .7s cubic-bezier(.2,.8,.2,1) var(--d,0s) both}
+.bki i{display:block;height:3px;margin:14px auto 0;background:linear-gradient(90deg,transparent,var(--acc),transparent);animation:bkln .9s ease calc(var(--d,0s) + .25s) both}
+@keyframes bkbd{from{opacity:0}to{opacity:1}}
+@keyframes bkin{from{opacity:0;transform:scale(1.5);letter-spacing:.3em;filter:blur(8px)}to{opacity:1;transform:none;letter-spacing:.04em;filter:none}}
+@keyframes bksm{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes bkln{from{width:0;opacity:0}to{width:min(70vw,560px);opacity:1}}
+@keyframes bkout{to{opacity:0}}
 .mfx{position:fixed;z-index:9999;pointer-events:none;display:flex;align-items:center;gap:4px;font:800 26px 'Big Shoulders Display',Impact,sans-serif;color:#9fd0ff;text-shadow:0 0 12px #3b8fe0cc,0 2px 4px #000;transform:translate(-50%,-50%);opacity:0;animation:mfx 1.5s ease-in-out forwards}
 .mfx svg{width:24px;height:24px;fill:#2a5b8f;stroke:#cfe8ff;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 @keyframes mfx{0%{opacity:0;transform:translate(-50%,-30%) scale(.7)}22%{opacity:1;transform:translate(-50%,-70%) scale(1.15)}60%{opacity:1;transform:translate(-50%,-90%) scale(1)}100%{opacity:0;transform:translate(-50%,-130%) scale(1)}}
@@ -1278,10 +1290,23 @@ function startDraft(){
  G.ph='draft';G.cur=draftFirstP();G.ready=false;autoDone();
 }
 function autoDone(){
- G.pl.forEach(p=>{if(!G.pool.some(c=>c.cost<=p.cash)&&!G.pshop.some(c=>prc(c,p)<=p.cash))p.done=true});
- if(G.pl.every(p=>p.done)||(!G.pool.length&&!G.pshop.length)){G.disc.push(...G.pool);G.pool=[];G.pd.push(...G.pshop);G.pshop=[];return startShow();}
+ const none=!G.pool.length&&!G.pshop.length;
+ G.pl.forEach((p,i)=>{if(AI[i]&&(none||(!G.pool.some(c=>c.cost<=p.cash)&&!G.pshop.some(c=>prc(c,p)<=p.cash))))p.done=true}); // only the AI is passed automatically: a human with no money left gets a Continue to booking button
+ if(G.pl.every(p=>p.done)){G.disc.push(...G.pool);G.pool=[];G.pd.push(...G.pshop);G.pshop=[];return bookingIntro();}
  if(me().done){const o=nextOpen(G.cur,'done');if(o>=0&&o!==G.cur){G.cur=o;G.ready=false}}
  ui();
+}
+let BKI=0; // 1 while the BOOKING PHASE title is on screen
+function bookingIntro(){ // draft over: a BOOKING PHASE title holds for about 2 seconds, then the show starts
+ if(BKI)return;
+ const g=G;
+ if(ANIM_SPEED===0||matchMedia('(prefers-reduced-motion:reduce)').matches)return startShow();
+ BKI=1;if(G.ready)ui();
+ const m=ANIM_SPEED===2?1.5:1,wait=(g.signing?750:250)*m,o=document.createElement('div');
+ o.className='bkintro';o.style.setProperty('--d',wait+'ms');
+ o.innerHTML='<div class="bki"><small>Draft complete</small><b>BOOKING PHASE</b><i></i></div>';
+ document.body.append(o);
+ setTimeout(()=>{BKI=0;if(G===g)startShow();o.classList.add('out');setTimeout(()=>o.remove(),450)},wait+2000*m);
 }
 function draft(i){const p=me(),c=G.pool.splice(i,1)[0];p.cash-=c.cost;p.vp+=+c.vp||0;p.signed.push(c);p.hand.push(c);p.picks++;(p.rp=p.rp||[]).push(c);nextDraft();}
 function buyPw(i){const p=me(),c=G.pshop[i];if(!c||prc(c,p)>p.cash)return;G.pshop.splice(i,1);p.cash-=prc(c,p);p.pw.push(c);p.picks++;(p.bp=p.bp||[]).push(c);nextDraft();} // paid now, free to play later
@@ -1708,7 +1733,8 @@ const VW=()=>{const h=AI.findIndex(x=>!x);return AI[G.cur]&&h>=0?h:G.cur}; // wh
 const rosterH=()=>{const v=VW();return `<div class="rost">${G.pl.map((_,i)=>{const pl=G.pl[i],list=ownedW(pl),nw=pl.rp||[];
   return `<div class="rs ${i===G.cur&&!pl.done?'on':''}"><div class="rh2"><b>${who(i)}${i===v?' (you)':''}</b><span>${list.length} wrestler${list.length===1?'':'s'}${nw.length?' · '+nw.length+' signed this show':''}${pl.done?' · done drafting':''}</span><em class="pwn" title="Power cards in hand">⚡ ${pl.pw.length}</em></div><div class="rm">${list.length?list.map(c=>`<div class="mc ${nw.includes(c)?'nw':i===v?'me':'op'}" title="${esc(c.n)}${nw.includes(c)?' (signed this show)':''}"${zd(c)}><div class="im"><span>${esc(c.n[0])}</span><img src="${imgOf(c)}" alt="" onerror="this.remove()"></div><b>${esc(c.n)}</b><u>⚔ ${c.atk} · 🛡 ${c.def}</u></div>`).join(''):'<div class="rn0">No wrestlers signed yet</div>'}</div></div>`}).join('')}</div>`};
 function draftH(){const p=G.pl[VW()],b=AI[G.cur],r1=G.round===1;
- return `<div class="bar">DRAFT · SHOW ${G.round}<span>${b?'Opponent':'Player '+(G.cur+1)}'s pick</span></div><p class="hint dhn">One pick per turn: sign a wrestler or buy a power card (pay now, play free later). Gain its VP immediately. ${r1?'Sign at least one wrestler in this first draft. ':''}Press Stop drafting when done.</p>${rosterH()}<div class="row sw dr">${G.pool.map((c,i)=>{const no=c.cost>p.cash;return cardH(c,{off:no,nm:1,btn:`<button ${no||b?'disabled':''} onclick="signDraft(${i})">Sign $${c.cost}</button>`})}).join('')||'<p class="hint">No wrestlers left.</p>'}${G.pshop.length?`<div class="rsep"><span>Power cards for sale</span></div>${G.pshop.map((c,i)=>{const no=prc(c,p)>p.cash;return cardH(c,{off:no,btn:`<button ${no||b?'disabled':''} onclick="signDraft(${i},'p')">${prc(c,p)?'Buy $'+prc(c,p):'Take · free'}</button>${isWpn(c)?'<small class="dqn">⚠ DQ risk outside the hardcore match</small>':''}`})}).join('')}`:''}</div>${G.pshop.length?'':'<p class="hint">No power cards for sale.</p>'}<div class="fbar"><button class="ghost" ${!b&&canStop(p)?'':'disabled'} onclick="stopDraft()">Stop drafting</button></div>`;}
+ const cant=!b&&!G.pool.some(c=>c.cost<=p.cash)&&!G.pshop.some(c=>prc(c,p)<=p.cash);
+ return `<div class="bar">DRAFT · SHOW ${G.round}<span>${b?'Opponent':'Player '+(G.cur+1)}'s pick</span></div><p class="hint dhn">One pick per turn: sign a wrestler or buy a power card (pay now, play free later). Gain its VP immediately. ${r1?'Sign at least one wrestler in this first draft. ':''}Press Stop drafting when done.</p>${rosterH()}<div class="row sw dr">${G.pool.map((c,i)=>{const no=c.cost>p.cash;return cardH(c,{off:no,nm:1,btn:`<button ${no||b?'disabled':''} onclick="signDraft(${i})">Sign $${c.cost}</button>`})}).join('')||'<p class="hint">No wrestlers left.</p>'}${G.pshop.length?`<div class="rsep"><span>Power cards for sale</span></div>${G.pshop.map((c,i)=>{const no=prc(c,p)>p.cash;return cardH(c,{off:no,btn:`<button ${no||b?'disabled':''} onclick="signDraft(${i},'p')">${prc(c,p)?'Buy $'+prc(c,p):'Take · free'}</button>${isWpn(c)?'<small class="dqn">⚠ DQ risk outside the hardcore match</small>':''}`})}).join('')}`:''}</div>${G.pshop.length?'':'<p class="hint">No power cards for sale.</p>'}<div class="fbar">${cant?'<button onclick="stopDraft()">Continue to booking →</button>':`<button class="ghost" ${!b&&canStop(p)?'':'disabled'} onclick="stopDraft()">Stop drafting</button>`}</div>`;}
 // ---- the bonus badge on a wrestler's art: DISPLAY ONLY. It reads bonuses, never runs a power (nothing is drawn, paid or placed), and only counts what both players can already see ----
 const ownerOf=c=>G&&G.pl?G.pl.find(p=>ownedW(p).includes(c))||null:null;
 const fxOK=(f,c)=>!f.tag||hasT(c,f.tag);
@@ -1977,7 +2003,7 @@ function endH(){const sc=G.pl.map(score),top=Math.max(...sc),hy=p=>p.tok+tokOn(p
 // ---------- AI (player 2) ----------
 const fxVal=(c,w,role)=>c.fx.reduce((t,f)=>(f.tag&&!hasT(w,f.tag))?t:t+(f.k===role||f.k==='both'||f.k==='win'||(f.k==='perPower'&&f.s===role)?f.n:0),0);
 function aiStep(){
- if(!AI[G.cur])return;
+ if(BKI||!AI[G.cur])return;
  G.aiFx=null;
  const p=me();
  if(G.ph==='efed'){const o=p.opts.map((e,i)=>[e.cash+e.hyp*2+e.fx.length*3,i]).sort((a,b)=>b[0]-a[0]);return pickEfed(o[0][1]);}
