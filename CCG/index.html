@@ -244,6 +244,10 @@ body.artonly .c:has(.im img) .im{position:absolute;inset:0}
 @keyframes bksm{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes bkln{from{width:0;opacity:0}to{width:min(70vw,560px);opacity:1}}
 @keyframes bkout{to{opacity:0}}
+.vpfx{position:fixed;z-index:9999;pointer-events:none;display:flex;align-items:center;gap:.12em;font:800 clamp(40px,7vw,56px)/1 'Big Shoulders Display',Impact,sans-serif;color:#ffe08a;-webkit-text-stroke:2px #3a2500;paint-order:stroke fill;text-shadow:0 0 16px #f0a81ecc,0 3px 6px #000;opacity:0;white-space:nowrap}
+.vpfx svg{width:.85em;height:.85em;fill:none;stroke:#ffe08a;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 2px 3px #000)}
+.vpfx img{height:.9em;width:auto;filter:drop-shadow(0 2px 3px #000)}
+.arena:has(.spw:not(.ph)) .side .tot{margin-top:calc(var(--cw)*.225 + 12px)}
 .mfx{position:fixed;z-index:9999;pointer-events:none;display:flex;align-items:center;gap:4px;font:800 26px 'Big Shoulders Display',Impact,sans-serif;color:#9fd0ff;text-shadow:0 0 12px #3b8fe0cc,0 2px 4px #000;transform:translate(-50%,-50%);opacity:0;animation:mfx 1.5s ease-in-out forwards}
 .mfx svg{width:24px;height:24px;fill:#2a5b8f;stroke:#cfe8ff;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 @keyframes mfx{0%{opacity:0;transform:translate(-50%,-30%) scale(.7)}22%{opacity:1;transform:translate(-50%,-70%) scale(1.15)}60%{opacity:1;transform:translate(-50%,-90%) scale(1)}100%{opacity:0;transform:translate(-50%,-130%) scale(1)}}
@@ -1280,7 +1284,8 @@ function pickEfed(i){const p=me(),e=p.opts[i];p.efed=e;p.cash+=e.cash;p.tok+=(+e
  if(G.cur<G.pl.length-1){G.cur++;G.ready=false;ui();}else startDraft();}
 
 // ---------- DRAFT ----------
-function startDraft(){
+function startDraft(){phaseIntro('DRAFT PHASE','Show '+G.round,startDraft0)}
+function startDraft0(){
  G.s0=G.pl.map(snapP); // the show starts here: the summary compares against this
  if(G.wd.length<10){G.wd.push(...sh(G.disc.filter(c=>c.atk)));G.disc=G.disc.filter(c=>!c.atk);}
  G.pool=G.wd.splice(0,10);
@@ -1296,22 +1301,31 @@ function autoDone(){
  if(me().done){const o=nextOpen(G.cur,'done');if(o>=0&&o!==G.cur){G.cur=o;G.ready=false}}
  ui();
 }
-let BKI=0; // 1 while the BOOKING PHASE title is on screen
-function bookingIntro(){ // draft over: a BOOKING PHASE title holds for about 2 seconds, then the show starts
+let BKI=0; // 1 while a phase title (DRAFT / BOOKING / RESOLUTION PHASE) is on screen
+function phaseIntro(title,small,next,fresh){ // a title holds for about 2 seconds, then next() runs
  if(BKI)return;
  const g=G;
- if(ANIM_SPEED===0||matchMedia('(prefers-reduced-motion:reduce)').matches)return startShow();
- BKI=1;if(G.ready)ui();
+ if(ANIM_SPEED===0||matchMedia('(prefers-reduced-motion:reduce)').matches)return next();
+ BKI=1;if(fresh&&G.ready)ui();
  const m=ANIM_SPEED===2?1.5:1,wait=(g.signing?750:250)*m,o=document.createElement('div');
  o.className='bkintro';o.style.setProperty('--d',wait+'ms');
- o.innerHTML='<div class="bki"><small>Draft complete</small><b>BOOKING PHASE</b><i></i></div>';
+ o.innerHTML='<div class="bki"><small>'+small+'</small><b>'+title+'</b><i></i></div>';
  document.body.append(o);
- setTimeout(()=>{BKI=0;if(G===g)startShow();o.classList.add('out');setTimeout(()=>o.remove(),450)},wait+2000*m);
+ setTimeout(()=>{BKI=0;if(G===g)next();o.classList.add('out');setTimeout(()=>o.remove(),450)},wait+2000*m);
 }
+function bookingIntro(){return phaseIntro('BOOKING PHASE','Draft complete',startShow,1)} // draft over: the title, then the show starts
 function draft(i){const p=me(),c=G.pool.splice(i,1)[0];p.cash-=c.cost;p.vp+=+c.vp||0;p.signed.push(c);p.hand.push(c);p.picks++;(p.rp=p.rp||[]).push(c);nextDraft();}
 function buyPw(i){const p=me(),c=G.pshop[i];if(!c||prc(c,p)>p.cash)return;G.pshop.splice(i,1);p.cash-=prc(c,p);p.pw.push(c);p.picks++;(p.bp=p.bp||[]).push(c);nextDraft();} // paid now, free to play later
 const canStop=p=>G.round>1||(p.rp||[]).length>0||!G.pool.some(c=>c.cost<=p.cash); // the first draft needs at least one wrestler
 function stopDraft(){if(G.signing||!canStop(me()))return;me().done=true;nextDraft();}
+function vpPop(n,x,y){ // the +N VP that pops over a wrestler you just signed: pops in, floats up, fades
+ const o=document.createElement('div'),im=(DB.tk||{}).vp;
+ o.className='vpfx';o.style.left=x+'px';o.style.top=y+'px';
+ o.innerHTML='<b>+'+n+'</b>'+(im?'<img src="'+im+'" alt="VP">':IC.vp);
+ document.body.append(o);
+ const T='translate(-50%,-50%)',a=o.animate([{opacity:0,transform:T+' scale(.4)'},{opacity:1,transform:T+' scale(1.2)',offset:.18},{opacity:1,transform:T+' scale(1)',offset:.3},{opacity:1,transform:'translate(-50%,-95%) scale(1)',offset:.72},{opacity:0,transform:'translate(-50%,-150%) scale(1)'}],{duration:1500,easing:'ease-out',fill:'forwards'});
+ a.onfinish=()=>o.remove();
+}
 function signDraft(i,kind){ // human picks only: the card zooms to the middle, holds, then flies into its spot in your roster preview (a power card flies to your power card count)
  if(G.signing)return;
  const pw=kind==='p',buy=()=>pw?buyPw(i):draft(i);
@@ -1323,6 +1337,7 @@ function signDraft(i,kind){ // human picks only: the card zooms to the middle, h
  const cx=r.left+r.width/2,cy=r.top+r.height/2,S=Math.min(2.8,innerHeight*.72/r.height,innerWidth*.86/r.width),
   mid=`translate(${innerWidth/2-cx}px,${innerHeight/2-cy}px) scale(${S})`,end=()=>{k.remove();bd.remove();g.signing=false};
  w.style.visibility='hidden';document.body.append(bd,k);
+ {const vp=pw?0:+(g.pool[i]&&g.pool[i].vp)||0;if(vp>0)setTimeout(()=>{if(G===g)vpPop(vp,innerWidth/2,Math.min(innerHeight-60,innerHeight/2+r.height*S/2))},650)} // wrestlers only (a power card gives no VP): +N VP at the bottom edge of the zoomed card
  bd.animate([{opacity:0},{opacity:1}],{duration:350,fill:'forwards'});
  k.animate([{transform:'none'},{transform:mid}],{duration:450,easing:'cubic-bezier(.2,.8,.2,1)',fill:'forwards'});
  setTimeout(()=>{
@@ -1489,9 +1504,11 @@ function resolveOne(i,pre=[]){
  r.lines.unshift(...pre);
  delete s.atk.fired;delete s.def.fired;done(s.atk);done(s.def);return r;
 }
-function resolve(){
- G.s1=G.pl.map(snapP);G.hold=G.s1;G.gained=false;G.mres=[];G.sumDone=false;G.trs=[]; // results start: cash and power cards are compared from here
- G.ph='resolve';G.rq=G.slots.map((x,i)=>(x.atk||x.def)?i:-1).filter(i=>i>=0);G.rn=0;G.res=null;G.sum=[];G.story=[];G.eos=[];G.fin=false;ui();
+function resolve(){ // booking is over: the RESOLUTION PHASE title, then straight into the first match (no page in between)
+ phaseIntro('RESOLUTION PHASE','Booking complete',()=>{
+  G.s1=G.pl.map(snapP);G.hold=G.s1;G.gained=false;G.mres=[];G.sumDone=false;G.trs=[]; // results start: cash and power cards are compared from here
+  G.ph='resolve';G.rq=G.slots.map((x,i)=>(x.atk||x.def)?i:-1).filter(i=>i>=0);G.rn=0;G.res=null;G.sum=[];G.story=[];G.eos=[];G.fin=false;nextMatch();
+ });
 }
 function nextMatch(){
  if(document.querySelector('.sty'))return; // a story scene is playing
