@@ -220,16 +220,53 @@
     if (n >= 1000)    return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
     return n.toString();
   }
+  // ── GUEST VIEW: a shared video link (?play= / ?v=) is publicly viewable with limited access.
+  // Anything else still requires sign-in.
   (function() {
+    var guestOk = false;
+    try { var q = new URLSearchParams(location.search); guestOk = !!(q.get('play') || q.get('v')); } catch(e) {}
+    function deny() {
+      if (guestOk) { window.GUEST_MODE = true; document.documentElement.classList.add('guest-mode'); }
+      else window.location.replace('auth.html');
+    }
     try {
       const session = JSON.parse(localStorage.getItem('efed_session'));
-      if (!session || !session.username) {
-        window.location.replace('auth.html');
-      }
-    } catch(e) {
-      window.location.replace('auth.html');
-    }
+      if (!session || !session.username) deny();
+    } catch(e) { deny(); }
   })();
+
+  // Guest boot: open the shared video straight away (approved videos only), then load
+  // the library in the background so "Similar Videos" can populate. No hub is rendered.
+  window.guestBoot = async function() {
+    const q = new URLSearchParams(location.search);
+    const playUrl = q.get('play') || q.get('v');
+    if (!playUrl) return;
+    const mapSub = s => ({
+      url: s.url, show: s.show_name || '', efed: s.efed || '', date: s.date || '',
+      dateMs: s.date_ms || (s.date ? new Date(s.date).getTime() : 0) || 0,
+      submittedAt: s.submitted_at || 0, submittedBy: s.submitted_by || '',
+      displayName: s.submitted_by || '', community: true, status: 'approved',
+      thumb: s.thumb_url || null, submission_type: s.submission_type, tags: safeParseTagsJson(s.tags)
+    });
+    let v = videos.find(x => x.url === playUrl) || null;
+    if (!v) {
+      try {
+        let rows = [];
+        try { rows = await sbGet('submissions', 'url=eq.' + encodeURIComponent(playUrl) + '&status=eq.approved&limit=1'); } catch(e) {}
+        if (!rows.length) { try { rows = await sbGet('submissions', 'url=eq.' + playUrl + '&status=eq.approved&limit=1'); } catch(e) {} }
+        if (rows.length) { v = mapSub(rows[0]); videos.push(v); }
+      } catch(e) { console.warn('[guest] lookup failed', e); }
+    }
+    if (!v) { window.location.replace('auth.html'); return; }
+    for (let i = 0; i < 100 && typeof openExpand !== 'function'; i++) await new Promise(r => setTimeout(r, 50));
+    openExpand(v);
+    try {
+      const subs = await sbGet('submissions', 'status=eq.approved&order=submitted_at.desc&select=url,show_name,efed,date,date_ms,submitted_at,submitted_by,thumb_url,tags&limit=300');
+      const have = new Set(videos.map(x => extractId(x.url)).filter(Boolean));
+      subs.forEach(s => { const id = extractId(s.url); if (id && have.has(id)) return; videos.push(mapSub(s)); });
+      if (_expandVideo && typeof renderRecommended === 'function') renderRecommended(_expandVideo);
+    } catch(e) { console.warn('[guest] library load failed', e); }
+  };
 
   function submitDisabledToast() {
     const existing = document.getElementById('submit-disabled-toast');
@@ -8519,6 +8556,7 @@ let _heroLastIdx = -1; // track previous slide to prevent back-to-back repeats
 setTimeout(()=>{ if(typeof loadVerifiedUsers==="function") loadVerifiedUsers(); }, 1000);
 // Fast-path: if ?play= param exists, open video immediately + load hub in background
 (async function() {
+  if (window.GUEST_MODE) { await window.guestBoot(); return; }
   const _playUrl = new URLSearchParams(window.location.search).get('play');
   if (_playUrl) {
     history.replaceState(null, '', window.location.pathname);
@@ -19843,5 +19881,191 @@ async function toggleShortBookmark(btn) {
   } catch(e) { console.warn('Short bookmark failed', e); }
 }
 </script>
+
+<!-- ═══════════════ GUEST VIEW LAYER (public video page, limited access) ═══════════════ -->
+<script>
+(function() {
+  if (!window.GUEST_MODE) return;
+  document.body.classList.add('guest-mode');
+
+  // ── Styles ──
+  const st = document.createElement('style');
+  st.textContent = `
+    /* hide everything except nav + the video overlay */
+    html.guest-mode body > *:not(nav):not(#card-expand):not(#guest-modal):not(script):not(style) { display:none !important; }
+    html.guest-mode #nav-search-wrap, html.guest-mode #nav-mail-btn, html.guest-mode #bnav-notif-top,
+    html.guest-mode #nav-user-wrap, html.guest-mode #nav-invite-btn, html.guest-mode #online-counter { display:none !important; }
+    /* locked buttons look disabled */
+    html.guest-mode #expand-rate-btn, html.guest-mode #expand-appear-btn, html.guest-mode #expand-bookmark-btn,
+    html.guest-mode #expand-tag-btn, html.guest-mode #expand-repost-btn, html.guest-mode #expand-flag-btn {
+      opacity:.35 !important; filter:grayscale(1); cursor:not-allowed !important;
+    }
+    html.guest-mode #expand-tag-btn { display:flex !important; }
+    /* comments: no input, replaced by read-only box */
+    html.guest-mode #expand-comment-wrap, html.guest-mode #expand-comment-login-msg { display:none !important; }
+    #guest-comments-box { display:flex; align-items:center; gap:10px; margin-top:6px; padding:14px 16px; border-radius:12px;
+      background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.09); color:rgba(255,255,255,.55);
+      font-family:'DM Sans',sans-serif; font-size:.82rem; font-weight:500; cursor:pointer; user-select:none; }
+    #guest-comments-box:hover { border-color:rgba(200,168,75,.4); color:rgba(255,255,255,.75); }
+    #guest-comments-box svg { flex-shrink:0; opacity:.7; }
+    /* nav: guest badge + sign in */
+    #guest-nav { display:flex; align-items:center; gap:10px; margin-left:auto; }
+    .guest-pill { font-family:'DM Sans',sans-serif; font-size:.64rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
+      color:rgba(255,255,255,.6); padding:5px 10px; border:1px solid rgba(255,255,255,.14); border-radius:20px; white-space:nowrap; }
+    .guest-signin-btn { font-family:'DM Sans',sans-serif; font-size:.78rem; font-weight:700; letter-spacing:.5px; color:#fff !important;
+      background:#c0000e; padding:8px 16px; border-radius:20px; text-decoration:none; white-space:nowrap; }
+    .guest-signin-btn:hover { background:#d9101f; }
+    @media (max-width:480px) { .guest-pill { display:none; } }
+    /* sign-in popup */
+    #guest-modal { display:none; position:fixed; inset:0; z-index:2147483000; background:rgba(0,0,0,.75); backdrop-filter:blur(8px); align-items:center; justify-content:center; }
+    #guest-modal.open { display:flex; }
+    #guest-modal-card { background:#111115; border:1px solid rgba(255,255,255,.1); border-radius:16px; width:90%; max-width:360px;
+      padding:28px 24px; box-shadow:0 24px 60px rgba(0,0,0,.6); text-align:center; }
+    #guest-modal-title { font-family:'Bebas Neue',sans-serif; font-size:1.4rem; letter-spacing:2px; color:#fff; margin-bottom:8px; }
+    #guest-modal-msg { font-family:'DM Sans',sans-serif; font-size:.85rem; color:rgba(255,255,255,.6); line-height:1.5; margin-bottom:20px; }
+    #guest-modal-signin { display:block; width:100%; box-sizing:border-box; padding:12px; background:#c0000e; color:#fff; border:none; border-radius:10px;
+      font-family:'DM Sans',sans-serif; font-size:.9rem; font-weight:700; cursor:pointer; text-decoration:none; }
+    #guest-modal-signin:hover { background:#d9101f; }
+    #guest-modal-close { margin-top:10px; background:none; border:none; color:rgba(255,255,255,.45); font-family:'DM Sans',sans-serif; font-size:.78rem; cursor:pointer; padding:8px; }
+    #guest-modal-close:hover { color:rgba(255,255,255,.8); }
+  `;
+  document.head.appendChild(st);
+
+  // ── Top-right: Guest view + Sign In ──
+  const navRight = document.querySelector('nav .nav-right');
+  if (navRight) {
+    const g = document.createElement('div');
+    g.id = 'guest-nav';
+    g.innerHTML = '<span class="guest-pill">Guest view</span><a class="guest-signin-btn" href="auth.html">Sign In</a>';
+    navRight.insertBefore(g, navRight.firstChild);
+  }
+
+  // ── Sign-in popup ──
+  const modal = document.createElement('div');
+  modal.id = 'guest-modal';
+  modal.innerHTML = `
+    <div id="guest-modal-card">
+      <div id="guest-modal-title">Sign in to continue</div>
+      <div id="guest-modal-msg"></div>
+      <a id="guest-modal-signin" href="auth.html">Sign In / Create Account</a>
+      <button id="guest-modal-close" type="button">Not now</button>
+    </div>`;
+  document.body.appendChild(modal);
+  function closeModal() { modal.classList.remove('open'); }
+  modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+  modal.querySelector('#guest-modal-close').addEventListener('click', closeModal);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+  window.showGuestSignIn = function(what) {
+    document.getElementById('guest-modal-msg').textContent = what
+      ? 'Sign in or create a free account to ' + what + '.'
+      : 'Sign in or create a free account to keep exploring the hub.';
+    modal.classList.add('open');
+  };
+
+  // ── Intercept locked buttons + anything that would change the page ──
+  const LOCKED = {
+    'expand-rate-btn': 'rate shows',
+    'expand-appear-btn': 'mark yourself as featured in a show',
+    'expand-bookmark-btn': 'bookmark shows',
+    'expand-tag-btn': 'tag shows',
+    'expand-repost-btn': 'repost shows',
+    'expand-flag-btn': 'report a show'
+  };
+  const NAV_SEL = [
+    '.expand-rec-card', '#expand-featured-avatars a', '#expand-efed', '#expand-close-btn', '#expand-close-btn-desktop',
+    '#landscape-close-btn', '#expand-nav-prev', '#expand-nav-next', '#expand-nav-prev-mobile', '#expand-nav-next-mobile',
+    '#expand-supporters-section a', '#expand-poster a', 'nav .logo'
+  ].join(',');
+  function block(e) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); }
+  document.addEventListener('click', function(e) {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    if (t.closest('#guest-modal, #guest-nav, #expand-like-btn')) return;
+    for (const id in LOCKED) {
+      if (t.closest('#' + id)) { block(e); window.showGuestSignIn(LOCKED[id]); return; }
+    }
+    if (t.closest(NAV_SEL)) { block(e); window.showGuestSignIn(); return; }
+    const a = t.closest('a[href]');
+    if (a && a.getAttribute('href') !== '#') { block(e); window.showGuestSignIn(); }
+  }, true);
+
+  // Swipe / chevron navigation, back button, shorts, and watch tracking
+  window.navigateExpandVideo = function() { window.showGuestSignIn(); };
+  window.openShorts = function() { window.showGuestSignIn(); };
+  window.closeExpand = function(fromPopState) {
+    window.showGuestSignIn();
+    if (fromPopState && typeof _expandVideo !== 'undefined' && _expandVideo) {
+      history.pushState({ videoOpen: true, url: _expandVideo.url }, '', location.pathname + '?v=' + encodeURIComponent(_expandVideo.url));
+    }
+  };
+  window.startWatchTimer = function() {};
+  window.stopWatchTimer = function() {};
+  window.cwSave = function() {};
+
+  // ── Comments: disabled, read-only box ──
+  window.loadExpandComments = async function() {
+    const list = document.getElementById('expand-comments-list');
+    if (!list) return;
+    list.innerHTML = `<div id="guest-comments-box" role="note" aria-disabled="true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span>Log in for more features</span></div>`;
+    document.getElementById('guest-comments-box').addEventListener('click', () => window.showGuestSignIn('join the conversation'));
+  };
+
+  // ── Likes: guests can like (stored under a per-browser guest id) ──
+  function guestId() {
+    let id = null;
+    try { id = localStorage.getItem('efed_guest_id'); } catch(e) {}
+    if (!id) {
+      id = 'guest_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+      try { localStorage.setItem('efed_guest_id', id); } catch(e) {}
+    }
+    return id;
+  }
+  function localLikes() { try { return JSON.parse(localStorage.getItem('efed_guest_likes') || '[]'); } catch(e) { return []; } }
+  function saveLocalLikes(a) { try { localStorage.setItem('efed_guest_likes', JSON.stringify(a)); } catch(e) {} }
+
+  window.loadExpandLikeCount = async function(url) {
+    const vid = extractId(url), me = guestId();
+    const btn = document.getElementById('expand-like-btn'), countEl = document.getElementById('expand-like-count');
+    let rows = [];
+    try { rows = await sbGet('likes', 'video_id=eq.' + encodeURIComponent(vid)); } catch(e) { console.warn('Likes load failed', e); }
+    if (_expandVideo && _expandVideo.url !== url) return; // user moved on
+    let liked = rows.some(r => r.username === me);
+    let count = rows.length;
+    if (!liked && localLikes().includes(vid)) { liked = true; count += 1; } // local-only fallback like
+    countEl.textContent = count;
+    btn.classList.toggle('liked', liked);
+  };
+
+  let likeBusy = false;
+  window.toggleExpandLike = async function() {
+    if (!_expandVideo || likeBusy) return;
+    likeBusy = true;
+    const url = _expandVideo.url, vid = extractId(url), me = guestId();
+    const btn = document.getElementById('expand-like-btn'), countEl = document.getElementById('expand-like-count');
+    const wasLiked = btn.classList.contains('liked');
+    // optimistic UI
+    btn.classList.toggle('liked', !wasLiked);
+    countEl.textContent = Math.max(0, (parseInt(countEl.textContent) || 0) + (wasLiked ? -1 : 1));
+    try {
+      if (wasLiked) {
+        await sbDelete('likes', 'video_id=eq.' + encodeURIComponent(vid) + '&username=eq.' + encodeURIComponent(me));
+        saveLocalLikes(localLikes().filter(x => x !== vid));
+      } else {
+        await sbInsert('likes', { video_url: url, video_id: vid, username: me, liked_at: Date.now() });
+      }
+    } catch(e) {
+      // Database refused the guest row — keep the like on this device only.
+      console.warn('Guest like saved locally only', e);
+      const l = localLikes().filter(x => x !== vid);
+      if (!wasLiked) l.push(vid);
+      saveLocalLikes(l);
+    }
+    likeBusy = false;
+  };
+})();
+</script>
+
 </body>
 </html>
