@@ -261,10 +261,44 @@
     for (let i = 0; i < 100 && typeof openExpand !== 'function'; i++) await new Promise(r => setTimeout(r, 50));
     openExpand(v);
     try {
-      const subs = await sbGet('submissions', 'status=eq.approved&order=submitted_at.desc&select=url,show_name,efed,date,date_ms,submitted_at,submitted_by,thumb_url,tags&limit=300');
+      // Same full, paginated load the hub uses, so Similar Videos has the whole catalog to match against.
+      let subs = [], offset = 0;
+      const PAGE = 1000;
+      while (true) {
+        let page = null;
+        for (let t = 0; t < 3 && page === null; t++) {
+          try { page = await sbGet('submissions', 'status=eq.approved&order=submitted_at.desc&select=url,show_name,efed,date,date_ms,submitted_at,submitted_by,thumb_url,tags,submission_type&limit=' + PAGE + '&offset=' + offset); }
+          catch(e) { await new Promise(r => setTimeout(r, 400)); }
+        }
+        if (page === null) break;
+        subs = subs.concat(page);
+        if (page.length < PAGE) break;
+        offset += PAGE;
+      }
+      const byUrl = new Map(videos.map(x => [x.url, x]));
       const have = new Set(videos.map(x => extractId(x.url)).filter(Boolean));
-      subs.forEach(s => { const id = extractId(s.url); if (id && have.has(id)) return; videos.push(mapSub(s)); });
-      if (_expandVideo && typeof renderRecommended === 'function') renderRecommended(_expandVideo);
+      subs.forEach(s => {
+        const existing = byUrl.get(s.url);
+        if (existing) {
+          // Built-in videos carry no tags locally — pull them from the database (never overwrite with empty).
+          const tg = safeParseTagsJson(s.tags);
+          if (tg.length) existing.tags = tg;
+          if (s.submission_type) existing.submission_type = s.submission_type;
+          return;
+        }
+        const id = extractId(s.url);
+        if (id && have.has(id)) return;
+        videos.push(mapSub(s));
+      });
+      // The opened video may have arrived before its tags did — refresh tags + Similar Videos.
+      if (_expandVideo) {
+        const fresh = videos.find(x => x.url === _expandVideo.url);
+        if (fresh && fresh.tags && fresh.tags.length) {
+          _expandVideo.tags = fresh.tags;
+          if (typeof renderExpandTags === 'function') renderExpandTags(fresh.tags);
+        }
+        if (typeof renderRecommended === 'function') renderRecommended(_expandVideo);
+      }
     } catch(e) { console.warn('[guest] library load failed', e); }
   };
 
