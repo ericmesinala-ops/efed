@@ -250,6 +250,7 @@ body.artonly .c:has(.im img) .im{position:absolute;inset:0}
 .bki{position:relative;text-align:center;font-family:'Big Shoulders Display',Impact,sans-serif;text-transform:uppercase}
 .bki small{display:block;letter-spacing:.5em;font-size:clamp(12px,3vw,18px);color:var(--mute);margin-bottom:6px;animation:bksm .5s ease calc(var(--d,0s) + .15s) both}
 .bki b{display:block;font-weight:900;font-size:clamp(44px,13vw,120px);line-height:1;color:var(--ink);text-shadow:0 0 28px var(--acc),0 4px 10px #000;animation:bkin .7s cubic-bezier(.2,.8,.2,1) var(--d,0s) both}
+.bki span{display:block;margin-top:10px;font-weight:800;letter-spacing:.2em;font-size:clamp(22px,6vw,44px);color:var(--acc);animation:bksm .5s ease calc(var(--d,0s) + .45s) both}
 .bki i{display:block;height:3px;margin:14px auto 0;background:linear-gradient(90deg,transparent,var(--acc),transparent);animation:bkln .9s ease calc(var(--d,0s) + .25s) both}
 @keyframes bkbd{from{opacity:0}to{opacity:1}}
 @keyframes bkin{from{opacity:0;transform:scale(1.5);letter-spacing:.3em;filter:blur(8px)}to{opacity:1;transform:none;letter-spacing:.04em;filter:none}}
@@ -1159,7 +1160,7 @@ const mFx=(p,k)=>(((p&&p.efed)||{}).fx||[]).filter(f=>f.k===k); // a manager's a
 const mSum=(p,k)=>mFx(p,k).reduce((a,f)=>a+(+f.n||0),0),mHas=(p,k)=>mFx(p,k).length>0;
 const tieW=i=>mHas(G.pl[i],'tieWin'); // manager effect: this player wins every tie
 const beats=(A,D,ap,dp)=>A.v>D.v||(A.v===D.v&&tieW(ap)&&!tieW(dp)); // does the attacker win? a tie goes to the defender, unless only the attacker's manager wins ties
-const isMainE=e=>!!(G.slots&&G.slots.length)&&[G.slots[G.slots.length-1].atk,G.slots[G.slots.length-1].def].includes(e);
+const isMainE=e=>!!(G.slots&&G.slots.length)&&slEs(G.slots[G.slots.length-1]).includes(e);
 const maxPw=e=>Math.max(MAX_PW,...[...(e.c.fx||[]),...e.pw.flatMap(x=>x.fx||[]),...((G.pl[e.p].efed||{}).fx||[])].filter(f=>f.k==='pwLimit').map(f=>+f.n||0))+mFx(G.pl[e.p],'pwSlot').filter(f=>f.m!=='main'||isMainE(e)).reduce((a,f)=>a+(+f.n||0),0); // 'pwLimit' effect raises the cap for that wrestler; a manager's 'pwSlot' adds extra slots on top (all matches, or the main event only)
 // ---- finishers: each wrestler can link one Finisher card; his meter fills +1 when he steps into a match and +1 after a win; full on entering a match = the finisher fires there, then the meter resets ----
 const finOf=c=>c&&String(c.finN||'').trim()?{n:String(c.finN).trim(),atkB:+c.finA||0,defB:+c.finD||0,fx:c.finFx||[],rules:c.finRules||[],txt:''}:null; // a wrestler has a finisher once it has a name (Wrestlers › Finisher)
@@ -1198,17 +1199,35 @@ function incAdd(i,ks){const p=G.pl[i],n={};ks.forEach(k=>{if(k&&TR[k])n[k]=(n[k]
 const isWpn=c=>String(c&&c.cat||'').trim().toLowerCase()==='weapon';
 const wpnFx=c=>{if(isWpn(c))c.fx=(c.fx||[]).map(f=>f&&(f.k==='atk'||(f.k==='def'&&+f.n>0))?{...f,k:'both'}:f);return c}; // a weapon's bonus number counts as Attack AND Defense (it helps in either role); a Defense penalty (negative) stays a Defense penalty. The one place this rule lives
 const hasA=(c,a)=>((c&&c.rules)||[]).some(r=>(r.do||[]).some(x=>x&&x.a===a));
-const ownFlag=(si,pi,a)=>['atk','def'].some(r=>{const e=G.slots[si]&&G.slots[si][r];return !!e&&e.p===pi&&e.pw.some(x=>hasA(x,a))}); // you already put a Referee Down / Distract into this match (you only know your own face-down cards)
+const ownFlag=(si,pi,a)=>RK.some(r=>{const e=G.slots[si]&&G.slots[si][r];return !!e&&e.p===pi&&e.pw.some(x=>hasA(x,a))}); // you already put a Referee Down / Distract into this match (you only know your own face-down cards)
 const legalW=(si,pi)=>G.hc===si||ownFlag(si,pi,'refDown'),legalI=(si,pi)=>G.hc===si||ownFlag(si,pi,'distract');
 const injOut=c=>!!c&&c.injR===G.round; // injured: misses this show
+const TAG_FROM=3; // tag / handicap matches (a partner on either side) are open from this show on
+const RK=['atk','def','atk2','def2'],rb=r=>String(r).slice(0,3); // the booking spots of a match, in flip order: lead attacker, lead defender, attacker's partner, defender's partner. rb = the role (atk / def) of a spot
+const slEs=s=>RK.map(r=>s[r]).filter(Boolean); // every wrestler booked in a match
+const sideOf=(s,e)=>e===s.atk||e===s.atk2?'a':'d'; // a = the booked attacker's side, d = the booked defender's side
+const isMulti=s=>!!(s.atk2||s.def2);
+const mkind=s=>!(s.atk&&s.def)?'':!isMulti(s)?'match':(s.atk2&&s.def2)?'tag':'handicap'; // both sides at 2 = tag, 2 vs 1 = handicap, 1 vs 1 = normal
+const sidesOf=s=>s.swap?{A:[s.def,s.def2].filter(Boolean),D:[s.atk,s.atk2].filter(Boolean)}:{A:[s.atk,s.atk2].filter(Boolean),D:[s.def,s.def2].filter(Boolean)}; // who acts as attacker / defender (roles may be switched)
+const partnerKeys=(s,p)=>G.round<TAG_FROM?[]:['atk','def'].filter(r=>s[r]&&s[r].p===p&&!s[r+'2']).map(r=>r+'2'); // a side can only add its own partner, one per side
+function teamCalc(es,role){ // a side's Attack / Defense: one wrestler as is; two = the average of both, halves kept (no rounding). Each one's own win payout still counts
+ const cs=es.map(e=>calc(e,role));if(cs.length<2)return cs[0];
+ const v=(cs[0].v+cs[1].v)/2,R=role==='atk'?'Attack':'Defense';
+ return{v,win:cs[0].win+cs[1].win,parts:cs,
+  st:[...cs[0].st,...cs[1].st,{t:`Team ${R}: (${cs[0].v} + ${cs[1].v}) / 2`,n:0,run:v}],
+  ws:[...cs[0].ws.map(x=>({...x,t:es[0].c.n+': '+x.t})),...cs[1].ws.map(x=>({...x,t:es[1].c.n+': '+x.t}))],
+  cards:{...cs[0].cards,...cs[1].cards}}}
+const tagR=(s,sd)=>({tg:mkind(s),ac2:sd.A[1]?cl(sd.A[1].c):null,dc2:sd.D[1]?cl(sd.D[1].c):null,apw2:sd.A[1]?sd.A[1].pw.map(x=>x.n):[],dpw2:sd.D[1]?sd.D[1].pw.map(x=>x.n):[],afin2:(sd.A[1]&&sd.A[1].fired)||'',dfin2:(sd.D[1]&&sd.D[1].fired)||''}); // the partners' side of a result
 const MAIN_VP=1; // the winner of the Main Event (last match slot) gains this many VP
 const DEFCH_VP=1; // the defending champion booked in the Main Event gains this many VP, win or lose
-const titleUp=(s,main)=>!!(s.atk.c.champ||s.def.c.champ||(main&&!G.pl.some(q=>ownedW(q).some(c=>c.champ)))); // the title is on the line: the champion is in this match, or it is vacant (first show, or the champion was stripped) and this is the main event. A DQ never moves it
+const titleUp=(s,main)=>!isMulti(s)&&!!(s.atk.c.champ||s.def.c.champ||(main&&!G.pl.some(q=>ownedW(q).some(c=>c.champ)))); // the title is on the line: the champion is in this match, or it is vacant (first show, or the champion was stripped) and this is the main event. A DQ never moves it
 const PSHOP=6; // power cards for sale in each draft
 const prc=(c,p)=>{const b=Math.max(1,Math.floor(+c.pcost)||0);return p?Math.max(0,b-mSum(p,'pwCost')):b}; // draft price of a power card (unpriced = $1); p = the buyer: manager 'pwCost' discounts stack and can make a card free; no p = the printed price // a power card's price in the draft (paid once; playing it later is free). No price set = $1
 const fxSum=(c,k)=>((c&&c.fx)||[]).filter(f=>f.k===k).reduce((t,f)=>t+(+f.n||0),0); // total of one passive effect on a card
 const TRN=2,trP=(c,k)=>{const v=+c[k]||0,b=v<=6?4:v<=8?6:8;return Math.max(1,b-fxSum(c,'trCost'))}; // training: +2, priced by how high that stat already is; a 'trCost' effect makes it cheaper (never below $1)
-const SLOTS=[3,3,4,4,5,5,6,8]; // matches per show
+const SLOTS=[3,4,5,6,6,7,8,8]; // matches per show
+const PLE={4:{cash:3},8:{vp:2}}; // Premium Live Events: every match win that show pays this bonus (Show 8 is VP: money no longer matters)
+const pleTxt=x=>x.vp?'+'+x.vp+' VP per win':'+$'+x.cash+' per win',pleLn=x=>'Premium Live Event win '+(x.vp?'+'+x.vp+' VP':'+$'+x.cash);
 const HV=1, MAXR=8; // cash value of one hype token; number of shows
 const sh=a=>a.map(x=>[Math.random(),x]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
 const cl=o=>JSON.parse(JSON.stringify(o));
@@ -1293,7 +1312,7 @@ function rulesPop(force){let off=false;try{off=localStorage.getItem(RULES_LS)===
  sec(1,'Manager',li(['Select your Manager. It will show you your starting cash, hype tokens and Special Ability for the game.'])),
  sec(2,'Draft',li(['Take turns selecting 1 Wrestler Card or 1 power card. Pay the Signing Cost of a Wrestler Card or the Cost of a power card when selected. When you sign a Wrestler Card, immediately gain its VP.','During the first Draft, you must sign at least 1 Wrestler Card. When you are finished drafting, press Stop drafting.','<b>No hand limit:</b> you may hold any number of Wrestler Cards and power cards.'])),
  sec(3,'Turn order',li(['Players take turns performing one action. The available actions are <b>Book</b>, <b>Attach</b> and <b>Train</b>.','<b>Book:</b> Book a Wrestler Card face up in an empty Match Slot to make that wrestler the <b>Attacker</b>, or Book it in a Match Slot containing your opponent\'s Wrestler Card to make your wrestler the <b>Defender</b>. Gain all covered rewards: the Attacker earns $'+INCV+' of that match\'s income ('+incB('rat')+' '+incB('fan')+' '+incB('spo')+') plus $'+INCV+' of his own Win Track\'s income, the Defender gets 1 hype token plus $'+INCV+' of his own Win Track\'s income.','<b>Attach:</b> Place a power card face down on a booked Wrestler Card. Up to '+MAX_PW+' power cards may be attached to each Wrestler Card. You may also attach a Wrestler Card face down. This is called <b>Interference</b>. The interfering Wrestler earns $'+INCV+' of his own Win Track\'s income. Only 1 Wrestler Card may be attached as Interference, except during the Main Event. When an Interference Wrestler Card is revealed, use half of its Attack, rounded down, if it is attached to the Attacker. If it is attached to the Defender, use half of its Defense, rounded down.','<b>Train:</b> Instead of Booking or Attaching, you may Train an unbooked Wrestler Card by paying the required cost and choosing either Attack or Defense (+'+TRN+'). Each Wrestler Card may be Trained only once.'])),
- sec(4,'Matches',li(['<b>Attack vs Defense:</b> the Attacker uses its Attack value and modifiers and compares it to the Defender\'s Defense value and modifiers. The higher number wins. A tie goes to the Defender.'])+'<p class="rwh">Reward <small>(the winner gets all of these)</small></p>'+li(['<b>Win Payout:</b> Gain the Wrestler\u2019s Win Payout in Cash, plus any bonuses.','<b>Hype:</b> Each Hype Token on Wrestler Cards in the match is converted into $'+HV+' and awarded to the winner.','<b>Win Track:</b> Advance the winner +1 on their Ratings, Fanbase, or Sponsors track, up to 10.','<b>Main Event:</b> The winner of the Main Event (the last Match Slot) gains +'+MAIN_VP+' VP.','<b>Defending Champion:</b> If the Champion is booked in the Main Event, he gains +'+DEFCH_VP+' VP, win or lose.','<b>Championship:</b> In a Championship Match, the winner takes the Championship Token and gains +3 VP.','<b>Elite:</b> Fill 2 Elite segments for the winner: 1 for being booked and 1 for winning. The loser fills 1 Elite segment for being booked. At Elite \u2605\u2605, a win also awards +1 VP. At Elite \u2605\u2605\u2605, a win instead awards +2 VP.','<b>Finisher:</b> If the winner used their Finisher, gain +1 VP and fill 1 additional Elite segment.','<b>Abilities:</b> Power Cards, Wrestler Cards, and Managers may provide additional rewards for winning.'])+li(['If an Attacker has no opponent, they cut a <b>Promo</b>: gain their '+iw('promo','Promo')+' payout, place your hype tokens on that Wrestler, and draw 1 power card.','Weapons and Interference cause an immediate <b>DQ</b>, awarding the win to the opposing Wrestler, unless a card that allows Weapons or Interference was played earlier in the Resolution Order.','<b>Resolution Order:</b> Resolve the Attacker\'s first power card, then the Defender\'s first power card, alternating back and forth until one player has no attached power cards remaining.'])),
+ sec(4,'Matches',li(['<b>Attack vs Defense:</b> the Attacker uses its Attack value and modifiers and compares it to the Defender\'s Defense value and modifiers. The higher number wins. A tie goes to the Defender.'])+'<p class="rwh">Reward <small>(the winner gets all of these)</small></p>'+li(['<b>Win Payout:</b> Gain the Wrestler\u2019s Win Payout in Cash, plus any bonuses.','<b>Hype:</b> Each Hype Token on Wrestler Cards in the match is converted into $'+HV+' and awarded to the winner.','<b>Win Track:</b> Advance the winner +1 on their Ratings, Fanbase, or Sponsors track, up to 10.','<b>Main Event:</b> The winner of the Main Event (the last Match Slot) gains +'+MAIN_VP+' VP.','<b>Champion in the Main Event:</b> If the Champion is booked in the Main Event, as Attacker or Defender, he gains +'+DEFCH_VP+' VP, win or lose.','<b>Premium Live Event:</b> Shows 4 and 8 are Premium Live Events. Show 4: every match winner gains +$'+PLE[4].cash+'. Show 8: every match winner gains +'+PLE[8].vp+' VP.','<b>Championship:</b> In a Championship Match, the winner takes the Championship Token and gains +3 VP.','<b>Elite:</b> Fill 2 Elite segments for the winner: 1 for being booked and 1 for winning. The loser fills 1 Elite segment for being booked. At Elite \u2605\u2605, a win also awards +1 VP. At Elite \u2605\u2605\u2605, a win instead awards +2 VP.','<b>Finisher:</b> If the winner used their Finisher, gain +1 VP and fill 1 additional Elite segment.','<b>Abilities:</b> Power Cards, Wrestler Cards, and Managers may provide additional rewards for winning.'])+li(['If an Attacker has no opponent, they cut a <b>Promo</b>: gain their '+iw('promo','Promo')+' payout, place your hype tokens on that Wrestler, and draw 1 power card.','Weapons and Interference cause an immediate <b>DQ</b>, awarding the win to the opposing Wrestler, unless a card that allows Weapons or Interference was played earlier in the Resolution Order.','<b>Resolution Order:</b> Resolve the Attacker\'s first power card, then the Defender\'s first power card, alternating back and forth until one player has no attached power cards remaining.'])),
  sec(5,'Tokens',tok('hype','Hype token',['Hype tokens accumulate on your dashboard throughout the game.','When one of your Wrestlers cuts a Promo, move all hype tokens from your dashboard onto that Wrestler Card. The next time that Wrestler competes, the winner of the match claims all hype tokens on that card and immediately converts them to Cash ($'+HV+' each). Hype tokens are removed from the card afterward.','If a Wrestler with hype tokens is not booked for a show, 1 hype token is removed from that Wrestler. Using the Wrestler to Train or Interfere does not count as being booked, so they still lose 1 hype token.'])+tok('inj','Injury token',['A Wrestler with an Injury Token cannot compete in the next show. The Injury Token is removed after that show. If the Champion receives an Injury Token, they immediately lose the Championship Token and the title becomes vacant.'])+tok('champ','Championship token',['The winner of a Championship Match receives the Championship Token and places it on their Wrestler Card. The Main Event of Show 1 is the first Championship Match. Whenever the Championship becomes vacant, the Main Event of that show becomes a Championship Match.','A Wrestler with the Championship Token is the Champion and must defend the title whenever they compete. The winner of that match takes the Championship Token and becomes the new Champion (+3 VP). If the Champion is not booked for 2 consecutive shows, the Championship is vacated.'])),
  sec(6,'Finishers &amp; Elite',li(['<b>Finishers:</b> Each Wrestler Card has a Finisher Meter with 3 segments. Fill 1 segment for each card attached to that Wrestler. When all 3 segments are filled, the Wrestler may use their Finisher for its bonus (shown on the card): an Attack bonus as the Attacker, a Defense bonus as the Defender. After the Finisher is used, reset the Finisher Meter to 0. Unused segments carry over to the Wrestler\'s next match.','<b>Elite:</b> Each Wrestler Card also has an Elite Meter with '+ELM+' segments. Fill 1 segment each time that Wrestler is booked, 1 additional segment if they win the match, and 1 additional segment if they use their Finisher. When all '+ELM+' segments are filled, the Wrestler gains 1 Elite Star and the Elite Meter starts over. Fill the meter again to reach Elite 2, then Elite 3.','Each Elite level grants additional bonuses: ★ / ★★ / ★★★ give +1 / +2 / +3 Attack, Defense, '+iw('promo','promo $')+' and '+iw('win','win $')+'; ★★ also earns +1 VP per win and ★★★ +2.'])),
  sec(7,'End game',li(['The game ends after Show '+MAXR+'. Add all VP earned from your Wrestler Cards. The player leading each Win Track ('+trI('rat')+'Ratings, '+trI('fan')+'Fanbase, '+trI('spo')+'Sponsors) gains +'+WIN_BONUS+' VP; tied Win Tracks award no VP. The player with the highest total VP wins. If tied, the player with the most hype tokens (placed and unplaced) wins.','Money: every match pays one kind of income: match 1 '+incB('rat')+', match 2 '+incB('fan')+', match 3 '+incB('spo')+', then it repeats. The Attacker you book (or a wrestler you send in to interfere) earns $'+INCV+' of it, paid at the end of the show.']))].join('');
@@ -1341,18 +1360,18 @@ function autoDone(){
  ui();
 }
 let BKI=0; // 1 while a phase title (DRAFT / BOOKING / RESOLUTION PHASE) is on screen
-function phaseIntro(title,small,next,fresh){ // a title holds for about 2 seconds, then next() runs
+function phaseIntro(title,small,next,fresh,sub){ // a title holds for about 2 seconds, then next() runs
  if(BKI)return;
  const g=G;
  if(ANIM_SPEED===0||matchMedia('(prefers-reduced-motion:reduce)').matches)return next();
  BKI=1;if(fresh&&G.ready)ui();
  const m=ANIM_SPEED===2?1.5:1,wait=(g.signing?750:250)*m,o=document.createElement('div');
  o.className='bkintro';o.style.setProperty('--d',wait+'ms');
- o.innerHTML='<div class="bki"><small>'+small+'</small><b>'+title+'</b><i></i></div>';
+ o.innerHTML='<div class="bki"><small>'+small+'</small><b>'+title+'</b>'+(sub?'<span>'+sub+'</span>':'')+'<i></i></div>';
  document.body.append(o);
  setTimeout(()=>{BKI=0;if(G===g)next();o.classList.add('out');setTimeout(()=>o.remove(),450)},wait+2000*m);
 }
-function bookingIntro(){return phaseIntro('BOOKING PHASE','Draft complete',startShow,1)} // draft over: the title, then the show starts
+function bookingIntro(){const x=PLE[G.round],bk=()=>phaseIntro('BOOKING PHASE','Draft complete',startShow,1);return x?phaseIntro('PREMIUM LIVE EVENT','Show '+G.round,bk,1,pleTxt(x)):bk()} // draft over: the title, then the show starts
 function draft(i){const p=me(),c=G.pool.splice(i,1)[0];p.cash-=c.cost;p.vp+=+c.vp||0;p.signed.push(c);p.hand.push(c);p.picks++;(p.rp=p.rp||[]).push(c);nextDraft();}
 function buyPw(i){const p=me(),c=G.pshop[i];if(!c||prc(c,p)>p.cash)return;G.pshop.splice(i,1);p.cash-=prc(c,p);p.pw.push(c);p.picks++;(p.bp=p.bp||[]).push(c);nextDraft();} // paid now, free to play later
 const canStop=p=>G.round>1||(p.rp||[]).length>0||!G.pool.some(c=>c.cost<=p.cash); // the first draft needs at least one wrestler
@@ -1432,34 +1451,34 @@ function endTurn(){
  ui();
 }
 let HYPE_FX=[]; // queued hype-token flights: {i: player, from: screen rect of the slot's token}
-function play(si){ // book a wrestler: an empty match = he attacks; an open opposing attacker = he defends (and takes that spot's hype token)
- const p=me(),c=p.hand[G.sel.i],s=G.slots[si],role=s.atk?'def':'atk';
- if(!c||c.trn||injOut(c))return;
+function play(si,pk){ // book a wrestler: an empty match = he attacks; an open opposing attacker = he defends (and takes that spot's hype token)
+ const p=me(),c=p.hand[G.sel.i],s=G.slots[si],role=pk?rb(pk):s.atk?'def':'atk';
+ if(!c||c.trn||injOut(c)||(pk&&!partnerKeys(s,G.cur).includes(pk)))return; // pk: book him as the partner of your own side
  let from=null;if(role==='def'){const t=document.querySelector('#app .slot[data-si="'+si+'"] .htk');if(t)from=t.getBoundingClientRect()}
  p.hand.splice(G.sel.i,1);c.bk=G.round; // last show he was booked (hype decay / champion inactivity)
- s[role]={p:G.cur,c,pw:[]};p.last=s[role];G.aiFx=AI[G.cur]?{si,r:role,k:'w',n:c.n}:null; // the opponent's move is replayed on the board (see aiHold)
+ const key=pk||role;s[key]={p:G.cur,c,pw:[]};p.last=s[key];G.aiFx=AI[G.cur]?{si,r:role,k:'w',n:c.n}:null; // the opponent's move is replayed on the board (see aiHold)
  c.fx.forEach(f=>{if(f.k==='draw'&&(!f.tag||hasT(c,f.tag)))drawP(p,f.n)});
  if(c.champ&&si===G.slots.length-1)p.tok++;
- if(role==='def'){p.tok++;HYPE_FX.push({i:G.cur,from})}
- incAdd(G.cur,role==='atk'?[slotInc(si),c.tr]:[c.tr]); // the attacker spot pays that match's income plus his own win track's income; the defender gets the spot's hype token plus his own win track's income
+ if(role==='def'&&!pk){p.tok++;HYPE_FX.push({i:G.cur,from})} // a partner takes no hype token and no spot income
+ incAdd(G.cur,role==='atk'&&!pk?[slotInc(si),c.tr]:[c.tr]); // the attacker spot pays that match's income plus his own win track's income; the defender gets the spot's hype token plus his own win track's income
  actFx('book',{c,on:c,role,main:si===G.slots.length-1},()=>endTurn());
 }
-const itfFree=e=>{const i=(G.slots||[]).findIndex(x=>x.atk===e||x.def===e);return i<0||i===G.slots.length-1||![G.slots[i].atk,G.slots[i].def].some(x=>x&&x.pw.some(y=>y.itf))}; // one interference per match, except the main event
+const itfFree=e=>{const i=(G.slots||[]).findIndex(x=>slEs(x).includes(e));return i<0||i===G.slots.length-1||!slEs(G.slots[i]).some(x=>x.pw.some(y=>y.itf))}; // one interference per match, except the main event
 const itfOK=(c,e)=>!!e&&!e.fake&&e.c!==c&&npw(e)<maxPw(e)&&alignOf(c)===alignOf(e.c)&&itfFree(e); // a heel only helps a heel, a face only a face
-const itfT=c=>(G.slots||[]).flatMap((sl,i)=>['atk','def'].filter(r=>sl[r]&&sl[r].p===G.cur&&itfOK(c,sl[r])).map(r=>({e:sl[r],i,r})));
-const itfB=(c,r)=>Math.floor((+(r==='atk'?c.atk:c.def)||0)/2); // half his base Attack (helping an attacker) or Defense (helping a defender), rounded down
+const itfT=c=>(G.slots||[]).flatMap((sl,i)=>RK.filter(r=>sl[r]&&sl[r].p===G.cur&&itfOK(c,sl[r])).map(r=>({e:sl[r],i,r})));
+const itfB=(c,r)=>Math.floor((+(rb(r)==='atk'?c.atk:c.def)||0)/2); // half his base Attack (helping an attacker) or Defense (helping a defender), rounded down
 function interfere(si,r){ // a wrestler from your hand goes in as a face-down card on one of your booked wrestlers; he is used up for the show but still earns his own win track's income pip
  const p=me(),i=G.sel.i,c=p.hand[i],e=G.slots[si][r];
  if(!c||c.trn||injOut(c)||!e||e.p!==G.cur||!itfOK(c,e)||!atxOK(p))return;
- atxPay(p);p.hand.splice(i,1);e.pw.push({n:c.n,cat:'Interference',itf:true,wc:c,op:G.cur,img:c.img||'',fx:[],rules:[],txt:''});fmLit(e);p.last=e;incAdd(G.cur,[c.tr]);G.aiFx=AI[G.cur]?{si,r,k:'i',n:e.c.n}:null;actFx('itf',{c,on:e.c,role:r,main:si===G.slots.length-1},()=>endTurn())}
+ atxPay(p);p.hand.splice(i,1);e.pw.push({n:c.n,cat:'Interference',itf:true,wc:c,op:G.cur,img:c.img||'',fx:[],rules:[],txt:''});fmLit(e);p.last=e;incAdd(G.cur,[c.tr]);G.aiFx=AI[G.cur]?{si,r,k:'i',n:e.c.n}:null;actFx('itf',{c,on:e.c,role:rb(r),main:si===G.slots.length-1},()=>endTurn())}
 const swLeft=p=>Math.max(0,mSum(p,'swapW')-(p.swU||0)); // manager 'swapW': swaps left this show
-const swT=()=>(G.slots||[]).flatMap((sl,i)=>['atk','def'].filter(r=>sl[r]&&sl[r].p===G.cur).map(r=>({e:sl[r],i,r}))); // your booked wrestlers
+const swT=()=>(G.slots||[]).flatMap((sl,i)=>RK.filter(r=>sl[r]&&sl[r].p===G.cur).map(r=>({e:sl[r],i,r}))); // your booked wrestlers
 function swapIn(si,r){ // manager power: a wrestler from your hand takes the place of one of your booked wrestlers (his attached cards stay in the match); the booked one goes back to your hand. Uses your turn
  const p=me(),i=G.sel&&G.sel.i,c=p.hand[i],e=G.slots[si]&&G.slots[si][r];
  if(!c||c.trn||injOut(c)||!reqOK(c,p)||!e||e.p!==G.cur||!swLeft(p))return;
  p.hand.splice(i,1);const old=e.c;p.hand.push(old);c.bk=G.round;e.c=c;p.swU=(p.swU||0)+1;p.last=e;G.aiFx=null;
  if(!AI[G.cur])toast(`${p.efed.n}: ${c.n} replaces ${old.n} in Match ${si+1}`);endTurn()}
-function attach(si,r){const p=me();if(!atxOK(p))return;atxPay(p);const pc=p.pw.splice(G.sel.i,1)[0],e=G.slots[si][r];e.pw.push(pc);fmLit(e);p.last=e;G.aiFx=AI[G.cur]?{si,r,k:'p',n:e.c.n}:null;pc.fx.forEach(f=>{if(f.k==='draw'&&(!f.tag||hasT(e.c,f.tag)))drawP(p,f.n)});actFx('attach',{c:e.c,on:e.c,role:r,pc,main:si===G.slots.length-1},()=>endTurn());}
+function attach(si,r){const p=me();if(!atxOK(p))return;atxPay(p);const pc=p.pw.splice(G.sel.i,1)[0],e=G.slots[si][r];e.pw.push(pc);fmLit(e);p.last=e;G.aiFx=AI[G.cur]?{si,r,k:'p',n:e.c.n}:null;pc.fx.forEach(f=>{if(f.k==='draw'&&(!f.tag||hasT(e.c,f.tag)))drawP(p,f.n)});actFx('attach',{c:e.c,on:e.c,role:rb(r),pc,main:si===G.slots.length-1},()=>endTurn());}
 function drawPower(){if(!G.pd.length){G.pd=sh(G.disc.filter(c=>c.cat));G.disc=G.disc.filter(c=>!c.cat);}
  if(G.pd.length)me().pw.push(G.pd.shift());endTurn();}
 function scoutDeck(){if(!G.wd.length)return;G.scouted=G.wd.shift();ui();}
@@ -1472,7 +1491,7 @@ function trainOpen(i){TRO=TRO===i?-1:i;ui()}
 const trCnt=c=>c.tn!=null?c.tn:((c.ta||c.td)?1:0), trained=c=>trCnt(c)>=1+Math.max(0,fxSum(c,'trLimit')); // how many times he has been trained; one time only, unless a 'trLimit' effect on his card allows more
 function train(i,k){const p=me(),c=p.hand[i];k=k==='def'?'def':'atk';if(!c||c.trn||trained(c)||injOut(c))return;const pr=trP(c,k);if(pr>p.cash)return;p.cash-=pr;c.trn=k;TRO=-1;G.sel=null;G.step=null;actFx('train',{c,on:c,k},()=>endTurn())}
 function actFx(trig,A,done){ // your own action: every card of yours on play (booked, or attached to a booked wrestler) runs its rules for it. A: {c: the wrestler it happens to, on: the card it is 'done to', role, k, pc, main}
- const ents=(G.slots||[]).flatMap(s=>['atk','def'].map(r=>s[r]).filter(x=>x&&x.p===G.cur)),L=[],ctx={trig,lines:L,noEfed:true,main:!!A.main,on:A.on,actRole:A.role,actK:A.k,actPc:A.pc,actE:A.c?{c:A.c,pw:[],p:G.cur}:null};let k=0;
+ const ents=(G.slots||[]).flatMap(s=>slEs(s).filter(x=>x.p===G.cur)),L=[],ctx={trig,lines:L,noEfed:true,main:!!A.main,on:A.on,actRole:A.role,actK:A.k,actPc:A.pc,actE:A.c?{c:A.c,pw:[],p:G.cur}:null};let k=0;
  const nx=()=>{if(k>=ents.length){if(L.length&&!AI[G.cur])toast(L.join(' · '));return done()}const e=ents[k++];runRules(trig,e,null,ctx,()=>{if((trig==='book'||trig==='attach')&&e.c===A.on)runRules(trig==='book'?'bookS':'attS',e,null,ctx,nx);else nx()})};nx();if(G.pend&&G.ph==='show')ui()} // a power is waiting for an answer: show its prompt
 function trainApply(){G.trs=[];G.pl.forEach((p,pi)=>ownedW(p).forEach(c=>{if(!c.trn)return;const k=c.trn,f=+c[k]||0;c.tn=trCnt(c)+1;c[k]=f+TRN;if(k==='atk')c.ta=(c.ta||0)+TRN;else c.td=(c.td||0)+TRN;G.trs.push({p:pi,c,k,from:f,to:f+TRN});delete c.trn}))} // runs once at the end of the show
 function pass(){actFx('pass',{},()=>{me().passed=true;endTurn()})}
@@ -1505,49 +1524,49 @@ function done(e){const o=G.pl[e.p];e.pw.forEach(x=>x.fin?0:x.itf?G.pl[x.op].hand
 function resolveOne(i,pre=[]){
  const s=G.slots[i],main=i===G.slots.length-1,r={i,main};
  if(!s.def){
-  const e=s.atk,p=G.pl[e.p],L=[],ctx={trig:'promo',promo:true,main,lines:L,hypeMul:1};
-  p.promoS=(p.promoS||0)+1;p.promoG=(p.promoG||0)+1; // counted before the rules run, so 'has cut 1 promo' is already true during this one
+  const two=!!s.atk2,first=two&&!s.pd1,e=two&&s.pd1?s.atk2:s.atk,p=G.pl[e.p],L=[],ctx={trig:'promo',promo:true,main,lines:L,hypeMul:1}; // a lone attacker with a partner cuts two promos, one after the other
+  if(first){const all=p.tok;p.tok=Math.ceil(all/2);s.tokRest=all-p.tok} // the hype tokens split between the two promos, any extra goes to the first
+  p.promoS=(p.promoS||0)+1;p.promoG=(p.promoG||0)+1;if(main&&e.c.champ){p.vp+=DEFCH_VP;L.push(`Champion in the Main Event +${DEFCH_VP} VP`)} // the champion booked in the Main Event gets the VP even when nobody answers; // counted before the rules run, so 'has cut 1 promo' is already true during this one
   runRules('promo',e,null,ctx,()=>{});
   const tok=Math.round(p.tok*ctx.hypeMul),bonus=[...e.c.fx,...e.pw.flatMap(x=>x.fx),...(p.efed.fx||[])].filter(f=>f.k==='promo'&&(!f.tag||hasT(e.c,f.tag))).reduce((t,f)=>t+f.n,0);
   Object.assign(r,{kind:'promo',ec:cl(e.c),pw:e.pw.map(x=>x.n),winner:e.p,promo:e.c.promo+bonus,bonus,tok,lines:L});
-  p.cash+=r.promo;r.drew=drawP(p,1);e.c.hype+=tok;p.tok=0;r.hype=e.c.hype;
+  p.cash+=r.promo;r.drew=drawP(p,1);e.c.hype+=tok;p.tok=first?s.tokRest:0;if(first)s.pd1=1;r.hype=e.c.hype;
   others(e.p).forEach(j=>runRules('oppPromo',fakeE(j),fakeE(e.p,1),{trig:'oppPromo',main,lines:L},()=>{}));
   (G.story=G.story||[]).push({p:cl(e.c),m:i+1}); // his promo scene, played right after this match
   G.sum.push(`Match ${i+1}: PROMO by ${who(e.p)} ${e.c.n}, +$${r.promo}${r.lines.length?' ('+r.lines.join('; ')+')':''}`);elAdd(e,2+(e.fired?1:0),r);done(e);return r;} // promo: competes +1, a promo counts as a win +1
- const ea=s.swap?s.def:s.atk,ed=s.swap?s.atk:s.def,A=calc(ea,'atk'),D=calc(ed,'def'),aw=s.dq?s.dq.e!==ea:beats(A,D,ea.p,ed.p)!==!!s.flip,w=aw?ea:ed,W=aw?A:D,wp=G.pl[w.p]; // ea/ed = who acts as attacker/defender (roles may be switched)
- Object.assign(r,{kind:'match',ac:cl(ea.c),dc:cl(ed.c),ap:ea.p,dp:ed.p,apw:ea.pw.map(x=>x.n),dpw:ed.pw.map(x=>x.n),afin:ea.fired||'',dfin:ed.fired||'',A,D,aw,wn:w.c.n,wp:w.p,tie:A.v===D.v,flipped:!!s.flip,lines:[],hc:G.hc===i,dq:s.dq?{n:s.dq.c.n,wn:s.dq.e.c.n,p:s.dq.e.p,why:s.dq.why}:null,voidL:s.voidL||[]});
- {const dch=main?[s.atk,s.def].find(e=>e&&e.c&&e.c.champ):null;if(dch){G.pl[dch.p].vp+=DEFCH_VP;r.lines.push(`Defending champion ${dch.c.n}: +${DEFCH_VP} VP`)}} // the Champion defends his title in the Main Event: +VP
+ const sd=sidesOf(s),ea=sd.A[0],ed=sd.D[0],A=teamCalc(sd.A,'atk'),D=teamCalc(sd.D,'def'),aw=s.dq?!sd.A.includes(s.dq.e):beats(A,D,ea.p,ed.p)!==!!s.flip,WE=aw?sd.A:sd.D,LE=aw?sd.D:sd.A,w=WE[0],lo=LE[0],W=aw?A:D,wp=G.pl[w.p],all=slEs(s),nW=WE.length,multi=isMulti(s),wr=aw?'atk':'def',lr=aw?'def':'atk',nm=e=>multi?e.c.n+': ':''; // ea/ed = the lead of each acting side (roles may be switched). A side of two is one team (average); each wrestler on the winning side is a winner in his own right
+ Object.assign(r,{kind:'match',ac:cl(ea.c),dc:cl(ed.c),ap:ea.p,dp:ed.p,apw:ea.pw.map(x=>x.n),dpw:ed.pw.map(x=>x.n),afin:ea.fired||'',dfin:ed.fired||'',A,D,aw,wn:WE.map(e=>e.c.n).join(' & '),wp:w.p,tie:A.v===D.v,flipped:!!s.flip,lines:[],hc:G.hc===i,dq:s.dq?{n:s.dq.c.n,wn:s.dq.e.c.n,p:s.dq.e.p,why:s.dq.why}:null,voidL:s.voidL||[],...tagR(s,sd)});
+ const fin=()=>{r.lines.unshift(...pre);r.injA=(ea.c.inj||0)>(r.ac.inj||0);r.injD=(ed.c.inj||0)>(r.dc.inj||0);r.injA2=!!(sd.A[1]&&(sd.A[1].c.inj||0)>(r.ac2.inj||0));r.injD2=!!(sd.D[1]&&(sd.D[1].c.inj||0)>(r.dc2.inj||0));all.forEach(x=>{delete x.fired;done(x)});return r};
+ {const dch=main?all.find(e=>e.c&&e.c.champ):null;if(dch){G.pl[dch.p].vp+=DEFCH_VP;r.lines.push(`Champion in the Main Event +${DEFCH_VP} VP`)}} // the Champion booked in the Main Event (either side, either spot): +VP, win or lose
  if(s.draw){ // called a draw: nobody wins or loses, so no payout, no hype cash-in, no championship move and no win / lose rules
   r.draw=true;r.wn='';r.wp=-1;r.lines.push('Match called a draw: no win payout, no hype cashed in, no championship change');
-  G.sum.push(`Match ${i+1}: ${who(ea.p)} ${ea.c.n} vs ${who(ed.p)} ${ed.c.n} ends in a draw (${A.v} vs ${D.v})`);
-  runRules('resolve',ea,ed,{trig:'resolve',role:'atk',main,lines:r.lines},()=>{});runRules('resolve',ed,ea,{trig:'resolve',role:'def',main,lines:r.lines},()=>{});
-  [s.atk,s.def].forEach(x=>elAdd(x,1+(x.fired?1:0),r)); // a draw still counts as competing
-  r.lines.unshift(...pre);r.injA=(ea.c.inj||0)>(r.ac.inj||0);r.injD=(ed.c.inj||0)>(r.dc.inj||0);delete s.atk.fired;delete s.def.fired;done(s.atk);done(s.def);return r}
- wp.cash+=W.win;let got=W.win;
- if(w.nmv>0){wp.vp+=w.nmv;r.lines.push(`${w.c.n}: +${w.nmv} VP for winning his next match`);delete w.nmv}
-
- {const hs=w.pw.filter(x=>x.itf&&x.wc&&x.op===w.p);if(hs.length){const x=hs[Math.floor(Math.random()*hs.length)];(G.story=G.story||[]).push({h:cl(x.wc),w:cl(w.c),m:i+1})}} // a partner ran in and he won: one story scene (a random helper when several ran in), played right after this match
+  G.sum.push(`Match ${i+1}: ${who(ea.p)} ${sd.A.map(e=>e.c.n).join(' & ')} vs ${who(ed.p)} ${sd.D.map(e=>e.c.n).join(' & ')} ends in a draw (${A.v} vs ${D.v})`);
+  sd.A.forEach(e=>runRules('resolve',e,ed,{trig:'resolve',role:'atk',main,lines:r.lines},()=>{}));sd.D.forEach(e=>runRules('resolve',e,ea,{trig:'resolve',role:'def',main,lines:r.lines},()=>{}));
+  all.forEach(x=>elAdd(x,1+(x.fired?1:0),r)); // a draw still counts as competing
+  return fin()}
+ let got=0;WE.forEach((e,j)=>{const c=(W.parts||[W])[j];wp.cash+=c.win;got+=c.win}); // every winner is paid his own win payout
+ WE.forEach(e=>{if(e.nmv>0){wp.vp+=e.nmv;r.lines.push(`${nm(e)}${e.c.n}: +${e.nmv} VP for winning his next match`);delete e.nmv}});
+ {const hs=WE.flatMap(e=>e.pw.filter(x=>x.itf&&x.wc&&x.op===e.p).map(x=>({x,e})));if(hs.length){const h=hs[Math.floor(Math.random()*hs.length)];(G.story=G.story||[]).push({h:cl(h.x.wc),w:cl(h.e.c),m:i+1})}} // a partner ran in and his side won: one story scene (a random helper when several ran in), played right after this match
  if(s.dq)r.lines.push(`Won by disqualification: ${s.dq.e.c.n} ${s.dq.why==='itf'?'got outside interference':'used a weapon'} (no championship change)`);
  r.lines.push(`Win payout +$${W.win}`+(W.ws.length>1?` (${W.ws.map(x=>x.n).join(' + ')})`:''));
-  {const tk=w&&w.c&&w.c.tr;if(tk&&TR[tk]&&wp.tr){const o=wp.tr[tk];wp.tr[tk]=Math.min(10,o+1);if(wp.tr[tk]>o)r.lines.push(`${TR[tk].n} +1 (now ${wp.tr[tk]})`)}}
- const hy=(s.atk.c.hype+s.def.c.hype)*HV;
- if(hy){wp.cash+=hy;got+=hy;r.lines.push(`Hype tokens cashed in +$${hy}`);s.atk.c.hype=0;s.def.c.hype=0;}
- if(!s.dq&&titleUp(s,main)){const hold=s.atk.c.champ?s.atk:s.def.c.champ?s.def:null;r.champ={to:aw?'a':'d',from:hold?(hold===ea?'a':'d'):null,kept:hold===w};s.atk.c.champ=false;s.def.c.champ=false;w.c.champ=true;w.c.tw=(w.c.tw||0)+1;wp.vp+=3;r.lines.push('Takes the championship token +3 VP');r.tt=true}
- if(main){wp.vp+=MAIN_VP;r.lines.push(`Main Event victory +${MAIN_VP} VP`)}
- [[ea,r.afin],[ed,r.dfin]].forEach(([e,f])=>{if(f)r.lines.push(`FINISHER: ${f} by ${e.c.n}`)});
- r.got=got;G.sum.push(`Match ${i+1}: ${who(w.p)} ${w.c.n} wins (${A.v} vs ${D.v}), +$${got}${(r.tt||main)?`, +${(r.tt?3:0)+(main?MAIN_VP:0)} VP`:''}`);
- const lo=aw?ed:ea,wr=aw?'atk':'def',lr=aw?'def':'atk';
- {const ev=elVpW(w.c);if(ev){wp.vp+=ev;r.lines.push(`Elite ${'★'.repeat(elvOf(w.c))}: +${ev} VP for the win`)}} // his level when the match was fought
- elAdd(w,2+(w.fired?1:0),r);elAdd(lo,1+(lo.fired?1:0),r); // elite meter: competes +1, wins +1, finisher fired +1
- runRules('win',w,lo,{trig:'win',role:wr,main,lines:r.lines},()=>{});runRules('lose',lo,w,{trig:'lose',role:lr,main,lines:r.lines},()=>{});
- runRules('resolve',w,lo,{trig:'resolve',role:wr,main,lines:r.lines},()=>{});runRules('resolve',lo,w,{trig:'resolve',role:lr,main,lines:r.lines},()=>{});
- r.lines.unshift(...pre);
- r.injA=(ea.c.inj||0)>(r.ac.inj||0);r.injD=(ed.c.inj||0)>(r.dc.inj||0);delete s.atk.fired;delete s.def.fired;done(s.atk);done(s.def);return r;
+ WE.forEach(e=>{const tk=e.c&&e.c.tr;if(tk&&TR[tk]&&wp.tr){const o=wp.tr[tk];wp.tr[tk]=Math.min(10,o+1);if(wp.tr[tk]>o)r.lines.push(`${TR[tk].n} +1 (now ${wp.tr[tk]})`)}}); // the win track moves once per winner
+ const hy=all.reduce((t,e)=>t+(e.c.hype||0),0)*HV; // one hype pool for the whole match
+ if(hy){wp.cash+=hy;got+=hy;r.lines.push(`Hype tokens cashed in +$${hy}`);all.forEach(e=>{e.c.hype=0})}
+ if(!s.dq&&titleUp(s,main)){const hold=s.atk.c.champ?s.atk:s.def.c.champ?s.def:null;r.champ={to:aw?'a':'d',from:hold?(hold===ea?'a':'d'):null,kept:hold===w};s.atk.c.champ=false;s.def.c.champ=false;w.c.champ=true;w.c.tw=(w.c.tw||0)+1;wp.vp+=3;r.lines.push('Takes the championship token +3 VP');r.tt=true} // never in a tag / handicap match
+ if(main)WE.forEach(e=>{wp.vp+=MAIN_VP;r.lines.push(`${nm(e)}Main Event victory +${MAIN_VP} VP`)});
+ {const x=PLE[G.round];r.pv=0;if(x)WE.forEach(e=>{if(x.cash){wp.cash+=x.cash;got+=x.cash}if(x.vp){wp.vp+=x.vp;r.pv+=x.vp}r.lines.push(nm(e)+pleLn(x))})} // Premium Live Event: every winner gets the bonus
+ [[ea,r.afin],[ed,r.dfin],[sd.A[1],r.afin2],[sd.D[1],r.dfin2]].forEach(([e,f])=>{if(f&&e)r.lines.push(`FINISHER: ${f} by ${e.c.n}`)});
+ r.got=got;G.sum.push(`Match ${i+1}: ${who(w.p)} ${WE.map(e=>e.c.n).join(' & ')} wins (${A.v} vs ${D.v}), +$${got}${(r.tt||main||r.pv)?`, +${(r.tt?3:0)+(main?MAIN_VP*nW:0)+(r.pv||0)} VP`:''}`);
+ WE.forEach(e=>{const ev=elVpW(e.c);if(ev){wp.vp+=ev;r.lines.push(`${nm(e)}Elite ${'★'.repeat(elvOf(e.c))}: +${ev} VP for the win`)}}); // his level when the match was fought
+ WE.forEach(e=>elAdd(e,2+(e.fired?1:0),r));LE.forEach(e=>elAdd(e,1+(e.fired?1:0),r)); // elite meter: competes +1, wins +1, finisher fired +1
+ WE.forEach(e=>runRules('win',e,lo,{trig:'win',role:wr,main,lines:r.lines},()=>{}));LE.forEach(e=>runRules('lose',e,w,{trig:'lose',role:lr,main,lines:r.lines},()=>{}));
+ WE.forEach(e=>runRules('resolve',e,lo,{trig:'resolve',role:wr,main,lines:r.lines},()=>{}));LE.forEach(e=>runRules('resolve',e,w,{trig:'resolve',role:lr,main,lines:r.lines},()=>{}));
+ return fin();
 }
 function resolve(){ // booking is over: the RESOLUTION PHASE title, then straight into the first match (no page in between)
  phaseIntro('RESOLUTION PHASE','Booking complete',()=>{
   G.s1=G.pl.map(snapP);G.hold=G.s1;G.gained=false;G.mres=[];G.sumDone=false;G.trs=[]; // results start: cash and power cards are compared from here
-  G.ph='resolve';G.rq=G.slots.map((x,i)=>(x.atk||x.def)?i:-1).filter(i=>i>=0);G.rn=0;G.res=null;G.sum=[];G.story=[];G.eos=[];G.fin=false;nextMatch();
+  G.ph='resolve';G.rq=G.slots.flatMap((x,i)=>(x.atk||x.def)?[i,...(!x.def&&x.atk2?[i]:[])]:[]);G.rn=0;G.res=null;G.sum=[];G.story=[];G.eos=[];G.fin=false;nextMatch();
  });
 }
 function nextMatch(){
@@ -1556,26 +1575,26 @@ function nextMatch(){
  if(G.rn>=G.rq.length)return finishShow();
  {const j=G.rq[G.rn],m=G.slots[j];if(j===G.slots.length-1&&m.atk&&m.def&&!m.foD&&ANIM_SPEED!==0){m.foD=1;return playStory([{f:m.atk.c,o:m.def.c,me:1}],nextMatch)}} // the Main Event: the face-off scene plays first (Continue), then the match resolves
  const i=G.rq[G.rn++],s=G.slots[i],pre=[];G.res=null;
- if(s.atk&&s.def)[s.atk,s.def].forEach(e=>{if(e.c.nm){const m=e.c.nm;delete e.c.nm;if(m.atk>0)(e.xs=e.xs||[]).push({k:'atk',n:m.atk,src:'His next match'});if(m.vp>0)e.nmv=(e.nmv||0)+m.vp;pre.push(`${e.c.n}: ${m.atk>0?'+'+m.atk+' Attack':''}${m.vp>0?(m.atk>0?', ':'')+'+'+m.vp+' VP if he wins':''}`)}const p=G.pl[e.p];if(p.nxAtk>0){(e.xs=e.xs||[]).push({k:'atk',n:p.nxAtk,src:'Next-match boost'});pre.push(`${who(e.p)}: +${p.nxAtk} Attack for ${e.c.n} (from a flipped result)`);delete p.nxAtk}}); // a flip power's temporary Attack bonus lasts for the owner's next match only
+ if(s.atk&&s.def)slEs(s).forEach(e=>{if(e.c.nm){const m=e.c.nm;delete e.c.nm;if(m.atk>0)(e.xs=e.xs||[]).push({k:'atk',n:m.atk,src:'His next match'});if(m.vp>0)e.nmv=(e.nmv||0)+m.vp;pre.push(`${e.c.n}: ${m.atk>0?'+'+m.atk+' Attack':''}${m.vp>0?(m.atk>0?', ':'')+'+'+m.vp+' VP if he wins':''}`)}const p=G.pl[e.p];if(p.nxAtk>0){(e.xs=e.xs||[]).push({k:'atk',n:p.nxAtk,src:'Next-match boost'});pre.push(`${who(e.p)}: +${p.nxAtk} Attack for ${e.c.n} (from a flipped result)`);delete p.nxAtk}}); // a flip power's temporary Attack bonus lasts for the owner's next match only
  const go=()=>{G.res=resolveOne(i,pre);(G.mres=G.mres||[]).push(G.res);ui()};
  if(!s.def)return go();
  dqScan(i,s);
  const cx=isA=>({trig:'reveal',get role(){return isA!==!!s.swap?'atk':'def'},main:i===G.slots.length-1,lines:pre,slot:s});
- runRules('reveal',s.atk,s.def,cx(true),()=>runRules('reveal',s.def,s.atk,cx(false),()=>s.dq?go():finIn(s,cx,()=>askResultChoices(s,pre,go)))); // a DQ ends the match: no finisher, no result choices
+ const lead=e=>sideOf(s,e)==='a'?s.def:s.atk;let rk=0;const rv=()=>{const E=slEs(s);if(rk>=E.length)return s.dq?go():finIn(s,cx,()=>askResultChoices(s,pre,go));const e=E[rk++];runRules('reveal',e,lead(e),cx(sideOf(s,e)==='a'),rv)};rv(); // flip order: attacker 1, defender 1, attacker 2, defender 2. A DQ ends the match: no finisher, no result choices
 }
 function dqScan(i,s){ // flip order: attacker's 1st card, defender's 1st, attacker's 2nd… then whatever is left on the longer side. Outside the hardcore match a weapon before a Referee Down, or an interference before a Distract, is a DQ: the match stops, and that card and every card after it are flipped and discarded
- const A=s.atk,D=s.def,seq=[];for(let k=0;k<Math.max(A.pw.length,D.pw.length);k++){if(A.pw[k])seq.push([A,A.pw[k]]);if(D.pw[k])seq.push([D,D.pw[k]])}
+ const Es=slEs(s),seq=[];for(let k=0;k<Math.max(...Es.map(e=>e.pw.length));k++)Es.forEach(e=>{if(e.pw[k])seq.push([e,e.pw[k]])});
  let wl=G.hc===i,il=G.hc===i,at=-1;
  for(let k=0;k<seq.length;k++){const c=seq[k][1];if((isWpn(c)&&!wl)||(c.itf&&!il)){at=k;break}if(hasA(c,'refDown'))wl=true;if(hasA(c,'distract'))il=true}
  s.dq=null;s.voidL=[];if(at<0)return;
  const [de,dc]=seq[at];s.dq={e:de,c:dc,why:dc.itf?'itf':'wpn'};
  seq.slice(at).forEach(([e,c],j)=>{e.pw.splice(e.pw.indexOf(c),1);s.voidL.push({p:e.p,n:c.n,card:cl(c.itf&&c.wc?c.wc:c),dq:!j,itf:!!c.itf});if(c.itf)G.pl[c.op].hand.push(c.wc);else if(!c.fin)dsc(c)})}
 function finIn(s,cx,cb){ // the very last action before the result: each power card attached lights one pip on his finisher meter (carries over from match to match); a full meter fires the finisher at once, past the power card limit, then resets
- const f0=firstP(),sides=[s.atk,s.def].sort((a,b)=>(a.p!==f0)-(b.p!==f0));let k=0;
+ const f0=firstP(),sides=isMulti(s)?slEs(s):[s.atk,s.def].sort((a,b)=>(a.p!==f0)-(b.p!==f0));let k=0;
  const next=()=>{if(k>=sides.length)return cb();const e=sides[k++],F=finOf(e.c);if(!F)return next();
   if((e.c.fm||0)<fmaxOf(e.c))return next(); // pips were already lit one by one as the power cards were attached
-  e.c.fm=0;delete e.c.fmFx;G.pl[e.p].vp+=1;(cx(e===s.atk).lines||[]).push(`FINISHER: ${finN(e.c,F)} +1 VP`);const fc=finCard(F,finN(e.c,F));e.pw.push(fc);e.fired=fc.n;
-  runRules('reveal',e,e===s.atk?s.def:s.atk,{...cx(e===s.atk),only:fc},next)};
+  e.c.fm=0;delete e.c.fmFx;G.pl[e.p].vp+=1;(cx(sideOf(s,e)==='a').lines||[]).push(`FINISHER: ${finN(e.c,F)} +1 VP`);const fc=finCard(F,finN(e.c,F));e.pw.push(fc);e.fired=fc.n;
+  runRules('reveal',e,sideOf(s,e)==='a'?s.def:s.atk,{...cx(sideOf(s,e)==='a'),only:fc},next)};
  next()}
 const fakeE=(i,f)=>({p:i,c:{n:(G.pl[i].efed&&G.pl[i].efed.n)||'Player',tags:[],rules:[]},pw:[],fake:!!f,efed:true}); // stands in for a player when no wrestler is involved (end of show / end of game)
 function finishShow(){G.pl.forEach(p=>delete p.nxAtk); // pay everyone, then run every 'At the end of the show' rule: your manager first, then each wrestler you own (tokens on them are still there)
@@ -1826,11 +1845,11 @@ function boardB(e,r,si){ // a booked wrestler: base bonuses + conditional 'at re
  return o}
 const tmpB=(e,r)=>{let a=0,d=0;e.pw.forEach(x=>{if(x.itf&&x.wc){const n=itfB(x.wc,r);if(r==='atk')a+=n;else d+=n;return}(x.fx||[]).forEach(f=>{if(!fxOK(f,e.c))return;if((f.k==='atk'||f.k==='both')&&+f.n>0)a+=+f.n;if((f.k==='def'||f.k==='both')&&+f.n>0)d+=+f.n})});return {a,d}}; // the owner's own attached cards this match (a tagged bonus only counts if this wrestler has the tag, like in the match)
 function slotCol(sl,r,si){
- const e=sl[r],k=r==='atk'&&si!==undefined?slotInc(si):'',nm=r==='atk'?'Attacker':'Defender';
+ const e=sl[r],k=r==='atk'&&si!==undefined?slotInc(si):'',nm=(r.length>3?'Partner ':'')+(rb(r)==='atk'?'Attacker':'Defender');
  if(!e)return `<div><div class="role">${nm}</div><div class="empty${r==='def'?' dtk'+(sl.atk&&sl.atk.p!==G.cur&&G.ph==='show'?' live':''):k?' dtk itn '+k+(G.ph==='show'?' live':''):''}">${k&&r==='atk'?`<span class="itk" title="Book an attacker here to earn $${INCV} ${INC[k].n}, plus $${INCV} of his own win track's income (paid at the end of the show)"><i>${INC[k].ic}</i><b>+$${INCV}</b></span><small>${INC[k].n}</small>`:r==='def'?`<span class="htk" title="${sl.atk&&sl.atk.p!==G.cur&&G.ph==='show'?'Book a defender here to earn this hype token':'Gray: there is no opposing attacker to defend against yet. Whoever books the defender here earns this hype token, plus $'+INCV+' of his own win track\'s income'}">${tkI('hype')}<b>+1</b></span><small>Hype token</small>`:'Empty'}</div></div>`;
  const vis=e.p===VW();
  const pw=vis?e.pw.map(x=>`<span class="att">+ ${x.n}${x.itf?' (interfering)':x.bw?' (borrowed power)':''}</span>`).join(''):(e.pw.length?`<span class="att">${e.pw.length} power card${e.pw.length>1?'s':''} face-down</span>`:'');
- return `<div><div class="role">${r==='atk'?nm.replace('Attacker','Attacker · P'+(e.p+1)):nm+' · P'+(e.p+1)}</div>${cardH(e.c,{tmp:(()=>{const b=boardB(e,r,si===undefined?G.slots.indexOf(sl):si);if(vis){const t=tmpB(e,r);b.a+=t.a;b.d+=t.d}return b})()})}<div class="atts">${pw}</div></div>`;
+ return `<div><div class="role">${r==='atk'?nm.replace('Attacker','Attacker · P'+(e.p+1)):nm+' · P'+(e.p+1)}</div>${cardH(e.c,{tmp:(()=>{const b=boardB(e,rb(r),si===undefined?G.slots.indexOf(sl):si);if(vis){const t=tmpB(e,rb(r));b.a+=t.a;b.d+=t.d}return b})()})}<div class="atts">${pw}</div></div>`;
 }
 function miniH(e,r,sw){
  if(!e)return `<div class="mc none">${r==='atk'?'ATK':'DEF'}<br>—</div>`;
@@ -1838,29 +1857,29 @@ function miniH(e,r,sw){
  
  return `<div class="mc ${mine?'me':'op'}" title="${e.c.n}"${zd(e.c)}><div class="im"><span>${e.c.n[0]}</span><img src="${imgOf(e.c)}" alt="" onerror="this.remove()"></div><b>${e.c.n}</b><u>${(sw?r==='def':r==='atk')?'⚔ '+e.c.atk:'🛡 '+e.c.def}${sw?' ⇄':''}</u>${e.pw.length?`<i>+${e.pw.length}</i>`:''}</div>`;
 }
-const preview=()=>`<div class="pv">${G.slots.map((sl,i)=>`<div class="pt ${i===G.slots.length-1?'main':''}${i===G.hc?' hc':''}"><small>MATCH ${i+1}${i===G.slots.length-1?' ★':''}${i===G.hc?' · HARDCORE':''}</small><div>${miniH(sl.atk,'atk',sl.swap)}${miniH(sl.def,'def',sl.swap)}</div></div>`).join('')}</div>`;
+const preview=()=>`<div class="pv">${G.slots.map((sl,i)=>`<div class="pt ${i===G.slots.length-1?'main':''}${i===G.hc?' hc':''}"><small>MATCH ${i+1}${i===G.slots.length-1?' ★':''}${i===G.hc?' · HARDCORE':''}</small><div>${miniH(sl.atk,'atk',sl.swap)}${miniH(sl.def,'def',sl.swap)}${sl.atk2?miniH(sl.atk2,'atk',sl.swap):''}${sl.def2?miniH(sl.def2,'def',sl.swap):''}</div></div>`).join('')}</div>`;
 const locked=p=>G.slots.some(s=>s.atk&&!s.def&&s.atk.p===p); // you have an unanswered attacker
-const canPlace=()=>G.slots.some(s=>(!s.atk&&!locked(G.cur))||(s.atk&&!s.def&&s.atk.p!==G.cur));
+const canPlace=()=>G.slots.some(s=>(!s.atk&&!locked(G.cur))||(s.atk&&!s.def&&s.atk.p!==G.cur)||partnerKeys(s,G.cur).length); // an empty partner spot is never an unanswered attacker: locked() only looks at lead attackers
 function showH(){
  if(G.pend)return pendH(); // a power asked a question during your turn (book / attach / train…): answer it first
  const p=G.pl[VW()],busy=AI[G.cur],st=G.step,s=G.sel,last=G.slots.length-1;
- const turn=`<div class="bar">SHOW ${G.round} / ${MAXR}${G.round===MAXR?' · PLE':''}<span>${busy?'Opponent':'Player '+(G.cur+1)}'s turn</span></div>`;
+ const turn=`<div class="bar">SHOW ${G.round} / ${MAXR}${PLE[G.round]?' · PLE '+pleTxt(PLE[G.round]):''}<span>${busy?'Opponent':'Player '+(G.cur+1)}'s turn</span></div>`;
  const back=`<button class="ghost" onclick="G.sel=null;G.step=null;ui()">← Back</button>`;
  const view=`<button class="ghost" onclick="G.sel=null;G.step='board';ui()">View matches</button>`;
- const board=c=>`<div class="slw"><button class="sla l" hidden onclick="slGo(this,-1)" aria-label="Previous matches">&#8249;</button><div class="slots">${G.slots.map((sl,i)=>{const can=c&&((!sl.atk&&!locked(G.cur))||(sl.atk&&!sl.def&&sl.atk.p!==G.cur));return `<div class="slot ${i===last?'main':''}${i===G.hc?' hc':''}" data-si="${i}"><div class="sh"><b>MATCH ${i+1}</b>${i===last?`<em>★ MAIN EVENT</em><span class="mvps"><small class="mvp" title="The winner of the Main Event gains +${MAIN_VP} VP">${rich("Winner +"+MAIN_VP+" VP")}</small><small class="mvp${(sl.atk&&sl.atk.c.champ)||(sl.def&&sl.def.c.champ)?' hot':''}" title="If the Champion is booked in the Main Event, he gains +${DEFCH_VP} VP">${rich("Defending champion +"+DEFCH_VP+" VP")}</small></span>`:''}${i===G.hc?'<em class="hct">HARDCORE</em>':''}${can?`<button onclick="play(${i})">Book here</button>`:''}</div><div class="cols">${slotCol(sl,'atk',i)}${slotCol(sl,'def')}</div></div>`}).join('')}</div><button class="sla r" hidden onclick="slGo(this,1)" aria-label="Next matches">&#8250;</button></div>`;
+ const board=c=>`<div class="slw"><button class="sla l" hidden onclick="slGo(this,-1)" aria-label="Previous matches">&#8249;</button><div class="slots">${G.slots.map((sl,i)=>{const can=c&&((!sl.atk&&!locked(G.cur))||(sl.atk&&!sl.def&&sl.atk.p!==G.cur));return `<div class="slot ${i===last?'main':''}${i===G.hc?' hc':''}" data-si="${i}"><div class="sh"><b>MATCH ${i+1}</b>${i===last?`<em>★ MAIN EVENT</em><span class="mvps"><small class="mvp" title="The winner of the Main Event gains +${MAIN_VP} VP">${rich("Winner +"+MAIN_VP+" VP")}</small><small class="mvp${(sl.atk&&sl.atk.c.champ)||(sl.def&&sl.def.c.champ)?' hot':''}" title="If the Champion is booked in the Main Event, as Attacker or Defender, he gains +${DEFCH_VP} VP, win or lose">${rich("Champion in the Main Event +"+DEFCH_VP+" VP")}</small></span>`:''}${i===G.hc?'<em class="hct">HARDCORE</em>':''}${can?`<button onclick="play(${i})">Book here</button>`:''}${c?partnerKeys(sl,G.cur).map(k=>`<button onclick="play(${i},'${k}')">Book partner</button>`).join(''):''}</div><div class="cols">${slotCol(sl,'atk',i)}${slotCol(sl,'def')}</div>${isMulti(sl)||(c&&partnerKeys(sl,G.cur).length)?`<div class="cols">${slotCol(sl,'atk2',i)}${slotCol(sl,'def2')}</div>`:''}</div>`}).join('')}</div><button class="sla r" hidden onclick="slGo(this,1)" aria-label="Next matches">&#8250;</button></div>`;
  if(st==='board')return turn+`<p class="hint">All matches this show. Use the arrows (or drag) for more. In the <b class="hcn">HARDCORE</b> match weapons and interference are legal.</p>`+board(null)+`<div class="acts" style="margin-top:16px">${back}</div>`;
  if(G.aiFx&&aiHold())return turn+`<p class="hint big aimsg">${aiMsg(G.aiFx)}</p>`+board(null);
  if(busy)return turn+`<p class="hint big">Opponent is thinking…</p>`+board(null);
  const w=st==='place'&&s&&s.t==='w'?p.hand[s.i]:null;
- if(w)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(w)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Where should ${w.n} be booked?</h3><p class="hint">${locked(G.cur)?'You have an unanswered attacker, so '+w.n+' must defend an open match.':'An empty match: '+w.n+' attacks. A match with an open opposing attacker: '+w.n+' defends, takes that spot\'s hype token and earns $'+INCV+' of his own win track\'s income.'} Use the arrows (or drag) for more matches.</p></div></div>`+board(w);
+ if(w)return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(w)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Where should ${w.n} be booked?</h3><p class="hint">${locked(G.cur)?'You have an unanswered attacker, so '+w.n+' must defend an open match.':'An empty match: '+w.n+' attacks. A match with an open opposing attacker: '+w.n+' defends, takes that spot\'s hype token and earns $'+INCV+' of his own win track\'s income.'} ${G.round>=TAG_FROM?'<b>Book partner</b> adds '+w.n+' to your own wrestler\'s side (2 vs 2 is a tag match, 2 vs 1 a handicap match). A partner earns only his own win track\'s income.':''} Use the arrows (or drag) for more matches.</p></div></div>`+board(w);
  const legT=(ok,hc,k)=>ok?`<em class="lg ok">${hc?'Hardcore: '+(k==='w'?'weapons':'interference')+' legal':'Your '+(k==='w'?'Referee Down':'Distract')+' is already in'}</em>`:'<em class="lg no">⚠ May cause a DQ</em>';
- const mine=G.slots.flatMap((sl,i)=>['atk','def'].filter(r=>sl[r]&&sl[r].p===G.cur&&npw(sl[r])<maxPw(sl[r])).map(r=>({e:sl[r],i,r})));
+ const mine=G.slots.flatMap((sl,i)=>RK.filter(r=>sl[r]&&sl[r].p===G.cur&&npw(sl[r])<maxPw(sl[r])).map(r=>({e:sl[r],i,r})));
  const pc=st==='attach'&&s&&s.t==='p'?p.pw[s.i]:null;
- if(pc){const wp=isWpn(pc);return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(pc)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Attach ${pc.n} to which wrestler?</h3>${wp&&mine.some(m=>!legalW(m.i,G.cur))?'<p class="dqw">⚠ Weapons are illegal in this match. Unless a Referee Down card comes before it, this card causes a DQ and the opponent wins.</p>':''}<p class="hint">${mine.length?'Choose one of your wrestlers on the board. It stays face-down until the results. Max '+MAX_PW+' cards per wrestler in a match (some cards raise this).':'You have no wrestler on the board that can take it.'}</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${mine.map(m=>cardH(m.e.c,{btn:`<button onclick="attach(${m.i},'${m.r}')">Attach · Match ${m.i+1} ${m.r==='atk'?'attacker':'defender'} · ${m.e.pw.length}/${maxPw(m.e)}</button>${wp?legT(legalW(m.i,G.cur),G.hc===m.i,'w'):''}`})).join('')}</div>`}
+ if(pc){const wp=isWpn(pc);return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(pc)}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Attach ${pc.n} to which wrestler?</h3>${wp&&mine.some(m=>!legalW(m.i,G.cur))?'<p class="dqw">⚠ Weapons are illegal in this match. Unless a Referee Down card comes before it, this card causes a DQ and the opponent wins.</p>':''}<p class="hint">${mine.length?'Choose one of your wrestlers on the board. It stays face-down until the results. Max '+MAX_PW+' cards per wrestler in a match (some cards raise this).':'You have no wrestler on the board that can take it.'}</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${mine.map(m=>cardH(m.e.c,{btn:`<button onclick="attach(${m.i},'${m.r}')">Attach · Match ${m.i+1} ${rb(m.r)==='atk'?'attacker':'defender'} · ${m.e.pw.length}/${maxPw(m.e)}</button>${wp?legT(legalW(m.i,G.cur),G.hc===m.i,'w'):''}`})).join('')}</div>`}
  const sw=st==='swp'&&s&&s.t==='s'?p.hand[s.i]:null;
- if(sw){const T=swT();return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(sw,{nm:1})}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Swap ${esc(sw.n)} in for which wrestler?</h3><p class="hint">${esc(p.efed.n)}: ${esc(sw.n)} takes his place in the match and keeps any cards already attached there. The wrestler you swap out goes back to your hand. ${swLeft(p)} swap${swLeft(p)===1?'':'s'} left this show.</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${T.map(m=>cardH(m.e.c,{btn:`<button onclick="swapIn(${m.i},'${m.r}')">Swap · Match ${m.i+1} ${m.r==='atk'?'attacker':'defender'}</button>`})).join('')}</div>`}
+ if(sw){const T=swT();return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(sw,{nm:1})}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Swap ${esc(sw.n)} in for which wrestler?</h3><p class="hint">${esc(p.efed.n)}: ${esc(sw.n)} takes his place in the match and keeps any cards already attached there. The wrestler you swap out goes back to your hand. ${swLeft(p)} swap${swLeft(p)===1?'':'s'} left this show.</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${T.map(m=>cardH(m.e.c,{btn:`<button onclick="swapIn(${m.i},'${m.r}')">Swap · Match ${m.i+1} ${rb(m.r)==='atk'?'attacker':'defender'}</button>`})).join('')}</div>`}
  const iw=st==='itf'&&s&&s.t==='i'?p.hand[s.i]:null;
- if(iw){const T=itfT(iw),al=({heel:'Heel',face:'Face'})[alignOf(iw)];return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(iw,{nm:1})}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Send ${esc(iw.n)} in to help which wrestler?</h3>${T.some(m=>!legalI(m.i,G.cur))?'<p class="dqw">⚠ Interference is illegal in this match. Unless a Distract card comes before it, it causes a DQ and the opponent wins.</p>':''}<p class="hint">${al?'Only a '+al+' can help a '+al+'.':'A wrestler with no alignment can only help another one with no alignment.'} He goes in face-down like a power card and adds half his Attack (helping an attacker) or half his Defense (helping a defender), rounded down. He is used up for this show but still earns his income pip. Only 1 wrestler can interfere in each match, except the main event (no limit).</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${T.map(m=>cardH(m.e.c,{btn:`<button onclick="interfere(${m.i},'${m.r}')">Interfere · Match ${m.i+1} · +${itfB(iw,m.r)} ${m.r==='atk'?'ATK':'DEF'}</button>${legT(legalI(m.i,G.cur),G.hc===m.i,'i')}`})).join('')}</div>`}
+ if(iw){const T=itfT(iw),al=({heel:'Heel',face:'Face'})[alignOf(iw)];return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(iw,{nm:1})}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Send ${esc(iw.n)} in to help which wrestler?</h3>${T.some(m=>!legalI(m.i,G.cur))?'<p class="dqw">⚠ Interference is illegal in this match. Unless a Distract card comes before it, it causes a DQ and the opponent wins.</p>':''}<p class="hint">${al?'Only a '+al+' can help a '+al+'.':'A wrestler with no alignment can only help another one with no alignment.'} He goes in face-down like a power card and adds half his Attack (helping an attacker) or half his Defense (helping a defender), rounded down. He is used up for this show but still earns his income pip. Only 1 wrestler can interfere in each match, except the main event (no limit).</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${T.map(m=>cardH(m.e.c,{btn:`<button onclick="interfere(${m.i},'${m.r}')">Interfere · Match ${m.i+1} · +${itfB(iw,m.r)} ${rb(m.r)==='atk'?'ATK':'DEF'}</button>${legT(legalI(m.i,G.cur),G.hc===m.i,'i')}`})).join('')}</div>`}
  const canAct=p.hand.some(c=>!c.trn&&!injOut(c))||p.pw.some(c=>pwOK(c,p,mine.length));
  let h=turn+`<p class="hint big">${canAct?'Your turn: book a wrestler, send one in to interfere, train one, or attach a power card. Press Pass when you are done: you cannot act again this show.'+(locked(G.cur)?' You have an unanswered attacker, so the next wrestler you book must defend.':''):'Nothing left to do. Press Pass to finish your show. When both players pass, the matches are resolved.'}</p><div class="fbar"><button ${canAct?'class="ghost"':''} onclick="pass()">${canAct?'Pass — I am done':'Pass'}</button>${view}${ENABLE_SCOUT&&!G.scouted?`<button onclick="scoutDeck()">Scout</button>`:''}${ENABLE_DRAW&&!G.scouted?`<button onclick="drawPower()">Draw a power card</button>`:''}</div>`;
  if(G.scouted){const k=G.scouted;h+=`<div class="row">${cardH(k)}</div><div class="acts"><button ${k.cost>p.cash?'disabled':''} onclick="buy('s')">Sign for $${k.cost}</button><button onclick="toMarket()">Decline — send to market</button></div>`;}
@@ -2114,10 +2133,9 @@ function aiStep(){
  if(G.ph==='show'){
   const sl=G.slots;
   if(p.last&&npw(p.last)<maxPw(p.last)&&p.pw.length){
-   const e=p.last,role=sl.some(x=>x.atk===e)?'atk':'def';
-   const si=sl.findIndex(x=>x[role]===e);
+   const e=p.last,si=sl.findIndex(x=>slEs(x).includes(e)),key=si<0?null:RK.find(r=>sl[si][r]===e),role=key?rb(key):'atk'; // his last booked wrestler may be a partner
    const best=p.pw.map((c,i)=>[!reqOK(c,p)||(isWpn(c)&&!legalW(si,G.cur))?-1:fxVal(c,e.c,role),i]).sort((a,b)=>b[0]-a[0])[0]; // weapons only where they are legal
-   if(best&&best[0]>0&&atxOK(p)){G.sel={t:'p',i:best[1]};return attach(si,role);}
+   if(key&&best&&best[0]>0&&atxOK(p)){G.sel={t:'p',i:best[1]};return attach(si,key);}
   }
   if(G.hc>=0){const he=['atk','def'].map(r=>sl[G.hc][r]).find(x=>x&&x.p===G.cur&&npw(x)<maxPw(x)),idle=p.hand.map((c,i)=>({c,i})).filter(x=>!x.c.trn&&!injOut(x.c)&&reqOK(x.c,p)); // the hardcore match: send a spare wrestler in to help
    if(he&&idle.length>=2&&atxOK(p)&&Math.random()<.5){const h=idle.find(x=>itfOK(x.c,he));if(h){G.sel={t:'i',i:h.i};return interfere(G.hc,sl[G.hc].atk===he?'atk':'def')}}}
@@ -2195,7 +2213,7 @@ const ownedW=p=>[...new Set([...p.signed,...p.hand])];
 const vpNow=p=>G.endBase?G.endBase[G.pl.indexOf(p)]:score(p); // during end-game abilities every check uses the VP from before they ran, so player order never matters
 const tokOn=(p,k)=>ownedW(p).reduce((t,w)=>t+(w[k]||0),0); // total hype / injury tokens sitting on a player's wrestlers
 const pv=(k,p)=>k==='cash'?p.cash:k==='vp'?vpNow(p):k==='owned'?ownedW(p).length:k==='hand'?p.pw.length:k==='tok'?p.tok:k==='hypeOn'?tokOn(p,'hype'):k==='injOn'?tokOn(p,'inj'):k==='promoS'?(p.promoS||0):k==='promoG'?(p.promoG||0):0;
-const perCnt=(a,p,e,opp)=>{const w=ownedW(p),o=G.pl[oppOf(G.pl.indexOf(p))],k=({owned:()=>w.filter(x=>!a.v||hasT(x,a.v)).length,align:()=>w.filter(x=>alignOf(x)===(a.v==='face'?'face':'heel')).length,hand:()=>p.pw.length,cash:()=>Math.floor(p.cash/Math.max(1,+a.d||5)),tok:()=>p.tok,hypeOn:()=>tokOn(p,'hype'),injOn:()=>tokOn(p,'inj'),oppInj:()=>tokOn(o,'inj'),promoS:()=>p.promoS||0,promoG:()=>p.promoG||0,inPlayPw:()=>(G.slots||[]).reduce((t,s)=>t+['atk','def'].reduce((u,r)=>u+(s[r]?(s[r].pw||[]).filter(q=>!q.itf&&!q.bw).length:0),0),0),matchPw:()=>Math.floor([e,opp].reduce((t,x)=>t+(x?(x.pw||[]).filter(q=>!q.itf).length:0),0)/Math.max(1,+a.d||1)),pwMine:()=>e?(e.pw||[]).filter(q=>!q.itf).length:0,pwOpp:()=>opp?(opp.pw||[]).filter(q=>!q.itf).length:0,itfMine:()=>e?(e.pw||[]).filter(q=>q.itf).length:0,itfAll:()=>[e,opp].reduce((t,x)=>t+(x?(x.pw||[]).filter(q=>q.itf).length:0),0),wonShow:()=>showCnt(p,'won'),lostShow:()=>showCnt(p,'lost'),bookedShow:()=>showCnt(p,'booked')})[a.per||'owned'];return k?k():0};
+const perCnt=(a,p,e,opp)=>{const w=ownedW(p),o=G.pl[oppOf(G.pl.indexOf(p))],k=({owned:()=>w.filter(x=>!a.v||hasT(x,a.v)).length,align:()=>w.filter(x=>alignOf(x)===(a.v==='face'?'face':'heel')).length,hand:()=>p.pw.length,cash:()=>Math.floor(p.cash/Math.max(1,+a.d||5)),tok:()=>p.tok,hypeOn:()=>tokOn(p,'hype'),injOn:()=>tokOn(p,'inj'),oppInj:()=>tokOn(o,'inj'),promoS:()=>p.promoS||0,promoG:()=>p.promoG||0,inPlayPw:()=>(G.slots||[]).reduce((t,s)=>t+RK.reduce((u,r)=>u+(s[r]?(s[r].pw||[]).filter(q=>!q.itf&&!q.bw).length:0),0),0),matchPw:()=>Math.floor([e,opp].reduce((t,x)=>t+(x?(x.pw||[]).filter(q=>!q.itf).length:0),0)/Math.max(1,+a.d||1)),pwMine:()=>e?(e.pw||[]).filter(q=>!q.itf).length:0,pwOpp:()=>opp?(opp.pw||[]).filter(q=>!q.itf).length:0,itfMine:()=>e?(e.pw||[]).filter(q=>q.itf).length:0,itfAll:()=>[e,opp].reduce((t,x)=>t+(x?(x.pw||[]).filter(q=>q.itf).length:0),0),wonShow:()=>showCnt(p,'won'),lostShow:()=>showCnt(p,'lost'),bookedShow:()=>showCnt(p,'booked')})[a.per||'owned'];return k?k():0};
 const showCnt=(p,k)=>{const i=G.pl.indexOf(p);return (G.mres||[]).filter(m=>m.kind==='promo'?(k==='booked'&&m.winner===i):(m.ap===i||m.dp===i)&&(k==='booked'||(!m.draw&&(k==='won')===(m.wp===i)))).length}; // this show's finished matches: his booked wrestlers that won / lost (a draw is neither) / were booked at all (a promo counts as booked)
 function condT(c){c=nc(c);const n=c.n??1,me=c.who==='me',ac=c.who==='act',w=ac?'the wrestler':me?'you':'the opponent',h=me?'have':'has',is=me?'are':'is',op=CMP[c.op||'ge'],ty=c.v&&c.v!=='Any'?c.v+' ':'',wr=ac?'the wrestler has':me?'this wrestler has':'the opposing wrestler has';
  const t=({power:()=>`${w} ${h} ${op} ${plural(n,ty+'power card')} attached`,align:()=>`${w} ${is} a ${AL(c)}`,tag:()=>`${w} ${is} ${c.v||'?'}`,cash:()=>`${w} ${h} ${op} $${n}`,role:()=>`${w} ${is} ${c.v==='def'?'defending':'attacking'}`,atkHigher:()=>`${w} ${h} a higher Attack than ${me?'the opponent':'you'}`,main:()=>'it is the main event',hasOpp:()=>'there is an opposing wrestler',
@@ -2212,7 +2230,7 @@ function condOK(r,e,opp,ctx){const cs=(r.if||[]).filter(c=>c.c);if(!cs.length)re
  const f=c=>{c=nc(c);const n=c.n??1,me=c.who==='me',ac=c.who==='act',x=ac?ctx.actE:me?e:opp,pi=me||ac?e.p:oppOf(e.p),P=G.pl[pi],cmp=a=>({ge:a>=n,eq:a===n,le:a<=n})[c.op||'ge'],sk=c.s==='def'?'def':'atk';
   let v=({power:()=>!!x&&cmp(x.pw.filter(p=>ptOK(p,c.v)).length),align:()=>!!x&&alignOf(x.c)===AL(c),tag:()=>!!x&&hasT(x.c,c.v),role:()=>!!x&&ctx.role===(me?(c.v==='def'?'def':'atk'):(c.v==='def'?'atk':'def')),atkHigher:()=>!!opp&&(me?e.c.atk>opp.c.atk:opp.c.atk>e.c.atk),
    stat:()=>!!x&&x.c[sk]!==undefined&&cmp(x.c[sk]),hype:()=>!!x&&cmp(x.c.hype||0),inj:()=>!!x&&cmp(x.c.inj||0),
-   cash:()=>cmp(P.cash),vp:()=>cmp(vpNow(P)),owned:()=>cmp(ownedW(P).filter(w=>!c.v||hasT(w,c.v)).length),hand:()=>{const att=()=>(G.slots||[]).reduce((t,s)=>t+['atk','def'].reduce((u,r)=>u+(s[r]&&s[r].p===pi?s[r].pw.filter(q=>!q.itf).length:0),0),0);return cmp(c.v==='on'?att():c.v==='both'?P.pw.length+att():c.v==='match'?[e,opp].reduce((t,y)=>t+(y?(y.pw||[]).filter(q=>!q.itf).length:0),0):P.pw.length)},champ:()=>ownedW(P).some(w=>w.champ),champThis:()=>!!x&&!!x.c.champ,promoS:()=>cmp(P.promoS||0),promoG:()=>cmp(P.promoG||0),promoStat:()=>!!x&&x.c.promo!==undefined&&cmp(x.c.promo),hypeOn:()=>cmp(tokOn(P,'hype')),injOn:()=>cmp(tokOn(P,'inj')),tokens:()=>cmp(P.tok),
+   cash:()=>cmp(P.cash),vp:()=>cmp(vpNow(P)),owned:()=>cmp(ownedW(P).filter(w=>!c.v||hasT(w,c.v)).length),hand:()=>{const att=()=>(G.slots||[]).reduce((t,s)=>t+RK.reduce((u,r)=>u+(s[r]&&s[r].p===pi?s[r].pw.filter(q=>!q.itf).length:0),0),0);return cmp(c.v==='on'?att():c.v==='both'?P.pw.length+att():c.v==='match'?[e,opp].reduce((t,y)=>t+(y?(y.pw||[]).filter(q=>!q.itf).length:0),0):P.pw.length)},champ:()=>ownedW(P).some(w=>w.champ),champThis:()=>!!x&&!!x.c.champ,promoS:()=>cmp(P.promoS||0),promoG:()=>cmp(P.promoG||0),promoStat:()=>!!x&&x.c.promo!==undefined&&cmp(x.c.promo),hypeOn:()=>cmp(tokOn(P,'hype')),injOn:()=>cmp(tokOn(P,'inj')),tokens:()=>cmp(P.tok),
    most:()=>{const k=me?e.p:oppOf(e.p);return G.pl.every((q,j)=>j===k||pv(c.s,G.pl[k])>pv(c.s,q))},
    main:()=>!!ctx.main,hasOpp:()=>!!opp&&!opp.fake,round:()=>cmp(Math.min(G.round,MAXR)),
    actSelf:()=>!!ctx.on&&(e.c===ctx.on)===(c.v!=='other'),actRole:()=>ctx.actRole===(c.v==='def'?'def':'atk'),actStat:()=>ctx.actK===(c.v==='def'?'def':'atk'),actPT:()=>!!ctx.actPc&&ptOK(ctx.actPc,c.v)})[c.c];
@@ -2251,7 +2269,7 @@ function drawPay(n,e,p,ctx,src,cb,wr){ // draw one at a time; the owner pays the
 function hypeTo(to,e,p,n,ctx,src,cb){ // 'keep' = into your pile; 'hand' / 'played' / 'owned' = onto a wrestler you pick (the AI picks its strongest)
  const L=ctx.lines;if(n<=0)return cb(false);
  if(to==='keep'){p.tok+=n;L.push(`${src}: +${plural(n,'hype token')} gained and kept (placed on a wrestler at your next promo)`);return cb(true)}
- const pl=(G.slots||[]).flatMap(s=>[s.atk,s.def]).filter(x=>x&&x.p===e.p).map(x=>x.c);
+ const pl=(G.slots||[]).flatMap(s=>slEs(s)).filter(x=>x.p===e.p).map(x=>x.c);
  const cands=[...new Set(to==='hand'?p.hand:to==='played'?pl:[...ownedW(p),...pl])];
  if(!cands.length){L.push(`${src}: no wrestler to place the hype token on`);return cb(false)}
  const fin=i=>{const c=cands[i];c.hype=(c.hype||0)+n;L.push(`${src}: ${plural(n,'hype token')} placed on ${c.n}`);cb(true)};
@@ -2263,7 +2281,7 @@ function hypeTo(to,e,p,n,ctx,src,cb){ // 'keep' = into your pile; 'hand' / 'play
 function doAct(a,e,opp,ctx,src,cb){
  const p=G.pl[e.p],n=+a.n||0,L=ctx.lines;
  if(a.a==='hypeCash'){ // optional: spend 1 hype token from your pile or from one of your wrestlers (hand, signed or booked) for $n
-  const ws=[...new Set([...ownedW(p),...(G.slots||[]).flatMap(s=>[s.atk,s.def]).filter(x=>x&&x.p===e.p).map(x=>x.c)])].filter(c=>(c.hype||0)>0);
+  const ws=[...new Set([...ownedW(p),...(G.slots||[]).flatMap(s=>slEs(s)).filter(x=>x.p===e.p).map(x=>x.c)])].filter(c=>(c.hype||0)>0);
   if(n<=0||(!p.tok&&!ws.length))return cb(false);
   const fin=k=>{if(k!=='pile'&&!ws[k]){L.push(`${src}: kept the hype tokens`);return cb(false)}
    if(k==='pile')p.tok--;else ws[k].hype--;p.cash+=n;L.push(`${src}: discarded 1 hype token ${k==='pile'?'from the pile':'from '+ws[k].n} for $${n}`);cb(true)};
@@ -2347,18 +2365,18 @@ function doAct(a,e,opp,ctx,src,cb){
  cb(false)}
 function askResultChoices(s,pre,go){
  const main=G.slots.indexOf(s)===G.slots.length-1;
- const ea=s.swap?s.def:s.atk,ed=s.swap?s.atk:s.def,A=calc(ea,'atk'),D=calc(ed,'def'),aw=beats(A,D,ea.p,ed.p);
- const W=aw?ea:ed,L=aw?ed:ea,WC=aw?A:D,LC=aw?D:A,wr=aw?'atk':'def',lr=aw?'def':'atk';
- const hy=(s.atk.c.hype+s.def.c.hype)*HV,cp=titleUp(s,main),ch=(cp?9:0)+(main?3*MAIN_VP:0);
+ const sd=sidesOf(s),ea=sd.A[0],ed=sd.D[0],A=teamCalc(sd.A,'atk'),D=teamCalc(sd.D,'def'),aw=beats(A,D,ea.p,ed.p);
+ const WS=aw?sd.A:sd.D,LS=aw?sd.D:sd.A,W=WS[0],L=LS[0],WC=aw?A:D,LC=aw?D:A,wr=aw?'atk':'def',lr=aw?'def':'atk',nW=WS.length;
+ const hy=slEs(s).reduce((t,e)=>t+(e.c.hype||0),0)*HV,cp=titleUp(s,main),ch=(cp?9:0)+(main?3*MAIN_VP*nW:0);
  const Rw=WC.win+hy+ch,Rl=LC.win+hy+ch; // rough reward value of each side winning (a VP counts as 3)
  const find=(e,opp,trig,role)=>{const p=G.pl[e.p],ctx={trig,role,main,lines:[]},out=[];
   for(const [r,src] of [...(e.c.rules||[]).map(r=>[r,e.c.n]),...e.pw.flatMap(x=>(x.rules||[]).map(r=>[r,x.n])),...((p.efed&&p.efed.rules)||[]).map(r=>[r,p.efed.n])]){
    if(r.when!==trig||!condOK(r,e,opp,ctx))continue;
    (r.do||[]).filter(x=>x.a==='flip'||(x.a==='callDraw'&&trig==='lose')).forEach(a=>out.push({e,src,n:+a.n||0,nx:a.a==='flip'?+a.nx||0:0,win:trig==='win',kind:a.a==='callDraw'?'draw':'flip'}))}
   return out.sort((x,y)=>(x.kind==='draw')-(y.kind==='draw'))}; // every flip power and every draw power a player has is offered; flips come first, because a draw is only possible if the result was not flipped
- const offers=[...find(W,L,'win',wr),...find(L,W,'lose',lr)];
- const r0={i:G.slots.indexOf(s),main,kind:'match',ac:cl(ea.c),dc:cl(ed.c),ap:ea.p,dp:ed.p,apw:ea.pw.map(x=>x.n),dpw:ed.pw.map(x=>x.n),afin:ea.fired||'',dfin:ed.fired||'',A,D,aw,wn:W.c.n,wp:W.p,tie:A.v===D.v,flipped:false,preview:true,hc:G.hc===G.slots.indexOf(s),
-  lines:[`Win payout +$${WC.win}`+(WC.ws.length>1?` (${WC.ws.map(x=>x.n).join(' + ')})`:''),...(hy?[`Hype tokens cashed in +$${hy}`]:[]),...(cp?['Takes the championship token +3 VP']:[]),...(main?[`Main Event victory +${MAIN_VP} VP`]:[])]}; // the normal result, shown first
+ const offers=[...WS.flatMap(e=>find(e,L,'win',wr)),...LS.flatMap(e=>find(e,W,'lose',lr))];
+ const r0={i:G.slots.indexOf(s),main,kind:'match',ac:cl(ea.c),dc:cl(ed.c),ap:ea.p,dp:ed.p,apw:ea.pw.map(x=>x.n),dpw:ed.pw.map(x=>x.n),afin:ea.fired||'',dfin:ed.fired||'',A,D,aw,wn:WS.map(e=>e.c.n).join(' & '),wp:W.p,tie:A.v===D.v,flipped:false,preview:true,hc:G.hc===G.slots.indexOf(s),...tagR(s,sd),
+  lines:[`Win payout +$${WC.win}`+(WC.ws.length>1?` (${WC.ws.map(x=>x.n).join(' + ')})`:''),...(hy?[`Hype tokens cashed in +$${hy}`]:[]),...(cp?['Takes the championship token +3 VP']:[]),...(main?[`Main Event victory +${MAIN_VP*nW} VP`]:[]),...(PLE[G.round]?[pleLn(PLE[G.round])]:[])]}; // the normal result, shown first
  let k=0,shown=false;
  const next=()=>{
   if(k>=offers.length){if(shown)G.noAnim=true;return go()} // kept: show the final result without replaying
