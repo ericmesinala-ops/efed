@@ -1190,6 +1190,9 @@ b[data-cu]{display:inline-block}.cpop{animation:cpop .28s ease-out}.bump b.cpop{
 .slt1.clm{opacity:.55;filter:grayscale(1)}.slcb{position:absolute;left:0;right:0;bottom:0;padding:2px 0;background:#000d;font:700 10px var(--lab);letter-spacing:1px;text-align:center;color:#ffd76b;font-style:normal}.slwn{font:700 11px var(--lab);letter-spacing:1px;text-transform:uppercase;color:#c9ced8}.slsq{width:200px;height:200px;border-radius:8px;overflow:hidden;position:relative;display:grid;place-items:center;background:linear-gradient(#22262e,#08090b);box-shadow:0 0 0 1px #000,0 0 0 2px #a9afb9}.slsq img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.slsq span{font:400 64px var(--disp);color:#ffffff40}
 .slcl{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.slcl span{padding:3px 9px;border-radius:999px;background:#ffffff0d;font:600 11px var(--lab);color:#c9ced8;cursor:zoom-in}
 .slpn>.hint{margin:10px 0 0;font-size:12px}
+/* opening Storylines reveal (first draft only): each tile drops in with the same fade + drop as the AI's signing; the delay is set inline per tile */
+.slt1.slin{opacity:0;animation:aiDrop .85s cubic-bezier(.2,.9,.3,1.15) both}
+@media (prefers-reduced-motion:reduce){.slt1.slin{animation:none;opacity:1}}
 @media(max-width:900px){.slgr{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.slgr{grid-template-columns:1fr}}
 /* one card back for every face-down card (Tokens tab: Card back) */
@@ -1363,12 +1366,20 @@ const slCan=(c,p)=>!!c&&!!p&&slV(c,p)>=slTgt(c); // has he reached it
 function slGive(c,p){c.by=G.pl.indexOf(p);c.cl=G.round;p.vp+=+c.vp||0;p.cash+=+c.rcash||0;p.tok+=+c.rhyp||0;if(+c.rdraw>0){const d=drawP(p,+c.rdraw);(p.fresh=p.fresh||[]).push(...p.pw.slice(-d))}} // the one place a Storyline pays out: VP, cash, hype tokens (your pile), free power card draws. It stays on the table, greyed out
 function slSweep(){const out=[];if(!G||!G.pl||!G.sl)return out;const f0=draftFirstP(),ord=G.pl.map((_,k)=>(f0+k)%G.pl.length);G.sl.forEach(c=>{if(!slOpen(c))return;const j=ord.find(k=>slCan(c,G.pl[k]));if(j==null)return;slGive(c,G.pl[j]);out.push([j,c])});return out} // awards every Storyline whose target has been reached, to the first player in turn order who reached it (a tie in the same result)
 const slReq=c=>{const k=SLC[c.cnt],t=k?k.w(slTgt(c),c.arg):'';return t?t[0].toUpperCase()+t.slice(1):''}; // 'Win 3 upsets'
+let SLI=null; // the opening Storylines reveal: {g:game,t0:start time,T:end timer}
+const SL_STEP=450,SL_HOLD=2000; // ms between tiles dropping in; how long all 4 stay up before the panel closes itself
+function slEnd(){if(SLI){clearTimeout(SLI.T);const g=SLI.g;SLI=null;if(G===g){G.slin=0;G.slv=0;ui()}}else if(G&&G.slin){G.slin=0}} // closes the panel as if the button was tapped, which makes the cards below bigger
+function slBegin(){ // runs the first time the panel is drawn on screen (so a pass-the-device screen doesn't eat it)
+ if(G.slin===1){const m=ANIM_SPEED===2?1.5:1,n=(G.sl||[]).length;G.slin=2;G.slv=1;const g=G;SLI={g,t0:Date.now(),T:setTimeout(()=>{if(SLI&&SLI.g===g)slEnd()},((Math.max(0,n-1))*SL_STEP+850+SL_HOLD)*m)};SLI.m=m}
+ else if(G.slin===2&&!(SLI&&SLI.g===G)){G.slin=0;G.slv=0} // a saved game reloaded mid reveal: just skip it
+}
 function slTop(){ // the Storylines button, at the top of the draft and booking screens. Tap it to open the compact panel. Won Storylines stay in place, greyed out
  const L=G.sl||[];if(!L.length)return '';
+ slBegin();const intro=G.slin===2&&SLI&&SLI.g===G;
  const nm=i=>i===VW()?'You':AI[i]?'Opp':'P'+(i+1);
  const bar=(c,i)=>{const v=Math.min(slV(c,G.pl[i]),slTgt(c)),pc=Math.round(v/slTgt(c)*100);return `<div class="slbr${i===VW()?' me':''}"><span>${nm(i)}</span><i><u style="width:${pc}%"></u></i><b>${v}/${slTgt(c)}</b></div>`};
- const tile=c=>{const won=!slOpen(c);return `<div class="slt1${won?' clm':''}"><div class="slti"${zd(c)}><span>${esc(String(c.n||'?')[0])}</span><img src="${imgOf(c)}" alt="" onerror="this.remove()">${won?'<em class="slcb">CLAIMED</em>':''}</div><div class="sltb"><b>${esc(c.n)}</b><small>${esc(slReq(c))}</small>${c.sp?`<div class="slsp">${spT(c.sp)}</div>`:`<div class="slrw">${slRwI(c)}</div>`}${won?`<div class="slwn">Claimed by ${nm(c.by)}</div>`:G.pl.map((_,k)=>bar(c,k)).join('')}</div></div>`};
- return `<div class="slwr"><button class="ghost slbt${G.slv?' on':''}" onclick="G.slv=G.slv?0:1;ui()" aria-expanded="${G.slv?'true':'false'}">Storylines ${G.slv?'▴':'▾'}</button>${G.slv?`<div class="slpn"><div class="slgr">${L.map(tile).join('')}</div><p class="hint slnt">First to reach a target wins it automatically</p></div>`:''}</div>`}
+ const tile=(c,ix)=>{const won=!slOpen(c);const dl=intro?Math.round(ix*SL_STEP*SLI.m-(Date.now()-SLI.t0)):0;return `<div class="slt1${won?' clm':''}${intro?' slin':''}"${intro?` style="animation-delay:${dl}ms"`:''}><div class="slti"${zd(c)}><span>${esc(String(c.n||'?')[0])}</span><img src="${imgOf(c)}" alt="" onerror="this.remove()">${won?'<em class="slcb">CLAIMED</em>':''}</div><div class="sltb"><b>${esc(c.n)}</b><small>${esc(slReq(c))}</small>${c.sp?`<div class="slsp">${spT(c.sp)}</div>`:`<div class="slrw">${slRwI(c)}</div>`}${won?`<div class="slwn">Claimed by ${nm(c.by)}</div>`:G.pl.map((_,k)=>bar(c,k)).join('')}</div></div>`};
+ return `<div class="slwr"><button class="ghost slbt${G.slv?' on':''}" onclick="if(G.slin)return slEnd();G.slv=G.slv?0:1;ui()" aria-expanded="${G.slv?'true':'false'}">Storylines ${G.slv?'▴':'▾'}</button>${G.slv?`<div class="slpn"><div class="slgr">${L.map((c,i)=>tile(c,i)).join('')}</div><p class="hint slnt">First to reach a target wins it automatically</p></div>`:''}</div>`}
 const prc=(c,p)=>{const b=Math.max(1,Math.floor(+c.pcost)||0);return p?Math.max(0,b-mSum(p,'pwCost')):b}; // draft price of a power card (unpriced = $1); p = the buyer: manager 'pwCost' discounts stack and can make a card free; no p = the printed price // a power card's price in the draft (paid once; playing it later is free). No price set = $1
 const fxSum=(c,k)=>((c&&c.fx)||[]).filter(f=>f.k===k).reduce((t,f)=>t+(+f.n||0),0); // total of one passive effect on a card
 const TRN=2,trP=(c,k)=>{const v=+c[k]||0,b=v<=6?4:v<=8?6:8;return Math.max(1,b-fxSum(c,'trCost'))}; // training: +2, priced by how high that stat already is; a 'trCost' effect makes it cheaper (never below $1)
@@ -1500,7 +1511,9 @@ function startDraft0(){
  G.bz=G.buzz||null;G.buzz=null;if(G.bz)G.pl.forEach(p=>{p.cash=Math.max(0,p.cash+(G.bz.c||0));p.tok+=G.bz.h||0}); // last show's Buzz lands on both players
  G.pshop=G.pd.splice(0,Math.max(1,PSHOP-((G.bz&&G.bz.f)||0))); // power cards for sale this draft (a dead crowd means fewer)
  G.pl.forEach(p=>{p.done=false;p.picks=0;p.rp=[];p.bp=[];p.inc={};delete p.incT});G.incPaid=false;G.hold=null;
- G.ph='draft';G.cur=draftFirstP();G.ready=false;autoDone();
+ G.ph='draft';G.cur=draftFirstP();G.ready=false;
+ if(G.round===1&&ANIM_SPEED!==0&&!matchMedia('(prefers-reduced-motion:reduce)').matches)G.slin=1; // only at the very start of the game: the 4 Storylines drop in one by one, hold, then the panel closes by itself
+ autoDone();
 }
 function autoDone(){
  const none=!G.pool.length&&!G.pshop.length;
@@ -1585,7 +1598,7 @@ function pwReveal(){ // when booking starts: each newly drawn power card zooms t
    k.an.finished.catch(()=>{}).then(()=>{k.remove();cur=null;const b2=tabBtn();if(b2&&!dead){b2.classList.remove('cpop');void b2.offsetWidth;b2.classList.add('cpop')}done()})});
  (async()=>{for(let i=0;i<L.length;i++){if(dead||G!==g)break;await one(L[i],i+1)}
   if(bd.isConnected)bd.animate([{opacity:1},{opacity:0}],{duration:300,fill:'forwards'}).finished.catch(()=>{}).then(end);else end();lb.remove()})()}
-function nextDraft(){G.slv=0;const o=nextOpen(G.cur,'done');if(o>=0&&o!==G.cur){G.cur=o;G.ready=false}autoDone();}
+function nextDraft(){if(G.slin){clearTimeout(SLI&&SLI.T);SLI=null;G.slin=0}G.slv=0;const o=nextOpen(G.cur,'done');if(o>=0&&o!==G.cur){G.cur=o;G.ready=false}autoDone();}
 
 // ---------- SHOW ----------
 function startShow(){
@@ -2386,7 +2399,7 @@ function ui(){
  slSweep().forEach(([j,c])=>toast(`${AI[j]?'Opponent':G.pl.length>2||!AI.some(Boolean)?'Player '+(j+1):'You'} won ${c.n}: ${slRw(c).join(', ')}`));stopAnim();queueMicrotask(postUi);if(STS)queueMicrotask(stsFill);
  if(AI.some(Boolean))G.ready=true;
  if(G.aiFx&&G.ph!=='show')G.aiFx=null;
- const hold=aiHold(),ai=AI[G.cur]&&['efed','draft','show'].includes(G.ph)&&!hold;
+ const hold=aiHold(),ai=AI[G.cur]&&['efed','draft','show'].includes(G.ph)&&!hold&&!G.slin;
  if(ai&&G.ph==='efed')return aiStep();
  const a=document.getElementById('app');
  if(!G.ready&&!['resolve','end'].includes(G.ph)){MERCH_FX=[];HYPE_FX=[];a.innerHTML=`<div class="pass"><h2>Pass the device to Player ${G.cur+1}</h2><p class="hint">Hidden cards stay hidden until you reveal.</p><button onclick="G.ready=true;ui()">I'm Player ${G.cur+1} — reveal my cards</button></div>`;return;}
