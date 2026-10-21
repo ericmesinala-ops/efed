@@ -1204,6 +1204,7 @@ b[data-cu]{display:inline-block}.cpop{animation:cpop .28s ease-out}.bump b.cpop{
 @media(max-width:520px){.slgr{grid-template-columns:1fr}}
 /* Storylines: expanded 2x2 view. The page behind blurs; tiles are laid out like the end-of-show summary */
 .slwr.open{z-index:900}
+.slrow{display:flex;justify-content:center;align-items:flex-start;flex-wrap:wrap;gap:0 10px}.slrow .slwr{margin:-4px 0 12px}.tcwk{background:#d23a4e22;box-shadow:inset 0 0 0 1px #d23a4e88;color:#ff8a9a}
 .slov{position:fixed;inset:0;z-index:900;display:grid;place-items:center;padding:16px;overflow:auto;background:rgba(5,6,10,.5);backdrop-filter:blur(10px) saturate(.9);-webkit-backdrop-filter:blur(10px) saturate(.9);animation:crwf .25s ease both}
 .slbx{width:min(100%,780px);max-height:calc(100dvh - 32px);overflow:auto;padding:18px 18px 16px;border-radius:14px;text-align:center;background:radial-gradient(circle at 50% 0,#2b2213,#0b0c10 72%);box-shadow:inset 0 0 0 1px #f0c23c55,0 24px 60px #000c}
 .slbh small{display:block;font:600 11px var(--lab);letter-spacing:.4em;text-transform:uppercase;color:var(--mute)}
@@ -1479,8 +1480,8 @@ const isMulti=s=>!!(s.atk2||s.def2);
 const mkind=s=>!(s.atk&&s.def)?'':!isMulti(s)?'match':(s.atk2&&s.def2)?'tag':'handicap'; // both sides at 2 = tag, 2 vs 1 = handicap, 1 vs 1 = normal
 const sidesOf=s=>s.swap?{A:[s.def,s.def2].filter(Boolean),D:[s.atk,s.atk2].filter(Boolean)}:{A:[s.atk,s.atk2].filter(Boolean),D:[s.def,s.def2].filter(Boolean)}; // who acts as attacker / defender (roles may be switched)
 const partnerKeys=(s,p)=>G.round<TAG_FROM?[]:['atk','def'].filter(r=>s[r]&&s[r].p===p&&!s[r+'2']).map(r=>r+'2'); // a side can only add its own partner, one per side
-function teamCalc(es,role){ // a side's Attack / Defense: one wrestler as is; two = the average of both, halves kept (no rounding). Each one's own win payout still counts
- const cs=es.map(e=>calc(e,role));if(cs.length<2)return cs[0];
+function teamCalc(es,role,vs){ // a side's Attack / Defense: one wrestler as is; two = the average of both, halves kept (no rounding). Each one's own win payout still counts
+ const cs=es.map(e=>calc(e,role,vs));if(cs.length<2)return cs[0];
  const v=(cs[0].v+cs[1].v)/2,R=role==='atk'?'Attack':'Defense';
  return{v,win:cs[0].win+cs[1].win,parts:cs,
   st:[...cs[0].st,...cs[1].st,{t:`Team ${R}: (${cs[0].v} + ${cs[1].v}) / 2`,n:0,run:v}],
@@ -1640,7 +1641,7 @@ function rdFix(o){ // keeps the sections in order with no holes: an open section
  const d=[...o.querySelectorAll('.rd')];let col=0;d.forEach((x,i)=>{const n=d[i+1],w=x.open||(col===0&&(!n||n.open));x.classList.toggle('wide',w);col=w?0:(col+1)%2})}
 function rulesOk(){const o=document.getElementById('rpop');if(!o)return;const c=o.querySelector('#rpoff');try{if(c&&c.checked)localStorage.setItem(RULES_LS,'1');else localStorage.removeItem(RULES_LS)}catch(e){}o.remove()}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('rpop'))rulesOk();else if(e.key==='Escape'&&G&&G.slv&&!G.slin){G.slv=0;ui()}});
-document.addEventListener('click',e=>{if(G&&G.slv&&!G.slin&&!e.target.closest('.slwr')){G.slv=0;ui()}}); // the open Storylines panel closes when you tap anywhere else
+document.addEventListener('click',e=>{if(G&&G.slv&&!G.slin&&!e.target.closest('.slwr')){G.slv=0;ui()}}); document.addEventListener('click',e=>{if(G&&G.tcv&&!e.target.closest('.tcw')){G.tcv=0;ui()}}); // the open Storylines panel closes when you tap anywhere else
 let toastT;function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200)}
 
 // ---------- SETUP ----------
@@ -1854,7 +1855,7 @@ function noteDraw(p,d){ // manager trigger 'drawAny': runs once for every power 
  try{G.pl.forEach((q,j)=>{if(!((q.efed&&q.efed.rules)||[]).some(r=>r.when==='drawAny'))return;for(let k=0;k<d;k++)runRules('drawAny',fakeE(j),fakeE(oppOf(j),1),{trig:'drawAny',lines:L,drawer:pi===j?'me':'opp'},()=>{})})}finally{G.inDA=false}
  if(L.length&&G.ph==='show'&&!AI[G.cur])toast(L.join(' · '))}
 const isMu=x=>(G.slots||[]).some(q=>q&&q.mu&&q.mu.includes(x)); // a power card whose abilities were switched off for this match (stats and rules); it stays attached
-function calc(e,role){
+function calc(e,role,vs){
  const p=G.pl[e.p],w=e.c;
  const fx=[...w.fx.map(f=>({f,src:w.n})),...e.pw.flatMap(x=>isMu(x)?[]:x.fx.map(f=>({f,src:x.n}))),...(p.efed.fx||[]).map(f=>({f,src:p.efed.n})),...(e.xs||[]).map(x=>({f:{k:x.k,n:x.n},src:x.src}))];
  let v=(role==='atk')!==!!e.sw?w.atk:w.def,win=w.win;
@@ -1866,6 +1867,7 @@ function calc(e,role){
   if(f.k==='champB'&&(w.tw>0||w.champ)&&(f.s===role||f.s==='both'||!f.s)){v+=f.n;st.push({src,t:`${src}: ${fxT(f)}`,n:f.n,run:v})} // manager: your wrestlers who have won a Championship Match
   if(f.k==='win'){win+=f.n;ws.push({t:src,n:f.n})}});
  e.pw.forEach(x=>{if(!x.itf||!x.wc)return;const n=itfB(x.wc,role);if(n){v+=n;st.push({src:x.n,t:`${x.n}: interferes, half his ${role==='atk'?'Attack':'Defense'}`,n,run:v})}});
+ {const ta=typeAdv(w,vs);if(ta){v+=1;st.push({src:'Type chart',t:`+1 Damage (${role==='atk'?'Attack':'Defense'}): ${ta}`,n:1,run:v})}} // type chart: +1 on the stat he is using vs a type he is strong against; never stacks
  const cards={};[w,...e.pw,p.efed].forEach(c=>{if(c&&c.n&&!cards[c.n])cards[c.n]=cl((c.itf||c.bw)&&c.wc?c.wc:c)});
  return{v:Math.max(0,v),win,st,ws,cards};
 }
@@ -1884,7 +1886,7 @@ function resolveOne(i,pre=[]){
   others(e.p).forEach(j=>runRules('oppPromo',fakeE(j),fakeE(e.p,1),{trig:'oppPromo',main,lines:L},()=>{}));
   (G.story=G.story||[]).push({p:cl(e.c),m:i+1}); // his promo scene, played right after this match
   G.sum.push(`Match ${i+1}: PROMO by ${who(e.p)} ${e.c.n}, +$${r.promo}${r.lines.length?' ('+r.lines.join('; ')+')':''}`);elAdd(e,2+(e.fired?1:0),r);done(e);return r;} // promo: competes +1, a promo counts as a win +1
- const sd=sidesOf(s),ea=sd.A[0],ed=sd.D[0],A=teamCalc(sd.A,'atk'),D=teamCalc(sd.D,'def'),aw=s.dq?!sd.A.includes(s.dq.e):beats(A,D,ea.p,ed.p)!==!!s.flip,WE=aw?sd.A:sd.D,LE=aw?sd.D:sd.A,w=WE[0],lo=LE[0],W=aw?A:D,wp=G.pl[w.p],all=slEs(s),nW=WE.length,multi=isMulti(s),wr=aw?'atk':'def',lr=aw?'def':'atk',nm=e=>multi?e.c.n+': ':''; // ea/ed = the lead of each acting side (roles may be switched). A side of two is one team (average); each wrestler on the winning side is a winner in his own right
+ const sd=sidesOf(s),ea=sd.A[0],ed=sd.D[0],A=teamCalc(sd.A,'atk',sd.D),D=teamCalc(sd.D,'def',sd.A),aw=s.dq?!sd.A.includes(s.dq.e):beats(A,D,ea.p,ed.p)!==!!s.flip,WE=aw?sd.A:sd.D,LE=aw?sd.D:sd.A,w=WE[0],lo=LE[0],W=aw?A:D,wp=G.pl[w.p],all=slEs(s),nW=WE.length,multi=isMulti(s),wr=aw?'atk':'def',lr=aw?'def':'atk',nm=e=>multi?e.c.n+': ':''; // ea/ed = the lead of each acting side (roles may be switched). A side of two is one team (average); each wrestler on the winning side is a winner in his own right
  Object.assign(r,{kind:'match',ac:cl(ea.c),dc:cl(ed.c),ap:ea.p,dp:ed.p,apw:ea.pw.map(x=>x.n),dpw:ed.pw.map(x=>x.n),afin:ea.fired||'',dfin:ed.fired||'',A,D,aw,wn:WE.map(e=>e.c.n).join(' & '),wp:w.p,tie:A.v===D.v,flipped:!!s.flip,lines:[],hc:G.hc===i,dq:s.dq?{n:s.dq.c.n,wn:s.dq.e.c.n,p:s.dq.e.p,why:s.dq.why}:null,voidL:s.voidL||[],...tagR(s,sd)});
  r.incE=revInc(all,sd,r.voidL);
  [...new Set(all.map(e=>e.p))].forEach(j=>{const q=G.pl[j];q.mtc=(q.mtc|0)+1});all.forEach(e=>{if(e.fired){const q=G.pl[e.p];q.fns=(q.fns|0)+1}}); // Storyline counters: matches competed (once per player per match), finishers landed // every power card and interference flipped in this match pays 1 income pip of its win track (paid at the end of the show)
@@ -2331,7 +2333,7 @@ function showH(){
  if(iw){const T=itfT(iw),al=({heel:'Heel',face:'Face'})[alignOf(iw)];return turn+`<div class="acts">${back}</div><div class="sel-row"><div style="zoom:.55">${cardH(iw,{nm:1})}</div><div style="flex:1;min-width:240px"><h3 style="margin-top:0">Send ${esc(iw.n)} in to help which wrestler?</h3>${T.some(m=>!legalI(m.i,G.cur))?'<p class="dqw">⚠ Interference is illegal in this match. Unless a Distract card comes before it, it causes a DQ and the opponent wins.</p>':''}<p class="hint">${al?'Only a '+al+' can help a '+al+'.':'A wrestler with no alignment can only help another one with no alignment.'} He goes in face-down like a power card and adds half his Attack (helping an attacker) or half his Defense (helping a defender), rounded down. He is used up for this show but still earns his income pip when he is revealed in the match. Only 1 wrestler can interfere in each match, except the main event (no limit).</p></div></div><h3>Your wrestlers on the board</h3><div class="row sw bk">${T.map(m=>cardH(m.e.c,{btn:`<button onclick="interfere(${m.i},'${m.r}')">Interfere · Match ${m.i+1} · +${itfB(iw,m.r)} ${rb(m.r)==='atk'?'ATK':'DEF'}</button>${legT(legalI(m.i,G.cur),G.hc===m.i,'i')}`})).join('')}</div>`}
  const canAct=p.hand.some(c=>!c.trn&&!injOut(c))||p.pw.some(c=>pwOK(c,p,mine.length));
  const hintT=canAct?(locked(G.cur)?'You have an unanswered attacker: your next wrestler must defend.':''):'Nothing left to do. Press Pass to finish your show.'; // one short line, and only when something needs your attention
- let h=turn.slice(0,-6)+slTop()+'</div>'+(hintT?`<p class="hint big">${hintT}</p>`:'')+`<div class="fbar"><button ${canAct?'class="ghost"':''} onclick="pass()">${canAct?'Pass — I am done':'Pass'}</button>${view}${ENABLE_SCOUT&&!G.scouted?`<button onclick="scoutDeck()">Scout</button>`:''}${ENABLE_DRAW&&!G.scouted?`<button onclick="drawPower()">Draw a power card</button>`:''}</div>`;
+ let h=turn.slice(0,-6)+'<div class="slrow">'+slTop()+tcTop()+'</div></div>'+(hintT?`<p class="hint big">${hintT}</p>`:'')+`<div class="fbar"><button ${canAct?'class="ghost"':''} onclick="pass()">${canAct?'Pass — I am done':'Pass'}</button>${view}${ENABLE_SCOUT&&!G.scouted?`<button onclick="scoutDeck()">Scout</button>`:''}${ENABLE_DRAW&&!G.scouted?`<button onclick="drawPower()">Draw a power card</button>`:''}</div>`;
  if(G.scouted){const k=G.scouted;h+=`<div class="row">${cardH(k)}</div><div class="acts"><button ${k.cost>p.cash?'disabled':''} onclick="buy('s')">Sign for $${k.cost}</button><button onclick="toMarket()">Decline — send to market</button></div>`;}
  const wN=p.hand.length,pN=p.pw.length;
  const wB=(c,i)=>{if(injOut(c))return '<button disabled>Injured · out this show</button>';if(c.trn)return `<button class="train" disabled>Training · ${trKey(c.trn)}</button>`;
@@ -2722,8 +2724,16 @@ const ALLOW=w=>w==='drawAny'?['cash','vp','hype','opCash']:w==='promo'?[...PROA,
 const MOST={cash:'cash',vp:'VP',owned:'wrestlers',hand:'power cards in hand',tok:'unplaced hype tokens',hypeOn:'hype tokens on wrestlers',injOn:'injury tokens on wrestlers',promoS:'promos cut this show',promoG:'promos cut this game'};
 const NUMC={promoS:1,promoG:2,promoStat:3,hypeOn:1,injOn:1,tokens:1,power:1,stat:6,hype:1,inj:1,cash:3,vp:10,owned:3,hand:1,round:4}; // default number when a numeric condition is picked
 const perT=a=>({owned:`wrestler you own${a.v?' with tag "'+a.v+'"':''}`,align:`${a.v==='face'?'Face':'Heel'} you own`,hand:'power card in your hand',cash:`$${+a.d||5} you have`,tok:'unplaced hype token you have',hypeOn:'hype token on your wrestlers',injOn:'injury token on your wrestlers',oppInj:"injury token on the opponent's wrestlers",promoS:'promo you cut this show',promoG:'promo you cut this game',inPlayPw:'power card attached in play (all booked wrestlers, both players)',matchPw:`${+a.d>1?'set of '+(+a.d)+' ':''}power card${+a.d>1?'s':''} attached in this match (both sides)`,pwMine:'power card attached to this Wrestler Card',pwOpp:"power card attached to the opposing Wrestler Card",itfMine:'interference on your wrestler in this match',itfAll:'interference in this match (both sides)',wonShow:'booked wrestler of yours that won this show',defWon:'Defender of yours that won this show',defWonAll:'Defender that won this show (both players)',lostShow:'booked wrestler of yours that lost this show',bookedShow:'wrestler of yours booked this show',upsets:'upset win of yours this game (your wrestler beat one with a higher Attack + Defense)',finShow:'Finisher used this show (both players)',finMine:'Finisher I used this show',wpnShow:'Weapon Power Card used this show (both players)',weak:`wrestler you own with Attack + Defense of ${+a.d||12} or less`})[a.per||'owned'];
-const GIMMICKS=['Loverboy','Strongman','Fan Favorite','Efed Owner','Patriot','Aggressor','Rockstar','Xtreme','Unorthodox','Flashy','Mask','Return','Cultist','Outcast','Faction Leader','Underdog'].sort((a,b)=>a.localeCompare(b)); // the gimmick list for every dropdown (add new ones here)
+const GIMMICKS=['Loverboy','Strongman','Fan Favorite','Efed Owner','Patriot','Aggressor','Rockstar','Xtreme','Unorthodox','Flashy','Mask','Return','Cultist','Outcast','Faction Leader','Underdog','Giant','Superstar'].sort((a,b)=>a.localeCompare(b)); // the gimmick list for every dropdown (add new ones here)
 const TYPES=['Powerhouse','Technical','Grappler','All-Rounder','Striker','Showman','Hardcore','Luchador','Rudo','Tag','High-Flyer','Underdog','Strategist','Brawler'].sort((a,b)=>a.localeCompare(b)); // the wrestler types (stored in the card's tags) for every dropdown (add new ones here)
+const TYPE_EDGE={Powerhouse:['Brawler','Hardcore'],Brawler:['Hardcore','Rudo'],Hardcore:['Rudo','Striker'],Rudo:['Striker','Luchador'],Striker:['Luchador','High-Flyer'],Luchador:['High-Flyer','Showman'],'High-Flyer':['Showman','All-Rounder'],Showman:['All-Rounder','Underdog'],'All-Rounder':['Underdog','Strategist'],Underdog:['Strategist','Technical'],Strategist:['Technical','Grappler'],Technical:['Grappler','Tag'],Grappler:['Tag','Powerhouse'],Tag:['Powerhouse','Brawler']}; // TYPE CHART: each wrestler type gets +1 Damage (+1 Attack when attacking, +1 Defense when defending) against exactly these 2 types. Edit the lists to rebalance; every type should stay in 2 lists so it is weak to exactly 2 types
+const typesOf=c=>TYPES.filter(t=>[...((c&&c.tags)||[]),c&&c.gimmick].some(x=>x&&tagKey(x)===tagKey(t))); // a card's wrestler types (tags or gimmick that are in TYPES)
+const typeAdv=(c,vs)=>{const th=(vs||[]).flatMap(x=>x&&x.c?typesOf(x.c):[]);for(const t of typesOf(c)){const hit=(TYPE_EDGE[t]||[]).find(u=>th.includes(u));if(hit)return `${t} vs ${hit}`}return ''}; // '' = no advantage; the first matching pair is shown, the bonus is always +1
+function tcTop(){ // the Type Chart button (beside Storylines) and its popup list
+ const inv={};TYPES.forEach(t=>inv[t]=[]);Object.entries(TYPE_EDGE).forEach(([a,l])=>l.forEach(b=>{if(inv[b])inv[b].push(a)}));
+ const tile=t=>`<div class="slx"><div class="slxh"><b>${esc(t)}</b></div><div class="slxq">+1 Damage against</div><div class="slxr">${(TYPE_EDGE[t]||[]).map(esc).join(' · ')}</div><div class="slxq">Weak to</div><div class="slxr tcwk">${inv[t].map(esc).join(' · ')}</div></div>`;
+ const shut='G.tcv=0;ui()';
+ return `<div class="slwr tcw${G.tcv?' open':''}"><button class="ghost slbt${G.tcv?' on':''}" onclick="G.tcv=G.tcv?0:1;G.slv=0;ui()" aria-expanded="${G.tcv?'true':'false'}">Type Chart ${G.tcv?'▴':'▾'}</button>${G.tcv?`<div class="slov" onclick="if(event.target===this){${shut}}"><div class="slbx"><div class="slbh"><small>Wrestler types</small><h3>Type Chart</h3></div><div class="slg2">${TYPES.map(tile).join('')}</div><p class="slnt2">+1 Damage = +1 Attack when attacking, +1 Defense when defending, against either type listed. It never stacks.</p><button class="ghost slcx" onclick="${shut}">Close</button></div></div>`:''}</div>`}
 const TAG_ALIAS={metal:'rockstar',agressor:'aggressor'}; // old names that mean a current one (Metal = Rockstar), so old cards keep working
 const tagKey=t=>{const k=String(t||'').toLowerCase().replace(/[^a-z0-9]/g,'');return TAG_ALIAS[k]||k},canonT=v=>[...GIMMICKS,...TYPES].find(g=>tagKey(g)===tagKey(v))||v; // 'High Flyer' and 'High-Flyer' are the same tag
 const gimOpts=(v,none)=>{const c=v?canonT(v):'',old=c&&!GIMMICKS.includes(c)&&!TYPES.includes(c),og=(l,a)=>`<optgroup label="${l}">${a.map(g=>`<option value="${esc(g)}" ${g===c?'selected':''}>${esc(g)}</option>`).join('')}</optgroup>`;return `<option value="">${none}</option>`+og('Gimmick',GIMMICKS)+og('Wrestler type',TYPES.filter(t=>!GIMMICKS.includes(t)))+(old?`<optgroup label="Old value"><option value="${esc(v)}" selected>${esc(v)} (old)</option></optgroup>`:'')}; // one dropdown for every tag box in the power / rule editor: a card matches by its gimmick or its wrestler type
@@ -2918,7 +2928,7 @@ function doAct(a,e,opp,ctx,src,cb){
  cb(false)}
 function askResultChoices(s,pre,go){
  const main=G.slots.indexOf(s)===G.slots.length-1;
- const sd=sidesOf(s),ea=sd.A[0],ed=sd.D[0],A=teamCalc(sd.A,'atk'),D=teamCalc(sd.D,'def'),aw=beats(A,D,ea.p,ed.p);
+ const sd=sidesOf(s),ea=sd.A[0],ed=sd.D[0],A=teamCalc(sd.A,'atk',sd.D),D=teamCalc(sd.D,'def',sd.A),aw=beats(A,D,ea.p,ed.p);
  const WS=aw?sd.A:sd.D,LS=aw?sd.D:sd.A,W=WS[0],L=LS[0],WC=aw?A:D,LC=aw?D:A,wr=aw?'atk':'def',lr=aw?'def':'atk',nW=WS.length;
  const hy=slEs(s).reduce((t,e)=>t+(e.c.hype||0),0)*HV,cp=titleUp(s,main),ch=(cp?9:0)+(main?3*MAIN_VP*nW:0);
  const Rw=WC.win+hy+ch,Rl=LC.win+hy+ch; // rough reward value of each side winning (a VP counts as 3)
