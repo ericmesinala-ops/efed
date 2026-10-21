@@ -1610,26 +1610,60 @@ function pickEfed(i){const p=me(),e=p.opts[i];p.efed=e;p.cash+=e.cash;p.tok+=(+e
  if(G.cur<G.pl.length-1){G.cur++;G.ready=false;ui();}else startDraft();}
 
 // ---------- DRAFT ----------
-function startDraft(){phaseIntro('DRAFT PHASE','Show '+G.round,startDraft0)}
+function startDraft(){phaseIntro('FREE AGENCY','Show '+G.round,startDraft0)}
 function startDraft0(){
  G.s0=G.pl.map(snapP); // the show starts here: the summary compares against this
  if(G.wd.length<10){G.wd.push(...sh(G.disc.filter(c=>c.atk)));G.disc=G.disc.filter(c=>!c.atk);}
- G.pool=G.wd.splice(0,10);
+ G.pool=G.wd.splice(0,G.round===1?10:BIDN); // Show 1: the full draft; Shows 2+: 3 free agents, sealed bids
  if(G.pd.length<PSHOP){G.pd.push(...sh(G.disc.filter(c=>c.cat&&!c.fin)));G.disc=G.disc.filter(c=>!c.cat)}
  G.bz=G.buzz||null;G.buzz=null;if(G.bz)G.pl.forEach(p=>{p.cash=Math.max(0,p.cash+(G.bz.c||0));p.tok+=G.bz.h||0}); // last show's Buzz lands on both players
- G.pshop=G.pd.splice(0,Math.max(1,PSHOP-((G.bz&&G.bz.f)||0))); // power cards for sale this draft (a dead crowd means fewer)
+ G.pshop=[]; // power cards are no longer drafted: each player draws PWDRAW after free agency
  G.pl.forEach(p=>{p.done=false;p.picks=0;p.rp=[];p.bp=[];p.inc={};delete p.incT});G.incPaid=false;G.hold=null;
- G.ph='draft';G.cur=draftFirstP();G.ready=false;
- if(G.round===1&&ANIM_SPEED!==0&&!matchMedia('(prefers-reduced-motion:reduce)').matches)G.slin=1; // only at the very start of the game: the 4 Storylines drop in one by one, hold, then the panel closes by itself
- autoDone();
+ if(G.round===1){G.ph='draft';G.cur=draftFirstP();G.ready=false}
+  // only at the very start of the game: the 4 Storylines drop in one by one, hold, then the panel closes by itself
+ if(G.round===1)autoDone();else startBid();
 }
 function autoDone(){
  const none=!G.pool.length&&!G.pshop.length;
  G.pl.forEach((p,i)=>{if(AI[i]&&(none||(!G.pool.some(c=>c.cost<=p.cash)&&!G.pshop.some(c=>prc(c,p)<=p.cash))))p.done=true}); // only the AI is passed automatically: a human with no money left gets a Continue to booking button
- if(G.pl.every(p=>p.done)){G.disc.push(...G.pool);G.pool=[];G.pd.push(...G.pshop);G.pshop=[];return bookingIntro();}
+ if(G.pl.every(p=>p.done)){G.disc.push(...G.pool);G.pool=[];return startPw();}
  if(me().done){const o=nextOpen(G.cur,'done');if(o>=0&&o!==G.cur){G.cur=o;G.ready=false}}
  ui();
 }
+// ---------- FREE AGENCY: Show 1 = draft, Shows 2+ = 3 wrestlers, sealed bids (ties: open raise / cancel) · POWER CARDS: every show each player draws 4, ticks, buys ----------
+const PWDRAW=4,BIDN=3;
+const frTie=pi=>{const T=G.bd.tie,b=G.bd.b[pi];return G.pl[pi].cash-G.bd.q.reduce((t,j)=>j===T.i?t:t+b[j],0)}; // cash free for a raise: other tied bids stay committed
+function startBid(){G.ph='bid';G.cur=firstP();G.ready=false;G.bd={b:[G.pool.map(()=>0),G.pool.map(()=>0)],done:[false,false],step:'enter',res:[],tie:null,q:[],rz:1};ui()}
+function bidAdj(i,d){const p=me(),b=G.bd.b[G.cur],c=G.pool[i],v=b[i],n=d>0?(v?v+1:c.cost):(v<=c.cost?0:v-1);if(n>0&&n-v>p.cash-b.reduce((t,x)=>t+x,0))return;b[i]=n;ui()}
+function confirmBid(){G.bd.done[G.cur]=true;const o=G.bd.done.findIndex(x=>!x);if(o>=0){G.cur=o;G.ready=false;ui()}else resolveBids()}
+function bidWin(i,pi,price){const p=G.pl[pi],c=G.pool[i];p.cash-=price;p.vp+=+c.vp||0;p.signed.push(c);p.hand.push(c);p.picks++;(p.rp=p.rp||[]).push(c);G.bd.res.push({c,pi,price})}
+function bidLose(i){const c=G.pool[i];G.disc.push(c);G.bd.res.push({c,pi:-1})}
+function resolveBids(){const bd=G.bd;G.pool.forEach((c,i)=>{const a=bd.b[0][i],b=bd.b[1][i];if(!a&&!b)bidLose(i);else if(a===b)bd.q.push(i);else bidWin(i,a>b?0:1,Math.max(a,b))});bd.q.sort((x,y)=>G.pool[x].cost-G.pool[y].cost);nextTie()}
+function nextTie(){const bd=G.bd;if(!bd.q.length){bd.step='res';bd.tie=null;const h=AI.findIndex(x=>!x);G.cur=h>=0?h:0;G.ready=false;return ui()}
+ const i=bd.q[0],x=bd.b[0][i],v=G.pl.map(p=>p.vp);bd.step='tie';bd.tie={i,bid:[x,x],t:v[0]<v[1]?0:v[1]<v[0]?1:1-firstP(),first:true};tieTurn()} // fewer VP acts first
+function tieTurn(){const bd=G.bd,T=bd.tie,need=T.bid[1-T.t]+1,can=pi=>frTie(pi)>=need;
+ if(T.first&&!can(0)&&!can(1)){bidLose(T.i);bd.q.shift();return nextTie()} // nobody can raise: nobody gets him
+ if(!can(T.t))return tieCancel(T.t);
+ bd.rz=need;if(G.cur!==T.t){G.cur=T.t;G.ready=false}ui()}
+function tieRaise(n){const bd=G.bd,T=bd.tie,need=T.bid[1-T.t]+1;n=+n;if(n<need||n>frTie(T.t))return;T.bid[T.t]=n;T.first=false;T.t=1-T.t;tieTurn()}
+function tieCancel(pi){const bd=G.bd,T=bd.tie;bidWin(T.i,1-pi,T.bid[1-pi]);bd.q.shift();nextTie()} // the other player wins at their own bid; the canceller keeps the cash
+function tieRz(d){const bd=G.bd,T=bd.tie,need=T.bid[1-T.t]+1;bd.rz=Math.max(need,Math.min(frTie(T.t),bd.rz+d));ui()}
+function bidDone(){G.pool=[];G.bd=null;startPw()}
+function startPw(){G.ph='pwsel';const n=Math.max(1,PWDRAW-((G.bz&&G.bz.f)||0));
+ G.pl.forEach(p=>{p.pwo=[];p.pws=[];for(let k=0;k<n;k++){if(!G.pd.length){G.pd=sh(G.disc.filter(c=>c.cat&&!c.fin));G.disc=G.disc.filter(c=>!(c.cat&&!c.fin))}if(!G.pd.length)break;p.pwo.push(G.pd.shift())}});
+ G.cur=firstP();G.ready=false;ui()}
+const pwTot=p=>p.pws.reduce((t,k)=>t+prc(p.pwo[k],p),0);
+function pwTog(i){const p=me();if(p.pws.includes(i))p.pws=p.pws.filter(k=>k!==i);else if(pwTot(p)+prc(p.pwo[i],p)<=p.cash)p.pws.push(i);ui()}
+function pwBuy(){const p=me();p.pwo.forEach((c,i)=>{if(p.pws.includes(i)){p.cash-=prc(c,p);p.pw.push(c);p.picks++;(p.bp=p.bp||[]).push(c)}else G.disc.push(c)});p.pwo=[];p.pws=[];
+ const o=G.pl.findIndex(q=>q.pwo&&q.pwo.length);if(o>=0){G.cur=o;G.ready=false;ui()}else bookingIntro()}
+function bidH(){const bd=G.bd,p=G.pl[VW()],hd=t=>faBar(t),wr=(c,btn)=>cardH(c,{nm:1,btn});
+ if(bd.step==='enter'){const b=bd.b[VW()],left=p.cash-b.reduce((t,x)=>t+x,0),ai=AI[G.cur];
+  return hd(ai?'Opponent is bidding':'Player '+(G.cur+1)+' · secret bids')+`<p class="hint dhn">Bid on each free agent (minimum = his signing cost, 0 = pass). Highest bid wins and pays their own bid. Equal bids: both players raise or cancel.</p><div class="row sw dr">${G.pool.map((c,i)=>wr(c,`<div style="display:flex;gap:10px;align-items:center;justify-content:center"><button ${ai?'disabled':''} onclick="bidAdj(${i},-1)">−</button><b>${b[i]?'$'+b[i]:'Pass'}</b><button ${ai?'disabled':''} onclick="bidAdj(${i},1)">+</button></div><small>min $${c.cost}</small>`)).join('')}</div><div class="fbar"><span>Cash left $${left}</span><button ${ai?'disabled':''} onclick="confirmBid()">Confirm bids →</button></div>`}
+ if(bd.step==='tie'){const T=bd.tie,c=G.pool[T.i],ai=AI[T.t],need=T.bid[1-T.t]+1;
+  return hd('Tie on '+c.name)+`<p class="hint dhn">Both bid $${T.bid[0]===T.bid[1]?T.bid[0]:'…'}. ${ai?'Opponent':'Player '+(T.t+1)} (fewer VP acts first) must raise or cancel. Cancelling refunds the bid and the other player wins at their bid.</p><div class="row sw dr">${wr(c,`<p>Player 1: $${T.bid[0]} · Player 2: $${T.bid[1]}</p>`)}</div><div class="fbar">${ai?'<span>Opponent is deciding…</span>':`<button onclick="tieRz(-1)">−</button><b>$${bd.rz}</b><button onclick="tieRz(1)">+</button><button onclick="tieRaise(G.bd.rz)">Raise to $${bd.rz}</button><button class="ghost" onclick="tieCancel(G.cur)">Cancel bid</button>`}</div>`}
+ return hd('Results')+`<div class="row sw dr">${bd.res.map(r=>wr(r.c,r.pi<0?'<p>No winner · discarded</p>':`<p>Player ${r.pi+1} signs for $${r.price}</p>`)).join('')}</div><div class="fbar"><button onclick="bidDone()">Continue to power cards →</button></div>`}
+function pwH(){const p=G.pl[VW()],b=AI[G.cur],tot=pwTot(p);
+ return `<div class="bar">POWER CARDS · SHOW ${G.round}<span>${b?'Opponent':'Player '+(G.cur+1)}'s draw · Cash $${p.cash}</span></div><p class="hint dhn">You drew ${p.pwo.length}. Select the cards to keep, then Buy. You pay each card's cost now; playing it later is free. The rest are discarded.</p><div class="row sw dr">${p.pwo.map((c,i)=>{const on=p.pws.includes(i),no=!on&&tot+prc(c,p)>p.cash;return cardH(c,{off:no,btn:`<button class="${on?'':'ghost'}" ${no||b?'disabled':''} onclick="pwTog(${i})">${on?'✓ Selected':'Select'} · ${prc(c,p)?'$'+prc(c,p):'free'}</button>${isWpn(c)?'<small class="dqn">⚠ DQ risk outside the hardcore match</small>':''}`})}).join('')||'<p class="hint">Nothing to choose.</p>'}</div><div class="fbar"><span>Total $${tot} · cash left $${p.cash-tot}</span><button ${b?'disabled':''} onclick="pwBuy()">${p.pws.length?'Buy selected':'Keep none'}</button></div>`}
 let BKI=0; // 1 while a phase title (DRAFT / BOOKING / RESOLUTION PHASE) is on screen
 function phaseIntro(title,small,next,fresh,sub){ // a title holds for about 2 seconds, then next() runs
  if(BKI)return;
@@ -1642,7 +1676,7 @@ function phaseIntro(title,small,next,fresh,sub){ // a title holds for about 2 se
  document.body.append(o);
  setTimeout(()=>{BKI=0;if(G===g)next();o.classList.add('out');setTimeout(()=>o.remove(),450)},wait+2000*m);
 }
-function bookingIntro(){const x=PLE[G.round],bk=()=>phaseIntro('BOOKING PHASE','Draft complete',startShow,1);return x?phaseIntro('PREMIUM LIVE EVENT','Show '+G.round,bk,1,pleTxt(x)):bk()} // draft over: the title, then the show starts
+function bookingIntro(){const x=PLE[G.round],bk=()=>phaseIntro('BOOKING PHASE','Free agency complete',startShow,1);return x?phaseIntro('PREMIUM LIVE EVENT','Show '+G.round,bk,1,pleTxt(x)):bk()} // draft over: the title, then the show starts
 function draft(i){const p=me(),c=G.pool.splice(i,1)[0];p.cash-=c.cost;p.vp+=+c.vp||0;p.signed.push(c);p.hand.push(c);p.picks++;(p.rp=p.rp||[]).push(c);nextDraft();}
 function buyPw(i){const p=me(),c=G.pshop[i];if(!c||prc(c,p)>p.cash)return;G.pshop.splice(i,1);p.cash-=prc(c,p);p.pw.push(c);p.picks++;(p.bp=p.bp||[]).push(c);nextDraft();} // paid now, free to play later
 const canStop=p=>G.round>1||(p.rp||[]).length>0||!G.pool.some(c=>c.cost<=p.cash); // the first draft needs at least one wrestler
@@ -2167,13 +2201,15 @@ const ixH=(p,o)=>{const paid=G.incPaid,pi=G.pl.indexOf(p);const lit=!o&&p.incT&&
  return `<div class="ixg"><div class="ixc"><span>Income this show</span><span>Win track</span></div>${Object.keys(TR).map(k=>{const I=INC[k],n0=(p.inc||{})[k]|0,n=paid?0:n0,t=p.tr[k]|0;
   const PI=o&&o.inc[k]||[],PT=o&&o.tr[k]||[],ia=`ixa${pi}${k}`,iq=`ixn${pi}${k}`;
   return `<div class="ix ${k}" title="${I.n}: +$${INCV} each time you book a wrestler on a spot that shows ${I.n}, +$${INCV} each time one of your ${TR[k].n} wrestlers is booked (as attacker or defender), and +$${INCV} for each of your power cards or interfering wrestlers of the ${TR[k].n} track when it is revealed in a match (paid at the end of the show). The ${TR[k].n} win track is at ${t} / 10 and goes +1 when one of your ${TR[k].n} wrestlers wins."><span class="ixl"><i class="inci">${I.ic}</i><em class="tn">${I.n}</em><em class="ts">${I.s}</em></span><span class="ixp tb2">${pip(Math.min(10,n),lit===k,PI.filter((q,j)=>n-PI.length+j<10))}</span><b class="ixa"${o?` id="${ia}"`:''}${paid&&G.incAnim&&n0?` data-cu data-from="${n0*INCV}" data-to="0" data-pre="$"`:''}>$${(n-PI.length)*INCV}</b>${o?cue(PI,n-PI.length,ia,v=>'$'+v*INCV):''}<svg class="ixar" viewBox="0 0 24 24"><path d="M4 12h14M13 6l6 6-6 6"/></svg><span class="ixl t">${trI(k)}<em class="tn">${TR[k].n}</em><em class="ts">${TR[k].n.slice(0,3)}</em></span><span class="ixq tb2">${pip(t,false,PT.map(x=>({t:x})))}</span><b class="ixn"${o?` id="${iq}"`:''}>${t-PT.length}</b>${o?cue(PT.map(x=>({t:x})),t-PT.length,iq,v=>v):''}</div>`}).join('')}${o?'':wtbH(p)}</div>`};
-const hudC=()=>`<div class="gc"><small>Show</small><b>${G.round}<em>/${MAXR}</em></b><div class="rp">${Array.from({length:MAXR},(_,k)=>`<i class="${k<G.round-1?'done':k===G.round-1?'now':''}"></i>`).join('')}</div><small class="ph">${PLE[G.round]&&G.ph!=='end'?'PLE · ':''}${({efed:'Setup',draft:'Draft',show:'Booking',resolve:'Results',end:'Final'})[G.ph]||''}</small></div>`;
+const hudC=()=>`<div class="gc"><small>Show</small><b>${G.round}<em>/${MAXR}</em></b><div class="rp">${Array.from({length:MAXR},(_,k)=>`<i class="${k<G.round-1?'done':k===G.round-1?'now':''}"></i>`).join('')}</div><small class="ph">${PLE[G.round]&&G.ph!=='end'?'PLE · ':''}${({efed:'Setup',draft:'Free Agency',bid:'Free Agency',pwsel:'Power Cards',show:'Booking',resolve:'Results',end:'Final'})[G.ph]||''}</small></div>`;
 // the HUD shows one player at a time: you by default, the chevron on the right switches to the other player
 let HUD_FLIP={k:0,for:-1}; // k = how many steps round the table from you the header is showing
 const hudIdx=()=>{const v=VW();return HUD_FLIP.for===v?(v+HUD_FLIP.k)%G.pl.length:v};
 const hudInner=()=>{const all=G.pl.map((p,j)=>hudP(p,j)),i=hudIdx(),o=(i+1)%G.pl.length,oAct=['efed','draft','show'].includes(G.ph)&&G.cur!==i; // every player is built so each keeps its change-flash memory
  return hudC()+`<div class="gv">${all[i]}<button class="gsw ${oAct?'dot':''} ${i!==VW()?'flip':''}" onclick="hudFlip()" aria-label="View ${AI[o]?'opponent':'Player '+(o+1)} stats" title="View ${AI[o]?'Opponent':'Player '+(o+1)} stats"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button></div>`};
 function hudFlip(){const v=VW(),k=HUD_FLIP.for===v?HUD_FLIP.k:0;HUD_FLIP={k:(k+1)%G.pl.length,for:v};const g=document.querySelector('.gh');if(g)g.innerHTML=hudInner()} // only the HUD is redrawn, so match animations are not restarted
+const headC=()=>{const h=head();return h.slice(0,h.indexOf('<div class="gh">'))}; // title + Status + menu only (no player stats, manager or income rows)
+const faBar=t=>`<div class="bar">FREE AGENCY · SHOW ${G.round} · ${SLOTS[G.round-1]} MATCHES<span>${t} · Cash $${G.pl[VW()].cash}</span></div>`;
 const head=()=>`<div class="hb"><h1 onclick="titleTap()">CAW <span>CARD GAME</span></h1><button class="ghost sbtn" onclick="openStatus()">Status</button><button class="ghost hbtn" id="hbtn" aria-label="Menu" aria-haspopup="true" aria-expanded="false" onclick="toggleMenu(event)"><svg width="20" height="14" viewBox="0 0 20 14" aria-hidden="true"><path d="M1 1.5h18M1 7h18M1 12.5h18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button><div class="tb" id="mnu">${EDIT?'<button onclick="openEd()">✎ Card editor</button>':''}<button class="ghost" onclick="closeMenu();rulesPop(1)">How to play</button>${HUB.u?`<button class="ghost" id="svb" onclick="saveGame()">Save game</button>`:''}<button class="ghost" onclick="if(confirm('Start a new game?'))newGame()">New game</button>${HUB.u?`<button class="ghost" id="opb" onclick="openGame()">Open game</button>`:''}${HUB.u?`<button class="ghost" onclick="hubOut()">Sign out · ${esc(HUB.u.display_name||HUB.u.username)}</button>`:`<button class="ghost" onclick="hubLogin()">Sign in with EFED Hub</button>`}<select title="Game mode" onchange="setMode(this.value)"><option value="ai" ${AI.some(Boolean)?'selected':''}>vs AI</option><option value="hs" ${AI.some(Boolean)?'':'selected'}>${NP} players (hot-seat)</option></select><select title="Animation speed" onchange="ANIM_SPEED=+this.value"><option value="0" ${ANIM_SPEED==0?'selected':''}>Instant results</option><option value="1" ${ANIM_SPEED==1?'selected':''}>Normal speed</option><option value="2" ${ANIM_SPEED==2?'selected':''}>Slow</option></select><select title="Card face" onchange="SHOW_TXT=this.value==='1';ui()"><option value="0" ${SHOW_TXT?'':'selected'}>Card face: stats only</option><option value="1" ${SHOW_TXT?'selected':''}>Card face: stats + power text</option></select></div></div><div class="gh">${hudInner()}</div>`;
 const efedH=()=>`<div class="bar">SETUP<span>Player ${G.cur+1}: choose your manager</span></div><p class="hint">Your manager runs your brand: you start the game with their cash and hype.</p><div class="row sw bk">${me().opts.map((e,i)=>cardH(e,{btn:`<button onclick="pickEfed(${i})">Choose</button>`})).join('')}</div>`;
 const VW=()=>{const h=AI.findIndex(x=>!x);return AI[G.cur]&&h>=0?h:G.cur}; // whose cards are shown on screen
@@ -2181,7 +2217,7 @@ const rosterH=()=>{const v=VW();return `<div class="rost">${G.pl.map((_,i)=>{con
   return `<div class="rs ${i===G.cur&&!pl.done?'on':''}"><div class="rh2"><b>${who(i)}${i===v?' (you)':''}</b><span>${list.length} wrestler${list.length===1?'':'s'}${nw.length?' · '+nw.length+' signed this show':''}${pl.done?' · done drafting':''}</span><em class="pwn" title="Power cards in hand">⚡ ${pl.pw.length}</em></div><div class="rm">${list.length?list.map(c=>`<div class="mc ${nw.includes(c)?'nw':i===v?'me':'op'}" title="${esc(c.n)}${nw.includes(c)?' (signed this show)':''}"${zd(c)}><div class="im"><span>${esc(c.n[0])}</span><img src="${imgOf(c)}" alt="" onerror="this.remove()"></div><b>${esc(c.n)}</b><u>⚔ ${c.atk} · 🛡 ${c.def}</u></div>`).join(''):'<div class="rn0">No wrestlers signed yet</div>'}</div></div>`}).join('')}</div>`};
 function draftH(){const p=G.pl[VW()],b=AI[G.cur],r1=G.round===1;
  const cant=!b&&!G.pool.some(c=>c.cost<=p.cash)&&!G.pshop.some(c=>prc(c,p)<=p.cash);
- return `<div class="bar">DRAFT · SHOW ${G.round}<span>${b?'Opponent':'Player '+(G.cur+1)}'s pick</span></div>${slTop()}${G.bz?`<p class="bzl">Buzz from last show (${'★'.repeat(G.bz.st)} ${CRN[G.bz.st]}): ${buzzI(G.bz)} for each player</p>`:''}<p class="hint dhn">One pick per turn: sign a wrestler or buy a power card (pay now, play free later). Gain its VP immediately. ${r1?'Sign at least one wrestler in this first draft. ':''}Press Stop drafting when done.</p>${rosterH()}<div class="row sw dr">${G.pool.map((c,i)=>{const no=c.cost>p.cash;return cardH(c,{off:no,nm:1,btn:`<button ${no||b?'disabled':''} onclick="signDraft(${i})">Sign $${c.cost}</button>`})}).join('')||'<p class="hint">No wrestlers left.</p>'}${G.pshop.length?`<div class="rsep"><span>Power cards for sale</span></div>${G.pshop.map((c,i)=>{const no=prc(c,p)>p.cash;return cardH(c,{off:no,btn:`<button ${no||b?'disabled':''} onclick="signDraft(${i},'p')">${prc(c,p)?'Buy $'+prc(c,p):'Take · free'}</button>${isWpn(c)?'<small class="dqn">⚠ DQ risk outside the hardcore match</small>':''}`})}).join('')}`:''}</div>${G.pshop.length?'':'<p class="hint">No power cards for sale.</p>'}<div class="fbar">${cant?'<button onclick="stopDraft()">Continue to booking →</button>':`<button class="ghost" ${!b&&canStop(p)?'':'disabled'} onclick="stopDraft()">Stop drafting</button>`}</div>`;}
+ return faBar((b?'Opponent':'Player '+(G.cur+1))+'\'s pick')+`<p class="hint dhn">One pick per turn: sign a wrestler. Gain its VP immediately. ${r1?'Sign at least one wrestler in this first draft. ':''}Press Stop drafting when done.</p><div class="row sw dr">${G.pool.map((c,i)=>{const no=c.cost>p.cash;return cardH(c,{off:no,nm:1,btn:`<button ${no||b?'disabled':''} onclick="signDraft(${i})">Sign $${c.cost}</button>`})}).join('')||'<p class="hint">No wrestlers left.</p>'}${G.pshop.length?`<div class="rsep"><span>Power cards for sale</span></div>${G.pshop.map((c,i)=>{const no=prc(c,p)>p.cash;return cardH(c,{off:no,btn:`<button ${no||b?'disabled':''} onclick="signDraft(${i},'p')">${prc(c,p)?'Buy $'+prc(c,p):'Take · free'}</button>${isWpn(c)?'<small class="dqn">⚠ DQ risk outside the hardcore match</small>':''}`})}).join('')}`:''}</div><div class="fbar">${cant?'<button onclick="stopDraft()">Continue to booking →</button>':`<button class="ghost" ${!b&&canStop(p)?'':'disabled'} onclick="stopDraft()">Stop drafting</button>`}</div>`;}
 // ---- the bonus badge on a wrestler's art: DISPLAY ONLY. It reads bonuses, never runs a power (nothing is drawn, paid or placed), and only counts what both players can already see ----
 const ownerOf=c=>G&&G.pl?G.pl.find(p=>ownedW(p).includes(c))||null:null;
 const fxOK=(f,c)=>!f.tag||hasT(c,f.tag);
@@ -2565,6 +2601,14 @@ function aiStep(){
  const p=me();
  if(G.ph==='efed'){const o=p.opts.map((e,i)=>[e.cash+e.hyp*2+e.fx.length*3,i]).sort((a,b)=>b[0]-a[0]);return pickEfed(o[0][1]);}
  
+ if(G.ph==='bid'){const bd=G.bd;
+  if(bd.step==='enter'){const b=bd.b[G.cur];let left=p.cash;const v=c=>c.atk+c.def+c.vp*2+c.fx.length*2-c.cost*.3;
+   G.pool.map((c,i)=>({c,i})).sort((x,y)=>v(y.c)-v(x.c)).forEach((x,k)=>{if(k>=2&&Math.random()<.5)return;const bid=x.c.cost+(Math.random()<.5?1:0)+(Math.random()<.3?1:0);if(bid<=left-2){b[x.i]=bid;left-=bid}else if(x.c.cost<=left){b[x.i]=x.c.cost;left-=x.c.cost}});
+   return confirmBid()}
+  if(bd.step==='tie'){const T=bd.tie,c=G.pool[T.i],need=T.bid[1-T.t]+1;return need<=c.cost+2+(+c.vp||0)&&need<=frTie(T.t)?tieRaise(need):tieCancel(T.t)}
+  return}
+ if(G.ph==='pwsel'){const pv=c=>(c.fx||[]).reduce((t,f)=>t+((f.k==='atk'||f.k==='def'||f.k==='both')&&f.n>0?f.n:0),0)*(isWpn(c)?.5:1)+(c.rules||[]).length-prc(c,p)*.3;let left=p.cash-2;
+  p.pwo.map((c,i)=>({c,i,v:pv(c)})).filter(x=>x.v>.5).sort((x,y)=>y.v-x.v).slice(0,3).forEach(x=>{const pr=prc(x.c,p);if(pr<=left){p.pws.push(x.i);left-=pr}});return pwBuy()}
  if(G.ph==='draft'){
   const ok=G.pool.map((c,i)=>({c,i})).filter(x=>x.c.cost<=p.cash),okP=G.pshop.map((c,i)=>({c,i})).filter(x=>prc(x.c,p)<=p.cash),nW=(p.rp||[]).length,nP=(p.bp||[]).length,need=G.round===1&&!nW;
   const pv=c=>(c.fx||[]).reduce((t,f)=>t+((f.k==='atk'||f.k==='def'||f.k==='both')&&f.n>0?f.n:0),0)*(isWpn(c)?.5:1)+(c.rules||[]).length-prc(c)*.3;
@@ -2611,11 +2655,11 @@ function ui(){
  slSweep().forEach(([j,c])=>toast(`${AI[j]?'Opponent':G.pl.length>2||!AI.some(Boolean)?'Player '+(j+1):'You'} won ${c.n}: ${slRw(c).join(', ')}`));stopAnim();queueMicrotask(postUi);if(STS)queueMicrotask(stsFill);
  if(AI.some(Boolean))G.ready=true;
  if(G.aiFx&&G.ph!=='show')G.aiFx=null;
- const hold=aiHold(),ai=AI[G.cur]&&['efed','draft','show'].includes(G.ph)&&!hold&&!G.slin;
+ const hold=aiHold(),ai=AI[G.cur]&&['efed','draft','bid','pwsel','show'].includes(G.ph)&&!hold&&!G.slin;
  if(ai&&G.ph==='efed')return aiStep();
  const a=document.getElementById('app');
  if(!G.ready&&!['resolve','end'].includes(G.ph)){MERCH_FX=[];HYPE_FX=[];a.innerHTML=`<div class="pass"><h2>Pass the device to Player ${G.cur+1}</h2><p class="hint">Hidden cards stay hidden until you reveal.</p><button onclick="G.ready=true;ui()">I'm Player ${G.cur+1} — reveal my cards</button></div>`;return;}
- a.innerHTML=(G.ph==='resolve'&&!G.fin?'':head())+({efed:efedH,draft:draftH,show:showH,resolve:resolveH,end:endH})[G.ph]();richDom(a);fitRow();
+ a.innerHTML=(G.ph==='resolve'&&!G.fin?'':['draft','bid','pwsel'].includes(G.ph)?headC():head())+({efed:efedH,draft:draftH,bid:bidH,pwsel:pwH,show:showH,resolve:resolveH,end:endH})[G.ph]();richDom(a);fitRow();
  clearTimeout(aiT);if(hold){aiT=setTimeout(()=>{G.aiFx=null;ui()},AIFX_MS());playAiFx()}else if(ai)aiT=setTimeout(aiStep,900);
  if(G.ph==='resolve'&&(G.res||(G.pend&&G.pend.r0))){if(G.noAnim){G.noAnim=false;skipAnim()}else startAnim()}
  playMerchFx();playHypeFx();
