@@ -3125,6 +3125,7 @@ function aiStep(){
  if(BKI||!AI[G.cur])return;
  G.aiFx=null;
  const p=me(),L=AIL(); // L: 0 = Easy, 1 = Normal, 2 = Hard
+ if(L===2){try{if(aiHard(p))return}catch(e){console.warn('AIFALLBACK',e&&e.stack||e)}}
  if(G.ph==='efed'){const o=p.opts.map((e,i)=>[e.cash+e.hyp*2+e.fx.length*3,i]).sort((a,b)=>b[0]-a[0]);return pickEfed(L===0?o[Math.floor(Math.random()*o.length)][1]:o[0][1]);}
  
  if(G.ph==='wsel'){const v=c=>c.atk+c.def+c.vp*2+c.fx.length*2-c.cost*.3;let left=p.cash-(L===0?4:L===2?1:2);
@@ -3169,6 +3170,157 @@ function aiStep(){
   G.sel={t:'w',i:wi};return play(si);
  }
 }
+// ---------- HARD AI v2: it plans instead of rolling dice. Every option (book, attach, interfere, train, Rumble entry, pass) gets a value in VP and the best one is played ----------
+// It only reads what a sharp human could read at the table: your signed wrestlers not yet booked, how many cards are face-down on your wrestlers, the board, the tracks. Never your hidden power cards.
+const AIH={
+ cv:()=>[.42,.4,.34,.28,.2,.05][Math.min(5,Math.max(0,G.round-1))], // what $1 is worth in VP this show (cash is useless after the last show)
+ sl:()=>Math.max(1,MAXR-G.round+1), // shows left, this one included
+ cdf:z=>{const t=1/(1+.2316419*Math.abs(z)),d=.3989423*Math.exp(-z*z/2),q=d*t*(.3193815+t*(-.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));return z>0?1-q:q},
+ pdf:z=>Math.exp(-z*z/2)*.3989423,
+ avgB:()=>{if(G._avgB)return G._avgB;const a=[];rdy(DB.pw).forEach(c=>{const b=(c.fx||[]).filter(f=>(f.k==='both'||f.k==='atk'||f.k==='def')&&f.n>0&&!f.tag).reduce((m,f)=>Math.max(m,f.n),0),n=Math.max(1,Math.floor(+c.copies)||1);for(let i=0;i<n;i++)a.push(b)});return G._avgB=a.length?Math.max(1.5,a.reduce((t,x)=>t+x,0)/a.length):2.2},
+ ent:(pi,c,pw)=>({p:pi,c,pw:pw||[]}),
+ // a side's total as the game itself would add it up (type chart, manager, own cards...); hidden cards of the other player are guessed, never read
+ side:(e,role,vs,mine)=>{let v;try{v=calc(mine?e:{...e,pw:[]},role,vs).v}catch(x){v=+e.c[role]||0}
+  if(!mine)v+=e.pw.length*AIH.avgB()*.9;
+  return v},
+ pwin:(A,D,hid)=>{const sd=1.5+.4*hid;return AIH.cdf((A-D-.5)/sd)}, // chance the attacker wins (a tie goes to the defender)
+ hidN:e=>e?e.pw.length:0,
+  trPip:(p,o,t)=>{ // what one more step on a win track is worth: the leader of each track gets +8 VP at the end, ties give nothing
+  if(!t)return 0;const d=(p.tr[t]|0)-(o.tr[t]|0),sg=Math.sqrt(2*(AIH.sl()+.5)*1.4);return Math.max(.12,WIN_BONUS*AIH.pdf((d-.5)/sg)/sg)},
+ ruleX:(c,role)=>{ // rough value of a card's rules in VP (+ the stat part that calc() cannot see)
+  let t=0;(c.rules||[]).forEach(r=>{const cond=(r.if||[]).length?.55:1,fr={bookS:1,endshow:1,win:.5,lose:.3,reveal:.8,resolve:.8,oppBook:.5,oppAtt:.5,finFire:.4,train:.5,endgame:.5}[r.when]||.5;
+   (r.do||[]).forEach(a=>{const n=+a.n||1,s=Math.sign(+a.n||1);let v=0;
+    if(a.a==='stat')v=(a.k===role||a.k==='both')&&role?.2*(+a.n||0):0;
+    else if(a.a==='vp'||a.a==='vpPer')v=(+a.n||0);
+    else if(a.a==='cash'||a.a==='cashPer'||a.a==='income'||a.a==='incPer'||a.a==='hypeCash'||a.a==='opCash')v=.3*n;
+    else if(a.a==='draw'||a.a==='drawPay'||a.a==='drawW')v=.7*n;
+    else if(a.a==='hype'||a.a==='hypePer')v=.3*n;
+    else if(a.a==='injure')v=.6;else if(a.a==='injSelf')v=-.6;
+    else if(a.a==='elite'||a.a==='trkUp'||a.a==='finPip'||a.a==='steal'||a.a==='hypeSteal')v=.5;
+    else if(a.a==='discardMine'||a.a==='attTax')v=-.4;
+    t+=v*cond*fr})});return t},
+ // ---------- value of signing a wrestler / buying a power card (VP, before price) ----------
+ wVal:(c,p)=>{const sl=AIH.sl(),cv=AIH.cv(),use=Math.min(sl,4);
+  let q=((+c.atk||0)+(+c.def||0))/2+.3*Math.max(+c.atk||0,+c.def||0)+(c.fx||[]).filter(f=>f.k==='atk'||f.k==='def'||f.k==='both').reduce((t,f)=>t+f.n*.4,0);
+  let v=(q-5)*.24*use+(+c.vp||0)*1.15+(+c.win||0)*cv*.55*use+(+c.promo||0)*cv*.25;
+  v+=AIH.ruleX(c)*use*.5+(finOf(c)?.6*Math.min(sl,3):0);
+  if(c.tr){const pip=AIH.trPip(p,G.pl[oppOf(G.cur)],c.tr);v+=pip*.5*use}
+  if(c.rq&&+c.rl>(p.tr[c.rq]|0))v-=Math.min(3,(+c.rl-(p.tr[c.rq]|0)))*.45;
+  if(c.champ)v+=.5;
+  // Grudge matches only take wrestlers costing $6 or less: always keep enough of them
+  const cheap=p.hand.filter(x=>x.cost<=GRC&&!injOut(x)).length,need=Math.min(4,(G.round>=3?2:1)+1);
+  if(c.cost<=GRC&&cheap<need)v+=(need-cheap)*1.1;
+  const want=G.round===MAXR?9:SLOTS[G.round-1]+1;if(p.hand.length>=want+2)v*=.6;
+  return v},
+ pVal:(c,p)=>{const sl=AIH.sl(),cv=AIH.cv();let b=(c.fx||[]).reduce((t,f)=>(f.k==='both'||f.k==='atk'||f.k==='def')&&f.n>0?Math.max(t,f.n):t,0)+(c.fx||[]).filter(f=>f.k==='pwPlus'||f.k==='pwLimit').reduce((t,f)=>t+1.5*f.n,0);
+  if((c.fx||[]).some(f=>f.tag)&&p.hand.length){const tg=c.fx.find(f=>f.tag).tag,m=p.hand.filter(x=>hasT(x,tg)).length/p.hand.length;b+=c.fx.filter(f=>f.tag&&f.n>0).reduce((t,f)=>t+f.n*m,0)}
+  let v=b*.24+.55+cv*1.0+AIH.ruleX(c,'atk')*1.1; // boost, a finisher pip, a win track pip, rules
+  if(isWpn(c))v*=.62; // legal only in the Hardcore match and the Rumble
+  if(c.rq){const d=+c.rl-(p.tr[c.rq]|0),w=Math.min(3,Math.max(0,G.round>1?G.round-1:0));v*=d<=0?1:d<=1?.55:d<=2?.25:.06} // a card you cannot play yet is dead weight
+  const usable=p.pw.filter(x=>reqOK(x,p)).length,cap=2+Math.ceil(SLOTS[G.round-1]*.8);if(usable>=cap)v*=.3;else if(usable>=cap-2)v*=.65;
+  if(sl<=1)v*=.9;return v},
+ reserve:p=>0, // spend it: a card in hand now beats cash in the bank (training uses what is left after buying)
+};
+function aiHEfed(p){ // manager: cash and hype count, plus what its abilities are worth
+ const W={pwSlot:5,tieWin:3.5,draftFirst:2.5,pwCost:2.2,swapW:2,champW:1.5,champB:1.5,pwLimit:3,pwPlus:3};
+ const sc=p.opts.map((e,i)=>[e.cash+e.hyp*2+(e.fx||[]).reduce((t,f)=>t+(W[f.k]||2)*Math.min(2,Math.max(1,+f.n||1)),0)+AIH.ruleX(e)*2,i]).sort((a,b)=>b[0]-a[0]);
+ pickEfed(sc[0][1]);return true}
+function aiHBuy(p,offer,priceOf,valOf,budget,maxN){ // free-agent / power-card offers at the start of a show: buy what is worth its price, best first
+ const o=offer.map((c,i)=>({c,i,v:valOf(c,p)-priceOf(c)*.27,pr:priceOf(c)})).filter(x=>x.v>.2).sort((a,b)=>b.v-a.v),pick=[];let left=budget;
+ o.forEach(x=>{if(pick.length<maxN&&x.pr<=left){pick.push(x.i);left-=x.pr}});return pick}
+function aiHDraft(p){
+ const nW=(p.rp||[]).length,first=G.round===1&&!nW,keep=nW?AIH.reserve(p):0,opp=G.pl[oppOf(G.cur)];
+ const opts=[];
+ G.pool.forEach((c,i)=>{if(c.cost<=p.cash)opts.push({k:'w',i,pr:c.cost,v:AIH.wVal(c,p)-c.cost*.27+(opp.cash>=c.cost?.15:0)-(nW>=3?4:0)})}); // taking a good wrestler also keeps him from you
+ const nP=(p.bp||[]).length;G.pshop.forEach((c,i)=>{const pr=prc(c,p);if(pr<=p.cash)opts.push({k:'p',i,pr,v:AIH.pVal(c,p)-pr*.27+(nW>=3&&nP<2?6:0)})}); // three wrestlers, then at least two power cards to play
+ const ok=opts.filter(x=>first?x.k==='w':(x.pr<=p.cash-keep)).sort((a,b)=>b.v-a.v);
+ if(ok.length&&(first||ok[0].v>.25)){const b=ok[0];if(b.k==='w')draft(b.i);else buyPw(b.i);return true}
+ if(!canStop(p)){const w=opts.filter(x=>x.k==='w').sort((a,b)=>b.v-a.v)[0];if(w){draft(w.i);return true}}
+ stopDraft();return true}
+function aiHShow(p){
+ const sl=G.slots,me_=G.cur,oi=oppOf(me_),opp=G.pl[oi],H=AIH,cv=H.cv(),last=sl.length-1,rd=G.round,B=H.avgB();
+ const avail=p.hand.map((c,i)=>({c,i})).filter(x=>!x.c.trn&&!injOut(x.c)&&reqOK(x.c,p));
+ const oppAv=opp.hand.filter(c=>!c.trn&&!injOut(c)&&reqOK(c,opp));
+ const E=(c,pw)=>H.ent(me_,c,pw),OE=c=>H.ent(oi,c,[]);
+ const trk=c=>c.tr?H.trPip(p,opp,c.tr):0;
+ const ple=(PLE[rd]&&PLE[rd].vp)||0;
+ // what winning is worth (VP): win payout, win track step, Main Event / Premium Live Event VP, elite progress, and every hype token on the two cards
+ const Vw=(c,oc,si,who)=>(+c.win||0)*cv+(who===me_?trk(c):(c.tr?H.trPip(opp,p,c.tr)*.9:0))+ple+(si===last?MAIN_VP:0)+.35+((c.hype|0)+(oc?oc.hype|0:0))*HV*cv+(oc&&oc.hype>2?.3:0);
+ const Vpr=c=>(+c.promo||0)*cv+.9+.3; // an unanswered attacker cuts a promo
+ const spotV=(s,r,P)=>{const w=spotRw(s,r);if(!w)return 0;return w.k==='vp'?(+w.n||1)*P:w.k==='hype'?.85:w.k==='pw'?.9:w.k==='inc'?.8:w.k==='cash'?(+w.n||0)*cv:0};
+ const grOpen=sl.filter((s,i)=>grI(i)&&!s.rum&&(!s.atk||!s.def)).length,cheapAv=avail.filter(x=>x.c.cost<=GRC).length;
+ const cands=[],bestFor=new Map();
+ const push=o=>{cands.push(o);if(o.i!=null)bestFor.set(o.i,Math.max(bestFor.get(o.i)??-9,o.ev))};
+ const hold=Math.min(3,p.pw.length)*B*.3,oppHold=0;
+ // ----- book: attack an open match, defend an opposing attacker, enter the Rumble -----
+ sl.forEach((s,si)=>{
+  if(s.rum){if(!rumCan(s,me_))return;avail.forEach(x=>{if(!gOK(x.c,si))return;const q=(+x.c.atk+ +x.c.def)/2;push({t:'rum',si,i:x.i,ev:.18+q*.05+(x.c.cost<=GRC&&grOpen?-.2:0)})});return}
+  if(!s.atk&&!locked(me_)){
+   avail.forEach(x=>{if(!gOK(x.c,si))return;const c=x.c,me0=E(c,[]);
+    let bd=null,Pd=0;oppAv.forEach(oc=>{if(!gOK(oc,si))return;const D=H.side(OE(oc),'def',[me0],false)+oppHold,A=H.side(me0,'atk',[OE(oc)],true)+hold,Pa=H.pwin(A,D,1);if(1-Pa>Pd){Pd=1-Pa;bd=oc}});
+    const ans=bd?Math.max(0,Math.min(1,(Pd-.3)/.35)):0,Pa=bd?1-Pd:1;
+    let ev=ans*(Pa*Vw(c,bd,si,me_)-(1-Pa)*Vw(bd||c,c,si,oi)*.9)+(1-ans)*Vpr(c)+spotV(s,'atk',ans*Pa+(1-ans));
+    if(c.champ&&si===last)ev+=DEFCH_VP;
+    if(c.cost<=GRC&&!grI(si)&&grOpen>=cheapAv)ev-=1.4; // keep the cheap wrestlers for the Grudge matches
+    push({t:'atk',si,i:x.i,ev,P:Pa})})}
+  else if(s.atk&&!s.def&&s.atk.p!==me_){
+   const oe=s.atk;avail.forEach(x=>{if(!gOK(x.c,si))return;const c=x.c,m0=E(c,[]);
+    const A=H.side(oe,'atk',[m0],false)+Math.min(2,Math.max(0,maxPw(oe)-npw(oe)),opp.pw.length)*B*.35,D=H.side(m0,'def',[oe],true)+hold,Pd=1-H.pwin(A,D,H.hidN(oe)+1);
+    let ev=Pd*Vw(c,oe.c,si,me_)-(1-Pd)*Vw(oe.c,c,si,oi)+spotV(s,'def',Pd)+Vpr(oe.c)*.8+((oe.c.hype|0)>0?.4:0);
+    if(c.champ&&si===last)ev+=DEFCH_VP;
+    if(c.cost<=GRC&&!grI(si)&&grOpen>=cheapAv)ev-=1.4;
+    push({t:'def',si,i:x.i,ev,P:Pd})})}
+ });
+ // ----- attach power cards (weapons only where they are legal), and send a wrestler in to interfere (Hardcore match) -----
+ const fin=(e,role)=>{const F=finOf(e.c);return F&&(e.c.fm|0)+1>=fmaxOf(e.c)?(role==='atk'?F.atkB:F.defB):0};
+ const mineE=[];sl.forEach((s,si)=>{if(s.rum){(s.rr||[]).forEach((e,k)=>{if(e.p===me_&&!e.rdone)mineE.push({e,si,key:'r'+k,role:'atk',rum:1})});return}RK.slice(0,2).forEach(r=>{const e=s[r];if(e&&e.p===me_)mineE.push({e,si,key:r,role:r})})});
+ const eval2=(m,extraPw,extraV)=>{ // chance to win with and without the extra card(s)
+  const s=sl[m.si],e=m.e,role=m.role;
+  if(m.rum){return{dP:Math.min(.5,.05*(extraV||0)+.04),Vm:RUM_VP*.5,Vo:1,P0:.45}}
+  const oe=role==='atk'?s.def:s.atk;
+  if(!oe){let bd=null,Pd=0;oppAv.forEach(oc=>{if(!gOK(oc,m.si))return;const D=H.side(OE(oc),'def',[e],false),A=H.side(e,'atk',[OE(oc)],true),Pa=H.pwin(A,D,1);if(1-Pa>Pd){Pd=1-Pa;bd=oc}});
+   const A0=H.side(e,'atk',bd?[OE(bd)]:[],true),A1=H.side({...e,pw:[...e.pw,...extraPw]},'atk',bd?[OE(bd)]:[],true)+extraV,D=bd?H.side(OE(bd),'def',[e],false):0;
+   return{dP:bd?(H.pwin(A1,D,1)-H.pwin(A0,D,1))*.6:.05,Vm:Vw(e.c,bd,m.si,me_),Vo:bd?Vw(bd,e.c,m.si,oi):0,P0:bd?H.pwin(A0,D,1):1}}
+  const mine0=H.side(e,role,[oe],true),mine1=H.side({...e,pw:[...e.pw,...extraPw]},role,[oe],true)+extraV,th=H.side(oe,role==='atk'?'def':'atk',[e],false)+Math.min(1.5,Math.max(0,maxPw(oe)-npw(oe)),opp.pw.length)*B*.3,hid=H.hidN(oe)+1;
+  const f=role==='atk'?(A,D)=>H.pwin(A,D,hid):(A,D)=>1-H.pwin(A,D,hid);
+  const P0=role==='atk'?f(mine0,th):f(th,mine0),P1=role==='atk'?f(mine1,th):f(th,mine1);
+  return{dP:P1-P0,Vm:Vw(e.c,oe.c,m.si,me_),Vo:Vw(oe.c,e.c,m.si,oi),P0}};
+ if(atxOK(p)){
+  const tax=atx(p);
+  mineE.forEach(m=>{const e=m.e,s=sl[m.si];if(npw(e)>=maxPw(e))return;
+   p.pw.forEach((pc,j)=>{if(!reqOK(pc,p)||(isWpn(pc)&&!legalW(m.si,me_)))return;
+    const role=m.role,bo=(pc.rules||[]).reduce((t,r)=>t+(r.do||[]).reduce((u,a)=>u+(a.a==='stat'&&(a.k===role||a.k==='both')?(r.if&&r.if.length?.55:1)*(+a.n||0):0),0),0),fb=fin(e,role),ex=bo+fb;
+    const R=eval2(m,[pc],ex);let ev=R.dP*(R.Vm+R.Vo)+H.ruleX(pc,role)*Math.max(.35,R.P0)+.35+(fb?1.1:0)+((e.c.fm|0)+npw(e)>=1?.15:0)-.3-tax*.3;
+    if(R.P0>.93&&!fb)ev-=.4;if(R.P0<.1&&!fb)ev-=.5;
+    push({t:'att',si:m.si,key:m.key,pj:j,ev})})});
+  avail.forEach(x=>{const ic=x.c;itfT(ic).forEach(tg=>{if(!legalI(tg.i,me_))return;const m=mineE.find(z=>z.e===tg.e);if(!m)return;const role=m.role,b=itfB(ic,role),fb=fin(tg.e,role),ps={n:ic.n,itf:true,wc:ic,op:me_,fx:[],rules:[]};
+    const R=eval2(m,[ps],0);let ev=R.dP*(R.Vm+R.Vo)+.35+(fb?1.1:0)-(bestFor.get(x.i)??0)*.7-.2-tax*.3;
+    if(b<=0&&!fb)return;if(R.P0>.93&&!fb)ev-=.4;
+    push({t:'itf',si:tg.i,key:tg.r,i:x.i,ev})})})}
+ // ----- train: a wrestler who has nothing better to do this show, while there are shows left to profit from it -----
+ if(rd<MAXR){avail.forEach(x=>{const c=x.c;if(trained(c)||(bestFor.get(x.i)??-9)>.5)return;const k=['atk','def'].map(k=>[k,trP(c,k)]).sort((a,b)=>a[1]-b[1]||(+c[b[0]]-+c[a[0]]))[0],pr=k[1];
+   if(p.cash<pr+(rd>=MAXR-1?0:1))return;const use=Math.min(H.sl()-1,4),ev=.3*use*1.6+((+c.atk+ +c.def)/2>=6?.3:0)-pr*.17;push({t:'trn',i:x.i,k:k[0],ev})})}
+ // Locked (an attacker of mine is waiting for an answer) with open matches left and you still in the show: passing would give the show away, so spend the wait on something useful
+ const wait=locked(me_)&&!opp.passed&&sl.some(s=>!s.rum&&!s.atk);
+ if(wait){cands.forEach(c=>{if(c.t==='att'||c.t==='itf'||c.t==='trn')c.ev+=.55});
+  if(rd<MAXR||true)avail.forEach(x=>{const c=x.c;if(cands.some(z=>z.t==='trn'&&z.i===x.i)||trained(c)||rd>=MAXR)return;const k=['atk','def'].map(k=>[k,trP(c,k)]).sort((a,b)=>a[1]-b[1])[0];if(p.cash>=k[1])cands.push({t:'trn',i:x.i,k:k[0],ev:.2-k[1]*.03})})}
+ cands.sort((a,b)=>b.ev-a.ev);
+ const b=cands[0];
+ if(!b||b.ev<(wait?-.05:.12)){pass();return true}
+ if(b.t==='atk'||b.t==='def'||b.t==='rum')G.sel={t:'w',i:b.i},play(b.si);
+ else if(b.t==='att')G.sel={t:'p',i:b.pj},attach(b.si,b.key);
+ else if(b.t==='itf')G.sel={t:'i',i:b.i},interfere(b.si,b.key);
+ else if(b.t==='trn')train(b.i,b.k);
+ else pass();
+ return true}
+function aiHard(p){
+ if(G.ph==='efed')return aiHEfed(p);
+ if(G.ph==='wsel'){const left=p.cash-(G.round<MAXR?5:0),pk=aiHBuy(p,p.wo,c=>c.cost,(c,q)=>AIH.wVal(c,q),left,4);p.ws=pk;wsBuy();return true}
+ if(G.ph==='pwsel'){const left=p.cash-AIH.reserve(p),pk=aiHBuy(p,p.pwo,c=>prc(c,p),(c,q)=>AIH.pVal(c,q),left,3);p.pws=pk;pwBuy();return true}
+ if(G.ph==='draft')return aiHDraft(p);
+ if(G.ph==='show')return aiHShow(p);
+ return false}
+
 const aiHold=()=>!!G.aiFx&&G.ph==='show'&&ANIM_SPEED!==0&&!G.pl.every(p=>p.passed); // after the opponent books / attaches, the matches stay on screen for a moment so you can watch it land
 const AIFX_MS=()=>(matchMedia('(prefers-reduced-motion:reduce)').matches?900:1700)*(ANIM_SPEED===2?1.5:1);
 function aiMsg(f){const w='<b>'+esc(f.n)+'</b>';return f.k==='w'?`Opponent booked ${w} as the ${f.r==='atk'?'Attacker':'Defender'} in Match ${f.si+1}`:f.k==='p'?`Opponent attached a power card face-down to ${w} in Match ${f.si+1}`:`Opponent sent a wrestler in to interfere for ${w} in Match ${f.si+1}`}
