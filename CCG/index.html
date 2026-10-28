@@ -3591,6 +3591,7 @@ function aiStep(){
 }
 // ---------- HARD AI v2: it plans instead of rolling dice. Every option (book, attach, interfere, train, Rumble entry, pass) gets a value in VP and the best one is played ----------
 // It only reads what a sharp human could read at the table: your signed wrestlers not yet booked, how many cards are face-down on your wrestlers, the board, the tracks. Never your hidden power cards.
+const AI_SPITE=1; // Hard AI: 0 = plays only for itself, 1 = also plays to block you, 1.5 = meaner
 const AIH={
  cv:()=>[.42,.4,.34,.28,.2,.05][Math.min(5,Math.max(0,G.round-1))], // what $1 is worth in VP this show (cash is useless after the last show)
  sl:()=>Math.max(1,MAXR-G.round+1), // shows left, this one included
@@ -3680,6 +3681,21 @@ function aiHShow(p){
  const Vpr=c=>(+c.promo||0)*cv+.9+.3; // an unanswered attacker cuts a promo
  const spotV=(s,r,P)=>{const w=spotRw(s,r);if(!w)return 0;return w.k==='vp'?(+w.n||1)*P:w.k==='hype'?.85:w.k==='pw'?.9:w.k==='inc'?.8:w.k==='cash'?(+w.n||0)*cv:0};
  const grOpen=sl.filter((s,i)=>grI(i)&&!s.rum&&(!s.atk||!s.def)).length,cheapAv=avail.filter(x=>x.c.cost<=GRC).length;
+ // ----- aware gamer: count what is left before choosing -----
+ const oppCheap=oppAv.filter(x=>x.c.cost<=GRC).length,SP=AI_SPITE; // rivals' cheap wrestlers who could still take a Grudge spot
+ const otherMine=avail.length-cheapAv,otherOpen=sl.filter((s,k)=>!grI(k)&&!s.pr&&!s.rum&&(!s.atk||(!s.def&&s.atk.p!==me_))).length; // wrestlers I have for the other matches / other matches still open
+ const grBonus=(c,si)=>{ // how much a cheap wrestler is worth in a Grudge spot right now
+  if(!grI(si)||c.cost>GRC)return 0;
+  let u=.4;                                   // only cheap wrestlers fit here
+  if(oppCheap>0)u+=.5;                        // a rival could take it first
+  if(cheapAv<=grOpen)u+=.6;                   // I have no spare cheap wrestler: this is the only match he can fill
+  if(cheapAv<=1&&oppCheap>0)u+=.4;            // my last cheap wrestler and a rival also wants the spot: take it now
+  u+=otherMine>=otherOpen?.4:-.3;             // my expensive wrestlers cover every other match (no cost to go now) / I am short for the other matches
+  if(cheapAv>grOpen+1)u-=.5*Math.min(2,cheapAv-grOpen-1); // plenty of cheap ones: no rush
+  return Math.max(0,u)};
+ const rivalLive=si=>oppAv.some(o=>gOK(o.c,si)&&!G.pl[o.j].passed); // a rival could still book into this match
+ const denyAtk=(s,si)=>rivalLive(si)?.25+.5*spotV(s,'atk',1)+(si===last?.3:0):0; // grab a spot a rival wants before he does
+ const denyDef=(s,oe,Pd)=>{const w=spotRw(s,'atk');return .5*Vpr(oe.c)+Math.min(G.pl[oe.p].tok|0,6)*.15*cv+Pd*(w&&w.k==='vp'?(+w.n||1):0)}; // answer a rival's attacker: no free promo, no hype pile moved, no 'VP if he wins'
  const cands=[],bestFor=new Map();
  const push=o=>{cands.push(o);if(o.i!=null)bestFor.set(o.i,Math.max(bestFor.get(o.i)??-9,o.ev))};
  const hold=Math.min(3,p.pw.length)*B*.3,oppHold=0;
@@ -3694,6 +3710,7 @@ function aiHShow(p){
     let ev=ans*(Pa*Vw(c,bd,si,me_)-(1-Pa)*Vw(bd||c,c,si,bj)*.9)+(1-ans)*Vpr(c)+spotV(s,'atk',ans*Pa+(1-ans));
     if(c.champ&&si===last)ev+=DEFCH_VP;
     if(c.cost<=GRC&&!grI(si)&&grOpen>=cheapAv)ev-=1.4; // keep the cheap wrestlers for the Grudge matches
+    ev+=grBonus(c,si)+SP*denyAtk(s,si);
     push({t:'atk',si,i:x.i,ev,P:Pa})})}
   else if(s.atk&&!s.def&&s.atk.p!==me_){
    const oe=s.atk;avail.forEach(x=>{if(!gOK(x.c,si))return;const c=x.c,m0=E(c,[]);
@@ -3701,6 +3718,7 @@ function aiHShow(p){
     let ev=Pd*Vw(c,oe.c,si,me_)-(1-Pd)*Vw(oe.c,c,si,oe.p)+spotV(s,'def',Pd)+Vpr(oe.c)*.8+((oe.c.hype|0)>0?.4:0);
     if(c.champ&&si===last)ev+=DEFCH_VP;
     if(c.cost<=GRC&&!grI(si)&&grOpen>=cheapAv)ev-=1.4;
+    ev+=grBonus(c,si)+SP*denyDef(s,oe,Pd);
     push({t:'def',si,i:x.i,ev,P:Pd})})}
  });
  // ----- attach power cards (weapons only where they are legal), and send a wrestler in to interfere (Hardcore match) -----
