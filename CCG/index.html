@@ -50,7 +50,7 @@ button.ghost{background:transparent;color:var(--ink);border:2px solid var(--line
 .stat b{font:700 22px 'Barlow Semi Condensed',sans-serif}
 .stat.d{left:auto;right:0;padding:2px 7px 2px 9px;background:#2d6cc0;border:2px solid #fff5;border-right:0;border-radius:14px 0 0 14px}
 .flag{position:absolute;right:6px;padding:1px 9px;border-radius:10px;font-weight:700;font-size:12px}
-.flag.cr{top:88px;background:var(--gold);color:#2a1d00}.flag.hy{top:112px;background:#ff9a3d;color:#2a1200}
+.flag.cr{top:88px;background:var(--gold);color:#2a1d00}.flag.pwl{top:136px;background:#2b2f3a;color:#c9ced8;box-shadow:inset 0 0 0 1px #ffffff2a}.flag.pwa{top:136px;background:linear-gradient(#ffe27a,#f0b400);color:#2a1d00;box-shadow:0 0 8px #f0b400aa}.cw.pwlk .spw{opacity:.4;filter:grayscale(.85)}.pwab{background:linear-gradient(#ffe27a,#f0b400)!important;color:#2a1d00!important;font-weight:700}.pwab[disabled]{opacity:.45}.flag.hy{top:112px;background:#ff9a3d;color:#2a1200}
 .tx{position:absolute;left:0;right:0;bottom:0;padding:16px 36px 7px 8px;background:linear-gradient(#0000,#0b0f1acc 22%,#0b0f1af2);font:500 12px/1.3 'Barlow Semi Condensed','Segoe UI',sans-serif}
 .tx small{display:block;text-transform:uppercase;letter-spacing:1px;color:var(--p);filter:brightness(1.5);font-size:10px}
 .tx p{margin:3px 0 0;background:#ffffff14;border-radius:6px;padding:3px 6px}
@@ -2091,7 +2091,7 @@ function revInc(es,sd,vl){ // the income of the cards flipped face up in a match
 const isWpn=c=>String(c&&c.cat||'').trim().toLowerCase()==='weapon';
 const isDm=c=>String(c&&c.cat||'').trim().toLowerCase()==='dirty move',isRisky=c=>isWpn(c)||(isDm(c)&&!c.nodq); // Weapon AND Dirty Move cards are only legal in the Hardcore match, or once a Referee Down comes earlier in the Resolution Order
 const wpnFx=c=>{if(isWpn(c))c.fx=(c.fx||[]).map(f=>f&&(f.k==='atk'||(f.k==='def'&&+f.n>0))?{...f,k:'both'}:f);return c}; // a weapon's bonus number counts as Attack AND Defense (it helps in either role); a Defense penalty (negative) stays a Defense penalty. The one place this rule lives
-const hasA=(c,a)=>((c&&c.rules)||[]).some(r=>(r.do||[]).some(x=>x&&x.a===a));
+const hasA=(c,a)=>wRules(c).some(r=>(r.do||[]).some(x=>x&&x.a===a));
 const ownFlag=(si,pi,a)=>RK.some(r=>{const e=G.slots[si]&&G.slots[si][r];return !!e&&e.p===pi&&e.pw.some(x=>hasA(x,a))}); // you already put a Referee Down / Distract into this match (you only know your own face-down cards)
 const legalW=(si,pi)=>(G.pl[pi]&&G.pl[pi].ndq>0)||ownFlag(si,pi,'noDQAll')||G.hc===si||!!(G.slots[si]&&G.slots[si].rum)||ownFlag(si,pi,'refDown'),legalI=(si,pi)=>(G.pl[pi]&&G.pl[pi].ndq>0)||ownFlag(si,pi,'noDQAll')||G.hc===si||ownFlag(si,pi,'distract');
 const injOut=c=>!!c&&c.injR===G.round; // injured: misses this show
@@ -3052,12 +3052,20 @@ const bstS=()=>{const v=+((DB.cfg||{}).bstS);return v>=50&&v<=200?v:100}; // boo
 const bstH=t=>{const el=t==='el',n=el?ELM:3;return `<span class="bst bst-${t}" style="font-size:${(.82*bstS()/100).toFixed(3)}em"><b>${el?'Elite':'Finisher'}</b><span>${Array.from({length:n},(_,k)=>`<i${k?'':' class="on"'}></i>`).join('')}</span></span>`}; // Elite Boost: 5 segments, first lit (neon). Finisher Boost: 3 pips, first lit (red)
 const spI=k=>{const d=SPC[k];if(!d){const g=spG()[k]||spTy()[k];if(!g)return null;const im=(DB.tk||{})['g_'+tagKey(g)];return im?`<img class="spi" src="${im}" alt="${esc(g)}" draggable="false">`:`<b class="spkw s-tg">${esc(g)}</b>`}if(k==='atk'||k==='def'||k==='atkdef')return `<i class="spm s-${k}">${k==='atk'?'ATK':k==='def'?'DEF':'ATK/DEF'}</i>`;const im=(DB.tk||{})[d[0]];if(!im&&k==='sep')return '<i class="sps"></i>';if(!im&&(k==='heel'||k==='face'))return `<i class="spm s-${k}">${k.toUpperCase()}</i>`;if(im)return `<img class="spi${k==='powercard'||k==='weaponcard'?' w':''}" src="${im}" alt="${d[1]}" draggable="false">`;const f=SPF[k];return f?`<span class="spv s-${k}" title="${d[1]}">${f()}</span>`:SPK.includes(k)?`<b class="spkw s-${k}">${d[1]}</b>`:`<b>${d[1]}</b>`};
 const spT=t=>esc(t).replace(/\{([a-z][a-z-]*)\}/gi,(m,k)=>spI(k.toLowerCase())||m);
+const actCost=c=>Math.max(0,(+c.cost||0)-4); // paying to switch a wrestler's rules on: his signing cost minus 4 ($4 or less = already on)
+const pwOff=c=>!!c&&c.atk!==undefined&&!c.pa&&(c.rules||[]).some(r=>(r.do||[]).length)&&actCost(c)>0; // his rules are still switched off
+const wRules=c=>pwOff(c)?[]:(c&&c.rules)||[]; // the rules that count: none until he is activated
+function activate(i){ // a free action: pay, the rules switch on for the rest of the game, and it is still your turn
+ const p=me(),c=p.hand[i];if(!c||!pwOff(c)||G.cur!==VW()||AI[G.cur]||p.cash<actCost(c))return;
+ p.cash-=actCost(c);c.pa=1;toast(c.n+': power activated for $'+actCost(c));ui()}
+function aiAct(p,L){ // the AI switches on the powers it can afford, keeping a little cash back (Easy 4, Normal 2, Hard 1)
+ const keep=L===0?4:L===2?1:2;p.hand.filter(c=>pwOff(c)&&!c.trn&&!injOut(c)).sort((a,b)=>actCost(a)-actCost(b)).forEach(c=>{if(p.cash-actCost(c)>=keep){p.cash-=actCost(c);c.pa=1}})}
 const spB=c=>{const t=String((c&&c.sp)||'').trim();return t?`<div class="spw">${spT(t)}</div>`:'<div class="spw ph"></div>'}; // empty = a hidden placeholder, so a row of cards stays lined up
 function cardH(c,o={}){
  const w=c.atk!==undefined,e=c.cash!==undefined,k=w?tagC((c.tags||[])[0]):e?'var(--e)':'var(--p)';
  const src=imgOf(c);
  const fx=fxOf(c);
- return `<div class="cw">${w?elxH(c):''}<div class="c ${e?'ef ':''}${o.sel?'sel':''} ${o.off?'off':''} ${c.champ?'champ':''}" style="--k:${k}"${zd(c)}><div class="im"><span>${c.n[0]}</span><img src="${src}" alt="" onerror="this.remove()"></div><div class="top">${w?`<i class="coin" title="Signing cost">${c.cost}</i>`:''}<b>${c.n}</b>${w?`<span class="tg">${[...(c.align?[c.align[0].toUpperCase()+c.align.slice(1)]:[]),...c.tags].map(t=>`<em>${t}</em>`).join('')}</span>`:''}</div>${w?`<div class="stat a" title="Attack">⚔ <b>${c.atk}</b></div><div class="stat d" title="Defense"><b>${c.def}</b> 🛡</div>`:''}${c.champ?'<div class="flag cr">★ CHAMPION</div>':''}${c.hype?`<div class="flag hy">🔥 ${c.hype}</div>`:''}<div class="tx">${rqB(c)}${c.cat?`<small>${c.cat}${c.fin?'':' · $'+prc(c)}</small>`:''}${w?`<div class="pay"><span>🏆 Win $${c.win}</span><span>🎤 Promo $${c.promo}</span>${INC_N[c.tr]?`<span>💲 ${INC_N[c.tr]}</span>`:''}</div>`:''}${e?`<div class="pay"><span>💵 $${c.cash}</span><span>🔥 ${c.hyp}</span></div>`:''}${fx&&(SHOW_TXT||!(w||e))?`<p>${fx}</p>`:''}</div>${w&&c.vp?`<i class="vps" title="Victory points">${c.vp}</i>`:''}${tkH(c)}${w?trbH(c,o.tmp||(G&&G.pl?baseB(c):null)):''}${o.lab||''}</div>${e||c.fin?'':spB(c)}${o.nm?'':w?fmH(c)+emH(c):o.sp?mPH:''}${o.btn?`<div class="bt">${o.btn}</div>`:''}</div>`;
+ return `<div class="cw${pwOff(c)?' pwlk':''}">${w?elxH(c):''}<div class="c ${e?'ef ':''}${o.sel?'sel':''} ${o.off?'off':''} ${c.champ?'champ':''}" style="--k:${k}"${zd(c)}><div class="im"><span>${c.n[0]}</span><img src="${src}" alt="" onerror="this.remove()"></div><div class="top">${w?`<i class="coin" title="Signing cost">${c.cost}</i>`:''}<b>${c.n}</b>${w?`<span class="tg">${[...(c.align?[c.align[0].toUpperCase()+c.align.slice(1)]:[]),...c.tags].map(t=>`<em>${t}</em>`).join('')}</span>`:''}</div>${w?`<div class="stat a" title="Attack">⚔ <b>${c.atk}</b></div><div class="stat d" title="Defense"><b>${c.def}</b> 🛡</div>`:''}${c.champ?'<div class="flag cr">★ CHAMPION</div>':''}${c.hype?`<div class="flag hy">🔥 ${c.hype}</div>`:''}${w&&pwOff(c)?`<div class="flag pwl" title="His power is switched off. Pay $${actCost(c)} to activate it (a free action)">🔒 $${actCost(c)}</div>`:w&&c.pa&&actCost(c)>0&&(c.rules||[]).length?`<div class="flag pwa" title="Power activated">⚡</div>`:''}<div class="tx">${rqB(c)}${c.cat?`<small>${c.cat}${c.fin?'':' · $'+prc(c)}</small>`:''}${w?`<div class="pay"><span>🏆 Win $${c.win}</span><span>🎤 Promo $${c.promo}</span>${INC_N[c.tr]?`<span>💲 ${INC_N[c.tr]}</span>`:''}</div>`:''}${e?`<div class="pay"><span>💵 $${c.cash}</span><span>🔥 ${c.hyp}</span></div>`:''}${fx&&(SHOW_TXT||!(w||e))?`<p>${fx}</p>`:''}</div>${w&&c.vp?`<i class="vps" title="Victory points">${c.vp}</i>`:''}${tkH(c)}${w?trbH(c,o.tmp||(G&&G.pl?baseB(c):null)):''}${o.lab||''}</div>${e||c.fin?'':spB(c)}${o.nm?'':w?fmH(c)+emH(c):o.sp?mPH:''}${o.btn?`<div class="bt">${o.btn}</div>`:''}</div>`;
 }
 const setMode=v=>{if(!confirm('Switching mode starts a new game. Continue?'))return ui();NP=NPU;AI=Array.from({length:NP},(_,i)=>v==='ai'&&i>0);newGame()};
 const HP_PREV={};
@@ -3260,8 +3268,8 @@ function boardB(e,r,si){ // a booked wrestler: base bonuses + conditional 'at re
  const add=(k,n)=>{if(k==='atk'||k==='both')o.a+=n;if(k==='def'||k==='both')o.d+=n};
  [...(e.c.fx||[]),...mFx(G.pl[e.p],'perPower')].forEach(f=>{if(f.k==='perPower'&&fxOK(f,e.c)&&e.pw.length)add(f.s==='def'?'def':'atk',f.n*e.pw.length)}); // per attached card: the count is public
  if(V===e.p){const pa=[...(e.c.fx||[]),...mFx(G.pl[e.p],'pwAtk')].filter(f=>f.k==='pwAtk'&&fxOK(f,e.c)).reduce((t,f)=>t+(+f.n||0),0);if(pa){const c=e.pw.filter(x=>(x.fx||[]).some(g=>(g.k==='atk'||g.k==='both')&&g.n>0&&fxOK(g,e.c))).length;o.a+=pa*c}const pw=[...(e.c.fx||[]),...mFx(G.pl[e.p],'pwWpn')].filter(f=>f.k==='pwWpn'&&fxOK(f,e.c)).reduce((t,f)=>t+(+f.n||0),0);if(pw){const c=e.pw.filter(isWpn).length;o.a+=pw*c;o.d+=pw*c}} // only the owner knows which attached cards grant Attack / are Weapons
- const srcs=[[e,opp,r,[...(e.c.rules||[]),...((G.pl[e.p].efed||{}).rules||[]),...(V===e.p?e.pw.flatMap(x=>x.itf?[]:x.rules||[]):[])]]];
- if(opp)srcs.push([opp,e,ro,[...(opp.c.rules||[]),...((G.pl[opp.p].efed||{}).rules||[]),...(V===opp.p?opp.pw.flatMap(x=>x.itf?[]:x.rules||[]):[])]]);
+ const srcs=[[e,opp,r,[...wRules(e.c),...((G.pl[e.p].efed||{}).rules||[]),...(V===e.p?e.pw.flatMap(x=>x.itf?[]:x.rules||[]):[])]]];
+ if(opp)srcs.push([opp,e,ro,[...wRules(opp.c),...((G.pl[opp.p].efed||{}).rules||[]),...(V===opp.p?opp.pw.flatMap(x=>x.itf?[]:x.rules||[]):[])]]);
  srcs.forEach(([me,him,role,rules])=>rules.forEach(rl=>{
   if(rl.when!=='reveal'||!(rl.do||[]).some(a=>a.a==='stat'))return;
   if(!(rl.if||[]).filter(c=>c.c).every(c=>seenCond(nc(c),me,him,V)))return;
@@ -3349,7 +3357,7 @@ function showH(){
  const wN=p.hand.length,pN=p.pw.length;
  const wB=(c,i)=>{if(injOut(c))return '<button disabled>Injured · out this show</button>';if(c.trn)return `<button class="train" disabled>Training · ${trKey(c.trn)}</button>`;
   const okR=reqOK(c,p),its=itfT(c),op=TRO===i;
-  return `<button ${canPlace(c)&&okR?'':'disabled'} onclick="G.sel={t:'w',i:${i}};G.step='place';ui()">Book</button><div class="trc"><button class="itf" ${(its.length||riT(c).length)&&okR&&atxOK(p)?'':'disabled'} title="${p.abk>0?'An opposing card stops you from attaching this turn.':!atxOK(p)?'You must pay $'+atx(p)+' before your next power card or interference.':its.length?'Send him in on one of your booked wrestlers with the same alignment. Illegal outside the hardcore match unless a Distract came first: may cause a DQ.'+(RI_ON()&&riT(c).length?' With 3 players you can also run in on a match between the other two.':''):(RI_ON()&&riT(c).length?'Run in on a match between the other two players: help a wrestler win, or get him disqualified.':'Needs a booked wrestler of yours with the same alignment and room for another card.')}" onclick="G.sel={t:'i',i:${i}};G.step='itf';ui()">Interfere</button>${mSum(p,'swapW')>0?`<button class="itf" ${swLeft(p)&&swT().length&&okR?'':'disabled'} title="${p.efed.n}: put him in place of one of your booked wrestlers (${swLeft(p)} left this show). Uses your turn." onclick="G.sel={t:'s',i:${i}};G.step='swp';ui()">Swap in</button>`:''}${trained(c)?'':`<button class="${op?'ghost':'train'}" onclick="trainOpen(${i})" title="Paid now. He sits out this show and gains +${TRN} Attack or Defense for the rest of the game. A wrestler can be trained one time only.">${op?'Cancel':'Train +'+TRN}</button>`}</div>${op?`<div class="trc">${['atk','def'].map(k=>{const pr=trP(c,k),no=pr>p.cash;return `<button class="train" ${no?'disabled':''} onclick="train(${i},'${k}')">${k==='atk'?'Attack':'Defense'} <span class="${no?'nof':''}">$${pr}</span></button>`}).join('')}</div>`:''}`};
+  return `${pwOff(c)?`<button class="itf pwab" ${p.cash>=actCost(c)?'':'disabled'} title="Switch his power on for the rest of the game. A free action: it is still your turn." onclick="activate(${i})">⚡ Activate · $${actCost(c)}</button>`:''}<button ${canPlace(c)&&okR?'':'disabled'} onclick="G.sel={t:'w',i:${i}};G.step='place';ui()">Book</button><div class="trc"><button class="itf" ${(its.length||riT(c).length)&&okR&&atxOK(p)?'':'disabled'} title="${p.abk>0?'An opposing card stops you from attaching this turn.':!atxOK(p)?'You must pay $'+atx(p)+' before your next power card or interference.':its.length?'Send him in on one of your booked wrestlers with the same alignment. Illegal outside the hardcore match unless a Distract came first: may cause a DQ.'+(RI_ON()&&riT(c).length?' With 3 players you can also run in on a match between the other two.':''):(RI_ON()&&riT(c).length?'Run in on a match between the other two players: help a wrestler win, or get him disqualified.':'Needs a booked wrestler of yours with the same alignment and room for another card.')}" onclick="G.sel={t:'i',i:${i}};G.step='itf';ui()">Interfere</button>${mSum(p,'swapW')>0?`<button class="itf" ${swLeft(p)&&swT().length&&okR?'':'disabled'} title="${p.efed.n}: put him in place of one of your booked wrestlers (${swLeft(p)} left this show). Uses your turn." onclick="G.sel={t:'s',i:${i}};G.step='swp';ui()">Swap in</button>`:''}${trained(c)?'':`<button class="${op?'ghost':'train'}" onclick="trainOpen(${i})" title="Paid now. He sits out this show and gains +${TRN} Attack or Defense for the rest of the game. A wrestler can be trained one time only.">${op?'Cancel':'Train +'+TRN}</button>`}</div>${op?`<div class="trc">${['atk','def'].map(k=>{const pr=trP(c,k),no=pr>p.cash;return `<button class="train" ${no?'disabled':''} onclick="train(${i},'${k}')">${k==='atk'?'Attack':'Defense'} <span class="${no?'nof':''}">$${pr}</span></button>`}).join('')}</div>`:''}`};
  h+=wN||pN?`<div class="row sw bk" data-hand="1">${p.hand.map((c,i)=>cardH(c,{off:!reqOK(c,p)||!!c.trn||injOut(c),btn:wB(c,i)})).join('')}${wN&&pN?'<div class="rsep"><span>Power cards</span></div>':''}${pwCards(p,mine.length)}</div>${atx(p)?`<p class="hint">Your next power card or interference costs $${atx(p)} once (an opposing card made you pay).${atxOK(p)?'':' You can\'t afford it yet.'}</p>`:''}${pN&&!mine.length?'<p class="hint">Book a wrestler first: power cards attach to your wrestlers on the board.</p>':''}`:'<p class="hint">No cards in hand.</p>';
  h+=`<div class="acts opvb"><button class="ghost" onclick="G.sel=null;G.step='opp';ui()">View opponent</button></div>`; // the other side of the table: his hand face-down, his Storylines face up
  if(ENABLE_SCOUT&&G.market.length&&!G.scouted)h+=`<h3>Market</h3><div class="row sw bk">${G.market.map((c,i)=>cardH(c,{off:c.cost>p.cash,btn:`<button ${c.cost>p.cash?'disabled':''} onclick="buy('m',${i})">Sign $${c.cost}</button>`})).join('')}</div>`;
@@ -3696,6 +3704,7 @@ function aiStep(){
  if(BKI||!AI[G.cur])return;
  G.aiFx=null;
  const p=me(),L=AIL(); // L: 0 = Easy, 1 = Normal, 2 = Hard
+ if(G.ph==='show'&&!G.pend)aiAct(p,L); // free action: switch on the powers it can afford
  if(G.ph==='show'&&aiTag(p))return;
  if(G.ph==='show'&&!G.pend&&fmAi(p))return;
  if(G.ph==='show'&&!G.pend&&aiRunIn(p,L))return;
@@ -3763,7 +3772,7 @@ const AIH={
  rs:(e,role,vs,V)=>{ // stat powers of this wrestler and of his MANAGER that fire at the reveal and whose conditions hold right now, for him and against him (a manager's boost on Attack, a debuff on the opposing Defense...). Only what a player can read off the face-up cards: attached cards are counted elsewhere, hidden cards never
   try{const him=vs&&vs[0]||null,ro=role==='atk'?'def':'atk';let t=0;
    [[e,him,role],...(him?[[him,e,ro]]:[])].forEach(([me,hm,r])=>{
-    [...(me.c.rules||[]),...((G.pl[me.p].efed||{}).rules||[])].forEach(rl=>{
+    [...wRules(me.c),...((G.pl[me.p].efed||{}).rules||[])].forEach(rl=>{
      if(rl.when!=='reveal'||!(rl.do||[]).some(a=>a.a==='stat'))return;
      if(!(rl.if||[]).filter(c=>c.c).every(c=>seenCond(nc(c),me,hm,V)))return;
      let ok=false;try{ok=condOK(rl,me,hm,{trig:'reveal',role:r,main:false,lines:[]})}catch(x){ok=false}
@@ -4046,7 +4055,7 @@ function condOK(r,e,opp,ctx){const cs=(r.if||[]).filter(c=>c.c);if(!cs.length)re
  return r.mode==='any'?cs.some(f):cs.every(f)}
 function runRules(trig,e,opp,ctx,done){
  const p=G.pl[e.p];
- const jobs=(ctx.only?(ctx.only.rules||[]).map(r=>[r,ctx.only.n]):[...(trig==='reveal'&&e.cpArm&&!e.cpDone?[[{when:'reveal',do:[{a:'copyPow',now:1,n:1}]},e.c.n]]:[]),...(e.c.rules||[]).map(r=>[r,e.c.n,undefined,1]),...(e.cpr||[]).map(r=>[r,e.cpn||e.c.n,undefined,1]),...e.pw.flatMap(x=>isMu(x)?[]:(x.rules||[]).map(r=>[r,x.n,x])),...(ctx.noEfed?[]:((p.efed&&p.efed.rules)||[]).map(r=>[r,p.efed.n]))]).filter(([r])=>r.when===trig&&(r.do||[]).length); // ctx.only: run just that card's rules (a finisher entering last)
+ const jobs=(ctx.only?(ctx.only.rules||[]).map(r=>[r,ctx.only.n]):[...(trig==='reveal'&&e.cpArm&&!e.cpDone?[[{when:'reveal',do:[{a:'copyPow',now:1,n:1}]},e.c.n]]:[]),...wRules(e.c).map(r=>[r,e.c.n,undefined,1]),...(e.cpr||[]).map(r=>[r,e.cpn||e.c.n,undefined,1]),...e.pw.flatMap(x=>isMu(x)?[]:(x.rules||[]).map(r=>[r,x.n,x])),...(ctx.noEfed?[]:((p.efed&&p.efed.rules)||[]).map(r=>[r,p.efed.n]))]).filter(([r])=>r.when===trig&&(r.do||[]).length); // ctx.only: run just that card's rules (a finisher entering last)
  let ji=0;
  const nextJob=()=>{
   if(ji>=jobs.length)return done();
@@ -4155,7 +4164,7 @@ function doAct(a,e,opp,ctx,src,cb){
   if(!a.now&&ctx.trig!=='reveal'){e.cpArm=1;L.push(`${src}: will copy the opposing wrestler's Power when the match starts`);return cb(true)}
   e.cpArm=0;
   const oc=opp&&opp.c&&!opp.fake&&!opp.efed?opp.c:null;
-  const rs=oc?(oc.rules||[]).filter(r=>LIVEW.includes(r.when)&&(r.do||[]).length&&!r.do.some(x=>x.a==='copyPow')):[];
+  const rs=oc?wRules(oc).filter(r=>LIVEW.includes(r.when)&&(r.do||[]).length&&!r.do.some(x=>x.a==='copyPow')):[];
   if(!rs.length){e.cpDone=1;L.push(`${src}: ${oc?oc.n+' has no Power to copy':'there is no opposing wrestler to copy'}`);return cb(false)}
   const fin=yes=>{e.cpDone=1;if(!yes){L.push(`${src}: chose not to copy ${oc.n}'s Power`);return cb(false)}
    e.cpn=`${e.c.n} (copied ${oc.n})`;const now=cl(rs.filter(r=>r.when==='reveal'));e.cpr=cl(rs.filter(r=>r.when!=='reveal'));
@@ -4274,7 +4283,7 @@ function askResultChoices(s,pre,go){
  const hy=slEs(s).reduce((t,e)=>t+(e.c.hype||0),0)*HV,cp=titleUp(s,main),ch=(cp?9:0)+(main?3*MAIN_VP*nW:0);
  const Rw=WC.win+hy+ch,Rl=LC.win+hy+ch; // rough reward value of each side winning (a VP counts as 3)
  const find=(e,opp,trig,role)=>{const p=G.pl[e.p],ctx={trig,role,main,lines:[]},out=[];
-  for(const [r,src] of [...(e.c.rules||[]).map(r=>[r,e.c.n]),...e.pw.flatMap(x=>(x.rules||[]).map(r=>[r,x.n])),...((p.efed&&p.efed.rules)||[]).map(r=>[r,p.efed.n])]){
+  for(const [r,src] of [...wRules(e.c).map(r=>[r,e.c.n]),...e.pw.flatMap(x=>(x.rules||[]).map(r=>[r,x.n])),...((p.efed&&p.efed.rules)||[]).map(r=>[r,p.efed.n])]){
    if(r.when!==trig||!condOK(r,e,opp,ctx))continue;
    (r.do||[]).filter(x=>x.a==='flip'||(x.a==='callDraw'&&trig==='lose')).forEach(a=>out.push({e,src,n:+a.n||0,nx:a.a==='flip'?+a.nx||0:0,win:trig==='win',kind:a.a==='callDraw'?'draw':'flip'}))}
   return out.sort((x,y)=>(x.kind==='draw')-(y.kind==='draw'))}; // every flip power and every draw power a player has is offered; flips come first, because a draw is only possible if the result was not flipped
