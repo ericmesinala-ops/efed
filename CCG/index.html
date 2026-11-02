@@ -2432,7 +2432,7 @@ let tapN=0,tapT;function titleTap(){tapN++;clearTimeout(tapT);tapT=setTimeout(()
 document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==='e')unlockEd()}); // editor button: always on your computer, on the public site only with ?edit
 function loadDB(){try{const s=JSON.parse(localStorage.getItem(LS));if(s&&s.wr&&s.pw&&s.ef)return fromObj(s)}catch(e){}return defDB()}
 let DB=loadDB();
-function persist(){let ok=true;try{localStorage.setItem(LS,JSON.stringify(DB))}catch(e){ok=false;if(!EDAUTH)toast('Storage full: use smaller images or Export JSON')}if(EDAUTH)cloudSave();return ok||EDAUTH}
+function persist(){let ok=true;try{localStorage.setItem('wtcg_dirty','1')}catch(e){}try{localStorage.setItem(LS,JSON.stringify(DB))}catch(e){ok=false;if(!EDAUTH)toast('Storage full: use smaller images or Export JSON')}if(EDAUTH)cloudSave();return ok||EDAUTH}
 // ---- how to play: a short summary shown before each new game (a checkbox turns that off; the menu always opens it) ----
 const RULES_LS='ccg_rules_off';
 function rulesPop(force){let off=false;try{off=localStorage.getItem(RULES_LS)==='1'}catch(e){}if(!force&&off)return;if(document.getElementById('rpop'))return;
@@ -3162,10 +3162,10 @@ async function cloudPush(){
  try{
   const r=await fetch(R2_URL+'/deck',{method:'PUT',headers:{Authorization:'Bearer '+r2Tok(),'Content-Type':'application/json'},body:JSON.stringify({base:CLOUD.rev,db:DB})});
   const j=await r.json().catch(()=>({}));
-  if(r.ok){CLOUD.rev=j.rev;DIRTY=false;setCloudMsg('☁ Saved to the cloud')}
+  if(r.ok){CLOUD.rev=j.rev;DIRTY=false;try{localStorage.removeItem('wtcg_dirty')}catch(e){}setCloudMsg('☁ Saved to the cloud')}
   else if(r.status===409){
    if(confirm('The cards in the cloud were changed from another device after you opened this page.\n\nOK = replace the cloud copy with what you have here.\nCancel = load the cloud copy (edits made here since are lost).')){CLOUD.rev=j.rev;cloudBusy=false;return cloudPush()}
-   DIRTY=false;await loadCloud();edSel(ED.tab,0);setCloudMsg('☁ Loaded the cloud copy')}
+   DIRTY=false;try{localStorage.removeItem('wtcg_dirty')}catch(e){}await loadCloud();edSel(ED.tab,0);setCloudMsg('☁ Loaded the cloud copy')}
   else if(r.status===401){EDAUTH=false;try{localStorage.removeItem('wtcg_r2')}catch(e){}setCloudMsg('Wrong password: not saved to the cloud',1)}
   else setCloudMsg('Cloud save failed ('+(j.error||r.status)+'): kept on this device',1)}
  catch(e){setCloudMsg('No connection: kept on this device, press Save to cloud later',1)}
@@ -4893,14 +4893,18 @@ function copyPrompt(){const t=wrPrompt(ED.d);const ok=()=>toast('Prompt copied')
  const fb=()=>{const a=document.createElement('textarea');a.value=t;document.body.append(a);a.select();let r=false;try{r=document.execCommand('copy')}catch(e){}a.remove();r?ok():prompt('Copy the prompt:',t)};
  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(ok,fb);else fb()}
 function edCopy(){navigator.clipboard.writeText(JSON.stringify(DB,null,1)).then(()=>toast('Card JSON copied'),()=>toast('Copy blocked: use Export file'))}
-function edExport(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['window.CARDS='+JSON.stringify(DB,null,1)+';\n'],{type:'text/javascript'}));a.download='cards.js';a.click()}
-function edImport(inp){const f=inp.files[0];if(!f)return;f.text().then(s=>{try{const o=JSON.parse(s.replace(/^\s*window\.CARDS\s*=\s*/,'').replace(/;\s*$/,''));if(!o.wr||!o.pw||!o.ef)throw 0;DB=fromObj(o);persist();edSel('wr',0);toast('Imported')}catch(e){toast('That file is not a card export')}});inp.value=''}
+function edExport(){
+ try{if(ED&&ED.d&&Array.isArray(DB[ED.tab])&&String(ED.d.n||'').trim())DB[ED.tab][ED.i]=cleanC(cl(ED.d))}catch(e){} // the card open in the form is included even if Save Card was not pressed
+ persist();const now=new Date(),head='// exported '+now.toISOString()+' | '+DB.wr.length+' wrestlers, '+DB.pw.length+' power cards, '+DB.ef.length+' effects\n';
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([head+'window.CARDS='+JSON.stringify(DB,null,1)+';\n'],{type:'text/javascript'}));a.download='cards.js';a.click();
+ toast('Exported '+DB.wr.length+' wrestlers, '+DB.pw.length+' power cards at '+now.toLocaleTimeString()+'. Check the file says that time at the top.')}
+function edImport(inp){const f=inp.files[0];if(!f)return;f.text().then(s=>{try{const o=JSON.parse(s.replace(/^\s*(?:\/\/[^\n]*\n\s*)*window\.CARDS\s*=\s*/,'').replace(/;\s*$/,''));if(!o.wr||!o.pw||!o.ef)throw 0;DB=fromObj(o);persist();edSel('wr',0);toast('Imported')}catch(e){toast('That file is not a card export')}});inp.value=''}
 async function edToR2(){
  const up=async(v,n)=>r2Up(await (await fetch(v)).blob(),n);let ok=0,bad=0,err='';
  try{for(const t of ['wr','pw','ef','st'])for(const c0 of DB[t]||[])for(const [c,nm] of [[c0,c0.n]])if(c.img&&c.img.startsWith('data:')){try{c.img=await up(c.img,nm);ok++;toast('Moved '+ok+'…')}catch(e){bad++;err=e.message;if(err==='wrong token'||err==='no token')throw e}}
   for(const k of Object.keys(DB.tk||{}))if(String(DB.tk[k]).startsWith('data:')){try{DB.tk[k]=await up(DB.tk[k],'token-'+k);ok++}catch(e){bad++;err=e.message;if(err==='wrong token'||err==='no token')throw e}}}catch(e){}
  persist();edSel(ED.tab,ED.i);toast(!ok&&!bad?'Nothing to move: no images are stored on this device':'Moved '+ok+' image'+(ok==1?'':'s')+' to R2'+(bad?', '+bad+' failed ('+err+')':'')+'. Export cards.js to publish.')}
-async function edReset(){if(!confirm('Discard unsaved changes and reload the cards saved in the cloud?'))return;localStorage.removeItem(LS);DIRTY=false;if(!await loadCloud())DB=defDB();edSel(ED.tab,0)}
+async function edReset(){if(!confirm('Discard unsaved changes and reload the cards saved in the cloud?'))return;localStorage.removeItem(LS);try{localStorage.removeItem('wtcg_dirty')}catch(e){}DIRTY=false;if(!await loadCloud())DB=defDB();edSel(ED.tab,0)}
 function edApply(){const m=rdyShort();
  if(m.length)return alert('Only cards marked ✓ All done are in the game. You still need at least '+5*NP+' wrestlers, '+2*NP+' managers and 1 power card marked. Ready so far: '+m.join(', ')+'.');
  persist();closeEd();newGame()}
@@ -5389,7 +5393,7 @@ async function ldrLoad(){
   else if(u&&!mine)h+='<p class="hint" style="text-align:center">You are not on the board yet. Finish a game while signed in.</p>';
   if(el())el().innerHTML=h}
  catch(e){if(el())el().innerHTML='<p class="hint" style="text-align:center">Could not load the leaderboard. Check your connection and try again.</p><div style="text-align:center"><button class="ghost" onclick="ldrLoad()">Try again</button></div>'}}
-loadCloud().then(hubInit).then(()=>{startGate();ldrFlush()});
+(()=>{let d=false;try{d=!!localStorage.getItem('wtcg_dirty')&&!!localStorage.getItem(LS)}catch(e){}if(d)DIRTY=true;return d?Promise.resolve(false):loadCloud()})().then(hubInit).then(()=>{startGate();ldrFlush()}); // unsynced local edits win over the cloud copy until they are pushed
 </script><script>/* mobile lock: block pinch zoom so the layout stays put (double-tap zoom is already off through touch-action) */
 (function(){var d=document;['gesturestart','gesturechange','gestureend'].forEach(function(n){d.addEventListener(n,function(e){e.preventDefault()},{passive:false})});d.addEventListener('touchmove',function(e){if(e.touches&&e.touches.length>1)e.preventDefault()},{passive:false});})();/* ---- background music: a soft, laid-back arena groove (Web Audio, no audio files) ---- */
 var MUS={vol:(function(){try{const v=localStorage.getItem('ccg_musv');if(v!==null&&!isNaN(+v))return Math.max(0,Math.min(100,+v));return localStorage.getItem('ccg_mus')==='0'?0:30}catch(e){return 30}})(),run:false,step:0,next:0,tm:null,out:null,nb:null,ctx:null,BPM:100};
