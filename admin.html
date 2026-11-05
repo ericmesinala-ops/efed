@@ -1228,12 +1228,20 @@ async function adminToggleCreator(username,grant) {
 
 async function adminBanUser(username) {
   if(!await adminConfirm('Ban @'+username+'? They will not be able to log in.', 'Ban User')) return;
-  try { await sbUpdate('users',{banned:true,banned_reason:'Banned by admin'},`username=eq.${encodeURIComponent(username)}`); toast('🚫 '+username+' banned.'); loadUsers(); }
+  try {
+    const res = await sbUpdate('users',{banned:true,banned_reason:'Banned by admin'},`username=eq.${encodeURIComponent(username)}`);
+    if(!Array.isArray(res)||!res.length){ toast('❌ Ban did not save — 0 rows updated. Check the Supabase RLS UPDATE policy on "users".', 6000); return; }
+    toast('🚫 '+username+' banned.'); loadUsers();
+  }
   catch(e){ toast('Error: '+e.message); }
 }
 
 async function adminUnbanUser(username) {
-  try { await sbUpdate('users',{banned:false,banned_reason:null,strikes:0},`username=eq.${encodeURIComponent(username)}`); toast('✅ '+username+' unbanned.'); loadUsers(); }
+  try {
+    const res = await sbUpdate('users',{banned:false,banned_reason:null,strikes:0},`username=eq.${encodeURIComponent(username)}`);
+    if(!Array.isArray(res)||!res.length){ toast('❌ Unban did not save — 0 rows updated. Check the Supabase RLS UPDATE policy on "users".', 6000); return; }
+    toast('✅ '+username+' unbanned.'); loadUsers();
+  }
   catch(e){ toast('Error: '+e.message); }
 }
 
@@ -1285,7 +1293,7 @@ async function adminSendBroadcast(toAll) {
 // ── SCANNER ──
 async function updateCostPreview() {
   try {
-    const channels = await sbGet('efed_channels','select=id,efed_name');
+    const { all: channels } = await _buildAllChannels();
     ['a','b'].forEach(grp => {
       const grpChannels = channels.filter(ch => _getChannelGroup(ch.efed_name.toLowerCase()) === grp);
       const enabled = grpChannels.filter(ch => _isChannelScanEnabled(ch.efed_name));
@@ -1383,7 +1391,7 @@ function _updateNextScanIndicator() {
 
 async function startScan(grp) {
   if(!checkScanLock(grp)) return;
-  const allChannels=await sbGet('efed_channels','select=*&order=efed_name.asc').catch(()=>[]);
+  const { all: allChannels } = await _buildAllChannels().catch(()=>({all:[]}));
   if(!allChannels.length){toast('No channels added yet. Add some above in eFed Channels.');return;}
   const channels=allChannels.filter(ch => {
     const key = ch.efed_name.toLowerCase();
@@ -1419,7 +1427,7 @@ async function startScan(grp) {
     const est=Math.round((channels.length-i)*1.5);
     label.textContent=`Scanning ${i+1} of ${channels.length}: ${ch.efed_name} — est. ${est}s remaining`;
     try {
-      const cid=await resolveChannelId(ch.yt_channel_url);
+      const cid = ch.yt_channel_url ? await resolveChannelId(ch.yt_channel_url) : await _ytResolveByName(ch.efed_name);
       if(!cid) { skipped.push(ch.efed_name); continue; }
       const r=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${cid}&type=video&publishedAfter=${sevenDaysAgo}&maxResults=10&order=date&key=${YT_API_KEY}`);
       if(r.status===403){fill.style.background='rgba(192,0,14,.8)';label.textContent='Quota exceeded — scanned '+i+' of '+channels.length+' channels. Try again tomorrow.';toast('YouTube quota exceeded!');break;}
@@ -1526,6 +1534,65 @@ async function _ytResolveTry(apiUrl) {
     if (e.message === 'YT_QUOTA_EXCEEDED') throw e;
     return null;
   }
+}
+
+// Fallback for feds that have never had a YouTube URL saved — they're
+// group-assigned and checked for scanning straight from submissions data,
+// so search by name instead of giving up. Without this, a fed with no saved
+// URL had no way to ever be scanned. Note this is a different response shape
+// than _ytResolveTry (search results nest the id under .channelId).
+async function _ytResolveByName(name) {
+  try {
+    const r = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=1&q=${encodeURIComponent(name)}&key=${YT_API_KEY}`);
+    if (r.status === 403) throw new Error('YT_QUOTA_EXCEEDED');
+    const d = await r.json();
+    return d.items?.[0]?.id?.channelId || null;
+  } catch (e) {
+    if (e.message === 'YT_QUOTA_EXCEEDED') throw e;
+    return null;
+  }
+}
+
+// Merge registered efed_channels rows with distinct efeds seen in approved
+// submissions. Shared by loadChannels() (what the admin sees, and where
+// group/checkbox assignments are made) and startScan() (what actually gets
+// scanned) so a fed assigned to a group and checked for scanning can never
+// silently drop out of the scan just because nobody's clicked "Save" on a
+// YouTube URL for it yet.
+async function _buildAllChannels() {
+  const [channels, subs] = await Promise.all([
+    sbGet('efed_channels', 'select=*&order=efed_name.asc'),
+    sbGet('submissions', 'status=eq.approved&select=efed,date,date_ms,url,show_name&order=date_ms.desc')
+  ]);
+
+  const map = new Map();
+  const lastUploadMap = {};
+  subs.forEach(s => {
+    if (!s.efed) return;
+    const key = s.efed.trim().toLowerCase();
+    const ms = s.date_ms || (s.date ? new Date(s.date).getTime() : 0);
+    if (!lastUploadMap[key] || ms > lastUploadMap[key].ms) {
+      lastUploadMap[key] = { name: s.efed.trim(), date: s.date, ms, url: s.url, show_name: s.show_name };
+    }
+  });
+  Object.values(lastUploadMap).forEach(({ name, date, ms, url, show_name }) => {
+    map.set(name.toLowerCase(), { efed_name: name, yt_channel_url: null, id: null, lastUpload: date, lastUploadMs: ms, latestUrl: url, latestShow: show_name });
+  });
+  channels.forEach(ch => {
+    const key = ch.efed_name.trim().toLowerCase();
+    const existing = map.get(key) || {};
+    map.set(key, {
+      efed_name: ch.efed_name,
+      yt_channel_url: ch.yt_channel_url,
+      id: ch.id,
+      lastUpload: existing.lastUpload || null,
+      lastUploadMs: existing.lastUploadMs || 0,
+      latestUrl: existing.latestUrl || null,
+      latestShow: existing.latestShow || null
+    });
+  });
+
+  return { all: Array.from(map.values()).sort((a, b) => a.efed_name.localeCompare(b.efed_name)), channels };
 }
 
 function showScanResults(results, grp) {
@@ -1910,10 +1977,7 @@ async function loadChannels() {
   list.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>Loading…</div>';
   try {
     // Pull registered channels (have YT URL) + all distinct efeds from approved submissions
-    const [channels, subs] = await Promise.all([
-      sbGet('efed_channels', 'select=*&order=efed_name.asc'),
-      sbGet('submissions', 'status=eq.approved&select=efed,date,date_ms,url,show_name&order=date_ms.desc')
-    ]);
+    const { all: mergedAll, channels } = await _buildAllChannels();
 
     // Diagnostic: flag any efed_channels rows sharing a name. Only one ever
     // renders (see dupe-guard note in saveChannelUrl below), so the rest are
@@ -1928,40 +1992,7 @@ async function loadChannels() {
       }
     }
 
-    // Build a map: efed_name (lowercase) → { efed_name, yt_channel_url, id, lastUpload, lastUploadMs }
-    const map = new Map();
-
-    // Seed from submissions — get most recent upload per efed using date_ms
-    const lastUploadMap = {};
-    subs.forEach(s => {
-      if (!s.efed) return;
-      const key = s.efed.trim().toLowerCase();
-      const ms = s.date_ms || (s.date ? new Date(s.date).getTime() : 0);
-      if (!lastUploadMap[key] || ms > lastUploadMap[key].ms) {
-        lastUploadMap[key] = { name: s.efed.trim(), date: s.date, ms, url: s.url, show_name: s.show_name };
-      }
-    });
-    Object.values(lastUploadMap).forEach(({ name, date, ms, url, show_name }) => {
-      map.set(name.toLowerCase(), { efed_name: name, yt_channel_url: null, id: null, lastUpload: date, lastUploadMs: ms, latestUrl: url, latestShow: show_name });
-    });
-
-    // Overlay registered channels (they have YT URLs and may have better names)
-    channels.forEach(ch => {
-      const key = ch.efed_name.trim().toLowerCase();
-      const existing = map.get(key) || {};
-      map.set(key, {
-        efed_name: ch.efed_name,
-        yt_channel_url: ch.yt_channel_url,
-        id: ch.id,
-        lastUpload: existing.lastUpload || null,
-        lastUploadMs: existing.lastUploadMs || 0,
-        latestUrl: existing.latestUrl || null,
-        latestShow: existing.latestShow || null
-      });
-    });
-
-    // Sort alphabetically by display name
-    const all = Array.from(map.values()).sort((a, b) => a.efed_name.localeCompare(b.efed_name));
+    const all = mergedAll;
     window._allChannels = all; // store for month filter
     const scannable = all.filter(ch => ch.yt_channel_url);
 
@@ -2007,7 +2038,7 @@ async function loadChannels() {
 }
 
 function updateScanCountLabel(all) {
-  const enabledChannels = all.filter(ch => ch.yt_channel_url && _isChannelScanEnabled(ch.efed_name));
+  const enabledChannels = all.filter(ch => _isChannelScanEnabled(ch.efed_name));
   const aCount = enabledChannels.filter(ch => _getChannelGroup(ch.efed_name.toLowerCase()) === 'a').length;
   const bCount = enabledChannels.filter(ch => _getChannelGroup(ch.efed_name.toLowerCase()) === 'b').length;
 
