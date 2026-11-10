@@ -6155,4 +6155,104 @@ function unlockFx(c,paid){
  setTimeout(()=>{const b=o.querySelector('.unl-go');if(b&&o.isConnected)b.focus({preventScroll:true})},1200);
 }
 </script>
+<script id="ccg-safety">
+/* ===== SAFETY NET (autosave + resume + error report) =====
+   1) At the start of every show (from Show 2) the game is saved on this device.
+   2) If the page reloads or closes mid-game, the New Game page offers "Resume".
+   3) If the game throws an error, a banner shows what happened (tap Copy and send it).
+   4) The New Game page tells you if the last game was cut off by a page reload. */
+(function(){
+ var K_SAVE='ccg_save',K_LIVE='ccg_live',K_ERR='ccg_err',LOG=[];
+ function ls(f){try{return f(localStorage)}catch(e){return null}}
+ function log(s){LOG.push(new Date().toTimeString().slice(0,8)+' '+s);if(LOG.length>30)LOG.shift()}
+ /* ---- graph serializer: keeps shared references (the same card in two places stays one card) ---- */
+ function ser(root){var ids=new Map(),objs=[],lost=0;
+  function enc(v){
+   if(v===null)return null;
+   var t=typeof v;
+   if(t==='function'){lost++;return{$u:1}}
+   if(t==='undefined')return{$u:1};
+   if(t==='number'&&!isFinite(v))return{$n:String(v)};
+   if(t!=='object')return v;
+   if(v.nodeType)return null;
+   if(ids.has(v))return{$r:ids.get(v)};
+   var id=objs.length;ids.set(v,id);objs.push(null);var o;
+   if(Array.isArray(v))o={a:v.map(enc)};
+   else if(v instanceof Set)o={s:Array.from(v).map(enc)};
+   else if(v instanceof Map)o={m:Array.from(v).map(function(p){return[enc(p[0]),enc(p[1])]})};
+   else if(v instanceof Date)o={d:+v};
+   else{o={o:{}};Object.keys(v).forEach(function(k){var x=v[k];if(typeof x==='function'){lost++;return}o.o[k]=enc(x)})}
+   objs[id]=o;return{$r:id}}
+  var r=enc(root);return{r:r,objs:objs,lost:lost}}
+ function deser(s){var objs=s.objs,out=objs.map(function(o){return o.a?[]:o.s?new Set():o.m?new Map():o.d!==undefined?new Date(o.d):{}});
+  function dec(v){if(v&&typeof v==='object'){if(v.$r!==undefined)return out[v.$r];if(v.$u)return undefined;if(v.$n)return Number(v.$n)}return v}
+  objs.forEach(function(o,i){var t=out[i];
+   if(o.a)o.a.forEach(function(x){t.push(dec(x))});
+   else if(o.s)o.s.forEach(function(x){t.add(dec(x))});
+   else if(o.m)o.m.forEach(function(p){t.set(dec(p[0]),dec(p[1]))});
+   else if(o.o)Object.keys(o.o).forEach(function(k){t[k]=dec(o.o[k])})});
+  return dec(s.r)}
+ window.ccgSer=ser;window.ccgDeser=deser;
+ /* ---- save ---- */
+ function save(){
+  if(typeof G==='undefined'||!G||G.ph!=='wsel')return;
+  if((typeof ONL!=='undefined'&&ONL.on)||(typeof TUT!=='undefined'&&TUT))return;
+  if(!AI.some(Boolean))return;
+  var s=ser(G),rec=JSON.stringify({v:1,t:Date.now(),np:NP,ai:AI.slice(),round:G.round,data:{r:s.r,objs:s.objs}});
+  try{localStorage.setItem(K_SAVE,rec);log('saved show '+G.round+' ('+Math.round(rec.length/1024)+' KB)')}
+  catch(e){log('save failed: '+e.message)}}
+ window.ccgSave=save;
+ function readSave(){var r=ls(function(l){return l.getItem(K_SAVE)});if(!r)return null;try{var s=JSON.parse(r);return s&&s.v===1?s:null}catch(e){return null}}
+ window.ccgResume=function(){
+  var s=readSave();if(!s){toast('No saved game found');return}
+  try{var g=deser(s.data);NP=s.np;AI=s.ai;RNG=null;TUT=false;TUTNEXT=false;
+   if(typeof ngHide==='function')ngHide();
+   G=g;G.ready=true;log('resumed show '+G.round);ui()}
+  catch(e){showErr('Resume failed: '+e.message,e.stack)}};
+ window.ccgDiscard=function(){ls(function(l){l.removeItem(K_SAVE);l.removeItem(K_LIVE);l.removeItem(K_ERR)});var b=document.getElementById('ccgres');if(b)b.remove()};
+ /* ---- was the last game cut off by a reload? ---- */
+ var CUT=ls(function(l){var v=l.getItem(K_LIVE);return v?JSON.parse(v):null}),CUTERR=ls(function(l){var v=l.getItem(K_ERR);return v?JSON.parse(v):null});
+ log('page loaded'+(CUT?' (last game was still running: show '+CUT.round+', '+CUT.ph+')':''));
+ function setLive(){try{if(!G||!G.ph||G.ph==='end'||(typeof TUT!=='undefined'&&TUT)){localStorage.removeItem(K_LIVE);return}
+  localStorage.setItem(K_LIVE,JSON.stringify({round:G.round,ph:G.ph,t:Date.now(),np:NP}))}catch(e){}}
+ /* ---- error banner ---- */
+ function showErr(msg,stack){
+  try{localStorage.setItem(K_ERR,JSON.stringify({msg:String(msg).slice(0,300),round:(G&&G.round)||0,ph:(G&&G.ph)||'',t:Date.now()}))}catch(e){}
+  var rep='CCG error: '+msg+'\n'+(stack||'').split('\n').slice(0,6).join('\n')+'\nShow '+((G&&G.round)||'?')+' phase '+((G&&G.ph)||'?')+' players '+(typeof NP!=='undefined'?NP:'?')+'\n'+LOG.slice(-14).join('\n')+'\nUA '+navigator.userAgent;
+  var b=document.getElementById('ccgerr');
+  if(!b){b=document.createElement('div');b.id='ccgerr';b.style.cssText='position:fixed;left:8px;right:8px;top:8px;z-index:99999;background:#2a0a10;color:#fff;border:2px solid #ff3b57;border-radius:10px;padding:10px 12px;font:13px/1.35 system-ui,sans-serif;box-shadow:0 8px 30px #000c';document.body.appendChild(b)}
+  b.innerHTML='<b>Something went wrong</b><div style="opacity:.85;margin:4px 0 6px;word-break:break-word">'+String(msg).replace(/[<&]/g,function(c){return c=='<'?'&lt;':'&amp;'})+' (show '+((G&&G.round)||'?')+', '+((G&&G.ph)||'?')+')</div><button id="ccgcp" style="margin-right:8px">Copy report</button><button id="ccgdm" class="ghost">Dismiss</button>';
+  b.querySelector('#ccgdm').onclick=function(){b.remove()};
+  b.querySelector('#ccgcp').onclick=function(){var done=function(){var x=b.querySelector('#ccgcp');if(x)x.textContent='Copied'};
+   try{navigator.clipboard.writeText(rep).then(done,function(){prompt('Copy this report:',rep)})}catch(e){prompt('Copy this report:',rep)}}}
+ window.addEventListener('error',function(e){
+  if(!e||!e.message||/ResizeObserver|^Script error/i.test(e.message))return;
+  log('ERROR '+e.message);showErr(e.message,e.error&&e.error.stack)});
+ window.addEventListener('unhandledrejection',function(e){var r=e&&e.reason,m=(r&&r.message)||String(r);
+  if(/nofetch|Failed to fetch|NetworkError|Load failed|AbortError|aborted/i.test(m))return;
+  log('REJECT '+m);showErr(m,r&&r.stack)});
+ document.addEventListener('visibilitychange',function(){log(document.hidden?'app hidden':'app visible')});
+ window.addEventListener('pagehide',function(e){log('pagehide'+(e.persisted?' (kept)':''))});
+ /* ---- hooks ---- */
+ var lastPh='';
+ var _ui=window.ui;window.ui=function(){var r=_ui.apply(this,arguments);
+  try{var p=G?G.round+':'+G.ph:'';if(p!==lastPh){lastPh=p;if(p)log('show '+G.round+' '+G.ph);setLive()}}catch(e){}return r};
+ var _sw=window.startWs;if(typeof _sw==='function')window.startWs=function(){var r=_sw.apply(this,arguments);try{save()}catch(e){log('save error '+e.message)}return r};
+ var _eg=window.endGame;if(typeof _eg==='function')window.endGame=function(){var r=_eg.apply(this,arguments);ls(function(l){l.removeItem(K_SAVE);l.removeItem(K_LIVE);l.removeItem(K_ERR)});return r};
+ var _ng=window.newGame;if(typeof _ng==='function')window.newGame=function(){CUT=null;CUTERR=null;return _ng.apply(this,arguments)};
+ /* ---- New Game page banner ---- */
+ var _nd=window.ngDraw;
+ if(typeof _nd==='function')window.ngDraw=function(){var r=_nd.apply(this,arguments);
+  try{var p=document.getElementById('ngpage'),s=readSave();
+   if(p&&!p.querySelector('#ccgres')&&(s||CUT)&&!(typeof ONL!=='undefined'&&ONL.on)&&!(typeof G!=='undefined'&&G&&G.ph&&G.ph!=='end'&&NGBACK)){
+    var h='<div id="ccgres" style="margin:10px 0;padding:10px 12px;border:2px solid #f0c23c;border-radius:10px;background:#1b1608;color:#fff">';
+    if(s)h+='<b>Game in progress</b><div style="opacity:.85;margin:3px 0 8px">Saved at the start of Show '+s.round+' ('+s.np+' players). '+(CUT?'The page was reloaded or closed during Show '+CUT.round+'.':'')+'</div><button onclick="ccgResume()">Resume game</button><button class="ghost" onclick="ccgDiscard()">Discard</button>';
+    else h+='<b>Your last game was cut off</b><div style="opacity:.85;margin:3px 0 8px">The page reloaded or closed during Show '+CUT.round+' ('+CUT.ph+'). Nothing was saved yet because the save starts at Show 2.</div><button class="ghost" onclick="ccgDiscard()">OK</button>';
+    if(CUTERR)h+='<div style="margin-top:8px;font-size:12px;opacity:.8">Last error: '+String(CUTERR.msg).replace(/[<&]/g,function(c){return c=='<'?'&lt;':'&amp;'})+' (show '+CUTERR.round+', '+CUTERR.ph+')</div>';
+    h+='</div>';
+    var t=p.querySelector('.fah');if(t)t.insertAdjacentHTML('afterend',h);else p.insertAdjacentHTML('afterbegin',h)}}catch(e){}
+  return r};
+})();
+
+</script>
 </body></html>
